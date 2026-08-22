@@ -173,7 +173,7 @@ export class TerminalScreen {
   }
 
   write(data: Uint8Array | string): void {
-    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(data);
     this.byteCount += bytes.byteLength;
     this.consume(this.decoder.decode(bytes, { stream: true }));
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Option, Stream } from "effect";
 import { makeUniverse, FixedClock } from "../../universe/test-support.ts";
 import { MockHostAdapter } from "./adapter.ts";
 import { createMockScenario } from "./scenarios.ts";
@@ -10,7 +11,7 @@ describe("Mock host adapter", () => {
     const scenario = createMockScenario();
     const adapter = new MockHostAdapter({ clock, scenario });
 
-    const first = await adapter.snapshot();
+    const first = await Effect.runPromise(adapter.snapshot());
     expect(first.hostKind).toBe("mock");
     expect(first.sessions).toHaveLength(20);
     expect(first.diagnostics).toHaveLength(0);
@@ -19,7 +20,7 @@ describe("Mock host adapter", () => {
     );
 
     clock.value += scenario.tickMs;
-    const second = await adapter.snapshot();
+    const second = await Effect.runPromise(adapter.snapshot());
     expect(second.sessions).toHaveLength(21);
     expect(second.sessions.some((session) => session.nativeId === "mock-p17")).toBe(false);
     expect(second.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
@@ -30,7 +31,7 @@ describe("Mock host adapter", () => {
     );
 
     clock.value += scenario.tickMs * (scenario.frames.length - 1);
-    const looped = await adapter.snapshot();
+    const looped = await Effect.runPromise(adapter.snapshot());
     expect(looped.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
       "blocked",
     );
@@ -43,37 +44,41 @@ describe("Mock host adapter", () => {
     const clock = new FixedClock(20_000);
     const scenario = createMockScenario();
     const adapter = new MockHostAdapter({ clock, scenario });
-    await adapter.snapshot();
+    await Effect.runPromise(adapter.snapshot());
 
-    const access = await adapter.access({
-      hostKind: "mock",
-      nativeId: "mock-p03",
-    });
+    const access = await Effect.runPromise(
+      adapter.access({
+        hostKind: "mock",
+        nativeId: "mock-p03",
+      }),
+    );
     expect(access.supported).toBe(true);
     expect(access.target).toEqual({
       kind: "mock-session",
       token: "mock-p03",
     });
-    expect(await adapter.activate(access)).toEqual({
+    expect(await Effect.runPromise(adapter.activate(access))).toEqual({
       ok: true,
       message: "Simulated focus for mock session mock-p03.",
     });
 
     clock.value += scenario.tickMs;
-    await adapter.snapshot();
-    expect((await adapter.access({ hostKind: "mock", nativeId: "mock-p17" })).supported).toBe(
-      false,
-    );
-    expect((await adapter.access({ hostKind: "herdr", nativeId: "mock-p03" })).supported).toBe(
-      false,
-    );
+    await Effect.runPromise(adapter.snapshot());
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "mock", nativeId: "mock-p17" })))
+        .supported,
+    ).toBe(false);
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "mock-p03" })))
+        .supported,
+    ).toBe(false);
   });
 
   test("seeds a real goal-and-session portfolio only through Universe commands", async () => {
     const clock = new FixedClock(30_000);
     const { universe } = makeUniverse({ clock });
     const adapter = new MockHostAdapter({ clock });
-    const snapshot = await adapter.snapshot();
+    const snapshot = await Effect.runPromise(adapter.snapshot());
     expect(universe.reconcile(snapshot).accepted).toBe(true);
 
     expect(seedMockPortfolio(universe)).toEqual({
@@ -92,21 +97,23 @@ describe("Mock host adapter", () => {
   test("provides a deterministic embedded terminal stream", async () => {
     const clock = new FixedClock(40_000);
     const adapter = new MockHostAdapter({ clock });
-    await adapter.snapshot();
-    const access = await adapter.access({ hostKind: "mock", nativeId: "mock-p01" });
-    const opened = await adapter.openTerminal(access, { columns: 80, rows: 24 });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    const opened = await Effect.runPromise(adapter.openTerminal(access, { columns: 80, rows: 24 }));
     expect(opened.ok).toBe(true);
-    const first = await opened.terminal!.events[Symbol.asyncIterator]().next();
-    expect(first.value?.kind).toBe("frame");
-    expect(await opened.terminal!.send({ kind: "text", value: "x" })).toEqual({
+    const first = await Effect.runPromise(Stream.runHead(opened.terminal!.events));
+    expect(Option.getOrUndefined(first)?.kind).toBe("frame");
+    expect(await Effect.runPromise(opened.terminal!.send({ kind: "text", value: "x" }))).toEqual({
       ok: true,
       message: "Input sent to the mock terminal.",
     });
-    expect(await opened.terminal!.resize({ columns: 90, rows: 30 })).toEqual({
+    expect(await Effect.runPromise(opened.terminal!.resize({ columns: 90, rows: 30 }))).toEqual({
       ok: true,
       message: "Resized mock terminal to 90×30.",
     });
-    expect(await opened.terminal!.release()).toEqual({
+    expect(await Effect.runPromise(opened.terminal!.release())).toEqual({
       ok: true,
       message: "Released mock terminal mock-p01.",
     });

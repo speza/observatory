@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { BunRuntime } from "@effect/platform-bun";
+import { Effect } from "effect";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { HerdrHostAdapter } from "./hosts/herdr/adapter.ts";
@@ -28,42 +30,59 @@ class RuntimeIds implements IdGenerator {
   }
 }
 
-const clock = new SystemClock();
-const databasePath = process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
-if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
-const store = new SqliteUniverseStore(databasePath);
-const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
-const host: SessionHost = useMockHost
-  ? new MockHostAdapter({
-      clock,
-      scenario: createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit"),
-      ...(process.env.AO_MOCK_TICK_MS ? { tickMs: Number(process.env.AO_MOCK_TICK_MS) } : {}),
-    })
-  : new HerdrHostAdapter({ clock });
-const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
+const program = Effect.scoped(
+  Effect.gen(function* () {
+    const clock = new SystemClock();
+    const databasePath = process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
+    if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
+    const store = new SqliteUniverseStore(databasePath);
+    const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
+    const mockScenario = createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit");
+    const mockTickMs = Number(process.env.AO_MOCK_TICK_MS ?? mockScenario.tickMs);
+    const host: SessionHost = useMockHost
+      ? new MockHostAdapter({ clock, scenario: mockScenario, tickMs: mockTickMs })
+      : new HerdrHostAdapter({ clock });
+    const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
 
-const reconcile = async (): Promise<string> => {
-  const snapshot = await host.snapshot();
-  const result = universe.reconcile(snapshot);
-  const hostLabel = displayHostKind(snapshot.hostKind);
-  if (!result.accepted) return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
-  if (!snapshot.available)
-    return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
-  return `${hostLabel} refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;
-};
+    const reconcile = Effect.gen(function* () {
+      const snapshot = yield* host.snapshot();
+      const result = universe.reconcile(snapshot);
+      const hostLabel = displayHostKind(snapshot.hostKind);
+      if (!result.accepted)
+        return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
+      if (!snapshot.available)
+        return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
+      return `${hostLabel} refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;
+    });
 
-let initialMessage = await reconcile();
-if (useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
-  const seeded = seedMockPortfolio(universe);
-  if (seeded.createdGoals > 0)
-    initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedSessions} sessions`;
-}
-const app = await createCommandCentreRenderer({
-  universe,
-  host,
-  clock,
-  refresh: reconcile,
-  initialAction: initialMessage,
-  onClose: () => store.close?.(),
-});
-app.start();
+    let initialMessage = yield* reconcile;
+    if (useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
+      const seeded = seedMockPortfolio(universe);
+      if (seeded.createdGoals > 0)
+        initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedSessions} sessions`;
+    }
+    const app = yield* Effect.tryPromise({
+      try: () =>
+        createCommandCentreRenderer({
+          universe,
+          host,
+          clock,
+          refresh: reconcile,
+          initialAction: initialMessage,
+          onClose: () => store.close?.(),
+        }),
+      catch: () => new Error("Could not create the Observatory renderer."),
+    });
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        app.start();
+        return app;
+      }),
+      (runningApp) => Effect.sync(() => runningApp.shutdown()),
+    );
+    yield* Effect.never;
+  }),
+);
+
+BunRuntime.runMain(program);

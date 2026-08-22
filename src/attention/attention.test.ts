@@ -16,22 +16,25 @@ const session = (
   goalId: string,
   attentionSince: number,
   lastChangedAt = attentionSince,
-): TrackedSession => ({
-  id,
-  hostKind: "herdr",
-  nativeId: id,
-  displayName: id,
-  displayNameSource: "host",
-  primaryGoalId: goalId,
-  runtimeState: state,
-  runtimeStateSource: "herdr.agent_status",
-  hostHealth: "live",
-  lastSeenAt: 10_000,
-  lastObservedAt: 10_000,
-  lastChangedAt,
-  ...(attentionSince ? { attentionSince } : {}),
-  hostLocator: id,
-});
+): TrackedSession => {
+  const result: TrackedSession = {
+    id,
+    hostKind: "herdr",
+    nativeId: id,
+    displayName: id,
+    displayNameSource: "host",
+    primaryGoalId: goalId,
+    runtimeState: state,
+    runtimeStateSource: "herdr.agent_status",
+    hostHealth: "live",
+    lastSeenAt: 10_000,
+    lastObservedAt: 10_000,
+    lastChangedAt,
+    hostLocator: id,
+  };
+  if (attentionSince) Object.assign(result, { attentionSince });
+  return result;
+};
 
 describe("attention", () => {
   test("orders human input, priority, wait duration, then recent host change", () => {

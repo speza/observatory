@@ -12,8 +12,10 @@ adapters and initial renderers.
 ```text
 Language                  TypeScript
 Runtime/package manager   Bun
+Async runtime             Effect + @effect/platform-bun
 Persistence               SQLite via bun:sqlite
 Linting                   Oxlint
+Lint policy               Vendored Anti-Slop Oxlint plugins
 Formatting                Oxfmt
 Type checking             tsgo or tsc --noEmit
 Testing                   bun test
@@ -75,6 +77,20 @@ ordinary TypeScript with injected persistence, clock and identifier
 implementations. Bun-specific imports belong in adapters and executable entry
 points.
 
+### Effect runtime boundary
+
+Effect is adopted now for the asynchronous application edge rather than
+introduced as a second domain model. `SessionHost` operations are typed Effects
+with a small `HostError`, and host-owned terminal output is an Effect Stream.
+This gives Observatory structured cancellation and resource finalization around
+Herdr/mock sessions, while the TUI remains an imperative OpenTUI boundary that
+executes those Effects. `BunRuntime.runMain` owns the executable lifecycle.
+
+The pure `universe/`, `attention/`, `spatial/`, `projection/` and persistence
+record shapes do not import Effect. Effect values do not cross into SQLite or
+durable semantic state. A future host adapter can therefore reuse the same
+semantic model without adopting Herdr or changing the renderer contract.
+
 ### SQLite usage
 
 Use `bun:sqlite` directly rather than introducing an ORM in v1.
@@ -120,9 +136,16 @@ keeps performance findings visible as warnings, and enables a small set of
 import and TypeScript rules including floating and misused promise detection.
 Whole-category style, pedantic, restriction and nursery rules stay disabled:
 Oxfmt owns presentation, while lint output should remain about likely defects.
-The formatter runs over every supported maintained repository file, including
-the prototype code and committed configuration. Agents run `bun run format`
-before handoff and `bun run check` before commit or handoff.
+The formatter runs over every supported maintained repository file and committed
+configuration. Disposable prototype trees are intentionally excluded from the
+production lint/format gate. Agents run `bun run format` before handoff and
+`bun run check` before commit or handoff.
+
+Anti-Slop is vendored at `tools/oxlint/anti-slop/` and loaded as a local Oxlint
+plugin, with its Effect-specific rule set enabled because the application uses
+Effect. The plugin is intentionally ignored as vendored source. Maintained
+production code must satisfy the rules; a finding is fixed at its boundary
+rather than hidden with a broad disable.
 
 Relevant documentation:
 

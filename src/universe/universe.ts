@@ -166,19 +166,18 @@ export class Universe {
         const id = command.id ?? this.ids.next("goal");
         if (next.goals.some((goal) => goal.id === id))
           return { ok: false, error: `Goal ${id} already exists.` };
-        const goal: Goal = {
+        const description = normalizeText(command.description);
+        const goal = {
           id,
           title,
-          ...(normalizeText(command.description)
-            ? { description: normalizeText(command.description) }
-            : {}),
           priority: command.priority ?? "P2",
-          status: "active",
+          status: "active" as const,
           createdAt: now,
           updatedAt: now,
           mapPosition: initialGoalMapPosition(id, goalLayoutOccupancy(next)),
           mapPositionPinned: false,
         };
+        if (description) Object.assign(goal, { description });
         next.goals = [...next.goals, goal];
         result = { ok: true, goalId: id };
         break;
@@ -198,8 +197,7 @@ export class Universe {
         const description = normalizeText(command.description);
         replaceGoal(next, {
           ...goal,
-          ...(description ? { description } : {}),
-          ...(description ? {} : { description: undefined }),
+          description: description || undefined,
           updatedAt: now,
         });
         result = { ok: true, goalId: goal.id };
@@ -292,8 +290,7 @@ export class Universe {
         const description = normalizeText(command.description);
         replaceSession(next, {
           ...session,
-          ...(description ? { description } : {}),
-          ...(description ? {} : { description: undefined }),
+          description: description || undefined,
         });
         result = { ok: true, sessionId: session.id };
         break;
@@ -360,13 +357,14 @@ export class Universe {
     const updatedSessionIds: SessionId[] = [];
     const staleSessionIds: SessionId[] = [];
     const now = snapshot.observedAt;
-    const hostStatus: HostHealth = {
+    const hostStatusValue: HostHealth["status"] = snapshot.available ? "live" : "unavailable";
+    const hostStatus = {
       hostKind: snapshot.hostKind,
-      status: snapshot.available ? "live" : "unavailable",
-      ...(snapshot.available ? { lastObservedAt: now } : {}),
-      ...(snapshot.error ? { lastError: snapshot.error } : {}),
+      status: hostStatusValue,
       diagnosticCount: diagnostics.length,
     };
+    if (snapshot.available) Object.assign(hostStatus, { lastObservedAt: now });
+    if (snapshot.error) Object.assign(hostStatus, { lastError: snapshot.error });
     replaceHost(next, hostStatus);
 
     if (!snapshot.available) {
@@ -406,32 +404,29 @@ export class Universe {
         }
         const stateChanged = existing.runtimeState !== observation.runtimeState;
         const currentAttention = isCurrentAttentionState(observation.runtimeState);
-        const updated: TrackedSession = {
+        const updated = {
           ...existing,
-          ...(existing.displayNameSource === "host"
-            ? { displayName: observation.displayName }
-            : {}),
           runtimeState: observation.runtimeState,
           runtimeStateSource: observation.runtimeStateSource,
-          hostHealth: "live",
+          hostHealth: "live" as const,
           lastSeenAt: observation.observedAt,
           lastObservedAt: observation.observedAt,
           lastChangedAt: stateChanged ? observation.observedAt : existing.lastChangedAt,
-          ...(currentAttention
-            ? {
-                attentionSince: stateChanged
-                  ? observation.observedAt
-                  : (existing.attentionSince ?? observation.observedAt),
-              }
-            : { attentionSince: undefined }),
-          ...(observation.repository
-            ? { repository: observation.repository }
-            : { repository: undefined }),
-          ...(observation.branch ? { branch: observation.branch } : { branch: undefined }),
-          ...(observation.worktree ? { worktree: observation.worktree } : { worktree: undefined }),
-          ...(observation.provider ? { provider: observation.provider } : { provider: undefined }),
           hostLocator: observation.hostLocator,
         };
+        if (existing.displayNameSource === "host")
+          Object.assign(updated, { displayName: observation.displayName });
+        Object.assign(updated, {
+          attentionSince: currentAttention
+            ? stateChanged
+              ? observation.observedAt
+              : (existing.attentionSince ?? observation.observedAt)
+            : undefined,
+          repository: observation.repository,
+          branch: observation.branch,
+          worktree: observation.worktree,
+          provider: observation.provider,
+        });
         replaceSession(next, updated);
         updatedSessionIds.push(existing.id);
       }
@@ -467,25 +462,28 @@ export class Universe {
     const attentionSince = isCurrentAttentionState(observation.runtimeState)
       ? observation.observedAt
       : undefined;
-    return {
+    const session = {
       id,
       hostKind: snapshot.hostKind,
       nativeId: observation.nativeId,
       displayName: observation.displayName,
-      displayNameSource: "host",
+      displayNameSource: "host" as const,
       runtimeState: observation.runtimeState,
       runtimeStateSource: observation.runtimeStateSource,
-      hostHealth: "live",
+      hostHealth: "live" as const,
       lastSeenAt: observation.observedAt,
       lastObservedAt: observation.observedAt,
       lastChangedAt: observation.observedAt,
-      ...(attentionSince !== undefined ? { attentionSince } : {}),
-      ...(observation.repository ? { repository: copyOptional(observation.repository) } : {}),
-      ...(observation.branch ? { branch: copyOptional(observation.branch) } : {}),
-      ...(observation.worktree ? { worktree: copyOptional(observation.worktree) } : {}),
-      ...(observation.provider ? { provider: copyOptional(observation.provider) } : {}),
       hostLocator: observation.hostLocator,
     };
+    Object.assign(session, {
+      attentionSince,
+      repository: copyOptional(observation.repository),
+      branch: copyOptional(observation.branch),
+      worktree: copyOptional(observation.worktree),
+      provider: copyOptional(observation.provider),
+    });
+    return session;
   }
 }
 

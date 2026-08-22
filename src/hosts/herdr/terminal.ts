@@ -1,3 +1,4 @@
+import { Effect, Schema, Stream } from "effect";
 import type {
   HostActionResult,
   HostTerminalEvent,
@@ -5,23 +6,18 @@ import type {
   TerminalDimensions,
   HostTerminalInput,
 } from "../types.ts";
+import { hostError, type HostError } from "../errors.ts";
 import type { TerminalCommandRunner, TerminalProcess } from "./runner.ts";
+import {
+  isRecord,
+  numberValue,
+  parseJsonValue,
+  stringValue,
+  type JsonRecord,
+  type JsonValue,
+} from "./protocol.ts";
 
-type RecordValue = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is RecordValue =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const stringValue = (record: RecordValue, key: string): string | undefined =>
-  typeof record[key] === "string" && record[key] ? record[key] : undefined;
-
-const numberValue = (record: RecordValue, ...keys: string[]): number | undefined => {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-};
+type RecordValue = JsonRecord;
 
 const recordType = (record: RecordValue): string =>
   stringValue(record, "type") ?? stringValue(record, "event") ?? stringValue(record, "kind") ?? "";
@@ -47,16 +43,15 @@ const encodeBase64 = (bytes: Uint8Array): string => {
 const looksBase64 = (value: string): boolean =>
   value.length > 0 && value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
 
-const bytesFromValue = (value: unknown, encoded = false): Uint8Array | undefined => {
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value) && value.every((item) => typeof item === "number"))
+const bytesFromValue = (value: JsonValue | undefined, encoded = false): Uint8Array | undefined => {
+  if (Array.isArray(value) && value.every((item) => Schema.is(Schema.Number)(item)))
     return Uint8Array.from(value.map((item) => item));
-  if (typeof value !== "string") return undefined;
+  if (!Schema.is(Schema.String)(value)) return undefined;
   if (encoded || looksBase64(value)) return decodeBase64(value);
   return new TextEncoder().encode(value);
 };
 
-const frameBytes = (value: unknown): Uint8Array | undefined => {
+const frameBytes = (value: JsonValue | undefined): Uint8Array | undefined => {
   if (!isRecord(value)) return undefined;
   for (const key of ["data_base64", "bytes_base64", "ansi_base64", "frame_base64"]) {
     const bytes = bytesFromValue(value[key], true);
@@ -73,14 +68,6 @@ const frameBytes = (value: unknown): Uint8Array | undefined => {
   return undefined;
 };
 
-const parseLine = (line: string): unknown => {
-  try {
-    return JSON.parse(line) as unknown;
-  } catch {
-    return undefined;
-  }
-};
-
 const validDimensions = (dimensions: TerminalDimensions): boolean =>
   Number.isInteger(dimensions.columns) &&
   Number.isInteger(dimensions.rows) &&
@@ -92,7 +79,7 @@ const writeRecord = async (process: TerminalProcess, record: RecordValue): Promi
 };
 
 export class HerdrTerminalSession implements HostedTerminalSession {
-  readonly events: AsyncIterable<HostTerminalEvent>;
+  readonly events: Stream.Stream<HostTerminalEvent, HostError>;
   private released = false;
   private stderrText = "";
 
@@ -100,11 +87,20 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     private readonly process: TerminalProcess,
     private readonly target: string,
   ) {
-    this.events = this.readEvents();
+    this.events = Stream.fromAsyncIterable(this.readEvents(), () =>
+      hostError("terminal.events", `Herdr terminal stream failed for ${target}.`),
+    );
     void this.drainStderr();
   }
 
-  async send(input: HostTerminalInput): Promise<HostActionResult> {
+  send(input: HostTerminalInput): Effect.Effect<HostActionResult, HostError> {
+    return Effect.tryPromise({
+      try: () => this.sendInternal(input),
+      catch: () => hostError("terminal.send", `Herdr terminal input failed for ${this.target}.`),
+    });
+  }
+
+  private async sendInternal(input: HostTerminalInput): Promise<HostActionResult> {
     if (this.released) return { ok: false, message: "The Herdr terminal has been released." };
     try {
       await writeRecord(
@@ -122,7 +118,14 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     }
   }
 
-  async resize(dimensions: TerminalDimensions): Promise<HostActionResult> {
+  resize(dimensions: TerminalDimensions): Effect.Effect<HostActionResult, HostError> {
+    return Effect.tryPromise({
+      try: () => this.resizeInternal(dimensions),
+      catch: () => hostError("terminal.resize", `Herdr terminal resize failed for ${this.target}.`),
+    });
+  }
+
+  private async resizeInternal(dimensions: TerminalDimensions): Promise<HostActionResult> {
     if (!validDimensions(dimensions))
       return { ok: false, message: "Terminal dimensions must be positive integers." };
     if (this.released) return { ok: false, message: "The Herdr terminal has been released." };
@@ -144,7 +147,15 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     }
   }
 
-  async release(): Promise<HostActionResult> {
+  release(): Effect.Effect<HostActionResult, HostError> {
+    return Effect.tryPromise({
+      try: () => this.releaseInternal(),
+      catch: () =>
+        hostError("terminal.release", `Herdr terminal release failed for ${this.target}.`),
+    });
+  }
+
+  private async releaseInternal(): Promise<HostActionResult> {
     if (this.released) return { ok: true, message: "Herdr terminal already released." };
     this.released = true;
     try {
@@ -189,7 +200,7 @@ export class HerdrTerminalSession implements HostedTerminalSession {
 
   private parseEvent(line: string): HostTerminalEvent | undefined {
     if (!line) return undefined;
-    const value = parseLine(line);
+    const value = parseJsonValue(line);
     if (!isRecord(value)) return undefined;
     const type = recordType(value).toLowerCase();
     const bytes = frameBytes(value);

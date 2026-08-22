@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
@@ -9,20 +10,24 @@ import type {
   TerminalDimensions,
   HostTerminalOpenResult,
 } from "../types.ts";
+import { hostError, type HostError } from "../errors.ts";
 import { openHerdrTerminal, parseHerdrTerminalTarget } from "./terminal.ts";
 import { BunCommandRunner, type CommandRunner, type TerminalCommandRunner } from "./runner.ts";
+import {
+  isRecord,
+  nonEmptyRecord,
+  parseJsonValue,
+  stringValue,
+  type JsonRecord,
+  type JsonValue,
+} from "./protocol.ts";
 
-type RecordValue = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is RecordValue =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const stringValue = (record: RecordValue, key: string): string | undefined =>
-  typeof record[key] === "string" && record[key] ? record[key] : undefined;
+type RecordValue = JsonRecord;
 const stripWorkingMarker = (value: string): string => {
   const stripped = value.replace(/^[◐◓◑◒]\s*/u, "").trim();
   return stripped || value;
 };
-const status = (value: unknown): HostSessionObservation["runtimeState"] => {
+const status = (value: JsonValue | undefined): HostSessionObservation["runtimeState"] => {
   switch (value) {
     case "idle":
     case "working":
@@ -35,9 +40,7 @@ const status = (value: unknown): HostSessionObservation["runtimeState"] => {
   }
 };
 
-const nonEmptyRecord = (value: unknown): RecordValue => (isRecord(value) ? value : {});
-
-const unwrapSnapshot = (value: unknown): RecordValue | undefined => {
+const unwrapSnapshot = (value: JsonValue | undefined): RecordValue | undefined => {
   if (!isRecord(value)) return undefined;
   const result = nonEmptyRecord(value.result);
   const snapshot = result.snapshot;
@@ -46,18 +49,13 @@ const unwrapSnapshot = (value: unknown): RecordValue | undefined => {
   return undefined;
 };
 
-const parseJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
-};
-
 const locator = (workspaceId: string, tabId: string, paneId: string, terminalId: string): string =>
   JSON.stringify({ workspaceId, tabId, paneId, terminalId });
 
-export const parseHerdrSnapshot = (payload: unknown, observedAt: number): HostSnapshot => {
+export const parseHerdrSnapshot = (
+  payload: JsonValue | undefined,
+  observedAt: number,
+): HostSnapshot => {
   const snapshot = unwrapSnapshot(payload);
   if (!snapshot) {
     return {
@@ -117,20 +115,22 @@ export const parseHerdrSnapshot = (payload: unknown, observedAt: number): HostSn
     );
     const repository = stringValue(worktree, "repo_name");
     const worktreePath = stringValue(worktree, "checkout_path");
+    const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const observedState = status(item.agent_status ?? pane.agent_status);
-    sessions.push({
+    const observation = {
       nativeId: paneId,
       displayName,
       runtimeState: observedState,
       runtimeStateSource: "herdr.agent_status",
       observedAt,
-      ...(repository ? { repository } : {}),
-      ...(stringValue(worktree, "branch") ? { branch: stringValue(worktree, "branch") } : {}),
-      ...(worktreePath ? { worktree: worktreePath } : {}),
-      ...(provider ? { provider } : {}),
       hostLocator: locator(workspaceId, tabId, paneId, terminalId),
-    });
+    };
+    if (repository) Object.assign(observation, { repository });
+    if (branch) Object.assign(observation, { branch });
+    if (worktreePath) Object.assign(observation, { worktree: worktreePath });
+    if (provider) Object.assign(observation, { provider });
+    sessions.push(observation);
   }
   if (!Array.isArray(snapshot.panes)) diagnostics.push("Herdr snapshot omitted its panes array.");
   if (!Array.isArray(snapshot.agents)) diagnostics.push("Herdr snapshot omitted its agents array.");
@@ -160,14 +160,18 @@ export class HerdrHostAdapter implements SessionHost {
     const runner = options.runner ?? new BunCommandRunner();
     this.runner = runner;
     this.terminalRunner =
-      options.terminalRunner ??
-      ("spawnTerminal" in runner && typeof runner.spawnTerminal === "function"
-        ? (runner as CommandRunner & TerminalCommandRunner)
-        : undefined);
+      options.terminalRunner ?? (runner instanceof BunCommandRunner ? runner : undefined);
     this.clock = options.clock;
   }
 
-  async snapshot(): Promise<HostSnapshot> {
+  snapshot(): Effect.Effect<HostSnapshot, HostError> {
+    return Effect.tryPromise({
+      try: () => this.snapshotInternal(),
+      catch: () => hostError("host.snapshot", "Herdr snapshot failed unexpectedly."),
+    });
+  }
+
+  private async snapshotInternal(): Promise<HostSnapshot> {
     this.liveTargets.clear();
     let result;
     try {
@@ -192,7 +196,7 @@ export class HerdrHostAdapter implements SessionHost {
         error: result.stderr.trim() || `Herdr exited with ${result.exitCode}.`,
       };
     }
-    const snapshot = parseHerdrSnapshot(parseJson(result.stdout), this.clock.now());
+    const snapshot = parseHerdrSnapshot(parseJsonValue(result.stdout), this.clock.now());
     this.liveTargets.clear();
     const nativeIds = new Set<string>();
     const ambiguous = snapshot.sessions.some((session) => {
@@ -209,74 +213,92 @@ export class HerdrHostAdapter implements SessionHost {
     return snapshot;
   }
 
-  async access(session: {
+  access(session: {
     readonly hostKind: string;
     readonly nativeId: string;
-  }): Promise<SessionAccess> {
-    if (session.hostKind !== "herdr")
+  }): Effect.Effect<SessionAccess, HostError> {
+    return Effect.sync(() => {
+      if (session.hostKind !== "herdr")
+        return {
+          supported: false,
+          explanation: "This session belongs to an unsupported host.",
+        } satisfies SessionAccess;
+      const target = this.liveTargets.get(session.nativeId);
+      if (!target)
+        return {
+          supported: false,
+          explanation: "The session is not present in the latest Herdr snapshot.",
+        } satisfies SessionAccess;
       return {
-        supported: false,
-        explanation: "This session belongs to an unsupported host.",
-      };
-    const target = this.liveTargets.get(session.nativeId);
-    if (!target)
-      return {
-        supported: false,
-        explanation: "The session is not present in the latest Herdr snapshot.",
-      };
-    return {
-      supported: true,
-      mode: "attach",
-      target,
-      terminalTarget: {
-        kind: "herdr-terminal-control",
-        token: session.nativeId,
-      },
-      explanation: "Attach directly or open an embedded terminal for the running Herdr session.",
-    };
-  }
-
-  async activate(access: SessionAccess): Promise<HostActionResult> {
-    if (!access.supported || !access.target) return { ok: false, message: access.explanation };
-    const token = parseTarget(access.target);
-    if (!token)
-      return {
-        ok: false,
-        message: "The Herdr attachment target is invalid or unsupported.",
-      };
-    const result = await this.runner.run(["herdr", "agent", "attach", token], {
-      interactive: true,
+        supported: true,
+        mode: "attach",
+        target,
+        terminalTarget: {
+          kind: "herdr-terminal-control",
+          token: session.nativeId,
+        },
+        explanation: "Attach directly or open an embedded terminal for the running Herdr session.",
+      } satisfies SessionAccess;
     });
-    if (result.exitCode !== 0)
-      return {
-        ok: false,
-        message: result.stderr.trim() || `Herdr could not attach to ${token}.`,
-      };
-    return { ok: true, message: `Attached to the real Herdr session ${token}.` };
   }
 
-  async openTerminal(
+  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError> {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!access.supported || !access.target) return { ok: false, message: access.explanation };
+        const token = parseTarget(access.target);
+        if (!token)
+          return {
+            ok: false,
+            message: "The Herdr attachment target is invalid or unsupported.",
+          };
+        const result = await this.runner.run(["herdr", "agent", "attach", token], {
+          interactive: true,
+        });
+        if (result.exitCode !== 0)
+          return {
+            ok: false,
+            message: result.stderr.trim() || `Herdr could not attach to ${token}.`,
+          };
+        return { ok: true, message: `Attached to the real Herdr session ${token}.` };
+      },
+      catch: () => hostError("host.activate", "Herdr could not attach to the session."),
+    });
+  }
+
+  openTerminal(
     access: SessionAccess,
     dimensions: TerminalDimensions,
-  ): Promise<HostTerminalOpenResult> {
-    if (!access.supported || !access.terminalTarget)
-      return { ok: false, message: "This session does not expose an embedded Herdr terminal." };
-    if (!this.terminalRunner)
-      return { ok: false, message: "The configured Herdr command runner cannot stream terminals." };
-    const token = parseHerdrTerminalTarget(access.terminalTarget);
-    if (!token)
-      return { ok: false, message: "The Herdr terminal target is invalid or unsupported." };
-    try {
-      return {
-        ok: true,
-        terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
-        message: `Opened an embedded Herdr terminal for ${token}.`,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
+  ): Effect.Effect<HostTerminalOpenResult, HostError> {
+    return Effect.sync(() => {
+      if (!access.supported || !access.terminalTarget)
+        return {
+          ok: false,
+          message: "This session does not expose an embedded Herdr terminal.",
+        } satisfies HostTerminalOpenResult;
+      if (!this.terminalRunner)
+        return {
+          ok: false,
+          message: "The configured Herdr command runner cannot stream terminals.",
+        } satisfies HostTerminalOpenResult;
+      const token = parseHerdrTerminalTarget(access.terminalTarget);
+      if (!token)
+        return {
+          ok: false,
+          message: "The Herdr terminal target is invalid or unsupported.",
+        } satisfies HostTerminalOpenResult;
+      try {
+        return {
+          ok: true,
+          terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
+          message: `Opened an embedded Herdr terminal for ${token}.`,
+        } satisfies HostTerminalOpenResult;
+      } catch (error) {
+        return {
+          ok: false,
+          message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
+        } satisfies HostTerminalOpenResult;
+      }
+    });
   }
 }

@@ -10,6 +10,7 @@ import {
   type MouseEvent,
   type OptimizedBuffer,
 } from "@opentui/core";
+import { Effect, Stream } from "effect";
 import { formatAge } from "../attention/attention.ts";
 import {
   displayHostKind,
@@ -18,6 +19,7 @@ import {
   type SessionHost,
   type TerminalDimensions,
 } from "../hosts/types.ts";
+import type { HostError } from "../hosts/errors.ts";
 import { layoutFor, type Rect } from "./layout.ts";
 import type {
   CommandCentreProjection,
@@ -166,7 +168,7 @@ export interface CommandCentreAppOptions {
   readonly universe: Universe;
   readonly host: SessionHost;
   readonly clock: Clock;
-  readonly refresh: () => Promise<string>;
+  readonly refresh: Effect.Effect<string, HostError>;
   readonly initialAction?: string;
   readonly onClose?: () => void;
   readonly renderer: CliRenderer;
@@ -309,7 +311,7 @@ export class CommandCentreApp {
     if (this.suspendTimer) clearTimeout(this.suspendTimer);
     const terminal = this.terminalMode?.terminal;
     this.terminalMode = undefined;
-    if (terminal) void terminal.release();
+    if (terminal) void Effect.runPromise(terminal.release()).catch(() => undefined);
     this.refreshTimer = undefined;
     this.suspendTimer = undefined;
   }
@@ -431,11 +433,18 @@ export class CommandCentreApp {
         kind: "empty-inspector",
         lines: ["No accepted goals or sessions yet."],
       };
-    return this.options.universe.project({
+    const projection = this.options.universe.project({
       kind: "inspector",
       now: this.options.clock.now(),
       target: this.selected,
-    }) as InspectorProjection;
+    });
+    if (
+      projection.kind !== "goal-inspector" &&
+      projection.kind !== "session-inspector" &&
+      projection.kind !== "empty-inspector"
+    )
+      throw new Error("Universe returned an unexpected inspector projection.");
+    return projection;
   }
 
   private floatingInspector(): InspectorProjection {
@@ -2621,7 +2630,7 @@ export class CommandCentreApp {
     this.busy = true;
     this.lastAction = manual ? "refreshing host snapshot…" : this.lastAction;
     try {
-      this.lastAction = await this.options.refresh();
+      this.lastAction = await Effect.runPromise(this.options.refresh);
     } catch (error) {
       this.lastAction = `refresh failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
@@ -2639,10 +2648,12 @@ export class CommandCentreApp {
     if (this.busy || this.terminalMode) return;
     this.busy = true;
     try {
-      const access = await this.options.host.access({
-        hostKind: session.hostKind,
-        nativeId: session.nativeId,
-      });
+      const access = await Effect.runPromise(
+        this.options.host.access({
+          hostKind: session.hostKind,
+          nativeId: session.nativeId,
+        }),
+      );
       if (!access.supported) {
         this.lastAction = access.explanation;
         return;
@@ -2656,7 +2667,7 @@ export class CommandCentreApp {
         this.renderer.height - 7,
       );
       this.lastAction = `opening terminal for ${session.displayName}…`;
-      const opened = await this.options.host.openTerminal(access, dimensions);
+      const opened = await Effect.runPromise(this.options.host.openTerminal(access, dimensions));
       if (!opened.ok || !opened.terminal) {
         this.lastAction = opened.message;
         return;
@@ -2685,11 +2696,15 @@ export class CommandCentreApp {
 
   private async consumeTerminalEvents(mode: TerminalMode): Promise<void> {
     try {
-      for await (const event of mode.terminal.events) {
-        if (this.terminalMode !== mode || this.closed) return;
-        this.applyTerminalEvent(mode, event);
-        this.renderer.requestRender();
-      }
+      await Effect.runPromise(
+        Stream.runForEach(mode.terminal.events, (event) =>
+          Effect.sync(() => {
+            if (this.terminalMode !== mode || this.closed) return;
+            this.applyTerminalEvent(mode, event);
+            this.renderer.requestRender();
+          }),
+        ),
+      );
       if (this.terminalMode === mode && !mode.closed) {
         mode.closed = true;
         mode.status = "The terminal stream ended.";
@@ -2732,7 +2747,7 @@ export class CommandCentreApp {
     mode.screen.resize(dimensions.columns, dimensions.rows);
     this.resizeTerminalSurface();
     this.updateTerminalSurface(mode);
-    const result = await mode.terminal.resize(dimensions);
+    const result = await Effect.runPromise(mode.terminal.resize(dimensions));
     if (!result.ok && this.terminalMode === mode) mode.status = result.message;
     this.renderer.requestRender();
   }
@@ -2742,7 +2757,7 @@ export class CommandCentreApp {
     if (!mode) return;
     this.terminalMode = undefined;
     this.destroyTerminalSurface();
-    const result = await mode.terminal.release();
+    const result = await Effect.runPromise(mode.terminal.release());
     this.lastAction = result.message;
     if (!this.closed) this.renderer.requestRender();
   }
@@ -2757,12 +2772,19 @@ export class CommandCentreApp {
     }
     const value = key.sequence || key.raw;
     if (!value) return;
-    void mode.terminal.send({ kind: "text", value }).then((result) => {
-      if (!result.ok && this.terminalMode === mode) {
-        mode.status = result.message;
-        this.renderer.requestRender();
-      }
-    });
+    void Effect.runPromise(mode.terminal.send({ kind: "text", value }))
+      .then((result) => {
+        if (!result.ok && this.terminalMode === mode) {
+          mode.status = result.message;
+          this.renderer.requestRender();
+        }
+      })
+      .catch(() => {
+        if (this.terminalMode === mode) {
+          mode.status = "terminal input failed";
+          this.renderer.requestRender();
+        }
+      });
   }
 
   private async attachSelected(): Promise<void> {
@@ -2792,10 +2814,12 @@ export class CommandCentreApp {
     let refreshAfterReturn = false;
     let rendererSuspended = false;
     try {
-      const access = await this.options.host.access({
-        hostKind: session.hostKind,
-        nativeId: session.nativeId,
-      });
+      const access = await Effect.runPromise(
+        this.options.host.access({
+          hostKind: session.hostKind,
+          nativeId: session.nativeId,
+        }),
+      );
       if (!access.supported) {
         this.lastAction = access.explanation;
         return;
@@ -2804,7 +2828,7 @@ export class CommandCentreApp {
       this.renderer.suspend();
       rendererSuspended = true;
       this.suspended = true;
-      const result = await this.options.host.activate(access);
+      const result = await Effect.runPromise(this.options.host.activate(access));
       this.lastAction = result.message;
       refreshAfterReturn = result.ok;
     } catch (error) {

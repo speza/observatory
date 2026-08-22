@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Stream } from "effect";
 import { readFileSync } from "node:fs";
 import { parseHerdrSnapshot, HerdrHostAdapter } from "./adapter.ts";
 import type { CommandRunner, TerminalCommandRunner, TerminalProcess } from "./runner.ts";
 import type { HostTerminalEvent } from "../types.ts";
 import { FixedClock } from "../../universe/test-support.ts";
+import { parseJsonValue } from "./protocol.ts";
 
-const fixture = JSON.parse(
+const fixture = parseJsonValue(
   readFileSync(new URL("../../../fixtures/herdr/sanitized-snapshot.json", import.meta.url), "utf8"),
-) as unknown;
+);
 
 class FakeRunner implements CommandRunner {
   readonly calls: string[][] = [];
@@ -227,16 +229,18 @@ describe("Herdr adapter", () => {
       runner,
       clock: new FixedClock(100),
     });
-    await adapter.snapshot();
-    const access = await adapter.access({
-      hostKind: "herdr",
-      nativeId: "fixture-w2:p1",
-    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({
+        hostKind: "herdr",
+        nativeId: "fixture-w2:p1",
+      }),
+    );
     expect(access.supported).toBe(true);
     expect(access.mode).toBe("attach");
     expect(access.target?.kind).toBe("herdr-agent-attach");
     expect(access.target?.token).toBe("fixture-w2:p1");
-    expect(await adapter.activate(access)).toEqual({
+    expect(await Effect.runPromise(adapter.activate(access))).toEqual({
       ok: true,
       message: "Attached to the real Herdr session fixture-w2:p1.",
     });
@@ -254,11 +258,12 @@ describe("Herdr adapter", () => {
       runner,
       clock: new FixedClock(100),
     });
-    const snapshot = await adapter.snapshot();
+    const snapshot = await Effect.runPromise(adapter.snapshot());
     expect(snapshot.available).toBe(false);
-    expect((await adapter.access({ hostKind: "herdr", nativeId: "missing" })).supported).toBe(
-      false,
-    );
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "missing" })))
+        .supported,
+    ).toBe(false);
   });
 
   test("clears live attachment targets when Herdr becomes unavailable", async () => {
@@ -271,15 +276,17 @@ describe("Herdr adapter", () => {
       runner,
       clock: new FixedClock(100),
     });
-    await adapter.snapshot();
-    expect((await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })).supported).toBe(
-      true,
-    );
+    await Effect.runPromise(adapter.snapshot());
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })))
+        .supported,
+    ).toBe(true);
     runner.setResult({ exitCode: 1, stdout: "", stderr: "socket unavailable" });
-    await adapter.snapshot();
-    expect((await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })).supported).toBe(
-      false,
-    );
+    await Effect.runPromise(adapter.snapshot());
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })))
+        .supported,
+    ).toBe(false);
   });
 
   test("opens a host-owned terminal stream without leaking Herdr protocol details", async () => {
@@ -297,16 +304,18 @@ describe("Herdr adapter", () => {
       terminalRunner,
       clock: new FixedClock(100),
     });
-    await adapter.snapshot();
-    const access = await adapter.access({
-      hostKind: "herdr",
-      nativeId: "fixture-w2:p1",
-    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({
+        hostKind: "herdr",
+        nativeId: "fixture-w2:p1",
+      }),
+    );
     expect(access.terminalTarget).toEqual({
       kind: "herdr-terminal-control",
       token: "fixture-w2:p1",
     });
-    const opened = await adapter.openTerminal(access, { columns: 80, rows: 24 });
+    const opened = await Effect.runPromise(adapter.openTerminal(access, { columns: 80, rows: 24 }));
     expect(opened.ok).toBe(true);
     expect(opened.terminal).toBeDefined();
     expect(terminalRunner.calls[0]).toEqual([
@@ -321,20 +330,19 @@ describe("Herdr adapter", () => {
       "--rows",
       "24",
     ]);
-    const events: HostTerminalEvent[] = [];
-    for await (const event of opened.terminal!.events) events.push(event);
+    const events = Array.from(await Effect.runPromise(Stream.runCollect(opened.terminal!.events)));
     expect(events).toHaveLength(2);
     expect(events[0]?.kind).toBe("frame");
     expect(events[1]).toEqual({ kind: "closed", reason: "done" });
-    expect(await opened.terminal!.send({ kind: "text", value: "x" })).toEqual({
+    expect(await Effect.runPromise(opened.terminal!.send({ kind: "text", value: "x" }))).toEqual({
       ok: true,
       message: "Input sent to the Herdr terminal.",
     });
-    expect(await opened.terminal!.resize({ columns: 90, rows: 30 })).toEqual({
+    expect(await Effect.runPromise(opened.terminal!.resize({ columns: 90, rows: 30 }))).toEqual({
       ok: true,
       message: "Resized Herdr terminal to 90×30.",
     });
-    expect((await opened.terminal!.release()).ok).toBe(true);
+    expect((await Effect.runPromise(opened.terminal!.release())).ok).toBe(true);
     expect(terminalRunner.process.killed).toBe(true);
     expect(terminalRunner.process.writes).toHaveLength(3);
   });

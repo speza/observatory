@@ -128,9 +128,12 @@ export const defaultGoalMapPosition = (goalId: string): MapPosition => {
  * for terminal-cell sizing, while new goal placement can avoid the current
  * session load without moving accepted goals.
  */
-export const goalLayoutFootprint = (
-  sessionCount: number,
-): { readonly halfWidth: number; readonly halfHeight: number } => {
+export interface GoalLayoutFootprint {
+  readonly halfWidth: number;
+  readonly halfHeight: number;
+}
+
+export const goalLayoutFootprint = (sessionCount: number): GoalLayoutFootprint => {
   const count = Number.isFinite(sessionCount) ? Math.max(0, Math.floor(sessionCount)) : 0;
   let ring = 0;
   while (count > 4 * ring * (ring + 1)) ring += 1;

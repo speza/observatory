@@ -1,4 +1,6 @@
+import type { Effect, Stream } from "effect";
 import type { RuntimeState } from "../universe/types.ts";
+import type { HostError } from "./errors.ts";
 
 /** Convert an opaque host kind into a readable label without knowing a host's brand. */
 export const displayHostKind = (hostKind: string): string => {
@@ -58,10 +60,10 @@ export type HostTerminalInput =
 
 /** A host-owned terminal stream. The host owns the process and its lifecycle. */
 export interface HostedTerminalSession {
-  readonly events: AsyncIterable<HostTerminalEvent>;
-  send(input: HostTerminalInput): Promise<HostActionResult>;
-  resize(dimensions: TerminalDimensions): Promise<HostActionResult>;
-  release(): Promise<HostActionResult>;
+  readonly events: Stream.Stream<HostTerminalEvent, HostError>;
+  send(input: HostTerminalInput): Effect.Effect<HostActionResult, HostError>;
+  resize(dimensions: TerminalDimensions): Effect.Effect<HostActionResult, HostError>;
+  release(): Effect.Effect<HostActionResult, HostError>;
 }
 
 export interface HostTerminalOpenResult {
@@ -85,11 +87,14 @@ export interface HostActionResult {
 }
 
 export interface SessionHost {
-  snapshot(): Promise<HostSnapshot>;
-  access(session: { readonly hostKind: string; readonly nativeId: string }): Promise<SessionAccess>;
-  activate(access: SessionAccess): Promise<HostActionResult>;
+  snapshot(): Effect.Effect<HostSnapshot, HostError>;
+  access(session: {
+    readonly hostKind: string;
+    readonly nativeId: string;
+  }): Effect.Effect<SessionAccess, HostError>;
+  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError>;
   openTerminal(
     access: SessionAccess,
     dimensions: TerminalDimensions,
-  ): Promise<HostTerminalOpenResult>;
+  ): Effect.Effect<HostTerminalOpenResult, HostError>;
 }

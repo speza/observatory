@@ -4,11 +4,11 @@ export type SemanticZoomLevel = "overview" | "context" | "detail";
 
 export type SemanticZoomLens = "portfolio" | "attention" | "goal" | "inbox";
 
-const levelRank: Record<SemanticZoomLevel, number> = {
+const levelRank = {
   overview: 0,
   context: 1,
   detail: 2,
-};
+} satisfies Record<SemanticZoomLevel, number>;
 
 const WORKING_MARKERS = ["◐", "◓", "◑", "◒"] as const;
 

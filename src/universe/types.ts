@@ -94,12 +94,16 @@ export const emptyUniverseState = (): UniverseState => ({
   hosts: [],
 });
 
-export const cloneUniverseState = (state: UniverseState): UniverseState => ({
-  version: 1,
-  goals: state.goals.map((goal) => ({
-    ...goal,
-    ...(goal.mapPosition ? { mapPosition: { ...goal.mapPosition } } : {}),
-  })),
-  sessions: state.sessions.map((session) => ({ ...session })),
-  hosts: state.hosts.map((host) => ({ ...host })),
-});
+export const cloneUniverseState = (state: UniverseState): UniverseState => {
+  const goals = state.goals.map((goal) => {
+    const copy = { ...goal };
+    if (goal.mapPosition) copy.mapPosition = { ...goal.mapPosition };
+    return copy;
+  });
+  return {
+    version: 1,
+    goals,
+    sessions: state.sessions.map((session) => ({ ...session })),
+    hosts: state.hosts.map((host) => ({ ...host })),
+  };
+};

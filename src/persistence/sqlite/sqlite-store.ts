@@ -86,57 +86,69 @@ export class SqliteUniverseStore implements UniverseStore {
     const goals = this.db
       .query<GoalRow, []>("SELECT * FROM goals ORDER BY created_at, id")
       .all()
-      .map((row): Goal => ({
-        id: row.id,
-        title: row.title,
-        ...(row.description ? { description: row.description } : {}),
-        priority: asPriority(row.priority),
-        status: asGoalStatus(row.status),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        ...(row.completed_at !== null ? { completedAt: row.completed_at } : {}),
-        ...(row.archived_at !== null ? { archivedAt: row.archived_at } : {}),
-        ...(row.map_x !== null && row.map_y !== null
-          ? {
-              mapPosition: { x: row.map_x, y: row.map_y },
-              mapPositionPinned: row.map_pinned !== 0,
-            }
-          : {}),
-      }));
+      .map((row) => {
+        const goal = {
+          id: row.id,
+          title: row.title,
+          priority: asPriority(row.priority),
+          status: asGoalStatus(row.status),
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+        if (row.description) Object.assign(goal, { description: row.description });
+        if (row.completed_at !== null) Object.assign(goal, { completedAt: row.completed_at });
+        if (row.archived_at !== null) Object.assign(goal, { archivedAt: row.archived_at });
+        if (row.map_x !== null && row.map_y !== null)
+          Object.assign(goal, {
+            mapPosition: { x: row.map_x, y: row.map_y },
+            mapPositionPinned: row.map_pinned !== 0,
+          });
+        return goal;
+      });
     const sessions = this.db
       .query<SessionRow, []>("SELECT * FROM sessions ORDER BY display_name, id")
       .all()
-      .map((row): TrackedSession => ({
-        id: row.id,
-        hostKind: row.host_kind,
-        nativeId: row.native_id,
-        displayName: row.display_name,
-        displayNameSource: asSource(row.display_name_source),
-        ...(row.description ? { description: row.description } : {}),
-        ...(row.primary_goal_id ? { primaryGoalId: row.primary_goal_id } : {}),
-        runtimeState: asRuntimeState(row.runtime_state),
-        runtimeStateSource: row.runtime_state_source,
-        hostHealth: asHealth(row.host_health),
-        lastSeenAt: row.last_seen_at,
-        lastObservedAt: row.last_observed_at,
-        lastChangedAt: row.last_changed_at,
-        ...(row.attention_since !== null ? { attentionSince: row.attention_since } : {}),
-        ...(row.repository ? { repository: row.repository } : {}),
-        ...(row.branch ? { branch: row.branch } : {}),
-        ...(row.worktree ? { worktree: row.worktree } : {}),
-        ...(row.provider ? { provider: row.provider } : {}),
-        hostLocator: row.host_locator,
-      }));
+      .map((row) => {
+        const session = {
+          id: row.id,
+          hostKind: row.host_kind,
+          nativeId: row.native_id,
+          displayName: row.display_name,
+          displayNameSource: asSource(row.display_name_source),
+          runtimeState: asRuntimeState(row.runtime_state),
+          runtimeStateSource: row.runtime_state_source,
+          hostHealth: asHealth(row.host_health),
+          lastSeenAt: row.last_seen_at,
+          lastObservedAt: row.last_observed_at,
+          lastChangedAt: row.last_changed_at,
+          hostLocator: row.host_locator,
+        };
+        if (row.description) Object.assign(session, { description: row.description });
+        if (row.primary_goal_id) Object.assign(session, { primaryGoalId: row.primary_goal_id });
+        if (row.attention_since !== null)
+          Object.assign(session, { attentionSince: row.attention_since });
+        if (row.repository) Object.assign(session, { repository: row.repository });
+        if (row.branch) Object.assign(session, { branch: row.branch });
+        if (row.worktree) Object.assign(session, { worktree: row.worktree });
+        if (row.provider) Object.assign(session, { provider: row.provider });
+        return session;
+      });
     const hosts = this.db
       .query<HostRow, []>("SELECT * FROM hosts ORDER BY host_kind")
       .all()
-      .map((row): HostHealth => ({
-        hostKind: row.host_kind,
-        status: row.status === "live" || row.status === "unavailable" ? row.status : "stale",
-        ...(row.last_observed_at !== null ? { lastObservedAt: row.last_observed_at } : {}),
-        ...(row.last_error ? { lastError: row.last_error } : {}),
-        diagnosticCount: row.diagnostic_count,
-      }));
+      .map((row) => {
+        const status: HostHealth["status"] =
+          row.status === "live" || row.status === "unavailable" ? row.status : "stale";
+        const host = {
+          hostKind: row.host_kind,
+          status,
+          diagnosticCount: row.diagnostic_count,
+        };
+        if (row.last_observed_at !== null)
+          Object.assign(host, { lastObservedAt: row.last_observed_at });
+        if (row.last_error) Object.assign(host, { lastError: row.last_error });
+        return host;
+      });
     return { version: 1, goals, sessions, hosts };
   }
 

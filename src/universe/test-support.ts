@@ -48,15 +48,19 @@ export class MemoryStore implements UniverseStore {
   }
 }
 
+interface UniverseFixture<TStore extends UniverseStore> {
+  readonly universe: Universe;
+  readonly store: TStore;
+  readonly clock: FixedClock;
+}
+
 export const makeUniverse = <TStore extends UniverseStore = MemoryStore>(options?: {
   readonly state?: UniverseState;
   readonly clock?: FixedClock;
   readonly store?: TStore;
-}): {
-  readonly universe: Universe;
-  readonly store: TStore;
-  readonly clock: FixedClock;
-} => {
+}): UniverseFixture<TStore> => {
+  // SAFETY: The fallback is only used when no caller-owned store is supplied;
+  // otherwise the generic store is exactly the value passed in options.store.
   const store = (options?.store ?? new MemoryStore(options?.state)) as TStore;
   const clock = options?.clock ?? new FixedClock(1_000_000);
   return {

@@ -148,6 +148,14 @@ capabilities. Unsupported operations are explicit. We add a capability only
 when a real host or user workflow proves it is needed; we do not pre-design a
 universal agent or terminal API.
 
+Host operations are represented as typed Effect values. `SessionHost` failures
+use a small `HostError` contract, while semantic unsupported results remain
+explicit data. Embedded terminal output is an Effect Stream so the renderer can
+interrupt consumption and release host-owned resources without inventing a
+second cancellation protocol. Effect stops at the host/runtime edge: the
+Universe, persistence records and projections remain ordinary TypeScript data
+and deterministic functions.
+
 The replacement test is architectural, not aspirational: selecting a future
 tmux adapter, Superlogical-style host or AO-owned multiplexer at composition
 time must leave Universe, persistence, projections and renderers unchanged.
@@ -159,13 +167,13 @@ smoke path where available.
 The v1 interface should remain smaller than the underlying host interfaces:
 
 ```text
-snapshot()                         -> HostSnapshot
-watch(cursor)                      -> EventStream<HostObservation>
-launch(LaunchRequest)              -> LaunchResult
-access(HostedSessionId)            -> SessionAccess
+snapshot()                         -> Effect<HostSnapshot, HostError>
+watch(cursor)                      -> Stream<HostObservation, HostError>
+launch(LaunchRequest)              -> Effect<LaunchResult, HostError>
+access(HostedSessionId)            -> Effect<SessionAccess, HostError>
 interact(HostedSessionId,
-         SessionInteraction)       -> InteractionResult
-capabilities()                     -> HostCapabilities
+         SessionInteraction)       -> Effect<InteractionResult, HostError>
+capabilities()                     -> Effect<HostCapabilities, HostError>
 ```
 
 `snapshot` and `watch` provide reconciliation plus live updates. `launch`
@@ -213,11 +221,11 @@ The implemented shape is deliberately small:
 
 ```text
 openTerminal(SessionAccess, TerminalDimensions)
-  -> HostTerminalOpenResult
-       events: frame | closed
-       send(text | bytes)
-       resize(columns, rows)
-       release()
+  -> Effect<HostTerminalOpenResult, HostError>
+       events: Stream<frame | closed, HostError>
+       send(text | bytes): Effect<HostActionResult, HostError>
+       resize(columns, rows): Effect<HostActionResult, HostError>
+       release(): Effect<HostActionResult, HostError>
 ```
 
 The Herdr adapter translates its controller stream into this capability; the

@@ -32,6 +32,10 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
 - Renderers consume projections and submit commands. They do not access SQLite
   or concrete host adapters; explicit attach/terminal actions go through the
   injected generic `SessionHost` capability port.
+- Effect owns asynchronous host/runtime work: `SessionHost` returns typed
+  Effects and terminal output is an Effect Stream. Keep `universe/`, SQLite
+  records, projections and spatial calculations Effect-free; the TUI is the
+  imperative edge that runs host Effects.
 - Keep host-specific behaviour behind the `SessionHost` seam. Herdr identifiers
   and attachment targets remain opaque outside its adapter.
 - Herdr is the deliberate required live host for V0/V1. That is a product
@@ -78,6 +82,9 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
 - Before committing or handing work back, run `bun run check` and `bun test`.
 - Do not weaken a lint rule merely to clear a finding. Fix the defect, or
   document why the rule is a poor fit before changing shared configuration.
+- Anti-Slop is vendored under `tools/oxlint/anti-slop/` and runs as an Oxlint
+  plugin. Disposable prototype trees are excluded deliberately; maintained
+  source must pass its rules.
 - Use trunk-based development: work directly on `main` until the user says
   otherwise. Do not create feature branches or pull requests by default.
 - Do not commit or push unless the user asks.

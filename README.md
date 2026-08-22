@@ -88,6 +88,13 @@ bun run lint:fix
 bun run check        # required before commit or agent handoff
 ```
 
+The maintained source is checked by the vendored Anti-Slop Oxlint plugins in
+`tools/oxlint/anti-slop/`. Effect is used for the asynchronous host/runtime
+edge: `SessionHost` operations are typed Effects, terminal output is a
+cancellable Effect Stream, and the pure universe model remains ordinary
+TypeScript. Disposable prototypes are excluded from the production lint/format
+gate.
+
 Oxlint treats correctness and suspicious findings as errors, reports
 performance findings as warnings, checks imports, and runs type-aware promise
 rules. Broad stylistic and pedantic categories remain disabled so Oxfmt owns

@@ -1,3 +1,4 @@
+import { Effect, Stream } from "effect";
 import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
@@ -11,6 +12,7 @@ import type {
   HostTerminalInput,
   HostTerminalOpenResult,
 } from "../types.ts";
+import { hostError, type HostError } from "../errors.ts";
 import { createMockScenario, type MockScenario } from "./scenarios.ts";
 
 const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
@@ -20,7 +22,7 @@ const elapsedFrames = (now: number, startedAt: number, tickMs: number): number =
   Math.floor(Math.max(0, now - startedAt) / tickMs);
 
 class MockTerminalSession implements HostedTerminalSession {
-  readonly events: AsyncIterable<HostTerminalEvent>;
+  readonly events: Stream.Stream<HostTerminalEvent, HostError>;
   readonly inputs: HostTerminalInput[] = [];
   readonly resizes: TerminalDimensions[] = [];
   private readonly queued: HostTerminalEvent[];
@@ -44,36 +46,44 @@ class MockTerminalSession implements HostedTerminalSession {
         },
       },
     ];
-    this.events = this.readEvents();
+    this.events = Stream.fromAsyncIterable(this.readEvents(), () =>
+      hostError("mock-terminal.events", `Mock terminal stream failed for ${sessionName}.`),
+    );
   }
 
-  async send(input: HostTerminalInput): Promise<HostActionResult> {
-    if (this.released) return { ok: false, message: "The mock terminal has been released." };
-    this.inputs.push(input);
-    const value = input.kind === "text" ? input.value : new TextDecoder().decode(input.value);
-    this.push({
-      kind: "frame",
-      frame: { bytes: new TextEncoder().encode(`\r\nmock input: ${JSON.stringify(value)}\r\n`) },
+  send(input: HostTerminalInput): Effect.Effect<HostActionResult, HostError> {
+    return Effect.sync(() => {
+      if (this.released) return { ok: false, message: "The mock terminal has been released." };
+      this.inputs.push(input);
+      const value = input.kind === "text" ? input.value : new TextDecoder().decode(input.value);
+      this.push({
+        kind: "frame",
+        frame: { bytes: new TextEncoder().encode(`\r\nmock input: ${JSON.stringify(value)}\r\n`) },
+      });
+      return { ok: true, message: "Input sent to the mock terminal." };
     });
-    return { ok: true, message: "Input sent to the mock terminal." };
   }
 
-  async resize(dimensions: TerminalDimensions): Promise<HostActionResult> {
-    if (this.released) return { ok: false, message: "The mock terminal has been released." };
-    if (dimensions.columns < 1 || dimensions.rows < 1)
-      return { ok: false, message: "Terminal dimensions must be positive." };
-    this.resizes.push(dimensions);
-    return {
-      ok: true,
-      message: `Resized mock terminal to ${dimensions.columns}×${dimensions.rows}.`,
-    };
+  resize(dimensions: TerminalDimensions): Effect.Effect<HostActionResult, HostError> {
+    return Effect.sync(() => {
+      if (this.released) return { ok: false, message: "The mock terminal has been released." };
+      if (dimensions.columns < 1 || dimensions.rows < 1)
+        return { ok: false, message: "Terminal dimensions must be positive." };
+      this.resizes.push(dimensions);
+      return {
+        ok: true,
+        message: `Resized mock terminal to ${dimensions.columns}×${dimensions.rows}.`,
+      };
+    });
   }
 
-  async release(): Promise<HostActionResult> {
-    if (this.released) return { ok: true, message: "Mock terminal already released." };
-    this.released = true;
-    this.push({ kind: "closed", reason: "Released by Observatory." });
-    return { ok: true, message: `Released mock terminal ${this.sessionName}.` };
+  release(): Effect.Effect<HostActionResult, HostError> {
+    return Effect.sync(() => {
+      if (this.released) return { ok: true, message: "Mock terminal already released." };
+      this.released = true;
+      this.push({ kind: "closed", reason: "Released by Observatory." });
+      return { ok: true, message: `Released mock terminal ${this.sessionName}.` };
+    });
   }
 
   private async *readEvents(): AsyncIterable<HostTerminalEvent> {
@@ -123,91 +133,116 @@ export class MockHostAdapter implements SessionHost {
     this.startedAt = this.clock.now();
   }
 
-  async snapshot(): Promise<HostSnapshot> {
-    this.liveTargets.clear();
-    const observedAt = this.clock.now();
-    const frameNumber =
-      elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) % this.scenario.frames.length;
-    const frame = this.scenario.frames[frameNumber];
-    if (!frame) throw new Error("Mock scenario frame disappeared.");
-    const sessions = frame.sessions.map((session) => ({
-      ...session,
-      observedAt,
-    }));
-    for (const session of sessions) {
-      this.liveTargets.set(session.nativeId, {
-        kind: "mock-session",
-        token: session.nativeId,
-      });
-    }
-    return {
-      hostKind: "mock",
-      available: true,
-      observedAt,
-      sessions,
-      diagnostics: [],
-    };
+  snapshot(): Effect.Effect<HostSnapshot, HostError> {
+    return Effect.sync(() => {
+      this.liveTargets.clear();
+      const observedAt = this.clock.now();
+      const frameNumber =
+        elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) %
+        this.scenario.frames.length;
+      const frame = this.scenario.frames[frameNumber];
+      if (!frame) throw new Error("Mock scenario frame disappeared.");
+      const sessions = frame.sessions.map((session) => ({
+        ...session,
+        observedAt,
+      }));
+      for (const session of sessions) {
+        this.liveTargets.set(session.nativeId, {
+          kind: "mock-session",
+          token: session.nativeId,
+        });
+      }
+      return {
+        hostKind: "mock",
+        available: true,
+        observedAt,
+        sessions,
+        diagnostics: [],
+      } satisfies HostSnapshot;
+    }).pipe(
+      Effect.catchAllDefect(() =>
+        Effect.fail(hostError("host.snapshot", "Mock scenario snapshot failed unexpectedly.")),
+      ),
+    );
   }
 
-  async access(session: {
+  access(session: {
     readonly hostKind: string;
     readonly nativeId: string;
-  }): Promise<SessionAccess> {
-    if (session.hostKind !== "mock")
+  }): Effect.Effect<SessionAccess, HostError> {
+    return Effect.sync(() => {
+      if (session.hostKind !== "mock")
+        return {
+          supported: false,
+          explanation: "This session belongs to an unsupported host.",
+        } satisfies SessionAccess;
+      const target = this.liveTargets.get(session.nativeId);
+      if (!target)
+        return {
+          supported: false,
+          explanation: "The session is not present in the latest mock frame.",
+        } satisfies SessionAccess;
       return {
-        supported: false,
-        explanation: "This session belongs to an unsupported host.",
-      };
-    const target = this.liveTargets.get(session.nativeId);
-    if (!target)
-      return {
-        supported: false,
-        explanation: "The session is not present in the latest mock frame.",
-      };
-    return {
-      supported: true,
-      mode: "focus",
-      target,
-      terminalTarget: {
-        kind: "mock-terminal",
-        token: session.nativeId,
-      },
-      explanation: "Simulate focus or open an embedded terminal in the deterministic mock host.",
-    };
+        supported: true,
+        mode: "focus",
+        target,
+        terminalTarget: {
+          kind: "mock-terminal",
+          token: session.nativeId,
+        },
+        explanation: "Simulate focus or open an embedded terminal in the deterministic mock host.",
+      } satisfies SessionAccess;
+    });
   }
 
-  async activate(access: SessionAccess): Promise<HostActionResult> {
-    if (!access.supported || !access.target) return { ok: false, message: access.explanation };
-    const token = parseTarget(access.target);
-    if (!token)
-      return {
-        ok: false,
-        message: "The mock attachment target is invalid or unsupported.",
-      };
-    if (!this.liveTargets.has(token))
-      return {
-        ok: false,
-        message: "The session is no longer present in the latest mock frame.",
-      };
-    return { ok: true, message: `Simulated focus for mock session ${token}.` };
+  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError> {
+    return Effect.sync(() => {
+      if (!access.supported || !access.target) return { ok: false, message: access.explanation };
+      const token = parseTarget(access.target);
+      if (!token)
+        return {
+          ok: false,
+          message: "The mock attachment target is invalid or unsupported.",
+        };
+      if (!this.liveTargets.has(token))
+        return {
+          ok: false,
+          message: "The session is no longer present in the latest mock frame.",
+        };
+      return { ok: true, message: `Simulated focus for mock session ${token}.` };
+    });
   }
 
-  async openTerminal(
+  openTerminal(
     access: SessionAccess,
     dimensions: TerminalDimensions,
-  ): Promise<HostTerminalOpenResult> {
-    if (!access.supported || !access.terminalTarget)
-      return { ok: false, message: "This mock session does not expose an embedded terminal." };
-    if (access.terminalTarget.kind !== "mock-terminal")
-      return { ok: false, message: "The mock terminal target is invalid or unsupported." };
-    if (dimensions.columns < 1 || dimensions.rows < 1)
-      return { ok: false, message: "Terminal dimensions must be positive." };
-    if (!this.liveTargets.has(access.terminalTarget.token))
-      return { ok: false, message: "The session is no longer present in the latest mock frame." };
-    return {
-      ok: true,
-      message: `Opened an embedded mock terminal for ${access.terminalTarget.token}.`,
-      terminal: new MockTerminalSession(access.terminalTarget.token, dimensions),
-    };
+  ): Effect.Effect<HostTerminalOpenResult, HostError> {
+    return Effect.sync(() => {
+      if (!access.supported || !access.terminalTarget)
+        return {
+          ok: false,
+          message: "This mock session does not expose an embedded terminal.",
+        } satisfies HostTerminalOpenResult;
+      if (access.terminalTarget.kind !== "mock-terminal")
+        return {
+          ok: false,
+          message: "The mock terminal target is invalid or unsupported.",
+        } satisfies HostTerminalOpenResult;
+      if (dimensions.columns < 1 || dimensions.rows < 1)
+        return {
+          ok: false,
+          message: "Terminal dimensions must be positive.",
+        } satisfies HostTerminalOpenResult;
+      if (!this.liveTargets.has(access.terminalTarget.token))
+        return {
+          ok: false,
+          message: "The session is no longer present in the latest mock frame.",
+        } satisfies HostTerminalOpenResult;
+      return {
+        ok: true,
+        message: `Opened an embedded mock terminal for ${access.terminalTarget.token}.`,
+        terminal: new MockTerminalSession(access.terminalTarget.token, dimensions),
+      } satisfies HostTerminalOpenResult;
+    });
   }
 }

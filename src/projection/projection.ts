@@ -111,7 +111,12 @@ const projectCommandCentre = (
   };
 };
 
-const goalRadius = (sessionCount: number): { x: number; y: number } => ({
+interface GoalRadius {
+  readonly x: number;
+  readonly y: number;
+}
+
+const goalRadius = (sessionCount: number): GoalRadius => ({
   // Size communicates durable scope/session load. Attention uses a separate
   // badge and outline so it cannot silently inflate a goal's apparent scope.
   x: Math.min(14, 7 + Math.ceil(Math.sqrt(sessionCount + 1) * 1.8)),
@@ -214,7 +219,7 @@ const projectSearch = (
       .map(searchable)
       .join(" ");
     if (haystack.includes(normalized)) {
-      results.push({
+      const result: SearchResult = {
         type: "session",
         id: session.id,
         label: session.displayName,
@@ -222,8 +227,9 @@ const projectSearch = (
           ? `session · ${session.primaryGoalId}`
           : "unassigned session",
         status: session.runtimeState,
-        ...(session.primaryGoalId ? { goalId: session.primaryGoalId } : {}),
-      });
+      };
+      if (session.primaryGoalId) Object.assign(result, { goalId: session.primaryGoalId });
+      results.push(result);
     }
   }
   return { kind: "search", query, results };
