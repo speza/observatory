@@ -58,4 +58,6 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
 - Before committing or handing work back, run `bun run check` and `bun test`.
 - Do not weaken a lint rule merely to clear a finding. Fix the defect, or
   document why the rule is a poor fit before changing shared configuration.
+- Work directly on `main` until the user says otherwise. Do not create feature
+  branches or pull requests by default.
 - Do not commit or push unless the user asks.
