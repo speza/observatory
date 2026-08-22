@@ -6,14 +6,16 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/main.ts",
+    "dev:mock": "AO_HOST=mock AO_MOCK_SCENARIO=orbit AO_MOCK_SEED=portfolio AO_DB_PATH=${TMPDIR:-/tmp}/ao-mock.sqlite bun run src/main.ts",
     "start": "bun run src/main.ts",
     "test": "bun test",
     "test:herdr": "bun test src/hosts/herdr/herdr.test.ts",
     "test:all": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src",
-    "format": "oxfmt src fixtures",
-    "format:check": "oxfmt --check src fixtures",
+    "lint": "oxlint --config .oxlintrc.json src",
+    "lint:fix": "oxlint --config .oxlintrc.json --fix src",
+    "format": "oxfmt --config .oxfmtrc.json src fixtures",
+    "format:check": "oxfmt --config .oxfmtrc.json --check src fixtures",
     "check": "bun run format:check && bun run lint && bun run typecheck"
   },
   "dependencies": {

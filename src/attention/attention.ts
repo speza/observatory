@@ -56,6 +56,9 @@ const sortAttention = (left: AttentionItem, right: AttentionItem): number => {
 const age = (now: number, startedAt: number): number =>
   Math.max(0, now - startedAt);
 
+const hostLabel = (hostKind: string): string =>
+  hostKind === "herdr" ? "Herdr" : hostKind;
+
 export const evaluateAttention = (
   now: number,
   goals: readonly Goal[],
@@ -72,6 +75,7 @@ export const evaluateAttention = (
         ? attentionReason(session.runtimeState)
         : undefined;
     if (currentReason) {
+      const sourceLabel = hostLabel(session.hostKind);
       const startedAt = session.attentionSince ?? session.lastChangedAt;
       items.push({
         id: `${session.id}:${currentReason}`,
@@ -88,12 +92,13 @@ export const evaluateAttention = (
         runtimeState: session.runtimeState,
         explanation:
           currentReason === "blocked"
-            ? "Herdr reports that this session is blocked and may need human input."
-            : "Herdr reports that this session is waiting for human input.",
+            ? `${sourceLabel} reports that this session is blocked and may need human input.`
+            : `${sourceLabel} reports that this session is waiting for human input.`,
       });
     }
 
     if (session.hostHealth !== "live") {
+      const sourceLabel = hostLabel(session.hostKind);
       const startedAt = session.lastSeenAt;
       items.push({
         id: `${session.id}:host-stale`,
@@ -108,7 +113,7 @@ export const evaluateAttention = (
         ageMs: age(now, startedAt),
         priority,
         runtimeState: session.runtimeState,
-        explanation: `The last Herdr observation is ${session.hostHealth}; the last known ${session.runtimeState} state is not current.`,
+        explanation: `The last ${sourceLabel} observation is ${session.hostHealth}; the last known ${session.runtimeState} state is not current.`,
       });
     }
   }

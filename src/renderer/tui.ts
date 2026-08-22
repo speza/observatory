@@ -271,7 +271,7 @@ export class CommandCentreApp {
       this.renderer.requestRender();
     });
     this.renderer.keyInput.on("keypress", (key) => this.handleKey(key));
-    this.renderer.setTerminalTitle("AO — live Herdr universe");
+    this.renderer.setTerminalTitle("AO — agent universe");
   }
 
   private get renderer(): CliRenderer {
@@ -517,9 +517,13 @@ export class CommandCentreApp {
       ? `${host.hostKind} ${host.status}${host.diagnosticCount > 0 ? ` · diag ${host.diagnosticCount}` : ""}`
       : "herdr not observed";
     const counts = `${countLabel(projection.counts.goals, "goal")} · ${countLabel(projection.counts.sessions, "session")} · ${projection.counts.unassigned} inbox`;
+    const title =
+      host?.hostKind === "mock"
+        ? "AO  MOCK AGENT UNIVERSE"
+        : "AO  LIVE HERDR UNIVERSE";
     this.text(
       buffer,
-      "AO  LIVE HERDR UNIVERSE",
+      title,
       rect.x + 2,
       rect.y,
       COLORS.white,

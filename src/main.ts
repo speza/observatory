@@ -3,6 +3,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { HerdrHostAdapter } from "./hosts/herdr/adapter.ts";
+import { MockHostAdapter } from "./hosts/mock/adapter.ts";
+import { createMockScenario } from "./hosts/mock/scenarios.ts";
+import { seedMockPortfolio } from "./hosts/mock/seed.ts";
+import type { SessionHost } from "./hosts/types.ts";
 import { SqliteUniverseStore } from "./persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "./projection/projection.ts";
 import { createCommandCentreRenderer } from "./renderer/tui.ts";
@@ -30,7 +34,16 @@ const databasePath =
 if (databasePath !== ":memory:")
   mkdirSync(dirname(databasePath), { recursive: true });
 const store = new SqliteUniverseStore(databasePath);
-const host = new HerdrHostAdapter({ clock });
+const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
+const host: SessionHost = useMockHost
+  ? new MockHostAdapter({
+      clock,
+      scenario: createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit"),
+      ...(process.env.AO_MOCK_TICK_MS
+        ? { tickMs: Number(process.env.AO_MOCK_TICK_MS) }
+        : {}),
+    })
+  : new HerdrHostAdapter({ clock });
 const universe = new Universe(
   store,
   clock,
@@ -41,14 +54,20 @@ const universe = new Universe(
 const reconcile = async (): Promise<string> => {
   const snapshot = await host.snapshot();
   const result = universe.reconcile(snapshot);
+  const hostLabel = snapshot.hostKind === "mock" ? "Mock" : "Herdr";
   if (!result.accepted)
-    return result.error ?? "Herdr reconciliation rejected the snapshot.";
+    return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
   if (!snapshot.available)
-    return `Herdr unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
-  return `Herdr refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;
+    return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
+  return `${hostLabel} refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;
 };
 
-const initialMessage = await reconcile();
+let initialMessage = await reconcile();
+if (useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
+  const seeded = seedMockPortfolio(universe);
+  if (seeded.createdGoals > 0)
+    initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedSessions} sessions`;
+}
 const app = await createCommandCentreRenderer({
   universe,
   host,

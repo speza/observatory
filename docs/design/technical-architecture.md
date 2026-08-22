@@ -606,6 +606,25 @@ The initial adapter is read-only except for explicit focus or attachment.
 Messaging, launch/stop and broader pane control can follow after live use proves
 exact-target interaction and the goal model; they are not part of V0.
 
+### Deterministic mock host
+
+The project also includes a development-only `MockHostAdapter`. It implements
+the same `SessionHost` interface as Herdr and is selected only by the explicit
+`AO_HOST=mock` composition setting. A clock-driven scenario selects immutable
+frames rather than sleeping or mutating a second domain model. Each frame emits
+stable synthetic native identities, opaque access targets and sanitized session
+metadata. The real Universe reconciliation, stale-session handling, attention
+evaluation, projections, layout and TUI attachment-return path therefore run
+unchanged.
+
+The default `orbit` scenario starts at twenty sessions, introduces additional
+sessions, rotates working/idle/waiting/blocked/done states and omits one session
+for a frame to exercise recovery. `AO_MOCK_SEED=portfolio` is an explicit
+development convenience that creates three synthetic goals and assigns sessions
+through `Universe.execute`; it never runs for the live Herdr host. The mock
+attachment action is intentionally local and reports simulated focus rather
+than claiming to control a real terminal.
+
 ## Terminal client
 
 The terminal is the first real client. It is a restrained, keyboard-first

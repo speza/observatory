@@ -27,6 +27,45 @@ Run against the live Herdr instance:
 AO_DB_PATH=/private/tmp/ao-v0-live.sqlite bun run dev
 ```
 
+For a repeatable dogfood loop without changing the live Herdr host, use the
+deterministic mock adapter. It starts with 20 synthetic sessions, adds sessions
+over the loop, rotates blocked/waiting/done states, and temporarily drops a
+session so AO's stale/recovery path is exercised. The optional portfolio seed
+creates three goals and assigns the first sessions through the same Universe
+commands used by the TUI:
+
+```sh
+bun run dev:mock
+```
+
+The script uses `${TMPDIR:-/tmp}/ao-mock.sqlite`. For an explicit disposable
+database or a faster scenario tick:
+
+```sh
+AO_HOST=mock AO_MOCK_SCENARIO=orbit AO_MOCK_SEED=portfolio \
+AO_MOCK_TICK_MS=1000 AO_DB_PATH=/private/tmp/ao-mock.sqlite bun run dev
+```
+
+Mock attachment reports success locally but does not focus a real pane. Mock
+names, metadata and locators are synthetic; no Herdr session contents are
+copied into the scenario. The adapter tests are deterministic and run without
+waiting:
+
+```sh
+bun test src/hosts/mock/mock.test.ts
+```
+
+Oxc owns the committed lint and format configuration (`.oxlintrc.json` and
+`.oxfmtrc.json`). The stable quality commands are:
+
+```sh
+bun run format       # apply Oxfmt
+bun run format:check
+bun run lint
+bun run lint:fix
+bun run check
+```
+
 At 80x24 the primary surface is a portfolio, cell-native map of goal bodies and
 their direct session satellites. The attention queue, unassigned inbox, flat
 grouped list lens and inspector remain supporting lenses. The main controls are:
