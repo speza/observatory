@@ -8,10 +8,18 @@ agent sessions across providers, repositories and git worktrees.
 The project-root implementation is a Bun/TypeScript OpenTUI spatial universe
 backed by SQLite. It discovers recognized live Herdr agents through
 `herdr api snapshot`, keeps human-owned goals, assignments and stable goal
-positions across restarts, and focuses a real Herdr session through the
-installed CLI. Herdr panes, tabs and workspaces are joined as session metadata
-and opaque focus targets; shell-only panes are not Observatory sessions. The default
+positions across restarts, and directly attaches to a real Herdr session through
+the installed CLI. Herdr panes, tabs and workspaces are joined as session
+metadata and opaque attachment targets; shell-only panes are not Observatory
+sessions. When Herdr exposes its controller stream, `t` opens a host-owned
+embedded terminal inside the TUI; `Enter` remains the foreground-native fallback.
+The default
 database is `data/ao.sqlite`; set `AO_DB_PATH` to use another database.
+
+Herdr is intentionally required for the first live product slice, not baked
+into the control plane. The `SessionHost` seam keeps future tmux,
+Superlogical-style or Observatory-owned hosts replaceable; `AO_HOST=mock`
+exercises the same path without a live Herdr instance.
 
 Install and verify the project:
 
@@ -26,6 +34,20 @@ Run against the live Herdr instance:
 ```sh
 AO_DB_PATH=/private/tmp/ao-v0-live.sqlite bun run dev
 ```
+
+The terminal-surface experiments remain disposable and do not add managed
+sessions or persistence. POC A starts a local shell inside an OpenTUI terminal
+panel; POC B renders a selected Herdr session through Herdr's observe/control
+stream. Press Ctrl-Q to leave either prototype:
+
+```sh
+bun run dev:pty-poc
+AO_HERDR_TARGET=<agent-or-pane-id> bun run dev:herdr-terminal-poc
+AO_HERDR_MOCK=1 bun run dev:herdr-terminal-poc
+```
+
+Their scope and current evidence are recorded in
+[Native terminal surface POCs](docs/specs/terminal-surface-pocs.md).
 
 For a repeatable dogfood loop without changing the live Herdr host, use the
 deterministic mock adapter. It starts with 20 synthetic sessions, adds sessions
@@ -75,23 +97,27 @@ At 80x24 the primary surface is a portfolio, cell-native map of goal bodies and
 their direct session satellites. The attention queue, unassigned inbox, flat
 grouped list lens and inspector remain supporting lenses. The main controls are:
 
-Unassigned sessions orbit a neutral `INBOX` body on the portfolio map; at
-narrow sizes that lens becomes a compact, selectable panel so it does not
-overlap goal bodies. Map satellites and inbox cards use identity-derived,
-collision-aware perimeter slots, with the inbox orbit expanding when it fills.
-The renderer sizes labels from the available cell scale rather than using one
-fixed card width. In the full map, each unassigned session has a direct faint
-cell tether to the inbox; selected and attention-bearing tethers become
-stronger. The focused inbox lens keeps those tethers visible for the whole
-orbit, including beyond the first ring. The inbox body is a supporting lens,
-not another topology node or a new kind of work object.
+Unassigned sessions are hidden from the portfolio map by default. The header
+shows an `INBOX !N · v list` warning whenever sessions need organising; `v`
+opens the supporting grouped list. `A` or focusing an inbox item exposes the
+attention-first inbox list, and the goal-level `a` picker supports
+type-to-filter assignment. The inbox remains a supporting lens rather than a
+topology node or a new kind of work object. Goal satellites use stable,
+identity-derived positions on the portfolio map.
+Live-but-idle sessions use a dot; actively working sessions use a rotating
+half-moon marker and restrained green border pulse. Herdr's transient working
+marker is removed from the session name before Observatory adds its own.
+On a clean database, the map shows an onboarding prompt: create a goal with
+`n`, then press `a` to assign sessions from it.
 
-Selecting a goal, session or inbox opens a transient floating inspector card
+Selecting a goal or session opens a transient floating inspector card
 near the selected item. It is clamped inside the map, never reserves a
 permanent sidebar, and can be hidden with `i`; `Enter` on a session still
 attaches to the real Herdr target. On a narrow terminal the card shortens its
-copy and the focused inbox/goal lens is preferred over compressing the whole
-universe.
+copy and the focused goal/list lens is preferred over compressing the whole
+universe. Creating a goal selects it automatically; `a` then opens an inbox
+picker so sessions can be assigned without first navigating to an individual
+session.
 
 SQLite persists each goal's world position and pinned flag. Refresh and restart
 therefore preserve body locations; map pan, zoom, focus and search are client
@@ -100,33 +126,34 @@ database. New goals use a deterministic free-space scan that considers the
 current satellite footprint without reflowing accepted goals. Drag a goal body
 to move its persisted anchor; its sessions follow the goal's orbit. Drag empty
 map space (or a session card) to pan the viewport. Clicking a goal enters its
-goal-only satellite view. Clicking the `INBOX` body, or its header in the
-narrow compact panel, enters an inbox-only orbit view; selecting an unassigned
-session and pressing `f` does the same.
+goal-only satellite view. Selecting an unassigned session and pressing `f`
+opens the supporting inbox list lens. Clicking empty map space clears the
+selection and floating inspector.
 
-| Key              | Action                                                                                                     |
-| ---------------- | ---------------------------------------------------------------------------------------------------------- |
-| `j` / `k`        | Move selection through goal bodies and satellites                                                          |
-| `h` / `l`        | Pan the map left/right                                                                                     |
-| `U` / `D`        | Pan the map up/down                                                                                        |
-| `+` / `-`        | Zoom the map                                                                                               |
-| `f` / `0`        | Focus selected goal or inbox / reset portfolio viewport                                                    |
-| Mouse click/drag | Click anywhere in a goal body or `INBOX` to focus it; drag a goal body to move it; drag empty space to pan |
-| `v`              | Toggle the supporting grouped-list lens                                                                    |
-| `A`              | Toggle the attention lens; dim healthy work and keep current/uncertain items in spatial context            |
-| `g`              | Jump to the next attention item                                                                            |
-| `z`              | Cycle semantic label detail without moving map nodes                                                       |
-| `Enter`          | Focus the selected live Herdr session; return preserves map state                                          |
-| `n`              | Create a goal (title, description, priority)                                                               |
-| `r` / `d`        | Rename or edit the selected goal/session                                                                   |
-| `p`              | Change selected goal priority                                                                              |
-| `a` / `u`        | Assign/reassign or unassign a session                                                                      |
-| `c` / `x`        | Confirm complete or archive a goal                                                                         |
-| `/`              | Search goals and session metadata                                                                          |
-| `R`              | Reconcile a fresh Herdr snapshot                                                                           |
-| `i`              | Toggle the floating inspector card                                                                         |
-| `s`              | Exercise suspend/resume                                                                                    |
-| `q`              | Cleanly exit                                                                                               |
+| Key              | Action                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `j` / `k`        | Move selection through goal bodies and satellites                                                  |
+| `h` / `l`        | Pan the map left/right                                                                             |
+| `U` / `D`        | Pan the map up/down                                                                                |
+| `+` / `-`        | Zoom the map                                                                                       |
+| `f` / `0`        | Focus selected goal or inbox list / reset portfolio viewport                                       |
+| Mouse click/drag | Click a goal to focus it; drag a goal body to move it; drag empty space to pan and clear selection |
+| `v`              | Toggle the supporting grouped-list lens                                                            |
+| `A`              | Toggle the attention lens; dim healthy work and keep current/uncertain items in spatial context    |
+| `g`              | Jump to the next attention item                                                                    |
+| `z`              | Cycle semantic label detail without moving map nodes                                               |
+| `t`              | Open the selected session in the embedded host terminal; Ctrl-Q/Esc releases back to the map       |
+| `Enter`          | Attach directly to the selected live Herdr session; detach to return with map state                |
+| `n`              | Create a goal (title, description, priority)                                                       |
+| `r` / `d`        | Rename or edit the selected goal/session                                                           |
+| `p`              | Change selected goal priority                                                                      |
+| `a` / `u`        | Assign from a selected goal/session or unassign a session                                          |
+| `c` / `x`        | Confirm complete or archive a goal                                                                 |
+| `/`              | Search goals and session metadata                                                                  |
+| `R`              | Reconcile a fresh Herdr snapshot                                                                   |
+| `i`              | Toggle the floating inspector card                                                                 |
+| `s`              | Exercise suspend/resume                                                                            |
+| `q`              | Cleanly exit                                                                                       |
 
 Documented manual acceptance flow:
 
@@ -134,16 +161,17 @@ Documented manual acceptance flow:
    in the unassigned inbox and shell-only panes do not. For the scale trial,
    use at least 15 recognized agents when the live environment provides them;
    do not count tabs or non-agent panes as sessions.
-2. Create three goals, including a P0 goal; edit a title and description, and
-   assign then reassign an inbox session. Confirm the default view shows three
-   stable goal bodies, that body size follows session load, and that P0 is a
-   distinct persistent priority treatment from attention badges. Drag one goal
-   to a new location and confirm its orbit follows; click it or press `f` and
-   confirm the focused view shows only that goal and its sessions. Click the
-   inbox body/header and confirm the focused view shows only unassigned
-   sessions, with a direct tether from the inbox to each visible session;
-   select one item and confirm its floating card does not consume permanent map
-   area and clicking the card does not pan the map.
+2. Create three goals, including a P0 goal; edit a title and description. Each
+   new goal should become selected, and pressing `a` should open a searchable
+   picker of inbox sessions. Assign several sessions from that picker, then
+   reassign one session through the session-to-goal picker. Confirm the default
+   view shows three stable goal bodies, no inbox cards, and an `INBOX !N · v
+list` warning; goal size follows session load, and P0 is a distinct
+   persistent priority treatment from attention badges. Drag one goal to a new
+   location and confirm its orbit follows; click it or press `f` and confirm
+   the focused view shows only that goal and its sessions. Select an inbox item
+   and confirm its floating card does not consume permanent map area; click
+   empty map space and confirm the selection and card clear.
    Press `Esc` to return to the portfolio.
    Toggle `A` to inspect the attention lens, and use `z` to cycle overview,
    context and detail labels without changing node positions. With no current

@@ -277,8 +277,11 @@ whether an agent may continue executing.
 
 ## Session hosting
 
-AO should not require Herdr and should not initially become a terminal
-multiplexer. Session execution is provided through a pluggable host boundary.
+Herdr is a deliberate V0/V1 requirement for live session execution, but it is
+not Observatory's architectural centre. Session execution is provided through
+one pluggable host boundary so Herdr can later be replaced or joined by tmux,
+a Superlogical-style host, or an Observatory-owned multiplexer without
+rewriting the semantic control plane.
 
 ```text
 AO semantic control plane
@@ -291,7 +294,22 @@ AO semantic control plane
 A session host is responsible for discovering, launching, attaching to,
 observing and stopping terminal sessions. AO is responsible for their meaning,
 relationships and presentation. Terminal frontends such as Ghostty, Kitty and
-WezTerm are a separate integration layer.
+WezTerm are a separate integration layer. Herdr's workspaces, tabs and panes
+are host metadata, not AO topology.
+
+This is an explicit dependency-inversion policy:
+
+- `SessionHost` is the only host interface visible to the control plane;
+- Herdr protocol details and native identifiers live only in its adapter and
+  the composition root;
+- generic capabilities are added only when a real host needs them, with an
+  explicit unsupported result otherwise; and
+- replacing the Herdr adapter with another host must not require changes to
+  Universe, persistence, projections or renderers.
+
+The mock host proves that the control plane and renderer can run without a
+live Herdr instance. A second production host will be treated as an adapter
+contract test, not as a reason to broaden the domain model.
 
 New implementation sessions should use a fresh Git worktree by default. Research
 sessions may require none, and reviewers may attach read-only to an existing
@@ -336,9 +354,9 @@ plus position, zoom and active lens on surfaces that provide them.
 
 ### Selection and floating inspector card
 
-Selecting a goal, session or the unassigned inbox does not immediately leave
-the universe. It opens a transient floating card anchored near the selected
-item. The card contains the smallest useful decision context:
+Selecting a goal or session does not immediately leave the universe. It opens a
+transient floating card anchored near the selected item. The card contains the
+smallest useful decision context:
 
 - the reason the session needs attention;
 - the pending question, approval or requested judgment where known;
@@ -383,9 +401,11 @@ being simulated unreliably.
 
 Attaching enters the existing hosted session. Depending on host capability this
 may focus an existing pane, open an adjacent split, suspend AO and attach in the
-foreground, or open an embedded terminal in a later local web client. Embedded
-access transports a host-owned PTY stream; it does not make AO responsible for
-the session lifecycle or require every host to support the same mechanism.
+foreground, or open an embedded terminal in a host-backed client. The V0 TUI
+uses `t` for the Herdr-backed embedded route and `Enter` for foreground attach;
+the later local web client can consume the same host capability. Embedded access
+transports a host-owned PTY stream; it does not make AO responsible for the
+session lifecycle or require every host to support the same mechanism.
 
 On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
@@ -502,7 +522,9 @@ Candidate default encodings are:
 
 For V0, attention must also have a steady, high-contrast cell marker and an
 explainable reason and age. Animation is optional and must never be the only
-attention encoding.
+attention encoding. Live `working` sessions may use a restrained rotating
+half-moon marker and border pulse to distinguish active execution from a live
+but idle session; runtime state remains available as text in detail/list views.
 
 New nodes receive the nearest deterministic free logical position. The placement
 scan considers the current goal body and direct-satellite footprint, prefers a
@@ -529,28 +551,23 @@ session satellites; focused goal views expose one body's satellites. Attention,
 inbox, inspector and grouped-list views are supporting lenses, and
 infrastructure details remain session metadata.
 
-Unassigned sessions remain visible without inventing another semantic layer:
-the portfolio renderer gives them a neutral `INBOX` body with an orbit of
-session cards, while narrow terminals replace that lens with a compact
-selectable inbox panel. The body and panel are supporting lenses over direct
-Goal → Session state, not durable map bodies. Satellites and inbox cards use
-identity-derived collision-aware perimeter slots; the inbox adds a larger ring
-when its current ring fills. In the full map, every unassigned session has a
-direct muted cell tether to the inbox; selected and attention-bearing tethers
-are stronger. The focused inbox lens keeps those tethers visible as the orbit
-expands, while the 80x24 portfolio uses the compact selectable panel to protect
-goal readability. Label width follows available cell scale, so dense portfolio
-views shorten labels while focused and zoomed views expose more session
-identity. This is deterministic slot allocation, not a force-directed graph
-layout or continuous auto-formatting.
+Unassigned sessions remain discoverable without becoming map topology: the
+portfolio hides their cards and shows an `INBOX !N · v list` warning instead.
+The list is a supporting lens over direct Goal → Session state, not a durable
+map body. Attention and focused inbox lenses expose the compact, attention-first
+list, while a selected goal's `a` action opens its type-to-filter assignment
+picker. Goal satellites continue to use identity-derived collision-aware
+perimeter slots; this is deterministic slot allocation, not a force-directed
+graph layout or continuous auto-formatting.
 
 Goal placement is a separate free-space operation: new goals are placed against
 the current occupied footprints, while accepted goal anchors remain stable.
 Dragging a goal persists its world-space anchor and moves the direct satellite
 orbit with it. Clicking a goal or using focus descends to a goal-only map that
-contains that body and all of its direct sessions. Clicking the neutral inbox
-body, or its narrow compact-panel header, descends to an inbox-only orbit; an
-unassigned session selected elsewhere can enter the same lens with focus.
+contains that body and all of its direct sessions. Selecting an unassigned
+session and using focus enters the supporting inbox list lens. Creating a goal
+selects it automatically; `a` from a selected goal opens the inbox assignment
+picker, while `a` from a selected session opens the goal picker.
 
 The experience should remain fully keyboard operable. Selecting an item should
 open its floating inspector card; `Enter` on a session should open its real

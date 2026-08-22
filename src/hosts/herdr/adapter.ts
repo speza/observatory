@@ -6,8 +6,11 @@ import type {
   OpaqueAccessTarget,
   SessionAccess,
   SessionHost,
+  TerminalDimensions,
+  HostTerminalOpenResult,
 } from "../types.ts";
-import { BunCommandRunner, type CommandRunner } from "./runner.ts";
+import { openHerdrTerminal, parseHerdrTerminalTarget } from "./terminal.ts";
+import { BunCommandRunner, type CommandRunner, type TerminalCommandRunner } from "./runner.ts";
 
 type RecordValue = Record<string, unknown>;
 
@@ -15,6 +18,10 @@ const isRecord = (value: unknown): value is RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const stringValue = (record: RecordValue, key: string): string | undefined =>
   typeof record[key] === "string" && record[key] ? record[key] : undefined;
+const stripWorkingMarker = (value: string): string => {
+  const stripped = value.replace(/^[◐◓◑◒]\s*/u, "").trim();
+  return stripped || value;
+};
 const status = (value: unknown): HostSessionObservation["runtimeState"] => {
   switch (value) {
     case "idle":
@@ -99,14 +106,15 @@ export const parseHerdrSnapshot = (payload: unknown, observedAt: number): HostSn
     else seen.add(paneId);
     const workspace = workspaceById.get(workspaceId) ?? {};
     const worktree = nonEmptyRecord(workspace.worktree);
-    const displayName =
+    const displayName = stripWorkingMarker(
       stringValue(item, "name") ??
-      stringValue(item, "title") ??
-      stringValue(item, "terminal_title_stripped") ??
-      stringValue(pane, "terminal_title_stripped") ??
-      stringValue(item, "label") ??
-      stringValue(workspace, "label") ??
-      paneId;
+        stringValue(item, "title") ??
+        stringValue(item, "terminal_title_stripped") ??
+        stringValue(pane, "terminal_title_stripped") ??
+        stringValue(item, "label") ??
+        stringValue(workspace, "label") ??
+        paneId,
+    );
     const repository = stringValue(worktree, "repo_name");
     const worktreePath = stringValue(worktree, "checkout_path");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
@@ -136,15 +144,26 @@ export const parseHerdrSnapshot = (payload: unknown, observedAt: number): HostSn
 };
 
 const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
-  target.kind === "herdr-agent-focus" ? target.token : undefined;
+  target.kind === "herdr-agent-attach" ? target.token : undefined;
 
 export class HerdrHostAdapter implements SessionHost {
   private readonly runner: CommandRunner;
+  private readonly terminalRunner: TerminalCommandRunner | undefined;
   private readonly clock: Clock;
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
 
-  constructor(options: { readonly runner?: CommandRunner; readonly clock: Clock }) {
-    this.runner = options.runner ?? new BunCommandRunner();
+  constructor(options: {
+    readonly runner?: CommandRunner;
+    readonly terminalRunner?: TerminalCommandRunner;
+    readonly clock: Clock;
+  }) {
+    const runner = options.runner ?? new BunCommandRunner();
+    this.runner = runner;
+    this.terminalRunner =
+      options.terminalRunner ??
+      ("spawnTerminal" in runner && typeof runner.spawnTerminal === "function"
+        ? (runner as CommandRunner & TerminalCommandRunner)
+        : undefined);
     this.clock = options.clock;
   }
 
@@ -184,7 +203,7 @@ export class HerdrHostAdapter implements SessionHost {
     if (!ambiguous)
       for (const session of snapshot.sessions)
         this.liveTargets.set(session.nativeId, {
-          kind: "herdr-agent-focus",
+          kind: "herdr-agent-attach",
           token: session.nativeId,
         });
     return snapshot;
@@ -207,9 +226,13 @@ export class HerdrHostAdapter implements SessionHost {
       };
     return {
       supported: true,
-      mode: "focus",
+      mode: "attach",
       target,
-      explanation: "Focus this pane in the running Herdr session.",
+      terminalTarget: {
+        kind: "herdr-terminal-control",
+        token: session.nativeId,
+      },
+      explanation: "Attach directly or open an embedded terminal for the running Herdr session.",
     };
   }
 
@@ -221,12 +244,39 @@ export class HerdrHostAdapter implements SessionHost {
         ok: false,
         message: "The Herdr attachment target is invalid or unsupported.",
       };
-    const result = await this.runner.run(["herdr", "agent", "focus", token]);
+    const result = await this.runner.run(["herdr", "agent", "attach", token], {
+      interactive: true,
+    });
     if (result.exitCode !== 0)
       return {
         ok: false,
-        message: result.stderr.trim() || `Herdr could not focus ${token}.`,
+        message: result.stderr.trim() || `Herdr could not attach to ${token}.`,
       };
-    return { ok: true, message: `Focused the real Herdr session ${token}.` };
+    return { ok: true, message: `Attached to the real Herdr session ${token}.` };
+  }
+
+  async openTerminal(
+    access: SessionAccess,
+    dimensions: TerminalDimensions,
+  ): Promise<HostTerminalOpenResult> {
+    if (!access.supported || !access.terminalTarget)
+      return { ok: false, message: "This session does not expose an embedded Herdr terminal." };
+    if (!this.terminalRunner)
+      return { ok: false, message: "The configured Herdr command runner cannot stream terminals." };
+    const token = parseHerdrTerminalTarget(access.terminalTarget);
+    if (!token)
+      return { ok: false, message: "The Herdr terminal target is invalid or unsupported." };
+    try {
+      return {
+        ok: true,
+        terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
+        message: `Opened an embedded Herdr terminal for ${token}.`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 }

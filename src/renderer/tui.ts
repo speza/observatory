@@ -1,15 +1,23 @@
 import {
+  BoxRenderable,
   createCliRenderer,
   FrameBufferRenderable,
   RGBA,
   TextAttributes,
+  TextRenderable,
   type CliRenderer,
   type KeyEvent,
   type MouseEvent,
   type OptimizedBuffer,
 } from "@opentui/core";
 import { formatAge } from "../attention/attention.ts";
-import type { SessionHost } from "../hosts/types.ts";
+import {
+  displayHostKind,
+  type HostedTerminalSession,
+  type HostTerminalEvent,
+  type SessionHost,
+  type TerminalDimensions,
+} from "../hosts/types.ts";
 import { layoutFor, type Rect } from "./layout.ts";
 import type {
   CommandCentreProjection,
@@ -29,7 +37,10 @@ import {
   zoomViewportAt,
 } from "../spatial/viewport.ts";
 import { placeFloatingInspector } from "./inspector-placement.ts";
+import { filterAssignableSessions } from "./assignment.ts";
 import { isEraseKey, typedCharacter } from "./input.ts";
+import { modalFrameFor } from "./modal.ts";
+import { ensureTerminalDimensions, TerminalScreen, TERMINAL_COLORS } from "./terminal-screen.ts";
 import {
   nextSemanticZoom,
   semanticZoomLevel,
@@ -128,11 +139,28 @@ type Modal =
       readonly index: number;
     }
   | {
+      readonly kind: "session-picker";
+      readonly goalId: string;
+      readonly index: number;
+      readonly query: string;
+    }
+  | {
       readonly kind: "confirm";
       readonly action: "complete" | "archive";
       readonly goalId: string;
       readonly title: string;
     };
+
+type TerminalMode = {
+  readonly sessionId: string;
+  readonly displayName: string;
+  readonly hostLabel: string;
+  readonly terminal: HostedTerminalSession;
+  readonly screen: TerminalScreen;
+  dimensions: TerminalDimensions;
+  status: string;
+  closed: boolean;
+};
 
 export interface CommandCentreAppOptions {
   readonly universe: Universe;
@@ -181,8 +209,8 @@ const wrap = (value: string, maximum: number): string[] => {
   );
 };
 
-const statusGlyph = (session: SessionView): string => {
-  return sessionMarker(session.hostHealth, session.runtimeState);
+const statusGlyph = (session: SessionView, phase = 0): string => {
+  return sessionMarker(session.hostHealth, session.runtimeState, phase);
 };
 
 const statusColor = (session: SessionView): RGBA => {
@@ -230,6 +258,10 @@ export class CommandCentreApp {
   private frameCount = 0;
   private frameStarted = performance.now();
   private lastFrameMs = 0;
+  private animationPhase = 0;
+  private terminalMode: TerminalMode | undefined;
+  private terminalPanel: BoxRenderable | undefined;
+  private terminalText: TextRenderable | undefined;
 
   constructor(options: CommandCentreAppOptions) {
     this.options = options;
@@ -253,6 +285,7 @@ export class CommandCentreApp {
     this.renderer.on("resize", (width: number, height: number) => {
       this.canvas.width = width;
       this.canvas.height = height;
+      if (this.terminalMode) void this.resizeTerminal(width, height);
       this.lastAction = `resized to ${width}×${height}`;
       this.renderer.requestRender();
     });
@@ -266,7 +299,7 @@ export class CommandCentreApp {
 
   start(): void {
     this.refreshTimer = setInterval(() => {
-      if (!this.closed && !this.busy) void this.refreshFromHost(false);
+      if (!this.closed && !this.busy && !this.terminalMode) void this.refreshFromHost(false);
     }, 2_500);
     this.renderer.start();
   }
@@ -274,6 +307,9 @@ export class CommandCentreApp {
   dispose(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.suspendTimer) clearTimeout(this.suspendTimer);
+    const terminal = this.terminalMode?.terminal;
+    this.terminalMode = undefined;
+    if (terminal) void terminal.release();
     this.refreshTimer = undefined;
     this.suspendTimer = undefined;
   }
@@ -281,6 +317,7 @@ export class CommandCentreApp {
   shutdown(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.terminalMode) void this.releaseTerminal();
     this.dispose();
     this.renderer.destroy();
   }
@@ -334,7 +371,9 @@ export class CommandCentreApp {
         for (const session of goal.sessions) rows.push({ type: "session", id: session.id });
       }
     }
-    if (projection.unassigned.length > 0) {
+    const includeInboxRows =
+      this.viewMode !== "map" || this.mapLens === "attention" || this.mapLens === "inbox";
+    if (projection.unassigned.length > 0 && includeInboxRows) {
       rows.push({ type: "inbox-label", id: "inbox-label" });
       for (const session of projection.unassigned) rows.push({ type: "session", id: session.id });
     }
@@ -407,7 +446,7 @@ export class CommandCentreApp {
         lines: [
           `${count} unassigned sessions`,
           "select a session for host facts",
-          "Enter attaches to session",
+          "t opens terminal · Enter attaches to session",
         ],
       };
     }
@@ -416,6 +455,7 @@ export class CommandCentreApp {
 
   private renderFrame(deltaTime: number): void {
     const started = performance.now();
+    this.animationPhase = (this.animationPhase + Math.max(deltaTime, 16.67) / 1000) % 120;
     this.frameCount += 1;
     this.lastFrameMs = performance.now() - this.frameStarted;
     this.frameStarted = performance.now();
@@ -425,6 +465,10 @@ export class CommandCentreApp {
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
     buffer.clear(COLORS.background);
+    if (this.terminalMode) {
+      this.drawTerminalBackdrop(buffer, width, height);
+      return;
+    }
     const projection = this.projection();
     const rows = this.ensureSelection(projection);
     const layout = layoutFor(width, height);
@@ -463,6 +507,125 @@ export class CommandCentreApp {
     }
   }
 
+  private drawTerminalBackdrop(buffer: OptimizedBuffer, width: number, height: number): void {
+    this.text(
+      buffer,
+      "OBSERVATORY  /  EMBEDDED TERMINAL",
+      2,
+      0,
+      COLORS.white,
+      COLORS.background,
+      TextAttributes.BOLD,
+    );
+    const mode = this.terminalMode;
+    if (!mode) return;
+    this.text(
+      buffer,
+      `${mode.displayName} · ${mode.closed ? "stream closed" : `live ${mode.hostLabel} stream`}`,
+      2,
+      1,
+      mode.closed ? COLORS.orange : COLORS.muted,
+      COLORS.background,
+    );
+    if (width > 0 && height > 0) {
+      this.textRight(
+        buffer,
+        `${mode.dimensions.columns}×${mode.dimensions.rows}`,
+        width - 2,
+        1,
+        COLORS.faint,
+        COLORS.background,
+      );
+    }
+    if (height >= 2) {
+      const footer = { x: 0, y: height - 2, width, height: 2 };
+      this.panel(buffer, footer, COLORS.background, COLORS.border);
+      this.text(
+        buffer,
+        "Ctrl-Q/Esc release  ·  all other keys route to session  ·  resize follows terminal",
+        2,
+        footer.y,
+        COLORS.muted,
+        COLORS.background,
+      );
+      this.text(
+        buffer,
+        shorten(mode.status, Math.max(1, width - 4)),
+        2,
+        footer.y + 1,
+        mode.closed ? COLORS.orange : COLORS.faint,
+        COLORS.background,
+      );
+    }
+  }
+
+  private createTerminalSurface(mode: TerminalMode): void {
+    this.destroyTerminalSurface();
+    const panel = new BoxRenderable(this.renderer, {
+      id: "ao-embedded-terminal-panel",
+      position: "absolute",
+      left: 1,
+      top: 2,
+      width: Math.max(1, this.renderer.width - 2),
+      height: Math.max(1, this.renderer.height - 5),
+      border: true,
+      borderColor: COLORS.borderStrong,
+      backgroundColor: TERMINAL_COLORS.background,
+      title: ` ${mode.displayName} `,
+      titleColor: COLORS.cyan,
+      zIndex: 20,
+    });
+    const text = new TextRenderable(this.renderer, {
+      id: "ao-embedded-terminal-text",
+      position: "absolute",
+      left: 2,
+      top: 3,
+      width: Math.max(1, this.renderer.width - 4),
+      height: Math.max(1, this.renderer.height - 7),
+      content: mode.screen.toStyledText(),
+      fg: TERMINAL_COLORS.text,
+      bg: TERMINAL_COLORS.background,
+      zIndex: 21,
+    });
+    this.renderer.root.add(panel);
+    this.renderer.root.add(text);
+    this.terminalPanel = panel;
+    this.terminalText = text;
+  }
+
+  private destroyTerminalSurface(): void {
+    const panel = this.terminalPanel;
+    const text = this.terminalText;
+    this.terminalPanel = undefined;
+    this.terminalText = undefined;
+    if (panel && !panel.isDestroyed) {
+      this.renderer.root.remove(panel);
+      panel.destroy();
+    }
+    if (text && !text.isDestroyed) {
+      this.renderer.root.remove(text);
+      text.destroy();
+    }
+  }
+
+  private updateTerminalSurface(mode: TerminalMode): void {
+    if (this.terminalText && !this.terminalText.isDestroyed)
+      this.terminalText.content = mode.screen.toStyledText();
+    if (this.terminalPanel && !this.terminalPanel.isDestroyed)
+      this.terminalPanel.title = ` ${mode.displayName} `;
+  }
+
+  private resizeTerminalSurface(): void {
+    if (this.terminalPanel && !this.terminalPanel.isDestroyed) {
+      this.terminalPanel.width = Math.max(1, this.renderer.width - 2);
+      this.terminalPanel.height = Math.max(1, this.renderer.height - 5);
+    }
+    if (this.terminalText && !this.terminalText.isDestroyed) {
+      this.terminalText.width = Math.max(1, this.renderer.width - 4);
+      this.terminalText.height = Math.max(1, this.renderer.height - 7);
+    }
+  }
+
   private drawHeader(
     buffer: OptimizedBuffer,
     rect: Rect,
@@ -471,10 +634,10 @@ export class CommandCentreApp {
     this.panel(buffer, rect, COLORS.panel, COLORS.border);
     const host = projection.host;
     const hostLabel = host
-      ? `${host.hostKind} ${host.status}${host.diagnosticCount > 0 ? ` · diag ${host.diagnosticCount}` : ""}`
-      : "herdr not observed";
+      ? `${displayHostKind(host.hostKind)} ${host.status}${host.diagnosticCount > 0 ? ` · diag ${host.diagnosticCount}` : ""}`
+      : "host not observed";
     const counts = `${countLabel(projection.counts.goals, "goal")} · ${countLabel(projection.counts.sessions, "session")} · ${projection.counts.unassigned} inbox`;
-    const title = host?.hostKind === "mock" ? "OBSERVATORY  MOCK" : "OBSERVATORY  HERDR";
+    const title = `OBSERVATORY  ${displayHostKind(host?.hostKind ?? "host").toUpperCase()}`;
     this.text(buffer, title, rect.x + 2, rect.y, COLORS.white, COLORS.panel, TextAttributes.BOLD);
     this.textRight(
       buffer,
@@ -488,14 +651,31 @@ export class CommandCentreApp {
       const query = this.searchActive
         ? `search: ${this.searchQuery || "type to find"}`
         : `${this.viewMode === "map" ? "map" : "list lens"} · ${this.lastAction}`;
+      const warning =
+        projection.counts.unassigned > 0
+          ? `INBOX !${projection.counts.unassigned} · v list`
+          : undefined;
+      const leftWidth = warning
+        ? Math.max(1, rect.width - warning.length - 8)
+        : Math.max(1, rect.width - 4);
       this.text(
         buffer,
-        shorten(query, Math.max(1, rect.width - 4)),
+        shorten(query, leftWidth),
         rect.x + 2,
         rect.y + 1,
         COLORS.muted,
         COLORS.panel,
       );
+      if (warning)
+        this.textRight(
+          buffer,
+          warning,
+          rect.x + rect.width - 2,
+          rect.y + 1,
+          COLORS.yellow,
+          COLORS.panel,
+          TextAttributes.BOLD,
+        );
     }
   }
 
@@ -576,11 +756,11 @@ export class CommandCentreApp {
       width: Math.max(1, rect.width - 2),
       height: Math.max(1, rect.height - 2),
     };
-    const compactInbox =
-      (this.mapLens === "portfolio" || attentionLens) &&
-      visibleUnassigned.length > 0 &&
-      (map.width < 90 || map.height < 18) &&
-      map.height >= 9;
+    // The inbox is a transient queue, not a durable topology node. Only show
+    // its compact list in attention/focused inbox lenses; the portfolio keeps
+    // the map clear and exposes the count in the header instead.
+    const showInbox = this.mapLens === "attention" || this.mapLens === "inbox";
+    const compactInbox = showInbox && visibleUnassigned.length > 0 && map.height >= 9;
     const compactInboxHeight = compactInbox
       ? this.compactInboxHeight(map, projection.unassigned.length)
       : 0;
@@ -611,11 +791,7 @@ export class CommandCentreApp {
         goal.mapPosition,
         ...visibleSessions(goal).map((session) => session.mapPosition),
       ]),
-      ...((this.mapLens === "portfolio" ||
-        this.mapLens === "attention" ||
-        this.mapLens === "inbox") &&
-      visibleUnassigned.length > 0 &&
-      !compactInbox
+      ...(showInbox && visibleUnassigned.length > 0 && !compactInbox
         ? [projection.inboxPosition, ...visibleUnassigned.map((session) => session.mapPosition)]
         : []),
     ];
@@ -646,7 +822,7 @@ export class CommandCentreApp {
     );
     this.textRight(
       buffer,
-      `${this.mapLens} · ${this.semanticZoom} · ${Math.round(this.mapZoom * 100)}%`,
+      `${this.mapLens} · labels ${this.semanticZoom} · ${Math.round(this.mapZoom * 100)}%`,
       rect.x + rect.width - 2,
       rect.y,
       COLORS.faint,
@@ -676,6 +852,17 @@ export class CommandCentreApp {
       return;
     }
 
+    if (goals.length === 0 && visibleUnassigned.length > 0 && this.mapLens !== "inbox") {
+      this.text(
+        buffer,
+        "Create a goal with n, then press a to assign sessions from the inbox.",
+        mapSurface.x + 2,
+        mapSurface.y + Math.floor(mapSurface.height / 2),
+        COLORS.muted,
+        COLORS.background,
+      );
+    }
+
     for (const goal of goals) {
       const goalPoint = worldToScreen(goal.mapPosition);
       for (const session of visibleSessions(goal)) {
@@ -685,10 +872,7 @@ export class CommandCentreApp {
     }
     if (compactInbox) {
       this.drawCompactInbox(buffer, map, visibleUnassigned, attentionLens);
-    } else if (
-      (this.mapLens === "portfolio" || attentionLens || this.mapLens === "inbox") &&
-      visibleUnassigned.length > 0
-    ) {
+    } else if (showInbox && visibleUnassigned.length > 0) {
       const inboxPoint = worldToScreen(projection.inboxPosition);
       for (const session of visibleUnassigned)
         this.drawMapLink(
@@ -705,10 +889,7 @@ export class CommandCentreApp {
       for (const session of visibleSessions(goal))
         this.drawMapSession(buffer, mapSurface, worldToScreen(session.mapPosition), goal, session);
     }
-    if (
-      (this.mapLens === "portfolio" || attentionLens || this.mapLens === "inbox") &&
-      !compactInbox
-    )
+    if (showInbox && !compactInbox)
       for (const session of visibleUnassigned)
         this.drawMapSession(
           buffer,
@@ -742,7 +923,7 @@ export class CommandCentreApp {
     } else if (this.mapLens === "inbox") {
       this.text(
         buffer,
-        "f portfolio · 0 reset view · Enter attaches to the selected session",
+        "f portfolio · 0 reset view · t terminal · Enter attaches to the selected session",
         map.x + 2,
         map.y + map.height - 2,
         COLORS.faint,
@@ -910,7 +1091,7 @@ export class CommandCentreApp {
       const x = panel.x + 2 + column * columnWidth;
       const y = panel.y + 1 + row;
       const selected = this.selected?.type === "session" && this.selected.id === session.id;
-      const glyph = statusGlyph(session);
+      const glyph = statusGlyph(session, this.animationPhase);
       const label = `${glyph === " " ? "·" : glyph} ${shorten(session.displayName, columnWidth - 4)}`;
       this.text(
         buffer,
@@ -1039,13 +1220,14 @@ export class CommandCentreApp {
       );
     if (radiusY >= 3) {
       const details = [
+        ...(level === "detail" ? [goal.status] : []),
         `${goal.sessions.length}s`,
         ...(goal.attentionCount > 0 ? [`!${goal.attentionCount}`] : []),
         ...(goal.staleCount > 0 ? [`?${goal.staleCount}`] : []),
       ].join("  ");
       this.textCentered(
         buffer,
-        details,
+        shorten(details, Math.max(3, radiusX * 2 - 2)),
         point.x,
         Math.min(point.y + radiusY - 1, point.y + 2),
         goal.attentionCount > 0
@@ -1099,7 +1281,7 @@ export class CommandCentreApp {
       attention,
     });
     const labelWidth = sessionLabelBudget(level, this.renderer.width, inboxSession);
-    const marker = statusGlyph(session);
+    const marker = statusGlyph(session, this.animationPhase);
     const titleLines =
       level === "detail"
         ? wrap(session.displayName, Math.max(8, labelWidth - 2)).slice(0, 2)
@@ -1107,8 +1289,12 @@ export class CommandCentreApp {
     const labelLines = titleLines.map((title, index) =>
       index === 0 ? `${marker} ${title}` : title,
     );
-    if (level === "detail" && session.attention)
-      labelLines.push(`${session.attention.reason} ${formatAge(session.attention.ageMs)}`);
+    if (level === "detail")
+      labelLines.push(
+        session.attention
+          ? `${session.attention.reason} ${formatAge(session.attention.ageMs)}`
+          : `${session.runtimeState} · ${session.provider ?? session.hostKind}`,
+      );
     const contentWidth = Math.max(3, ...labelLines.map((line) => line.length));
     const radiusX = clamp(
       Math.ceil(contentWidth / 2) + 1,
@@ -1144,13 +1330,19 @@ export class CommandCentreApp {
     )
       return;
     const background = selected ? COLORS.panelRaised : COLORS.background;
+    const working = session.hostHealth === "live" && session.runtimeState === "working";
+    const workingPulse = Math.sin(this.animationPhase * Math.PI * 2) > 0;
     const border = selected
       ? COLORS.white
       : session.attention
         ? statusColor(session)
-        : goal
-          ? this.goalFamilyColor(goal.id)
-          : COLORS.yellow;
+        : working
+          ? workingPulse
+            ? COLORS.green
+            : COLORS.faint
+          : goal
+            ? this.goalFamilyColor(goal.id)
+            : COLORS.yellow;
     this.roundedPanel(buffer, bounds, background, border);
     const firstLineY = point.y - Math.floor(labelLines.length / 2);
     for (const [index, line] of labelLines.entries())
@@ -1257,7 +1449,7 @@ export class CommandCentreApp {
       inboxCard
         ? "i close · j/k select"
         : projection.kind === "session-inspector"
-          ? "i close · Enter attach"
+          ? "i close · t terminal · Enter attach"
           : "i close · f focus",
       panel.x + 2,
       panel.y + panel.height - 1,
@@ -1359,7 +1551,7 @@ export class CommandCentreApp {
     const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const prefix = selected ? "  >" : "   ";
     const goal = session.goalTitle ? "↳" : "·";
-    const label = `${prefix}${goal} [${statusGlyph(session)}] ${session.displayName} · ${session.runtimeState}${session.hostHealth === "live" ? "" : `/${session.hostHealth}`}`;
+    const label = `${prefix}${goal} [${statusGlyph(session, this.animationPhase)}] ${session.displayName} · ${session.runtimeState}${session.hostHealth === "live" ? "" : `/${session.hostHealth}`}`;
     const foreground = selected ? COLORS.selected : statusColor(session);
     this.text(
       buffer,
@@ -1379,10 +1571,29 @@ export class CommandCentreApp {
   ): void {
     this.panel(buffer, rect, COLORS.background, COLORS.border);
     if (rect.height < 2) return;
+    if (this.terminalMode) {
+      this.text(
+        buffer,
+        "Ctrl-Q/Esc release  ·  all other keys route to session  ·  resize follows terminal",
+        rect.x + 2,
+        rect.y,
+        COLORS.muted,
+        COLORS.background,
+      );
+      this.text(
+        buffer,
+        shorten(this.terminalMode.status, Math.max(1, rect.width - 4)),
+        rect.x + 2,
+        rect.y + 1,
+        this.terminalMode.closed ? COLORS.orange : COLORS.faint,
+        COLORS.background,
+      );
+      return;
+    }
     const controls =
       rect.width < 92
-        ? "j/k select  h/l pan  +/- zoom  f focus  A alerts  z detail  g jump  / find  i card  Enter attach  q quit"
-        : "j/k select  h/l/U/D pan  +/- zoom  f focus  A alerts  z detail  v list lens  n goal  r rename  p priority  a assign  c complete  x archive  / find  i card  Enter attach  q quit";
+        ? "j/k select  h/l pan  +/- zoom  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
+        : "j/k select  h/l/U/D pan  +/- zoom  f focus  A alerts  z detail  v list lens  n goal  r rename  p priority  a assign  c complete  x archive  / find  i card  t terminal  Enter attach  q quit";
     this.text(
       buffer,
       shorten(controls, Math.max(1, rect.width - 4)),
@@ -1392,7 +1603,7 @@ export class CommandCentreApp {
       COLORS.background,
     );
     if (rect.height > 1) {
-      const detail = `${this.busy ? "working" : "live"} · ${projection.counts.attention} attention · ${projection.counts.stale} stale · ${this.viewMode} · ${this.mapLens} · ${this.inspectorVisible ? "inspector" : "clean"}`;
+      const detail = `${this.busy ? "working" : "live"} · ${projection.counts.attention} attention · ${projection.counts.stale} stale · labels ${this.semanticZoom} · ${this.viewMode} · ${this.mapLens} · ${this.inspectorVisible ? "inspector" : "clean"}`;
       this.text(
         buffer,
         shorten(detail, Math.max(1, rect.width - 4)),
@@ -1410,19 +1621,8 @@ export class CommandCentreApp {
     height: number,
     projection: CommandCentreProjection,
   ): void {
-    const overlayWidth = Math.min(width - 4, Math.max(42, Math.floor(width * 0.76)));
-    const overlayHeight = Math.min(
-      height - 4,
-      this.modal?.kind === "create-goal"
-        ? 9
-        : this.modal?.kind === "goal-picker"
-          ? 10
-          : this.modal?.kind === "confirm"
-            ? 6
-            : 7,
-    );
-    const x = Math.max(1, Math.floor((width - overlayWidth) / 2));
-    const y = Math.max(1, Math.floor((height - overlayHeight) / 2));
+    const frame = modalFrameFor(width, height, this.modal?.kind ?? "text");
+    const { x, y, width: overlayWidth, height: overlayHeight } = frame;
     const rect = { x, y, width: overlayWidth, height: overlayHeight };
     this.panel(buffer, rect, COLORS.panelRaised, COLORS.borderStrong);
     if (this.searchActive) {
@@ -1503,7 +1703,7 @@ export class CommandCentreApp {
         buffer,
         "Tab/Enter next · Esc cancel",
         x + 2,
-        y + overlayHeight - 2,
+        frame.footerY,
         COLORS.faint,
         COLORS.panelRaised,
       );
@@ -1524,7 +1724,7 @@ export class CommandCentreApp {
         buffer,
         "Enter save · Esc cancel",
         x + 2,
-        y + overlayHeight - 2,
+        frame.footerY,
         COLORS.faint,
         COLORS.panelRaised,
       );
@@ -1565,7 +1765,66 @@ export class CommandCentreApp {
         buffer,
         "j/k choose · Enter assign · Esc cancel",
         x + 2,
-        y + overlayHeight - 2,
+        frame.footerY,
+        COLORS.faint,
+        COLORS.panelRaised,
+      );
+      return;
+    }
+    if (modal.kind === "session-picker") {
+      const goal = projection.goals.find((candidate) => candidate.id === modal.goalId);
+      const sessions = filterAssignableSessions(projection.unassigned, modal.query);
+      this.text(
+        buffer,
+        `ASSIGN INBOX SESSION${goal ? ` TO ${shorten(goal.title, overlayWidth - 24)}` : ""}`,
+        x + 2,
+        y + 1,
+        COLORS.cyan,
+        COLORS.panelRaised,
+        TextAttributes.BOLD,
+      );
+      this.text(buffer, `Find: ${modal.query}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
+      this.text(
+        buffer,
+        `${sessions.length}/${projection.unassigned.length} inbox sessions · type to filter`,
+        x + 2,
+        y + 4,
+        COLORS.muted,
+        COLORS.panelRaised,
+      );
+      const visibleRows = Math.max(0, frame.footerY - (y + 6));
+      const visibleStart = Math.min(
+        Math.max(0, modal.index - visibleRows + 1),
+        Math.max(0, sessions.length - visibleRows),
+      );
+      const visible = sessions.slice(visibleStart, visibleStart + visibleRows);
+      if (visible.length === 0)
+        this.text(
+          buffer,
+          modal.query ? "No matching inbox sessions." : "Inbox is empty.",
+          x + 2,
+          y + 6,
+          COLORS.orange,
+          COLORS.panelRaised,
+        );
+      for (const [index, session] of visible.entries()) {
+        const absoluteIndex = visibleStart + index;
+        const prefix = absoluteIndex === modal.index ? ">" : " ";
+        this.text(
+          buffer,
+          `${prefix} ${statusGlyph(session, this.animationPhase)} ${shorten(session.displayName, overlayWidth - 10)}`,
+          x + 2,
+          y + 6 + index,
+          absoluteIndex === modal.index ? COLORS.white : statusColor(session),
+          COLORS.panelRaised,
+          absoluteIndex === modal.index ? TextAttributes.BOLD : TextAttributes.NONE,
+        );
+      }
+      this.text(
+        buffer,
+        "↑/↓ choose · type filter · Enter assign · Esc cancel",
+        x + 2,
+        frame.footerY,
         COLORS.faint,
         COLORS.panelRaised,
       );
@@ -1603,7 +1862,7 @@ export class CommandCentreApp {
         buffer,
         "y confirm · n/Esc cancel",
         x + 2,
-        y + overlayHeight - 2,
+        frame.footerY,
         COLORS.faint,
         COLORS.panelRaised,
       );
@@ -1612,6 +1871,10 @@ export class CommandCentreApp {
 
   private handleKey(key: KeyEvent): void {
     if (key.eventType === "release") return;
+    if (this.terminalMode) {
+      this.handleTerminalKey(key);
+      return;
+    }
     if (key.ctrl && key.name === "c") {
       key.preventDefault();
       this.shutdown();
@@ -1701,6 +1964,9 @@ export class CommandCentreApp {
       case "i":
         this.inspectorVisible = !this.inspectorVisible;
         this.lastAction = `inspector ${this.inspectorVisible ? "shown" : "hidden"}`;
+        return;
+      case "t":
+        void this.openTerminalSelected();
         return;
       case "f":
         this.toggleMapFocus();
@@ -1874,6 +2140,46 @@ export class CommandCentreApp {
             goalId: goal.id,
           });
         this.modal = undefined;
+      }
+      return;
+    }
+    if (modal.kind === "session-picker") {
+      const projection = this.projection();
+      const goal = projection.goals.find(
+        (candidate) => candidate.id === modal.goalId && candidate.status !== "archived",
+      );
+      if (!goal) {
+        this.modal = undefined;
+        this.lastAction = "Goal is no longer active.";
+        return;
+      }
+      const sessions = filterAssignableSessions(projection.unassigned, modal.query);
+      if (key.name === "down") {
+        this.modal = {
+          ...modal,
+          index: Math.min(Math.max(0, sessions.length - 1), modal.index + 1),
+        };
+      } else if (key.name === "up") {
+        this.modal = { ...modal, index: Math.max(0, modal.index - 1) };
+      } else if (key.name === "enter" || key.name === "return") {
+        const session = sessions[modal.index];
+        if (!session)
+          this.lastAction = modal.query
+            ? `No inbox sessions match “${modal.query}”.`
+            : "Inbox is empty.";
+        else {
+          this.runCommand({
+            type: "AssignSession",
+            sessionId: session.id,
+            goalId: goal.id,
+          });
+          this.modal = undefined;
+        }
+      } else if (isEraseKey(key)) {
+        this.modal = { ...modal, query: modal.query.slice(0, -1), index: 0 };
+      } else {
+        const character = typedCharacter(key);
+        if (character) this.modal = { ...modal, query: modal.query + character, index: 0 };
       }
       return;
     }
@@ -2240,14 +2546,24 @@ export class CommandCentreApp {
   }
 
   private openAssign(): void {
-    const session = this.selectedSession(this.projection());
-    if (!session) {
-      this.lastAction = "Select a session to assign.";
+    const projection = this.projection();
+    const goal = this.selectedGoal(projection);
+    if (goal) {
+      this.modal = {
+        kind: "session-picker",
+        goalId: goal.id,
+        index: 0,
+        query: "",
+      };
       return;
     }
-    const projection = this.projection();
-    const goals = projection.goals.filter((goal) => goal.status !== "archived");
-    const current = goals.findIndex((goal) => goal.id === session.primaryGoalId);
+    const session = this.selectedSession(projection);
+    if (!session) {
+      this.lastAction = "Select a goal to assign inbox sessions, or a session to choose its goal.";
+      return;
+    }
+    const goals = projection.goals.filter((candidate) => candidate.status !== "archived");
+    const current = goals.findIndex((candidate) => candidate.id === session.primaryGoalId);
     this.modal = {
       kind: "goal-picker",
       sessionId: session.id,
@@ -2287,15 +2603,23 @@ export class CommandCentreApp {
     this.lastAction = result.ok
       ? `applied ${command.type}`
       : (result.error ?? `rejected ${command.type}`);
-    if (result.ok && result.goalId && command.type === "CreateGoal")
+    if (result.ok && result.goalId && command.type === "CreateGoal") {
       this.expandedGoals.add(result.goalId);
+      this.selected = { type: "goal", id: result.goalId };
+      this.inspectorVisible = true;
+      this.viewMode = "map";
+      this.mapLens = "portfolio";
+      this.focusGoalId = undefined;
+      this.mapFitPending = true;
+      this.lastAction = `created goal ${command.title} · press a to assign inbox sessions`;
+    }
     this.renderer.requestRender();
   }
 
   private async refreshFromHost(manual: boolean): Promise<void> {
     if (this.busy || this.closed) return;
     this.busy = true;
-    this.lastAction = manual ? "refreshing Herdr snapshot…" : this.lastAction;
+    this.lastAction = manual ? "refreshing host snapshot…" : this.lastAction;
     try {
       this.lastAction = await this.options.refresh();
     } catch (error) {
@@ -2306,10 +2630,145 @@ export class CommandCentreApp {
     }
   }
 
+  private async openTerminalSelected(): Promise<void> {
+    const session = this.selectedSession(this.projection());
+    if (!session) {
+      this.lastAction = "Select a session to open a terminal.";
+      return;
+    }
+    if (this.busy || this.terminalMode) return;
+    this.busy = true;
+    try {
+      const access = await this.options.host.access({
+        hostKind: session.hostKind,
+        nativeId: session.nativeId,
+      });
+      if (!access.supported) {
+        this.lastAction = access.explanation;
+        return;
+      }
+      if (!access.terminalTarget) {
+        this.lastAction = `${session.displayName} has no embedded terminal; press Enter to attach.`;
+        return;
+      }
+      const dimensions = ensureTerminalDimensions(
+        this.renderer.width - 4,
+        this.renderer.height - 7,
+      );
+      this.lastAction = `opening terminal for ${session.displayName}…`;
+      const opened = await this.options.host.openTerminal(access, dimensions);
+      if (!opened.ok || !opened.terminal) {
+        this.lastAction = opened.message;
+        return;
+      }
+      const mode: TerminalMode = {
+        sessionId: session.id,
+        displayName: session.displayName,
+        hostLabel: displayHostKind(session.hostKind),
+        terminal: opened.terminal,
+        screen: new TerminalScreen(dimensions.columns, dimensions.rows),
+        dimensions,
+        status: opened.message,
+        closed: false,
+      };
+      this.terminalMode = mode;
+      this.createTerminalSurface(mode);
+      this.lastAction = opened.message;
+      void this.consumeTerminalEvents(mode);
+    } catch (error) {
+      this.lastAction = `terminal open failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.busy = false;
+      this.renderer.requestRender();
+    }
+  }
+
+  private async consumeTerminalEvents(mode: TerminalMode): Promise<void> {
+    try {
+      for await (const event of mode.terminal.events) {
+        if (this.terminalMode !== mode || this.closed) return;
+        this.applyTerminalEvent(mode, event);
+        this.renderer.requestRender();
+      }
+      if (this.terminalMode === mode && !mode.closed) {
+        mode.closed = true;
+        mode.status = "The terminal stream ended.";
+        this.updateTerminalSurface(mode);
+        this.renderer.requestRender();
+      }
+    } catch (error) {
+      if (this.terminalMode !== mode || this.closed) return;
+      mode.closed = true;
+      mode.status = `terminal stream failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.updateTerminalSurface(mode);
+      this.renderer.requestRender();
+    }
+  }
+
+  private applyTerminalEvent(mode: TerminalMode, event: HostTerminalEvent): void {
+    if (event.kind === "closed") {
+      mode.closed = true;
+      mode.status = event.reason ? `terminal closed: ${event.reason}` : "terminal stream closed";
+      return;
+    }
+    const frame = event.frame;
+    if (frame.columns && frame.rows) {
+      mode.dimensions = ensureTerminalDimensions(frame.columns, frame.rows);
+      mode.screen.resize(mode.dimensions.columns, mode.dimensions.rows);
+    }
+    if (frame.full) mode.screen.reset();
+    mode.screen.write(frame.bytes);
+    mode.status = `live · ${mode.screen.bytes} bytes · ${mode.screen.ansiSequences} control sequences`;
+    this.updateTerminalSurface(mode);
+  }
+
+  private async resizeTerminal(width: number, height: number): Promise<void> {
+    const mode = this.terminalMode;
+    if (!mode) return;
+    const dimensions = ensureTerminalDimensions(width - 4, height - 7);
+    if (dimensions.columns === mode.dimensions.columns && dimensions.rows === mode.dimensions.rows)
+      return;
+    mode.dimensions = dimensions;
+    mode.screen.resize(dimensions.columns, dimensions.rows);
+    this.resizeTerminalSurface();
+    this.updateTerminalSurface(mode);
+    const result = await mode.terminal.resize(dimensions);
+    if (!result.ok && this.terminalMode === mode) mode.status = result.message;
+    this.renderer.requestRender();
+  }
+
+  private async releaseTerminal(): Promise<void> {
+    const mode = this.terminalMode;
+    if (!mode) return;
+    this.terminalMode = undefined;
+    this.destroyTerminalSurface();
+    const result = await mode.terminal.release();
+    this.lastAction = result.message;
+    if (!this.closed) this.renderer.requestRender();
+  }
+
+  private handleTerminalKey(key: KeyEvent): void {
+    const mode = this.terminalMode;
+    if (!mode) return;
+    key.preventDefault();
+    if (key.name === "escape" || (key.ctrl && key.name === "q")) {
+      void this.releaseTerminal();
+      return;
+    }
+    const value = key.sequence || key.raw;
+    if (!value) return;
+    void mode.terminal.send({ kind: "text", value }).then((result) => {
+      if (!result.ok && this.terminalMode === mode) {
+        mode.status = result.message;
+        this.renderer.requestRender();
+      }
+    });
+  }
+
   private async attachSelected(): Promise<void> {
     const session = this.selectedSession(this.projection());
     if (!session) {
-      this.lastAction = "Select a session to focus.";
+      this.lastAction = "Select a session to attach.";
       return;
     }
     if (this.busy) return;
@@ -2331,6 +2790,7 @@ export class CommandCentreApp {
       scrollOffset: this.scrollOffset,
     };
     let refreshAfterReturn = false;
+    let rendererSuspended = false;
     try {
       const access = await this.options.host.access({
         hostKind: session.hostKind,
@@ -2340,19 +2800,18 @@ export class CommandCentreApp {
         this.lastAction = access.explanation;
         return;
       }
-      this.lastAction = `focusing ${session.displayName} in Herdr…`;
-      this.suspended = true;
+      this.lastAction = `attaching to ${session.displayName} via ${displayHostKind(session.hostKind)}…`;
       this.renderer.suspend();
+      rendererSuspended = true;
+      this.suspended = true;
       const result = await this.options.host.activate(access);
-      if (!this.renderer.isDestroyed) this.renderer.resume();
-      this.suspended = false;
       this.lastAction = result.message;
       refreshAfterReturn = result.ok;
     } catch (error) {
-      if (!this.renderer.isDestroyed) this.renderer.resume();
-      this.suspended = false;
-      this.lastAction = `focus failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.lastAction = `attach failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
+      if (rendererSuspended && !this.renderer.isDestroyed) this.renderer.resume();
+      this.suspended = false;
       this.selected = savedNavigation.selected;
       this.searchActive = savedNavigation.searchActive;
       this.searchQuery = savedNavigation.searchQuery;
@@ -2374,6 +2833,7 @@ export class CommandCentreApp {
   }
 
   private handleMouse(event: MouseEvent): void {
+    if (this.terminalMode) return;
     if (event.type === "down") {
       this.handleMouseDown(event);
       return;
@@ -2421,7 +2881,15 @@ export class CommandCentreApp {
             moved: false,
             clickTarget: target?.type === "inbox" ? "inbox" : undefined,
           };
-    if (!target) return;
+    if (!target) {
+      this.selected = undefined;
+      this.inspectorVisible = false;
+      this.searchActive = false;
+      this.searchQuery = "";
+      this.lastAction = "selection cleared";
+      this.renderer.requestRender();
+      return;
+    }
     this.selected = target.type === "inbox" ? undefined : { type: target.type, id: target.id };
     this.inspectorVisible = true;
     this.searchActive = false;

@@ -30,9 +30,29 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
   state; `attention/`, `spatial/` and `projection/` derive deterministic views;
   `renderer/` owns presentation and input only.
 - Renderers consume projections and submit commands. They do not access SQLite
-  or hosts directly.
+  or concrete host adapters; explicit attach/terminal actions go through the
+  injected generic `SessionHost` capability port.
 - Keep host-specific behaviour behind the `SessionHost` seam. Herdr identifiers
   and attachment targets remain opaque outside its adapter.
+- Herdr is the deliberate required live host for V0/V1. That is a product
+  dependency, not a control-plane dependency: Herdr protocol types, command
+  names, native identifiers and lifecycle rules must not enter `universe/`,
+  `persistence/`, `attention/`, `spatial/`, `projection/` or renderer
+  interfaces.
+- `SessionHost` is the only host seam. The composition root selects a concrete
+  adapter; `hosts/herdr/` owns all Herdr translation and process/terminal
+  mechanics. Do not add a second `HerdrService`-style pass-through seam or
+  expose Herdr workspaces, tabs or panes as domain concepts.
+- Keep the generic seam small and capability-based. Unsupported host
+  operations must be explicit; do not add speculative methods or a universal
+  provider/terminal API to anticipate every future host.
+- A future tmux adapter, Superlogical-style host, or Observatory-owned
+  multiplexer must be replaceable at composition time without changes to the
+  Universe, persistence, projection or renderer modules. If adding a host
+  requires those changes, repair the seam before adding host-specific logic.
+- Every production adapter must have the shared `SessionHost` contract tests,
+  sanitised fixtures and a live smoke path where available. Core tests must run
+  without Herdr; the mock host is the deterministic evidence path.
 - Persist durable semantic state and accepted goal positions. Keep viewport,
   hover, selection and other transient presentation state in the renderer.
 - Prefer deep modules with small interfaces. Do not add pass-through layers or

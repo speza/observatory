@@ -60,6 +60,9 @@ describe("semantic zoom", () => {
     expect(sessionMarker("live", "blocked")).toBe("!");
     expect(sessionMarker("live", "waiting")).toBe("!");
     expect(sessionMarker("stale", "blocked")).toBe("?");
-    expect(sessionMarker("live", "working")).toBe("·");
+    expect(sessionMarker("live", "idle")).toBe("·");
+    expect(sessionMarker("live", "working", 0)).toBe("◐");
+    expect(sessionMarker("live", "working", 0.6)).toBe("◓");
+    expect(sessionMarker("live", "unknown")).toBe("?");
   });
 });

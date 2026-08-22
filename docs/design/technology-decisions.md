@@ -1,7 +1,7 @@
 # Observatory technology decisions
 
 Status: accepted for v0 implementation  
-Date: 2026-08-21  
+Date: 2026-08-22
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision
@@ -19,7 +19,7 @@ Type checking             tsgo or tsc --noEmit
 Testing                   bun test
 Terminal renderer         OpenTUI, portable spatial cells
 Web renderer              Browser Canvas/WebGL, deferred until after live TUI proof
-Live session host         Herdr
+Live session host         Herdr (required for V0/V1 live mode)
 Local transport           Schema-validated JSON over a Unix socket
 ```
 
@@ -37,9 +37,13 @@ AO's initial implementation is primarily:
 - a live Herdr walking slice; and
 - a portable terminal command centre.
 
-It does not initially own pseudo-terminals, terminal emulation, process
-persistence or remote attachment. Those responsibilities remain behind the
-Session-host seam.
+It does not own pseudo-terminal process lifetime, persistence or remote
+attachment. Those responsibilities remain behind the Session-host seam. The
+implemented Herdr lens renders a host-owned terminal stream with a small
+cell-native VT model; a disposable Bun PTY experiment remains evidence for
+renderer feasibility, not a production runtime decision. The staged scope and
+verdicts are recorded in
+[Native terminal surface POCs](../specs/terminal-surface-pocs.md).
 
 TypeScript therefore optimises the work carrying the most product uncertainty.
 The same domain types and fixtures can support the terminal client, later local
@@ -197,14 +201,21 @@ does not emit graphics protocols or revive a custom ANSI raster engine. OpenTUI
 remains isolated inside the terminal-renderer module, so it can still be
 replaced if live use exposes input, lifecycle or portability failures.
 
+The embedded Herdr lens follows the same portability rule: `TerminalScreen`
+interprets the subset of ANSI/VT state needed for ordinary agent CLIs and
+renders it as OpenTUI cells. It is intentionally not a promise of Kitty/Sixel,
+mouse-protocol, scrollback or provider-specific full-screen parity; `Enter`
+foreground attachment remains available when native parity matters.
+
 The live renderer keeps the map full width rather than allocating a permanent
 right-hand inspector. Selecting a goal, session or inbox opens a transient
 floating card anchored near that item; the card is clamped to the map and
-shortens on narrow terminals. Unassigned sessions are connected to the neutral
-inbox by ordinary cell tethers, with a compact inbox panel used only when the
-80x24 portfolio cannot give the orbit enough room. These are presentation
-lenses over Goal → Session state, not new domain nodes or a richer graphics
-mode.
+shortens on narrow terminals. The portfolio does not spend map space on
+unassigned sessions: it reports the inbox count as a visible warning, then
+lets the operator open the list lens when they want to triage it. Attention and
+focused-inbox lenses can use a compact vertical list, while the goal-level `a`
+action opens a searchable assignment picker. These are presentation lenses
+over Goal → Session state, not new domain nodes or a richer graphics mode.
 
 Evidence:
 
@@ -216,13 +227,44 @@ Evidence:
 
 Herdr is the first live Session-host adapter because it already exposes
 snapshots, events, agent state, worktree provenance and attachment operations
-across several agent providers.
+across several agent providers. The terminal-surface POC demonstrated a live
+Herdr observe/control stream rendered through the OpenTUI panel, with the
+Herdr-owned agent surviving release. The production TUI now exposes that stream
+as an embedded terminal lens; foreground attach remains the fallback for
+unsupported sessions and provider-native features outside the lens.
+
+Herdr's terminal control stream is the V0 embedded-terminal path. Herdr
+continues to own the agent process and PTY; Observatory only renders the stream
+and routes explicit input, resize and release. This is an adapter capability,
+not an AO-owned multiplexer. The disposable AO-owned PTY remains evidence for
+renderer feasibility only.
 
 AO talks to Herdr through its public local protocol. It does not embed, fork or
 import Herdr implementation code.
 
 This maintains a clean licensing and module seam while ensuring Herdr-specific
 workspace, tab and pane concepts do not leak into AO records.
+
+### Dependency-inversion policy
+
+Herdr is a required first host, not the shape of the application. The only
+allowed production coupling is the Herdr adapter plus composition-time host
+selection. The control-plane modules and renderer interfaces must remain free
+of Herdr imports, protocol payloads, CLI command strings and native IDs.
+
+The generic `SessionHost` contract is deliberately small and capability-based.
+It may grow only in response to a demonstrated second host or user workflow;
+unsupported operations are represented explicitly instead of being hidden by
+guesses. A future tmux adapter, Superlogical-style host or AO-owned
+multiplexer must be addable without changing Universe, SQLite schema,
+projections or renderers. That adapter-replacement check is a release gate for
+any second host.
+
+The mock host keeps core and renderer tests independent of Herdr. Production
+host adapters must add the shared contract suite, sanitised protocol fixtures,
+feature/version detection and a non-destructive live smoke where the host is
+available. Observatory depends on Herdr for the first live product slice, but
+never on unpublished Herdr internals.
 
 Relevant documentation:
 
@@ -304,6 +346,9 @@ details.
 
 - Prefer platform functionality supplied by Bun before adding wrappers.
 - Keep the Universe module free of Bun, SQLite, OpenTUI and Herdr imports.
+- Keep all Herdr-specific imports and protocol knowledge inside
+  `src/hosts/herdr/` and the composition root; host adapters are the only
+  allowed translation boundary.
 - Pin fast-moving dependencies, particularly OpenTUI and Oxfmt.
 - Upgrade intentionally with domain, adapter and renderer fixtures.
 - Avoid an ORM until repeated persistence complexity demonstrates that direct

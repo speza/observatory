@@ -6,6 +6,7 @@ import {
   type RuntimeState,
   type TrackedSession,
 } from "../universe/types.ts";
+import { displayHostKind } from "../hosts/types.ts";
 
 export type AttentionReason = "blocked" | "waiting" | "host-stale";
 
@@ -51,8 +52,6 @@ const sortAttention = (left: AttentionItem, right: AttentionItem): number => {
 
 const age = (now: number, startedAt: number): number => Math.max(0, now - startedAt);
 
-const hostLabel = (hostKind: string): string => (hostKind === "herdr" ? "Herdr" : hostKind);
-
 export const evaluateAttention = (
   now: number,
   goals: readonly Goal[],
@@ -67,7 +66,7 @@ export const evaluateAttention = (
     const currentReason =
       session.hostHealth === "live" ? attentionReason(session.runtimeState) : undefined;
     if (currentReason) {
-      const sourceLabel = hostLabel(session.hostKind);
+      const sourceLabel = displayHostKind(session.hostKind);
       const startedAt = session.attentionSince ?? session.lastChangedAt;
       items.push({
         id: `${session.id}:${currentReason}`,
@@ -90,7 +89,7 @@ export const evaluateAttention = (
     }
 
     if (session.hostHealth !== "live") {
-      const sourceLabel = hostLabel(session.hostKind);
+      const sourceLabel = displayHostKind(session.hostKind);
       const startedAt = session.lastSeenAt;
       items.push({
         id: `${session.id}:host-stale`,

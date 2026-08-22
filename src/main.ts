@@ -6,7 +6,7 @@ import { HerdrHostAdapter } from "./hosts/herdr/adapter.ts";
 import { MockHostAdapter } from "./hosts/mock/adapter.ts";
 import { createMockScenario } from "./hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "./hosts/mock/seed.ts";
-import type { SessionHost } from "./hosts/types.ts";
+import { displayHostKind, type SessionHost } from "./hosts/types.ts";
 import { SqliteUniverseStore } from "./persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "./projection/projection.ts";
 import { createCommandCentreRenderer } from "./renderer/tui.ts";
@@ -45,7 +45,7 @@ const universe = new Universe(store, clock, new RuntimeIds(), createProjectionMo
 const reconcile = async (): Promise<string> => {
   const snapshot = await host.snapshot();
   const result = universe.reconcile(snapshot);
-  const hostLabel = snapshot.hostKind === "mock" ? "Mock" : "Herdr";
+  const hostLabel = displayHostKind(snapshot.hostKind);
   if (!result.accepted) return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
   if (!snapshot.available)
     return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;

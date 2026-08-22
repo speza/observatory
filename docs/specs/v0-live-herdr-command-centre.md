@@ -1,6 +1,6 @@
 # V0 live Herdr universe/map
 
-Status: implemented; live spatial iteration smoke verified  
+Status: implemented; live spatial and embedded-terminal smoke verified
 Date: 2026-08-22  
 Depends on:
 
@@ -66,7 +66,7 @@ start AO
   -> surface explainable attention
   -> search or navigate to a session
   -> inspect its execution metadata
-  -> attach to the real Herdr session
+  -> open an embedded Herdr terminal, or foreground-attach to the real session
   -> return to the same AO selection
   -> explicitly complete and later archive the goal
 ```
@@ -90,7 +90,8 @@ start AO
 - Supporting attention, grouped-list, search, inspector and inbox lenses.
 - Deterministic goal placement with durable goal map positions.
 - Session inspector metadata.
-- Focus or attachment to the real Herdr session.
+- Focus or foreground attachment to the real Herdr session.
+- Optional host-owned embedded terminal with frame, input, resize and release.
 - Restoration of AO selection after returning where the host permits it.
 
 ### Explicitly excluded
@@ -241,9 +242,9 @@ The default screen contains:
 - a compact attention strip or queue whose items also surface their owning goal;
 - a stable portfolio map of multiple goal bodies;
 - direct session satellites linked to their owning goal;
-- a neutral unassigned inbox sector (a compact selectable inbox panel on narrow
-  terminals, never a Goal or Session topology node); and
-- a transient floating inspector card for the selected goal, session or inbox.
+- an `INBOX !N · v list` warning for unassigned sessions (never a Goal or
+  Session topology node); and
+- a transient floating inspector card for the selected goal or session.
 
 Goal body size communicates session load/scope. P0-P3 use a stable priority
 colour/ring treatment. Blocked/waiting satellites use unmistakable `!`/`?`
@@ -254,11 +255,10 @@ duration.
 The interface must remain useful at 80x24. The map remains full width at every
 size; inspection is a transient card anchored near the selected item rather
 than a permanent right-hand panel. The card is clamped inside the map, uses
-shorter copy when space is tight, and can be hidden with `i`. Narrow terminals
-use a focused-goal or focused-inbox view and a compact selectable inbox sector
-rather than cramming every body into the portfolio. A focused view is the
-usable fallback when the portfolio contains more bodies or sessions than the
-terminal can show at once.
+shorter copy when space is tight, and can be hidden with `i`. The portfolio
+does not render unassigned session cards; attention/focused inbox lenses expose
+their compact list. A focused goal view is the fallback when the portfolio
+contains more bodies or sessions than the terminal can show at once.
 
 The map supports deterministic free-space-aware initial placement, selected
 goal/session navigation, keyboard pan, zoom, focus/reset, type-to-find
@@ -266,23 +266,17 @@ recentering, and OpenTUI mouse interaction where the terminal reports it.
 Dragging a goal persists its world-space anchor and moves its direct satellite
 orbit with it; dragging empty space or a session card pans the viewport.
 Clicking a goal or pressing focus enters a goal-only view containing exactly
-that goal and all of its direct sessions. Clicking the neutral inbox body or
-compact inbox header enters an inbox-only view containing unassigned sessions;
-focus on an unassigned session does the same. New goals scan occupied goal and
-satellite footprints for the next suitable logical position; accepted goals do
-not reflow when unrelated goals or sessions appear. Goal satellites use stable
-collision-aware perimeter slots. Unassigned sessions orbit a neutral `INBOX`
-body using the same identity-derived slot allocator; the orbit grows by rings
-as it fills and has no fixed session limit. When the full map is shown, every
-visible unassigned session has a direct muted cell tether from the inbox;
-selected and attention-bearing tethers are promoted. The focused inbox view
-keeps all of those tethers visible as the orbit expands. At 80x24 the portfolio
-may use the compact inbox sector to keep goal bodies legible; entering the inbox
-lens restores the spatial orbit. Label width adapts to the available cell
-scale, so dense views shorten cards while focused/zoomed views expose more
-identity. The inbox body and its tethers are a supporting presentation lens,
-never a Goal or Session topology node. The grouped list remains available as a
-supporting lens, never the default.
+that goal and all of its direct sessions. Selecting an unassigned session and
+focusing it enters the supporting inbox list lens. New goals scan occupied goal
+and satellite footprints for the next suitable logical position; accepted goals
+do not reflow when unrelated goals or sessions appear. Goal satellites use
+stable collision-aware perimeter slots. The portfolio header warns about the
+inbox count; attention/focused inbox lenses expose an attention-first list.
+Creating a goal selects it automatically; `a` from a selected goal opens a
+type-to-filter inbox assignment picker, while `a` from a selected session opens
+the goal picker. Clicking empty map space clears the selection and floating
+inspector. The grouped list remains available as a supporting lens, never the
+default.
 
 V0 semantic zoom is separate from camera zoom. Camera zoom changes map scale;
 semantic zoom changes label and metadata density without moving nodes:
@@ -290,16 +284,17 @@ semantic zoom changes label and metadata density without moving nodes:
 - overview shows the portfolio, short labels, goal body size, priority,
   attention counts and direct tethers;
 - context expands the selected or attention-bearing labels while retaining the
-  owning goal or inbox context; and
-- focus/detail shows a focused goal or inbox with larger or wrapped labels and
-  the complete direct orbit, while the floating inspector exposes full session
+  owning goal or inbox-list context; and
+- focus/detail shows a focused goal with larger or wrapped labels and its
+  complete direct orbit, while the floating inspector exposes full session
   metadata.
 
 The attention jump is the fastest path to intervention: `g` selects and focuses
-the next ordered attention item, `f` is the manual focus/reset action, and
-`Enter` attaches. Healthy or unrelated work may be dimmed by the attention lens,
-but its spatial position remains stable. Focus/detail is the narrow-terminal
-fallback; the portfolio must not compress every label until the map is unreadable.
+the next ordered attention item, `f` is the manual focus/reset action, `t` opens
+the host-owned terminal lens, and `Enter` foreground-attaches. Healthy or
+unrelated work may be dimmed by the attention lens, but its spatial position
+remains stable. Focus/detail is the narrow-terminal fallback; the portfolio
+must not compress every label until the map is unreadable.
 
 Required operations are keyboard-complete:
 
@@ -310,7 +305,8 @@ Required operations are keyboard-complete:
 - create, rename and reprioritise a goal;
 - assign or reassign a session;
 - inspect metadata;
-- attach to the selected session;
+- open an embedded terminal or foreground-attach to the selected session;
+- release the embedded terminal and return with map state;
 - complete and archive a goal; and
 - quit without terminal corruption.
 
@@ -361,14 +357,32 @@ interface:
 ```text
 snapshot()                  -> HostSnapshot
 access(HostedSessionId)     -> SessionAccess
+activate(SessionAccess)     -> HostActionResult
+openTerminal(SessionAccess,
+             TerminalDimensions) -> HostTerminalOpenResult
 ```
+
+Herdr is a deliberate V0/V1 live-host requirement. This spec does not promise
+tmux, Superlogical or an Observatory-owned multiplexer yet; it does require
+that they can be added later as `SessionHost` adapters. Herdr protocol payloads,
+CLI commands, native identifiers and pane topology remain inside
+`hosts/herdr/` and the composition root. The Universe, persistence,
+projections and renderer depend only on the generic contract above.
+
+The adapter boundary is a hard acceptance rule: replacing the Herdr adapter at
+composition time must not require changes to the semantic model, SQLite schema,
+projection code or renderer. Add generic capability only after a real host or
+user workflow demonstrates the need, and return an explicit unsupported result
+otherwise.
 
 `snapshot` discovers recognized agent sessions and their reliable runtime facts.
 For Herdr, `snapshot.agents` is the authoritative session inventory;
 `snapshot.panes`, tabs and workspaces only enrich those observations with
 topology, worktree and focus metadata. A pane without a recognized agent is not
-an AO session. `access` returns an opaque focus or attachment target. AO does
-not reconstruct Herdr's workspace, tab and pane hierarchy in its domain.
+an AO session. `access` returns opaque foreground-attach and optional terminal
+targets. `openTerminal` translates the host-owned stream into frame, input,
+resize and release operations. AO does not reconstruct Herdr's workspace, tab
+and pane hierarchy in its domain.
 
 ### Attention module
 
@@ -439,18 +453,22 @@ On startup and manual refresh:
 Reconciliation is idempotent. Retrying the same snapshot cannot duplicate a
 session or remove user-authored metadata.
 
-## Attach and return
+## Terminal, attach and return
 
-AO asks the Herdr adapter for the selected session's access capability. V0 uses
-the strongest reliable existing focus or attachment route; it does not proxy a
-PTY.
+AO asks the Herdr adapter for the selected session's access capability. V0
+opens a host-owned embedded terminal with `t` when the capability is available.
+The cell-native renderer forwards input and resize and releases the controller
+with Ctrl-Q or Esc. `Enter` remains the foreground-attach fallback to the
+selected Herdr agent, so the path works even when Observatory is running in a
+different Ghostty tab. Herdr owns the PTY in both cases; AO does not own a
+durable process or multiplexer.
 
-Before attachment, the TUI records its current selected goal, selected session,
-search query, expanded state, map lens, focused goal, map centre and zoom. When
-control returns, it restores that state and refreshes the host snapshot.
+The TUI keeps the selected goal, selected session, search query, expanded state,
+map lens, focused goal, map centre and zoom while the embedded surface is open.
+When control returns, it restores that state and refreshes the host snapshot.
 
-If no attachment route is available, the inspector explains that limitation
-instead of offering a dead action.
+If no embedded or foreground route is available, the inspector explains that
+limitation instead of offering a dead action.
 
 ## Error behaviour
 
@@ -464,6 +482,8 @@ instead of offering a dead action.
 - **SQLite command failure:** roll back the entire command and leave the current
   projection unchanged.
 - **Attach failure:** return to AO with the same selection and a visible error.
+- **Terminal stream closes or fails:** keep the map state intact, show the
+  reason in the terminal surface, and let the user release back to AO.
 - **Terminal resize:** preserve semantic selection even if presentation changes.
 
 ## Verification
@@ -486,6 +506,10 @@ instead of offering a dead action.
   attach path.
 - Semantic-zoom tests that expose more label/detail in context and focus views
   without reflowing durable map positions.
+- Assignment-picker tests for inbox-first filtering and session-to-goal
+  assignment direction.
+- Terminal-screen tests for split UTF-8, ANSI styling, cursor movement,
+  alternate-screen state and bounded resize.
 
 ### Herdr adapter contract tests
 
@@ -493,6 +517,8 @@ instead of offering a dead action.
 - Use recognized agent records as sessions and exclude pane-only terminals.
 - Preserve opaque native identifiers.
 - Report supported attachment capability accurately.
+- Open the host-owned terminal capability with opaque targets and dimensions;
+  translate frames, input, resize, release and stream errors.
 - Handle unavailable, empty and malformed responses.
 - Never mutate Herdr during discovery.
 
@@ -501,20 +527,27 @@ instead of offering a dead action.
 Using the current real Herdr environment:
 
 1. start with no accepted AO goals;
-2. discover every recognized agent session in the inbox (use at least 15 for
-   the scale trial when the live environment provides them);
-3. create three goals, including one P0 goal;
-4. assign and rename sessions;
+2. discover every recognized agent session and confirm the header shows the
+   unassigned count warning (use at least 15 for the scale trial when the live
+   environment provides them); press `v` to inspect the inbox list;
+3. create three goals, including one P0 goal; confirm each new goal becomes
+   selected and pressing `a` opens a type-to-filter inbox assignment picker;
+4. assign and rename sessions, then reassign one through the session-to-goal
+   picker;
 5. restart and confirm persistence;
 6. place one real agent into a waiting state;
 7. confirm it is promoted with an explanation and duration;
 8. press `g` repeatedly and verify the exact attention ordering, owning-goal
-   badges and reason/age text; use `Enter` to attach to the selected session;
-9. search for another session, confirm it is focused in spatial context, and
-   attach to it;
-10. return with the same selection, floating card, map lens, semantic detail
-    tier and viewport as far as the host permits; and
-11. complete a goal, confirm it remains dimmed, then archive it explicitly.
+   badges and reason/age text; use `t` to open the selected session's embedded
+   terminal, send a harmless printable key, resize the terminal, and release
+   with Ctrl-Q;
+9. confirm the same selection, floating card, map lens, semantic detail tier
+   and viewport return; use `Enter` to exercise foreground attachment as the
+   fallback;
+10. search for another session, confirm it is focused in spatial context, and
+    open or attach to it;
+11. return with the same selection and viewport as far as the host permits; and
+12. complete a goal, confirm it remains dimmed, then archive it explicitly.
 
 ## Implementation order
 
@@ -525,7 +558,9 @@ Using the current real Herdr environment:
 5. Implement Attention, universe-map and supporting projections.
 6. Build the portable native OpenTUI spatial universe over those projections.
 7. Add map focus/attachment and full return-state restoration.
-8. Run the manual acceptance flow and begin one-week dogfood.
+8. Add the optional host-owned terminal stream, cell renderer and reversible
+   terminal lens over the same selection state.
+9. Run the manual acceptance flow and begin one-week dogfood.
 
 Do not create the daemon, web client or agent skill while completing these
 steps. A second consumer should create those seams from evidence rather than

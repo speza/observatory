@@ -1,5 +1,12 @@
 import type { RuntimeState } from "../universe/types.ts";
 
+/** Convert an opaque host kind into a readable label without knowing a host's brand. */
+export const displayHostKind = (hostKind: string): string => {
+  const normalized = hostKind.trim().replace(/[-_]+/g, " ");
+  if (!normalized) return "Host";
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
 export interface HostSessionObservation {
   readonly nativeId: string;
   readonly displayName: string;
@@ -28,10 +35,47 @@ export interface OpaqueAccessTarget {
   readonly token: string;
 }
 
+export interface TerminalDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+export interface HostTerminalFrame {
+  readonly bytes: Uint8Array;
+  readonly columns?: number;
+  readonly rows?: number;
+  readonly sequence?: number;
+  readonly full?: boolean;
+}
+
+export type HostTerminalEvent =
+  | { readonly kind: "frame"; readonly frame: HostTerminalFrame }
+  | { readonly kind: "closed"; readonly reason?: string };
+
+export type HostTerminalInput =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "bytes"; readonly value: Uint8Array };
+
+/** A host-owned terminal stream. The host owns the process and its lifecycle. */
+export interface HostedTerminalSession {
+  readonly events: AsyncIterable<HostTerminalEvent>;
+  send(input: HostTerminalInput): Promise<HostActionResult>;
+  resize(dimensions: TerminalDimensions): Promise<HostActionResult>;
+  release(): Promise<HostActionResult>;
+}
+
+export interface HostTerminalOpenResult {
+  readonly ok: boolean;
+  readonly message: string;
+  readonly terminal?: HostedTerminalSession;
+}
+
 export interface SessionAccess {
   readonly supported: boolean;
   readonly mode?: "focus" | "attach";
   readonly target?: OpaqueAccessTarget;
+  /** Optional host-owned terminal capability for this session. */
+  readonly terminalTarget?: OpaqueAccessTarget;
   readonly explanation: string;
 }
 
@@ -44,4 +88,8 @@ export interface SessionHost {
   snapshot(): Promise<HostSnapshot>;
   access(session: { readonly hostKind: string; readonly nativeId: string }): Promise<SessionAccess>;
   activate(access: SessionAccess): Promise<HostActionResult>;
+  openTerminal(
+    access: SessionAccess,
+    dimensions: TerminalDimensions,
+  ): Promise<HostTerminalOpenResult>;
 }

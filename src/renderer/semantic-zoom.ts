@@ -10,6 +10,8 @@ const levelRank: Record<SemanticZoomLevel, number> = {
   detail: 2,
 };
 
+const WORKING_MARKERS = ["◐", "◓", "◑", "◒"] as const;
+
 export const nextSemanticZoom = (level: SemanticZoomLevel): SemanticZoomLevel => {
   if (level === "overview") return "context";
   if (level === "context") return "detail";
@@ -33,10 +35,14 @@ export const semanticZoomLevel = (input: {
 export const sessionMarker = (
   hostHealth: TrackedSession["hostHealth"],
   runtimeState: RuntimeState,
+  phase = 0,
 ): string => {
   if (hostHealth !== "live") return "?";
   if (runtimeState === "blocked" || runtimeState === "waiting") return "!";
   if (runtimeState === "done") return "✓";
+  if (runtimeState === "working")
+    return WORKING_MARKERS[Math.floor(Math.max(0, phase) * 2) % WORKING_MARKERS.length] ?? "◐";
+  if (runtimeState === "unknown") return "?";
   return "·";
 };
 

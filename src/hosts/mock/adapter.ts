@@ -2,9 +2,14 @@ import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
   HostSnapshot,
+  HostTerminalEvent,
+  HostedTerminalSession,
   OpaqueAccessTarget,
   SessionAccess,
   SessionHost,
+  TerminalDimensions,
+  HostTerminalInput,
+  HostTerminalOpenResult,
 } from "../types.ts";
 import { createMockScenario, type MockScenario } from "./scenarios.ts";
 
@@ -13,6 +18,83 @@ const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
 
 const elapsedFrames = (now: number, startedAt: number, tickMs: number): number =>
   Math.floor(Math.max(0, now - startedAt) / tickMs);
+
+class MockTerminalSession implements HostedTerminalSession {
+  readonly events: AsyncIterable<HostTerminalEvent>;
+  readonly inputs: HostTerminalInput[] = [];
+  readonly resizes: TerminalDimensions[] = [];
+  private readonly queued: HostTerminalEvent[];
+  private readonly waiters: (() => void)[] = [];
+  private released = false;
+
+  constructor(
+    private readonly sessionName: string,
+    dimensions: TerminalDimensions,
+  ) {
+    this.queued = [
+      {
+        kind: "frame",
+        frame: {
+          bytes: new TextEncoder().encode(
+            `\u001b[2J\u001b[H\u001b[1;36mMOCK TERMINAL\u001b[0m\r\n${sessionName}\r\n\r\nType here; Ctrl-Q releases this deterministic session.\r\n`,
+          ),
+          columns: dimensions.columns,
+          rows: dimensions.rows,
+          full: true,
+        },
+      },
+    ];
+    this.events = this.readEvents();
+  }
+
+  async send(input: HostTerminalInput): Promise<HostActionResult> {
+    if (this.released) return { ok: false, message: "The mock terminal has been released." };
+    this.inputs.push(input);
+    const value = input.kind === "text" ? input.value : new TextDecoder().decode(input.value);
+    this.push({
+      kind: "frame",
+      frame: { bytes: new TextEncoder().encode(`\r\nmock input: ${JSON.stringify(value)}\r\n`) },
+    });
+    return { ok: true, message: "Input sent to the mock terminal." };
+  }
+
+  async resize(dimensions: TerminalDimensions): Promise<HostActionResult> {
+    if (this.released) return { ok: false, message: "The mock terminal has been released." };
+    if (dimensions.columns < 1 || dimensions.rows < 1)
+      return { ok: false, message: "Terminal dimensions must be positive." };
+    this.resizes.push(dimensions);
+    return {
+      ok: true,
+      message: `Resized mock terminal to ${dimensions.columns}×${dimensions.rows}.`,
+    };
+  }
+
+  async release(): Promise<HostActionResult> {
+    if (this.released) return { ok: true, message: "Mock terminal already released." };
+    this.released = true;
+    this.push({ kind: "closed", reason: "Released by Observatory." });
+    return { ok: true, message: `Released mock terminal ${this.sessionName}.` };
+  }
+
+  private async *readEvents(): AsyncIterable<HostTerminalEvent> {
+    while (true) {
+      const next = this.queued.shift();
+      if (next) {
+        yield next;
+        continue;
+      }
+      if (this.released) return;
+      // This is an ordered event stream; concurrent waits would lose its wake-up semantics.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+  }
+
+  private push(event: HostTerminalEvent): void {
+    this.queued.push(event);
+    this.waiters.shift()?.();
+  }
+}
 
 /**
  * A deterministic development host. It exercises the same reconciliation,
@@ -86,7 +168,11 @@ export class MockHostAdapter implements SessionHost {
       supported: true,
       mode: "focus",
       target,
-      explanation: "Simulate focus in the deterministic mock host.",
+      terminalTarget: {
+        kind: "mock-terminal",
+        token: session.nativeId,
+      },
+      explanation: "Simulate focus or open an embedded terminal in the deterministic mock host.",
     };
   }
 
@@ -104,5 +190,24 @@ export class MockHostAdapter implements SessionHost {
         message: "The session is no longer present in the latest mock frame.",
       };
     return { ok: true, message: `Simulated focus for mock session ${token}.` };
+  }
+
+  async openTerminal(
+    access: SessionAccess,
+    dimensions: TerminalDimensions,
+  ): Promise<HostTerminalOpenResult> {
+    if (!access.supported || !access.terminalTarget)
+      return { ok: false, message: "This mock session does not expose an embedded terminal." };
+    if (access.terminalTarget.kind !== "mock-terminal")
+      return { ok: false, message: "The mock terminal target is invalid or unsupported." };
+    if (dimensions.columns < 1 || dimensions.rows < 1)
+      return { ok: false, message: "Terminal dimensions must be positive." };
+    if (!this.liveTargets.has(access.terminalTarget.token))
+      return { ok: false, message: "The session is no longer present in the latest mock frame." };
+    return {
+      ok: true,
+      message: `Opened an embedded mock terminal for ${access.terminalTarget.token}.`,
+      terminal: new MockTerminalSession(access.terminalTarget.token, dimensions),
+    };
   }
 }

@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
-Status: implemented V0 boundary; future extensions remain proposed  
-Date: 2026-08-21  
+Status: implemented V0 boundary; Herdr terminal lens added, future extensions remain proposed
+Date: 2026-08-22
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
@@ -15,6 +15,20 @@ web interface over agent sessions hosted by other tools.
 The implementation language and initial toolchain are selected separately in
 the technology decision record. Disposable renderer experiments established the
 v0 presentation split; live product evidence must drive later layout decisions.
+
+The staged native-terminal experiments are specified in
+[Native terminal surface POCs](../specs/terminal-surface-pocs.md). They test
+terminal fidelity and Herdr transport separately from the semantic control
+plane and do not change the implemented V0 boundary by themselves.
+
+The 2026-08-22 evidence pass found both experiments technically plausible:
+Bun/OpenTUI can host a small native terminal surface, and Herdr can stream a
+live session into the same panel while retaining process ownership after
+release. The first Herdr-backed embedded-terminal slice is now implemented
+behind the SessionHost seam and has passed deterministic mock coverage plus a
+non-destructive live map → terminal → release → map smoke. This promotes the
+host-owned capability, not the disposable AO-owned PTY, into V0. It does not add
+transcript ingestion or justify an AO-owned daemon.
 
 ## Architectural objective
 
@@ -113,6 +127,35 @@ The Session-host module hides how terminal sessions are discovered, persisted,
 launched, inspected and attached. Herdr and tmux are adapters at this seam; a
 future AO-native multiplexer would be another adapter.
 
+#### Host abstraction policy
+
+Herdr is the required live host for V0/V1. This keeps the first product slice
+focused and lets Herdr own session persistence, process lifetime and PTY
+transport. It does not make Herdr a dependency of the semantic control plane.
+
+`SessionHost` is the sole external-host seam. Only the Herdr adapter and the
+composition root may know Herdr protocol payloads, CLI commands or native
+identifiers. Universe, persistence, attention, spatial layout, projections and
+renderers consume generic snapshots, access capabilities and terminal events.
+They must not import Herdr modules or encode Herdr workspace, tab or pane
+concepts. The renderer may receive the generic `SessionHost` port for explicit
+attach and terminal actions, but never a concrete adapter or host payload.
+
+The seam is intentionally deep rather than a collection of pass-through
+wrappers: an adapter translates discovery, lifecycle, attachment, terminal
+transport, errors and version/feature detection into the small generic
+capabilities. Unsupported operations are explicit. We add a capability only
+when a real host or user workflow proves it is needed; we do not pre-design a
+universal agent or terminal API.
+
+The replacement test is architectural, not aspirational: selecting a future
+tmux adapter, Superlogical-style host or AO-owned multiplexer at composition
+time must leave Universe, persistence, projections and renderers unchanged.
+If it does not, the host seam is leaking and must be repaired before the new
+host is developed further. The mock host supplies deterministic contract
+coverage; every production adapter also needs sanitised fixtures and a live
+smoke path where available.
+
 The v1 interface should remain smaller than the underlying host interfaces:
 
 ```text
@@ -151,7 +194,9 @@ provider name.
 different operations depending on provider recognition, permissions, whether
 the process is live, and terminal protocol support. Candidate attachment modes
 are focus-existing, open-split, foreground-takeover and embedded-terminal.
-These modes remain opaque outside the Session-host module.
+Herdr's V0 adapter supports foreground attachment and an embedded terminal;
+other hosts may return an honest unsupported result. These modes remain opaque
+outside the Session-host module.
 
 Do not expose Herdr workspaces, tabs and panes as universal domain concepts.
 They remain adapter details referenced through opaque native identifiers.
@@ -163,6 +208,22 @@ an opaque byte stream plus input, resize and detach operations. The host still
 owns the PTY and its lifecycle; clients only render and transport it. Hosts that
 cannot provide this capability fall back to another attachment mode. This keeps
 the module deep and avoids copying Herdr or tmux mechanics into every caller.
+
+The implemented shape is deliberately small:
+
+```text
+openTerminal(SessionAccess, TerminalDimensions)
+  -> HostTerminalOpenResult
+       events: frame | closed
+       send(text | bytes)
+       resize(columns, rows)
+       release()
+```
+
+The Herdr adapter translates its controller stream into this capability; the
+mock adapter exercises the same contract. The renderer owns terminal-cell
+interpretation and transient panel state, while the host remains responsible
+for process ownership and cleanup.
 
 ### Provider-facts module
 
@@ -593,7 +654,8 @@ The live adapter should use:
 - opaque workspace/tab/pane identifiers as native locators and metadata;
 - agent status and session identity where available;
 - worktree provenance from Herdr plus canonical Git inspection from AO;
-- an attachment target that focuses the relevant pane;
+- an attachment target that directly attaches the current terminal to the
+  relevant pane;
 - recent pane output for an optional read-only preview.
 
 The adapter must translate Herdr-specific hierarchy into hosted-session facts.
@@ -601,6 +663,14 @@ For the current V0 adapter, `snapshot.agents` is authoritative: pane, tab and
 workspace records are joined only to enrich an agent session and provide its
 opaque focus target. A shell-only pane is not promoted into a hosted session.
 The Universe module must not depend on Herdr record types.
+
+This first-party adapter is intentionally the only live host in V0/V1. The
+boundary is considered successful when a later host can implement the same
+contract without changing the semantic model; no multi-host feature is implied
+until that evidence exists. External efforts such as
+[Superlogical](https://www.superlogical.com/), which describe a broader
+session/multiplexer substrate, are monitored as possible future host adapters,
+not modelled as new AO domain objects today.
 
 The initial adapter is read-only except for explicit focus or attachment.
 Messaging, launch/stop and broader pane control can follow after live use proves
@@ -640,17 +710,14 @@ use a focused goal/lens fallback rather than compressing the whole universe.
 Worktrees, repositories, runtimes and hosts are session metadata in the
 inspector, not navigation levels or map nodes.
 
-Unassigned live sessions are rendered around a neutral `INBOX` body on the
-portfolio map. At narrow sizes the renderer uses a compact selectable inbox
-panel, keeping goal bodies legible; the inbox is a supporting lens, not a new
-topology node or durable domain object. The spatial projection assigns
-identity-derived, collision-aware perimeter slots to direct satellites and
-inbox cards, expanding the inbox by rings as its current ring fills. In the
-full map, each unassigned session receives a direct muted cell tether to the
-inbox, with selected and attention-bearing tethers promoted for visibility.
-The renderer derives card label width from the available cell scale, so dense
-low-zoom views remain readable while a focused view can show more identity.
-This is deterministic slot allocation, not a force-directed graph layout.
+Unassigned live sessions are hidden from the portfolio map and represented by
+an `INBOX !N · v list` warning in the header. The inbox is a transient queue,
+not a topology node or durable domain object; it must not consume the central
+map footprint needed to understand accepted goals. Attention and focused inbox
+lenses expose an attention-first list, and a selected goal's assignment picker
+supports type-to-filter session metadata. Goal satellites continue to use
+identity-derived, collision-aware perimeter slots. This is deterministic slot
+allocation, not a force-directed graph layout.
 
 New goals use the Layout module's nearest-free placement scan. It is dynamic at
 insertion time because it considers current footprint and occupied space, but
@@ -658,9 +725,11 @@ it does not continuously reflow accepted goals. A manually dragged goal stores
 its world-space anchor and its direct session satellites continue to derive
 their positions relative to that anchor. Clicking or focusing a goal selects a
 goal-only map projection in the renderer; that view contains the goal and all
-of its direct sessions, not repositories, worktrees or panes. Clicking the
-neutral inbox body/header selects an inbox-only projection of unassigned
-sessions; focus on an unassigned session reaches the same projection.
+of its direct sessions, not repositories, worktrees or panes. Selecting an
+unassigned session and focusing it reaches the supporting inbox list lens.
+Creating a goal selects it automatically, and `a` from a selected goal opens a
+picker over unassigned sessions; `a` from a selected session retains the
+session-to-goal picker.
 
 The attention queue, unassigned inbox, inspector and grouped list remain
 supporting projections of the same state. A renderer can switch to them for
@@ -673,6 +742,11 @@ separate durable treatment. `g` selects and focuses the next item in the exact
 attention ordering, `f` can focus or reset the selected context, and `Enter`
 attaches to the selected hosted session. These actions may change emphasis and
 viewport, but never reflow durable positions.
+
+Live `working` sessions are deliberately distinct from merely live `idle`
+sessions: their marker cycles through a restrained half-moon animation and
+their map border pulses green. The animation is a progress cue, not a state
+source; the runtime state and host health remain visible in detail/list views.
 
 The renderer has semantic presentation tiers independent of camera zoom:
 overview uses compact labels and summary markers, context expands selected or
@@ -803,6 +877,9 @@ The v0 live Herdr slice should demonstrate:
 
 ### Phase 3 — interaction and agent integration
 
+- Run the [native terminal surface POCs](../specs/terminal-surface-pocs.md):
+  first an AO-owned Bun PTY for renderer fidelity, then a Herdr-backed control
+  stream for durable-session behaviour.
 - Add targeted quick messages only after exact-target UX is trusted.
 - Add CLI commands and an installable skill for agent-created goals, assignment
   and structured reporting.
@@ -821,6 +898,8 @@ The v0 live Herdr slice should demonstrate:
 ### Phase 5 — broader hosting
 
 - Add tmux after the Herdr interface has survived real use.
+- Evaluate other durable session hosts, including Superlogical, through the
+  adapter contract rather than by importing their internal model.
 - Add skills and hooks for enhanced reporting.
 - Revisit launch, input and lifecycle capabilities.
 - Consider an AO-native multiplexer only if existing hosts prevent important

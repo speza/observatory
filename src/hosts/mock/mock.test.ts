@@ -88,4 +88,27 @@ describe("Mock host adapter", () => {
       assignedSessions: 0,
     });
   });
+
+  test("provides a deterministic embedded terminal stream", async () => {
+    const clock = new FixedClock(40_000);
+    const adapter = new MockHostAdapter({ clock });
+    await adapter.snapshot();
+    const access = await adapter.access({ hostKind: "mock", nativeId: "mock-p01" });
+    const opened = await adapter.openTerminal(access, { columns: 80, rows: 24 });
+    expect(opened.ok).toBe(true);
+    const first = await opened.terminal!.events[Symbol.asyncIterator]().next();
+    expect(first.value?.kind).toBe("frame");
+    expect(await opened.terminal!.send({ kind: "text", value: "x" })).toEqual({
+      ok: true,
+      message: "Input sent to the mock terminal.",
+    });
+    expect(await opened.terminal!.resize({ columns: 90, rows: 30 })).toEqual({
+      ok: true,
+      message: "Resized mock terminal to 90×30.",
+    });
+    expect(await opened.terminal!.release()).toEqual({
+      ok: true,
+      message: "Released mock terminal mock-p01.",
+    });
+  });
 });
