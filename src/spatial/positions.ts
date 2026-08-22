@@ -41,8 +41,7 @@ const hash = (value: string): number => {
   return result >>> 0;
 };
 
-const positionKey = (position: MapPosition): string =>
-  `${position.x}:${position.y}`;
+const positionKey = (position: MapPosition): string => `${position.x}:${position.y}`;
 
 const stableSlotPositions = (
   anchor: MapPosition,
@@ -53,20 +52,12 @@ const stableSlotPositions = (
 ): Map<string, MapPosition> => {
   const result = new Map<string, MapPosition>();
   const occupied = new Set<string>();
-  const uniqueIds = [...new Set(ids)].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const uniqueIds = [...new Set(ids)].sort((left, right) => left.localeCompare(right));
   for (const id of uniqueIds) {
-    const preferredCount = Math.max(
-      1,
-      Math.min(offsets.length, preferredSlotCount),
-    );
+    const preferredCount = Math.max(1, Math.min(offsets.length, preferredSlotCount));
     const start = hash(`${namespace}:${id}`) % preferredCount;
     const candidateIndexes = [
-      ...Array.from(
-        { length: preferredCount },
-        (_, offset) => (start + offset) % preferredCount,
-      ),
+      ...Array.from({ length: preferredCount }, (_, offset) => (start + offset) % preferredCount),
       ...Array.from(
         { length: offsets.length - preferredCount },
         (_, offset) => preferredCount + offset,
@@ -99,14 +90,10 @@ const SATELLITE_OFFSETS: readonly MapPosition[] = (() => {
   for (let ring = 1; ring <= 5; ring += 1) {
     const width = ring * 32;
     const height = ring * 24;
-    for (let x = -ring; x <= ring; x += 1)
-      offsets.push({ x: x * 32, y: -height });
-    for (let y = -ring + 1; y <= ring; y += 1)
-      offsets.push({ x: width, y: y * 24 });
-    for (let x = ring - 1; x >= -ring; x -= 1)
-      offsets.push({ x: x * 32, y: height });
-    for (let y = ring - 1; y >= -ring + 1; y -= 1)
-      offsets.push({ x: -width, y: y * 24 });
+    for (let x = -ring; x <= ring; x += 1) offsets.push({ x: x * 32, y: -height });
+    for (let y = -ring + 1; y <= ring; y += 1) offsets.push({ x: width, y: y * 24 });
+    for (let x = ring - 1; x >= -ring; x -= 1) offsets.push({ x: x * 32, y: height });
+    for (let y = ring - 1; y >= -ring + 1; y -= 1) offsets.push({ x: -width, y: y * 24 });
   }
   return offsets;
 })();
@@ -122,12 +109,9 @@ const INBOX_OFFSETS: readonly MapPosition[] = (() => {
     const width = ring * 72;
     const height = ring * 32;
     for (let x = -width; x <= width; x += 36) offsets.push({ x, y: -height });
-    for (let y = -height + 32; y <= height; y += 32)
-      offsets.push({ x: width, y });
-    for (let x = width - 36; x >= -width; x -= 36)
-      offsets.push({ x, y: height });
-    for (let y = height - 32; y >= -height + 32; y -= 32)
-      offsets.push({ x: -width, y });
+    for (let y = -height + 32; y <= height; y += 32) offsets.push({ x: width, y });
+    for (let x = width - 36; x >= -width; x -= 36) offsets.push({ x, y: height });
+    for (let y = height - 32; y >= -height + 32; y -= 32) offsets.push({ x: -width, y });
   }
   return offsets;
 })();
@@ -147,9 +131,7 @@ export const defaultGoalMapPosition = (goalId: string): MapPosition => {
 export const goalLayoutFootprint = (
   sessionCount: number,
 ): { readonly halfWidth: number; readonly halfHeight: number } => {
-  const count = Number.isFinite(sessionCount)
-    ? Math.max(0, Math.floor(sessionCount))
-    : 0;
+  const count = Number.isFinite(sessionCount) ? Math.max(0, Math.floor(sessionCount)) : 0;
   let ring = 0;
   while (count > 4 * ring * (ring + 1)) ring += 1;
   return {
@@ -173,10 +155,7 @@ const goalCandidates = (goalId: string): readonly MapPosition[] => {
   }
   return candidates.sort((left, right) => {
     const gridRadius = (point: MapPosition): number =>
-      Math.max(
-        Math.abs(point.x) / GOAL_GRID_STEP_X,
-        Math.abs(point.y) / GOAL_GRID_STEP_Y,
-      );
+      Math.max(Math.abs(point.x) / GOAL_GRID_STEP_X, Math.abs(point.y) / GOAL_GRID_STEP_Y);
     const radiusDelta = gridRadius(left) - gridRadius(right);
     if (radiusDelta !== 0) return radiusDelta;
     // Prefer another portfolio row before consuming scarce terminal height.
@@ -184,17 +163,11 @@ const goalCandidates = (goalId: string): readonly MapPosition[] => {
     if (verticalDelta !== 0) return verticalDelta;
     const horizontalDelta = Math.abs(left.x) - Math.abs(right.x);
     if (horizontalDelta !== 0) return horizontalDelta;
-    return (
-      hash(`${goalId}:${positionKey(left)}`) -
-      hash(`${goalId}:${positionKey(right)}`)
-    );
+    return hash(`${goalId}:${positionKey(left)}`) - hash(`${goalId}:${positionKey(right)}`);
   });
 };
 
-const goalsOverlap = (
-  left: GoalLayoutOccupancy,
-  right: GoalLayoutOccupancy,
-): boolean => {
+const goalsOverlap = (left: GoalLayoutOccupancy, right: GoalLayoutOccupancy): boolean => {
   const leftFootprint = goalLayoutFootprint(left.sessionCount);
   const rightFootprint = goalLayoutFootprint(right.sessionCount);
   return (
@@ -222,8 +195,7 @@ export const initialGoalMapPosition = (
   };
   for (const candidate of goalCandidates(goalId)) {
     const next = { ...candidateOccupancy, position: candidate };
-    if (occupied.every((existing) => !goalsOverlap(next, existing)))
-      return { ...candidate };
+    if (occupied.every((existing) => !goalsOverlap(next, existing))) return { ...candidate };
   }
   const fallback = goalCandidates(goalId).at(-1) ?? { x: 0, y: 0 };
   return { ...fallback };
@@ -239,13 +211,7 @@ export const sessionSatellitePositions = (
   goalId: string,
   sessionIds: readonly string[],
 ): Map<string, MapPosition> =>
-  stableSlotPositions(
-    goal,
-    sessionIds,
-    SATELLITE_OFFSETS,
-    `satellite:${goalId}`,
-    8,
-  );
+  stableSlotPositions(goal, sessionIds, SATELLITE_OFFSETS, `satellite:${goalId}`, 8);
 
 /** Keep the original single-session helper for callers and unit fixtures. */
 export const sessionSatellitePosition = (
@@ -254,8 +220,7 @@ export const sessionSatellitePosition = (
   sessionId: string,
   _sessionIndex: number,
   _sessionCount: number,
-): MapPosition =>
-  sessionSatellitePositions(goal, goalId, [sessionId]).get(sessionId) ?? goal;
+): MapPosition => sessionSatellitePositions(goal, goalId, [sessionId]).get(sessionId) ?? goal;
 
 /**
  * Place the unassigned inbox to the left of the occupied universe. The caller
@@ -265,9 +230,7 @@ export const sessionSatellitePosition = (
 export const mapInboxAnchor = (goals: readonly MapPosition[]): MapPosition => {
   if (goals.length === 0) return { x: 0, y: 0 };
   const minimumX = Math.min(...goals.map((goal) => goal.x));
-  const averageY = Math.round(
-    goals.reduce((total, goal) => total + goal.y, 0) / goals.length,
-  );
+  const averageY = Math.round(goals.reduce((total, goal) => total + goal.y, 0) / goals.length);
   // Leave room for the inbox orbit's outer edge and both card bounds. This
   // keeps the neutral sector separate even at the minimum wide-map zoom.
   return { x: minimumX - 144, y: averageY };
@@ -281,10 +244,7 @@ export const unassignedSessionPositions = (
   stableSlotPositions(anchor, sessionIds, INBOX_OFFSETS, "unassigned", 12);
 
 /** Keep the original single-session helper for callers and unit fixtures. */
-export const unassignedSessionPosition = (
-  anchor: MapPosition,
-  sessionId: string,
-): MapPosition =>
+export const unassignedSessionPosition = (anchor: MapPosition, sessionId: string): MapPosition =>
   unassignedSessionPositions(anchor, [sessionId]).get(sessionId) ?? anchor;
 
 export const isMapPosition = (value: MapPosition): boolean =>

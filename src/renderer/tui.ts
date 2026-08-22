@@ -20,13 +20,8 @@ import type {
   SessionView,
   UniverseMapProjection,
 } from "../projection/types.ts";
-import { Universe, type UniverseCommand } from "../universe/universe.ts";
-import {
-  PRIORITIES,
-  priorityRank,
-  type Clock,
-  type MapPosition,
-} from "../universe/types.ts";
+import type { Universe, UniverseCommand } from "../universe/universe.ts";
+import { PRIORITIES, priorityRank, type Clock, type MapPosition } from "../universe/types.ts";
 import {
   fitViewportToPoints,
   panViewport,
@@ -68,9 +63,7 @@ const COLORS = {
 } as const;
 
 type Selection = { readonly type: "goal" | "session"; readonly id: string };
-type Row =
-  | Selection
-  | { readonly type: "inbox-label"; readonly id: "inbox-label" };
+type Row = Selection | { readonly type: "inbox-label"; readonly id: "inbox-label" };
 
 type MapLens = "portfolio" | "attention" | "goal" | "inbox";
 type ViewMode = "map" | "list";
@@ -151,10 +144,7 @@ export interface CommandCentreAppOptions {
   readonly renderer: CliRenderer;
 }
 
-export type CommandCentreDependencies = Omit<
-  CommandCentreAppOptions,
-  "renderer"
->;
+export type CommandCentreDependencies = Omit<CommandCentreAppOptions, "renderer">;
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.max(minimum, Math.min(maximum, value));
@@ -166,11 +156,8 @@ const shorten = (value: string, maximum: number): string => {
   return `${value.slice(0, maximum - 1)}…`;
 };
 
-const countLabel = (
-  count: number,
-  singular: string,
-  plural = `${singular}s`,
-): string => `${count} ${count === 1 ? singular : plural}`;
+const countLabel = (count: number, singular: string, plural = `${singular}s`): string =>
+  `${count} ${count === 1 ? singular : plural}`;
 
 const wrap = (value: string, maximum: number): string[] => {
   if (maximum <= 1) return [shorten(value, maximum)];
@@ -189,8 +176,8 @@ const wrap = (value: string, maximum: number): string[] => {
     }
   }
   if (line) lines.push(line);
-  return lines.flatMap((line) =>
-    line.length > maximum ? [shorten(line, maximum)] : [line],
+  return lines.flatMap((wrappedLine) =>
+    wrappedLine.length > maximum ? [shorten(wrappedLine, maximum)] : [wrappedLine],
   );
 };
 
@@ -261,8 +248,7 @@ export class CommandCentreApp {
       onMouseDragEnd: (event) => this.handleMouseDragEnd(event),
       onMouseScroll: (event) => this.handleMouseScroll(event),
     });
-    this.canvas.renderBefore = (_buffer, deltaTime) =>
-      this.renderFrame(deltaTime);
+    this.canvas.renderBefore = (_buffer, deltaTime) => this.renderFrame(deltaTime);
     this.renderer.root.add(this.canvas);
     this.renderer.on("resize", (width: number, height: number) => {
       this.canvas.width = width;
@@ -271,7 +257,7 @@ export class CommandCentreApp {
       this.renderer.requestRender();
     });
     this.renderer.keyInput.on("keypress", (key) => this.handleKey(key));
-    this.renderer.setTerminalTitle("AO — agent universe");
+    this.renderer.setTerminalTitle("Observatory — agent universe");
   }
 
   private get renderer(): CliRenderer {
@@ -334,32 +320,23 @@ export class CommandCentreApp {
           if (session.attention) rows.push({ type: "session", id: session.id });
         }
       }
-      const attentionInbox = projection.unassigned.filter(
-        (session) => session.attention,
-      );
+      const attentionInbox = projection.unassigned.filter((session) => session.attention);
       if (attentionInbox.length > 0) {
         rows.push({ type: "inbox-label", id: "inbox-label" });
-        for (const session of attentionInbox)
-          rows.push({ type: "session", id: session.id });
+        for (const session of attentionInbox) rows.push({ type: "session", id: session.id });
       }
       return rows;
     }
     const rows: Row[] = [];
     for (const goal of projection.goals) {
       rows.push({ type: "goal", id: goal.id });
-      if (
-        this.viewMode === "map" ||
-        this.expandedGoals.has(goal.id) ||
-        this.mapLens === "goal"
-      ) {
-        for (const session of goal.sessions)
-          rows.push({ type: "session", id: session.id });
+      if (this.viewMode === "map" || this.expandedGoals.has(goal.id) || this.mapLens === "goal") {
+        for (const session of goal.sessions) rows.push({ type: "session", id: session.id });
       }
     }
     if (projection.unassigned.length > 0) {
       rows.push({ type: "inbox-label", id: "inbox-label" });
-      for (const session of projection.unassigned)
-        rows.push({ type: "session", id: session.id });
+      for (const session of projection.unassigned) rows.push({ type: "session", id: session.id });
     }
     return rows;
   }
@@ -375,19 +352,13 @@ export class CommandCentreApp {
     }
     if (
       !this.selected ||
-      !selectable.some(
-        (row) =>
-          row.type === this.selected?.type && row.id === this.selected.id,
-      )
+      !selectable.some((row) => row.type === this.selected?.type && row.id === this.selected.id)
     ) {
       const first = selectable[0];
       this.selected = first ? { type: first.type, id: first.id } : undefined;
     }
     const index = this.selected
-      ? rows.findIndex(
-          (row) =>
-            row.type === this.selected?.type && row.id === this.selected?.id,
-        )
+      ? rows.findIndex((row) => row.type === this.selected?.type && row.id === this.selected?.id)
       : 0;
     const visibleHeight = Math.max(
       1,
@@ -401,26 +372,18 @@ export class CommandCentreApp {
     return rows;
   }
 
-  private selectedGoal(
-    projection: CommandCentreProjection,
-  ): GoalView | undefined {
+  private selectedGoal(projection: CommandCentreProjection): GoalView | undefined {
     if (!this.selected || this.selected.type !== "goal") return undefined;
     return projection.goals.find((goal) => goal.id === this.selected?.id);
   }
 
-  private selectedSession(
-    projection: CommandCentreProjection,
-  ): SessionView | undefined {
+  private selectedSession(projection: CommandCentreProjection): SessionView | undefined {
     if (!this.selected || this.selected.type !== "session") return undefined;
     for (const goal of projection.goals) {
-      const session = goal.sessions.find(
-        (candidate) => candidate.id === this.selected?.id,
-      );
+      const session = goal.sessions.find((candidate) => candidate.id === this.selected?.id);
       if (session) return session;
     }
-    return projection.unassigned.find(
-      (session) => session.id === this.selected?.id,
-    );
+    return projection.unassigned.find((session) => session.id === this.selected?.id);
   }
 
   private inspector(): InspectorProjection {
@@ -483,16 +446,10 @@ export class CommandCentreApp {
     } else {
       this.drawList(buffer, layout.list, projection, rows);
       if (this.inspectorVisible)
-        this.drawFloatingInspector(
-          buffer,
-          layout.list,
-          this.floatingInspector(),
-          undefined,
-        );
+        this.drawFloatingInspector(buffer, layout.list, this.floatingInspector(), undefined);
     }
     this.drawFooter(buffer, layout.footer, projection);
-    if (this.searchActive || this.modal)
-      this.drawOverlay(buffer, width, height, projection);
+    if (this.searchActive || this.modal) this.drawOverlay(buffer, width, height, projection);
     if (this.diagnosticsVisible && width >= 110 && height >= 18) {
       const stats = this.renderer.getStats();
       this.text(
@@ -517,19 +474,8 @@ export class CommandCentreApp {
       ? `${host.hostKind} ${host.status}${host.diagnosticCount > 0 ? ` · diag ${host.diagnosticCount}` : ""}`
       : "herdr not observed";
     const counts = `${countLabel(projection.counts.goals, "goal")} · ${countLabel(projection.counts.sessions, "session")} · ${projection.counts.unassigned} inbox`;
-    const title =
-      host?.hostKind === "mock"
-        ? "AO  MOCK AGENT UNIVERSE"
-        : "AO  LIVE HERDR UNIVERSE";
-    this.text(
-      buffer,
-      title,
-      rect.x + 2,
-      rect.y,
-      COLORS.white,
-      COLORS.panel,
-      TextAttributes.BOLD,
-    );
+    const title = host?.hostKind === "mock" ? "OBSERVATORY  MOCK" : "OBSERVATORY  HERDR";
+    this.text(buffer, title, rect.x + 2, rect.y, COLORS.white, COLORS.panel, TextAttributes.BOLD);
     this.textRight(
       buffer,
       `${hostLabel} · ${counts}`,
@@ -560,12 +506,8 @@ export class CommandCentreApp {
     deltaTime: number,
   ): void {
     this.panel(buffer, rect, COLORS.panelRaised, COLORS.border);
-    const current = projection.attention.items.find(
-      (item) => item.requiresHumanInput,
-    );
-    const uncertainty = projection.attention.items.find(
-      (item) => !item.requiresHumanInput,
-    );
+    const current = projection.attention.items.find((item) => item.requiresHumanInput);
+    const uncertainty = projection.attention.items.find((item) => !item.requiresHumanInput);
     if (current) {
       const session = this.findSession(projection, current.sessionId);
       const text = `ATTENTION ! ${session?.displayName ?? current.targetId} · ${current.reason} · waiting ${formatAge(current.ageMs)} · ${current.explanation}`;
@@ -604,11 +546,7 @@ export class CommandCentreApp {
     }
   }
 
-  private drawMap(
-    buffer: OptimizedBuffer,
-    rect: Rect,
-    projection: UniverseMapProjection,
-  ): void {
+  private drawMap(buffer: OptimizedBuffer, rect: Rect, projection: UniverseMapProjection): void {
     this.panel(buffer, rect, COLORS.background, COLORS.border);
     if (rect.width < 8 || rect.height < 5) return;
 
@@ -627,9 +565,7 @@ export class CommandCentreApp {
     const attentionLens = this.mapLens === "attention";
     const focusInbox = this.mapLens === "inbox";
     const visibleSessions = (goal: MapGoalView): readonly MapSessionView[] =>
-      attentionLens
-        ? goal.sessions.filter((session) => session.attention)
-        : goal.sessions;
+      attentionLens ? goal.sessions.filter((session) => session.attention) : goal.sessions;
     const visibleUnassigned = attentionLens
       ? projection.unassigned.filter((session) => session.attention)
       : projection.unassigned;
@@ -680,10 +616,7 @@ export class CommandCentreApp {
         this.mapLens === "inbox") &&
       visibleUnassigned.length > 0 &&
       !compactInbox
-        ? [
-            projection.inboxPosition,
-            ...visibleUnassigned.map((session) => session.mapPosition),
-          ]
+        ? [projection.inboxPosition, ...visibleUnassigned.map((session) => session.mapPosition)]
         : []),
     ];
     if (this.mapFitPending && mapPoints.length > 0) {
@@ -721,23 +654,13 @@ export class CommandCentreApp {
     );
 
     const worldToScreen = (point: MapPosition): MapPosition =>
-      screenPointForWorld(
-        point,
-        { center: this.mapCenter, zoom: this.mapZoom },
-        mapSurface,
-        { x: this.mapScaleX, y: this.mapScaleY },
-      );
+      screenPointForWorld(point, { center: this.mapCenter, zoom: this.mapZoom }, mapSurface, {
+        x: this.mapScaleX,
+        y: this.mapScaleY,
+      });
 
-    for (
-      let x = mapSurface.x + 4;
-      x < mapSurface.x + mapSurface.width - 1;
-      x += 12
-    ) {
-      for (
-        let y = mapSurface.y + 2;
-        y < mapSurface.y + mapSurface.height - 1;
-        y += 4
-      )
+    for (let x = mapSurface.x + 4; x < mapSurface.x + mapSurface.width - 1; x += 12) {
+      for (let y = mapSurface.y + 2; y < mapSurface.y + mapSurface.height - 1; y += 4)
         this.cell(buffer, x, y, "·", COLORS.faint, COLORS.background);
     }
 
@@ -757,22 +680,13 @@ export class CommandCentreApp {
       const goalPoint = worldToScreen(goal.mapPosition);
       for (const session of visibleSessions(goal)) {
         const sessionPoint = worldToScreen(session.mapPosition);
-        this.drawMapLink(
-          buffer,
-          goalPoint,
-          sessionPoint,
-          mapSurface,
-          goal,
-          session,
-        );
+        this.drawMapLink(buffer, goalPoint, sessionPoint, mapSurface, goal, session);
       }
     }
     if (compactInbox) {
       this.drawCompactInbox(buffer, map, visibleUnassigned, attentionLens);
     } else if (
-      (this.mapLens === "portfolio" ||
-        attentionLens ||
-        this.mapLens === "inbox") &&
+      (this.mapLens === "portfolio" || attentionLens || this.mapLens === "inbox") &&
       visibleUnassigned.length > 0
     ) {
       const inboxPoint = worldToScreen(projection.inboxPosition);
@@ -789,18 +703,10 @@ export class CommandCentreApp {
     }
     for (const goal of goals) {
       for (const session of visibleSessions(goal))
-        this.drawMapSession(
-          buffer,
-          mapSurface,
-          worldToScreen(session.mapPosition),
-          goal,
-          session,
-        );
+        this.drawMapSession(buffer, mapSurface, worldToScreen(session.mapPosition), goal, session);
     }
     if (
-      (this.mapLens === "portfolio" ||
-        attentionLens ||
-        this.mapLens === "inbox") &&
+      (this.mapLens === "portfolio" || attentionLens || this.mapLens === "inbox") &&
       !compactInbox
     )
       for (const session of visibleUnassigned)
@@ -812,19 +718,9 @@ export class CommandCentreApp {
           session,
         );
     for (const goal of goals)
-      this.drawMapGoal(
-        buffer,
-        mapSurface,
-        worldToScreen(goal.mapPosition),
-        goal,
-        attentionLens,
-      );
+      this.drawMapGoal(buffer, mapSurface, worldToScreen(goal.mapPosition), goal, attentionLens);
 
-    if (
-      attentionLens &&
-      projection.counts.attention === 0 &&
-      projection.counts.uncertainty === 0
-    )
+    if (attentionLens && projection.counts.attention === 0 && projection.counts.uncertainty === 0)
       this.text(
         buffer,
         "No current attention — press A to return to the portfolio map.",
@@ -877,9 +773,8 @@ export class CommandCentreApp {
     let x0 = Math.round(from.x);
     let y0 = Math.round(from.y);
     if (x0 === x1 && y0 === y1) return;
-    const selected =
-      this.selected?.type === "session" && this.selected.id === session.id;
-    const color = session.attention
+    const selected = this.selected?.type === "session" && this.selected.id === session.id;
+    const linkColor = session.attention
       ? session.attention.requiresHumanInput
         ? session.runtimeState === "blocked"
           ? COLORS.red
@@ -895,13 +790,8 @@ export class CommandCentreApp {
     // gaps produced by interpolating and rounding every step.
     const glyph = "•";
     const paint = (x: number, y: number): void => {
-      if (
-        x >= map.x &&
-        x < map.x + map.width &&
-        y >= map.y &&
-        y < map.y + map.height
-      )
-        this.cell(buffer, x, y, glyph, color, COLORS.background);
+      if (x >= map.x && x < map.x + map.width && y >= map.y && y < map.y + map.height)
+        this.cell(buffer, x, y, glyph, linkColor, COLORS.background);
     };
     const deltaX = Math.abs(x1 - x0);
     const stepX = x0 < x1 ? 1 : -1;
@@ -1019,8 +909,7 @@ export class CommandCentreApp {
       if (column >= columns) break;
       const x = panel.x + 2 + column * columnWidth;
       const y = panel.y + 1 + row;
-      const selected =
-        this.selected?.type === "session" && this.selected.id === session.id;
+      const selected = this.selected?.type === "session" && this.selected.id === session.id;
       const glyph = statusGlyph(session);
       const label = `${glyph === " " ? "·" : glyph} ${shorten(session.displayName, columnWidth - 4)}`;
       this.text(
@@ -1056,8 +945,7 @@ export class CommandCentreApp {
     goal: MapGoalView,
     attentionLens = false,
   ): void {
-    const selected =
-      this.selected?.type === "goal" && this.selected.id === goal.id;
+    const selected = this.selected?.type === "goal" && this.selected.id === goal.id;
     const selectedSession =
       this.selected?.type === "session" &&
       goal.sessions.some((session) => session.id === this.selected?.id);
@@ -1079,8 +967,7 @@ export class CommandCentreApp {
       level === "detail"
         ? wrap(fullTitle, Math.max(8, titleBudget - 2)).slice(0, 2)
         : [shorten(fullTitle, titleBudget)];
-    const titleRadius =
-      Math.ceil(Math.max(...titleLines.map((line) => line.length), 1) / 2) + 1;
+    const titleRadius = Math.ceil(Math.max(...titleLines.map((line) => line.length), 1) / 2) + 1;
     const loadRadius = Math.round(goal.radiusX * 0.86 * zoom);
     const radiusX = clamp(
       Math.max(loadRadius, titleRadius),
@@ -1121,9 +1008,7 @@ export class CommandCentreApp {
           ? COLORS.faint
           : this.priorityColor(goal.priority);
     const background =
-      muted || goal.status === "completed"
-        ? COLORS.background
-        : COLORS.panelRaised;
+      muted || goal.status === "completed" ? COLORS.background : COLORS.panelRaised;
     this.roundedPanel(buffer, bounds, background, border);
     this.hitTargets.push({
       type: "goal",
@@ -1140,14 +1025,7 @@ export class CommandCentreApp {
       : goal.status === "completed"
         ? COLORS.completed
         : family;
-    this.cell(
-      buffer,
-      point.x,
-      point.y - radiusY + 1,
-      "◎",
-      coreColor,
-      background,
-    );
+    this.cell(buffer, point.x, point.y - radiusY + 1, "◎", coreColor, background);
     const titleY = point.y - (titleLines.length > 1 ? 1 : 0);
     for (const [index, title] of titleLines.entries())
       this.textCentered(
@@ -1192,15 +1070,7 @@ export class CommandCentreApp {
       );
     }
     if (goal.staleCount > 0)
-      this.cell(
-        buffer,
-        bounds.x,
-        bounds.y,
-        "?",
-        COLORS.yellow,
-        background,
-        TextAttributes.BOLD,
-      );
+      this.cell(buffer, bounds.x, bounds.y, "?", COLORS.yellow, background, TextAttributes.BOLD);
     if (goal.status === "completed")
       this.cell(
         buffer,
@@ -1219,8 +1089,7 @@ export class CommandCentreApp {
     goal: MapGoalView | undefined,
     session: MapSessionView,
   ): void {
-    const selected =
-      this.selected?.type === "session" && this.selected.id === session.id;
+    const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const inboxSession = goal === undefined;
     const attention = session.attention !== undefined;
     const level = semanticZoomLevel({
@@ -1229,11 +1098,7 @@ export class CommandCentreApp {
       selected,
       attention,
     });
-    const labelWidth = sessionLabelBudget(
-      level,
-      this.renderer.width,
-      inboxSession,
-    );
+    const labelWidth = sessionLabelBudget(level, this.renderer.width, inboxSession);
     const marker = statusGlyph(session);
     const titleLines =
       level === "detail"
@@ -1243,9 +1108,7 @@ export class CommandCentreApp {
       index === 0 ? `${marker} ${title}` : title,
     );
     if (level === "detail" && session.attention)
-      labelLines.push(
-        `${session.attention.reason} ${formatAge(session.attention.ageMs)}`,
-      );
+      labelLines.push(`${session.attention.reason} ${formatAge(session.attention.ageMs)}`);
     const contentWidth = Math.max(3, ...labelLines.map((line) => line.length));
     const radiusX = clamp(
       Math.ceil(contentWidth / 2) + 1,
@@ -1322,11 +1185,8 @@ export class CommandCentreApp {
     anchor: MapHitTarget | undefined,
   ): void {
     const inboxCard =
-      projection.kind === "empty-inspector" &&
-      !this.selected &&
-      this.mapLens === "inbox";
-    if (projection.kind === "empty-inspector" && !this.selected && !inboxCard)
-      return;
+      projection.kind === "empty-inspector" && !this.selected && this.mapLens === "inbox";
+    if (projection.kind === "empty-inspector" && !this.selected && !inboxCard) return;
     if (rect.width < 20 || rect.height < 6) return;
 
     const title = inboxCard
@@ -1341,9 +1201,7 @@ export class CommandCentreApp {
       inboxCard ? 34 : projection.kind === "session-inspector" ? 46 : 38,
     );
     const contentWidth = Math.max(1, width - 4);
-    const wrappedLines = projection.lines.flatMap((line) =>
-      wrap(line, contentWidth),
-    );
+    const wrappedLines = projection.lines.flatMap((line) => wrap(line, contentWidth));
     const maxHeight = Math.min(13, rect.height - 2);
     const visibleLines = wrappedLines.slice(0, Math.max(1, maxHeight - 3));
     const height = Math.min(maxHeight, Math.max(4, visibleLines.length + 3));
@@ -1389,9 +1247,7 @@ export class CommandCentreApp {
         line,
         panel.x + 2,
         y,
-        line.startsWith("why") || line.startsWith("waiting")
-          ? COLORS.orange
-          : COLORS.muted,
+        line.startsWith("why") || line.startsWith("waiting") ? COLORS.orange : COLORS.muted,
         COLORS.panelRaised,
       );
       y += 1;
@@ -1446,9 +1302,7 @@ export class CommandCentreApp {
         continue;
       }
       if (row.type === "goal") {
-        const goal = projection.goals.find(
-          (candidate) => candidate.id === row.id,
-        );
+        const goal = projection.goals.find((candidate) => candidate.id === row.id);
         if (goal) this.drawGoalRow(buffer, rect, y, goal);
       } else {
         const session = this.findSession(projection, row.id);
@@ -1467,14 +1321,8 @@ export class CommandCentreApp {
     }
   }
 
-  private drawGoalRow(
-    buffer: OptimizedBuffer,
-    rect: Rect,
-    y: number,
-    goal: GoalView,
-  ): void {
-    const selected =
-      this.selected?.type === "goal" && this.selected.id === goal.id;
+  private drawGoalRow(buffer: OptimizedBuffer, rect: Rect, y: number, goal: GoalView): void {
+    const selected = this.selected?.type === "goal" && this.selected.id === goal.id;
     const marker = selected ? ">" : " ";
     const expand = this.expandedGoals.has(goal.id) ? "▾" : "▸";
     const attention =
@@ -1484,11 +1332,7 @@ export class CommandCentreApp {
           ? ` ?${goal.staleCount}`
           : "";
     const lifecycle =
-      goal.status === "completed"
-        ? " done"
-        : goal.status === "archived"
-          ? " archived"
-          : "";
+      goal.status === "completed" ? " done" : goal.status === "archived" ? " archived" : "";
     const value = `${marker}${expand} [${goal.priority}] ${goal.title}${attention}${lifecycle}`;
     const foreground = selected
       ? COLORS.selected
@@ -1512,8 +1356,7 @@ export class CommandCentreApp {
     y: number,
     session: SessionView,
   ): void {
-    const selected =
-      this.selected?.type === "session" && this.selected.id === session.id;
+    const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const prefix = selected ? "  >" : "   ";
     const goal = session.goalTitle ? "↳" : "·";
     const label = `${prefix}${goal} [${statusGlyph(session)}] ${session.displayName} · ${session.runtimeState}${session.hostHealth === "live" ? "" : `/${session.hostHealth}`}`;
@@ -1567,10 +1410,7 @@ export class CommandCentreApp {
     height: number,
     projection: CommandCentreProjection,
   ): void {
-    const overlayWidth = Math.min(
-      width - 4,
-      Math.max(42, Math.floor(width * 0.76)),
-    );
+    const overlayWidth = Math.min(width - 4, Math.max(42, Math.floor(width * 0.76)));
     const overlayHeight = Math.min(
       height - 4,
       this.modal?.kind === "create-goal"
@@ -1588,21 +1428,14 @@ export class CommandCentreApp {
     if (this.searchActive) {
       this.text(
         buffer,
-        "SEARCH AO METADATA",
+        "SEARCH OBSERVATORY METADATA",
         x + 2,
         y + 1,
         COLORS.cyan,
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      this.text(
-        buffer,
-        `/${this.searchQuery}_`,
-        x + 2,
-        y + 3,
-        COLORS.white,
-        COLORS.panelRaised,
-      );
+      this.text(buffer, `/${this.searchQuery}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
       const search = this.options.universe.project({
         kind: "search",
         query: this.searchQuery,
@@ -1686,14 +1519,7 @@ export class CommandCentreApp {
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      this.text(
-        buffer,
-        `${modal.value}_`,
-        x + 2,
-        y + 3,
-        COLORS.white,
-        COLORS.panelRaised,
-      );
+      this.text(buffer, `${modal.value}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
       this.text(
         buffer,
         "Enter save · Esc cancel",
@@ -1714,9 +1540,7 @@ export class CommandCentreApp {
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      const goals = projection.goals.filter(
-        (goal) => goal.status !== "archived",
-      );
+      const goals = projection.goals.filter((goal) => goal.status !== "archived");
       if (goals.length === 0)
         this.text(
           buffer,
@@ -1804,10 +1628,7 @@ export class CommandCentreApp {
     const command =
       key.shift && (key.name === "u" || key.name === "d")
         ? key.name.toUpperCase()
-        : key.name === "up" ||
-            key.name === "down" ||
-            key.name === "enter" ||
-            key.name === "return"
+        : key.name === "up" || key.name === "down" || key.name === "enter" || key.name === "return"
           ? key.name
           : key.sequence || key.name;
     switch (command) {
@@ -1912,19 +1733,14 @@ export class CommandCentreApp {
         this.smokeSuspendResume();
         return;
       case "?":
-        this.lastAction =
-          "? help is shown in the command footer; Esc closes dialogs";
+        this.lastAction = "? help is shown in the command footer; Esc closes dialogs";
         return;
       case "enter":
       case "return":
         void this.attachSelected();
         return;
       case "escape":
-        if (
-          this.mapLens === "goal" ||
-          this.mapLens === "attention" ||
-          this.mapLens === "inbox"
-        ) {
+        if (this.mapLens === "goal" || this.mapLens === "attention" || this.mapLens === "inbox") {
           this.mapLens = "portfolio";
           this.focusGoalId = undefined;
           this.resetMapView();
@@ -1996,9 +1812,7 @@ export class CommandCentreApp {
     }
   }
 
-  private selectSearchResult(
-    projection: ReturnType<Universe["project"]>,
-  ): void {
+  private selectSearchResult(projection: ReturnType<Universe["project"]>): void {
     if (projection.kind !== "search") return;
     const result = projection.results[this.searchIndex];
     if (!result) return;
@@ -2006,9 +1820,7 @@ export class CommandCentreApp {
     this.inspectorVisible = true;
     this.viewMode = "map";
     const goalId =
-      result.type === "goal"
-        ? result.id
-        : (result.goalId ?? this.selectedGoalForSession()?.id);
+      result.type === "goal" ? result.id : (result.goalId ?? this.selectedGoalForSession()?.id);
     if (goalId) {
       this.focusGoal(goalId);
     } else if (result.type === "session") {
@@ -2044,9 +1856,7 @@ export class CommandCentreApp {
     }
     if (modal.kind === "goal-picker") {
       const projection = this.projection();
-      const goals = projection.goals.filter(
-        (goal) => goal.status !== "archived",
-      );
+      const goals = projection.goals.filter((goal) => goal.status !== "archived");
       if (key.name === "j" || key.name === "down")
         this.modal = {
           ...modal,
@@ -2088,10 +1898,7 @@ export class CommandCentreApp {
         }
         return;
       }
-      if (
-        modal.field === 2 &&
-        (key.name === "j" || key.name === "k" || /^[0-3]$/.test(key.name))
-      ) {
+      if (modal.field === 2 && (key.name === "j" || key.name === "k" || /^[0-3]$/.test(key.name))) {
         const current = priorityRank(modal.priority);
         const next = /^[0-3]$/.test(key.name)
           ? Number(key.name)
@@ -2103,13 +1910,11 @@ export class CommandCentreApp {
       }
       const character = typedCharacter(key);
       if (character) {
-        if (modal.field === 0)
-          this.modal = { ...modal, title: modal.title + character };
+        if (modal.field === 0) this.modal = { ...modal, title: modal.title + character };
         if (modal.field === 1)
           this.modal = { ...modal, description: modal.description + character };
       } else if (isEraseKey(key)) {
-        if (modal.field === 0)
-          this.modal = { ...modal, title: modal.title.slice(0, -1) };
+        if (modal.field === 0) this.modal = { ...modal, title: modal.title.slice(0, -1) };
         if (modal.field === 1)
           this.modal = {
             ...modal,
@@ -2149,8 +1954,7 @@ export class CommandCentreApp {
       }
       const character = typedCharacter(key);
       if (character) this.modal = { ...modal, value: modal.value + character };
-      else if (isEraseKey(key))
-        this.modal = { ...modal, value: modal.value.slice(0, -1) };
+      else if (isEraseKey(key)) this.modal = { ...modal, value: modal.value.slice(0, -1) };
     }
   }
 
@@ -2160,18 +1964,13 @@ export class CommandCentreApp {
       (row): row is Selection => row.type === "goal" || row.type === "session",
     );
     if (rows.length === 0) {
-      this.lastAction =
-        "No accepted goals or sessions. Press n to create a goal.";
+      this.lastAction = "No accepted goals or sessions. Press n to create a goal.";
       return;
     }
     const currentIndex = this.selected
-      ? rows.findIndex(
-          (row) =>
-            row.type === this.selected?.type && row.id === this.selected.id,
-        )
+      ? rows.findIndex((row) => row.type === this.selected?.type && row.id === this.selected.id)
       : 0;
-    const nextIndex =
-      (Math.max(0, currentIndex) + direction + rows.length) % rows.length;
+    const nextIndex = (Math.max(0, currentIndex) + direction + rows.length) % rows.length;
     const next = rows[nextIndex];
     if (next) {
       this.selected = { type: next.type, id: next.id };
@@ -2202,9 +2001,7 @@ export class CommandCentreApp {
   }
 
   private jumpToAttention(): void {
-    const items = this.projection().attention.items.filter(
-      (item) => item.sessionId,
-    );
+    const items = this.projection().attention.items.filter((item) => item.sessionId);
     if (items.length === 0) {
       this.lastAction = "No attention items.";
       return;
@@ -2243,8 +2040,7 @@ export class CommandCentreApp {
 
   private toggleExpansion(): void {
     if (!this.selected || this.selected.type !== "goal") return;
-    if (this.expandedGoals.has(this.selected.id))
-      this.expandedGoals.delete(this.selected.id);
+    if (this.expandedGoals.has(this.selected.id)) this.expandedGoals.delete(this.selected.id);
     else this.expandedGoals.add(this.selected.id);
     this.lastAction = `${this.expandedGoals.has(this.selected.id) ? "expanded" : "collapsed"} goal`;
   }
@@ -2259,9 +2055,7 @@ export class CommandCentreApp {
     if (!goal) {
       const selectedUnassigned =
         this.selected?.type === "session" &&
-        projection.unassigned.some(
-          (session) => session.id === this.selected?.id,
-        );
+        projection.unassigned.some((session) => session.id === this.selected?.id);
       if (selectedUnassigned) {
         if (this.mapLens === "inbox") {
           this.mapLens = "portfolio";
@@ -2282,9 +2076,7 @@ export class CommandCentreApp {
   }
 
   private focusGoal(goalId: string): void {
-    const goal = this.mapProjection().goals.find(
-      (candidate) => candidate.id === goalId,
-    );
+    const goal = this.mapProjection().goals.find((candidate) => candidate.id === goalId);
     if (!goal) {
       this.lastAction = "Goal is no longer visible.";
       return;
@@ -2326,8 +2118,7 @@ export class CommandCentreApp {
 
   private goalPosition(goalId: string): MapPosition {
     return (
-      this.mapProjection().goals.find((goal) => goal.id === goalId)
-        ?.mapPosition ?? {
+      this.mapProjection().goals.find((goal) => goal.id === goalId)?.mapPosition ?? {
         x: 0,
         y: 0,
       }
@@ -2354,12 +2145,7 @@ export class CommandCentreApp {
     this.renderer.requestRender();
   }
 
-  private zoomMap(
-    factor: number,
-    anchorX?: number,
-    anchorY?: number,
-    source = "zoom",
-  ): void {
+  private zoomMap(factor: number, anchorX?: number, anchorY?: number, source = "zoom"): void {
     if (this.viewMode !== "map") return;
     this.mapFitPending = false;
     const map = this.mapRect;
@@ -2445,8 +2231,7 @@ export class CommandCentreApp {
       this.lastAction = "Select a goal to set priority.";
       return;
     }
-    const next =
-      PRIORITIES[(priorityRank(goal.priority) + 1) % PRIORITIES.length] ?? "P2";
+    const next = PRIORITIES[(priorityRank(goal.priority) + 1) % PRIORITIES.length] ?? "P2";
     this.runCommand({
       type: "SetGoalPriority",
       goalId: goal.id,
@@ -2462,9 +2247,7 @@ export class CommandCentreApp {
     }
     const projection = this.projection();
     const goals = projection.goals.filter((goal) => goal.status !== "archived");
-    const current = goals.findIndex(
-      (goal) => goal.id === session.primaryGoalId,
-    );
+    const current = goals.findIndex((goal) => goal.id === session.primaryGoalId);
     this.modal = {
       kind: "goal-picker",
       sessionId: session.id,
@@ -2609,23 +2392,14 @@ export class CommandCentreApp {
         : undefined;
     }
     return this.hitTargets.find(
-      (target) =>
-        target.type === this.selected?.type && target.id === this.selected.id,
+      (target) => target.type === this.selected?.type && target.id === this.selected.id,
     );
   }
 
   private handleMouseDown(event: MouseEvent): void {
-    if (
-      event.button !== 0 ||
-      !this.mapRect ||
-      !this.inRect(event.x, event.y, this.mapRect)
-    )
-      return;
+    if (event.button !== 0 || !this.mapRect || !this.inRect(event.x, event.y, this.mapRect)) return;
     event.preventDefault();
-    if (
-      this.floatingInspectorRect &&
-      this.inRect(event.x, event.y, this.floatingInspectorRect)
-    )
+    if (this.floatingInspectorRect && this.inRect(event.x, event.y, this.floatingInspectorRect))
       return;
     const target = this.nearestHit(event.x, event.y);
     this.dragState =
@@ -2648,10 +2422,7 @@ export class CommandCentreApp {
             clickTarget: target?.type === "inbox" ? "inbox" : undefined,
           };
     if (!target) return;
-    this.selected =
-      target.type === "inbox"
-        ? undefined
-        : { type: target.type, id: target.id };
+    this.selected = target.type === "inbox" ? undefined : { type: target.type, id: target.id };
     this.inspectorVisible = true;
     this.searchActive = false;
     this.searchQuery = "";
@@ -2662,10 +2433,8 @@ export class CommandCentreApp {
   private handleMouseDrag(event: MouseEvent): void {
     const state = this.dragState;
     if (!state || !this.mapRect || this.viewMode !== "map") return;
-    const deltaX =
-      event.x - (state.kind === "goal" ? state.startX : state.lastX);
-    const deltaY =
-      event.y - (state.kind === "goal" ? state.startY : state.lastY);
+    const deltaX = event.x - (state.kind === "goal" ? state.startX : state.lastX);
+    const deltaY = event.y - (state.kind === "goal" ? state.startY : state.lastY);
     if (deltaX === 0 && deltaY === 0) return;
     if (state.kind === "goal") {
       const result = this.options.universe.execute({
@@ -2750,12 +2519,7 @@ export class CommandCentreApp {
   }
 
   private inRect(x: number, y: number, rect: Rect): boolean {
-    return (
-      x >= rect.x &&
-      x < rect.x + rect.width &&
-      y >= rect.y &&
-      y < rect.y + rect.height
-    );
+    return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
   }
 
   private smokeSuspendResume(): void {
@@ -2800,8 +2564,7 @@ export class CommandCentreApp {
   private goalFamilyColor(goalId: string): RGBA {
     const colors = [COLORS.cyan, COLORS.green, COLORS.yellow, COLORS.orange];
     let hash = 0;
-    for (const character of goalId)
-      hash = (hash * 31 + character.charCodeAt(0)) | 0;
+    for (const character of goalId) hash = (hash * 31 + character.charCodeAt(0)) | 0;
     return colors[Math.abs(hash) % colors.length] ?? COLORS.cyan;
   }
 
@@ -2825,27 +2588,14 @@ export class CommandCentreApp {
     );
   }
 
-  private roundedPanel(
-    buffer: OptimizedBuffer,
-    rect: Rect,
-    background: RGBA,
-    border: RGBA,
-  ): void {
+  private roundedPanel(buffer: OptimizedBuffer, rect: Rect, background: RGBA, border: RGBA): void {
     if (rect.width <= 0 || rect.height <= 0) return;
     buffer.fillRect(rect.x, rect.y, rect.width, rect.height, background);
     if (rect.width === 1 || rect.height === 1) {
       this.cell(buffer, rect.x, rect.y, "·", border, background);
       return;
     }
-    this.hline(
-      buffer,
-      rect.x + 1,
-      rect.y,
-      rect.width - 2,
-      "─",
-      border,
-      background,
-    );
+    this.hline(buffer, rect.x + 1, rect.y, rect.width - 2, "─", border, background);
     this.hline(
       buffer,
       rect.x + 1,
@@ -2861,42 +2611,15 @@ export class CommandCentreApp {
     }
     this.cell(buffer, rect.x, rect.y, "╭", border, background);
     this.cell(buffer, rect.x + rect.width - 1, rect.y, "╮", border, background);
-    this.cell(
-      buffer,
-      rect.x,
-      rect.y + rect.height - 1,
-      "╰",
-      border,
-      background,
-    );
-    this.cell(
-      buffer,
-      rect.x + rect.width - 1,
-      rect.y + rect.height - 1,
-      "╯",
-      border,
-      background,
-    );
+    this.cell(buffer, rect.x, rect.y + rect.height - 1, "╰", border, background);
+    this.cell(buffer, rect.x + rect.width - 1, rect.y + rect.height - 1, "╯", border, background);
   }
 
-  private panel(
-    buffer: OptimizedBuffer,
-    rect: Rect,
-    background: RGBA,
-    border: RGBA,
-  ): void {
+  private panel(buffer: OptimizedBuffer, rect: Rect, background: RGBA, border: RGBA): void {
     if (rect.width <= 0 || rect.height <= 0) return;
     buffer.fillRect(rect.x, rect.y, rect.width, rect.height, background);
     if (rect.width < 2 || rect.height < 2) return;
-    this.hline(
-      buffer,
-      rect.x + 1,
-      rect.y,
-      rect.width - 2,
-      "─",
-      border,
-      background,
-    );
+    this.hline(buffer, rect.x + 1, rect.y, rect.width - 2, "─", border, background);
     this.hline(
       buffer,
       rect.x + 1,
@@ -2912,22 +2635,8 @@ export class CommandCentreApp {
     }
     this.cell(buffer, rect.x, rect.y, "╭", border, background);
     this.cell(buffer, rect.x + rect.width - 1, rect.y, "╮", border, background);
-    this.cell(
-      buffer,
-      rect.x,
-      rect.y + rect.height - 1,
-      "╰",
-      border,
-      background,
-    );
-    this.cell(
-      buffer,
-      rect.x + rect.width - 1,
-      rect.y + rect.height - 1,
-      "╯",
-      border,
-      background,
-    );
+    this.cell(buffer, rect.x, rect.y + rect.height - 1, "╰", border, background);
+    this.cell(buffer, rect.x + rect.width - 1, rect.y + rect.height - 1, "╯", border, background);
   }
 
   private hline(
@@ -2952,8 +2661,7 @@ export class CommandCentreApp {
     background: RGBA,
     attributes = TextAttributes.NONE,
   ): void {
-    if (x < 0 || y < 0 || x >= this.renderer.width || y >= this.renderer.height)
-      return;
+    if (x < 0 || y < 0 || x >= this.renderer.width || y >= this.renderer.height) return;
     buffer.setCell(x, y, glyph, foreground, background, attributes);
   }
 

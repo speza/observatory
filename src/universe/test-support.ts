@@ -35,7 +35,7 @@ export class MemoryStore implements UniverseStore {
   }
 
   load(): UniverseState {
-    return structuredClone(this.state) as UniverseState;
+    return structuredClone(this.state);
   }
 
   save(state: UniverseState): void {
@@ -43,14 +43,12 @@ export class MemoryStore implements UniverseStore {
       this.failNextSave = false;
       throw new Error("injected persistence failure");
     }
-    this.state = structuredClone(state) as UniverseState;
+    this.state = structuredClone(state);
     this.saves += 1;
   }
 }
 
-export const makeUniverse = <
-  TStore extends UniverseStore = MemoryStore,
->(options?: {
+export const makeUniverse = <TStore extends UniverseStore = MemoryStore>(options?: {
   readonly state?: UniverseState;
   readonly clock?: FixedClock;
   readonly store?: TStore;
@@ -62,12 +60,7 @@ export const makeUniverse = <
   const store = (options?.store ?? new MemoryStore(options?.state)) as TStore;
   const clock = options?.clock ?? new FixedClock(1_000_000);
   return {
-    universe: new Universe(
-      store,
-      clock,
-      new SequenceIds(),
-      createProjectionModule(),
-    ),
+    universe: new Universe(store, clock, new SequenceIds(), createProjectionModule()),
     store,
     clock,
   };

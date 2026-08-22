@@ -55,13 +55,9 @@ interface HostRow {
 }
 
 const asPriority = (value: string): Goal["priority"] =>
-  value === "P0" || value === "P1" || value === "P2" || value === "P3"
-    ? value
-    : "P2";
+  value === "P0" || value === "P1" || value === "P2" || value === "P3" ? value : "P2";
 const asGoalStatus = (value: string): Goal["status"] =>
-  value === "active" || value === "completed" || value === "archived"
-    ? value
-    : "active";
+  value === "active" || value === "completed" || value === "archived" ? value : "active";
 const asRuntimeState = (value: string): TrackedSession["runtimeState"] =>
   value === "idle" ||
   value === "working" ||
@@ -72,9 +68,7 @@ const asRuntimeState = (value: string): TrackedSession["runtimeState"] =>
     ? value
     : "unknown";
 const asHealth = (value: string): TrackedSession["hostHealth"] =>
-  value === "live" || value === "stale" || value === "unavailable"
-    ? value
-    : "stale";
+  value === "live" || value === "stale" || value === "unavailable" ? value : "stale";
 const asSource = (value: string): TrackedSession["displayNameSource"] =>
   value === "human" ? "human" : "host";
 
@@ -89,12 +83,10 @@ export class SqliteUniverseStore implements UniverseStore {
   }
 
   load(): UniverseState {
-    const goals = (
-      this.db
-        .query("SELECT * FROM goals ORDER BY created_at, id")
-        .all() as GoalRow[]
-    ).map(
-      (row): Goal => ({
+    const goals = this.db
+      .query<GoalRow, []>("SELECT * FROM goals ORDER BY created_at, id")
+      .all()
+      .map((row): Goal => ({
         id: row.id,
         title: row.title,
         ...(row.description ? { description: row.description } : {}),
@@ -110,14 +102,11 @@ export class SqliteUniverseStore implements UniverseStore {
               mapPositionPinned: row.map_pinned !== 0,
             }
           : {}),
-      }),
-    );
-    const sessions = (
-      this.db
-        .query("SELECT * FROM sessions ORDER BY display_name, id")
-        .all() as SessionRow[]
-    ).map(
-      (row): TrackedSession => ({
+      }));
+    const sessions = this.db
+      .query<SessionRow, []>("SELECT * FROM sessions ORDER BY display_name, id")
+      .all()
+      .map((row): TrackedSession => ({
         id: row.id,
         hostKind: row.host_kind,
         nativeId: row.native_id,
@@ -131,40 +120,29 @@ export class SqliteUniverseStore implements UniverseStore {
         lastSeenAt: row.last_seen_at,
         lastObservedAt: row.last_observed_at,
         lastChangedAt: row.last_changed_at,
-        ...(row.attention_since !== null
-          ? { attentionSince: row.attention_since }
-          : {}),
+        ...(row.attention_since !== null ? { attentionSince: row.attention_since } : {}),
         ...(row.repository ? { repository: row.repository } : {}),
         ...(row.branch ? { branch: row.branch } : {}),
         ...(row.worktree ? { worktree: row.worktree } : {}),
         ...(row.provider ? { provider: row.provider } : {}),
         hostLocator: row.host_locator,
-      }),
-    );
-    const hosts = (
-      this.db.query("SELECT * FROM hosts ORDER BY host_kind").all() as HostRow[]
-    ).map(
-      (row): HostHealth => ({
+      }));
+    const hosts = this.db
+      .query<HostRow, []>("SELECT * FROM hosts ORDER BY host_kind")
+      .all()
+      .map((row): HostHealth => ({
         hostKind: row.host_kind,
-        status:
-          row.status === "live" || row.status === "unavailable"
-            ? row.status
-            : "stale",
-        ...(row.last_observed_at !== null
-          ? { lastObservedAt: row.last_observed_at }
-          : {}),
+        status: row.status === "live" || row.status === "unavailable" ? row.status : "stale",
+        ...(row.last_observed_at !== null ? { lastObservedAt: row.last_observed_at } : {}),
         ...(row.last_error ? { lastError: row.last_error } : {}),
         diagnosticCount: row.diagnostic_count,
-      }),
-    );
+      }));
     return { version: 1, goals, sessions, hosts };
   }
 
   save(state: UniverseState): void {
     const write = this.db.transaction(() => {
-      this.db.exec(
-        "DELETE FROM sessions; DELETE FROM goals; DELETE FROM hosts;",
-      );
+      this.db.exec("DELETE FROM sessions; DELETE FROM goals; DELETE FROM hosts;");
       const goal = this.db.prepare(
         "INSERT INTO goals (id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
@@ -234,11 +212,10 @@ export class SqliteUniverseStore implements UniverseStore {
       "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
     );
     const applied = new Set(
-      (
-        this.db.query("SELECT version FROM schema_migrations").all() as Array<{
-          version: number;
-        }>
-      ).map((row) => row.version),
+      this.db
+        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
+        .all()
+        .map((row) => row.version),
     );
     if (!applied.has(1)) {
       const migration = this.db.transaction(() => {
@@ -288,11 +265,10 @@ export class SqliteUniverseStore implements UniverseStore {
       migration();
     }
     const afterOne = new Set(
-      (
-        this.db.query("SELECT version FROM schema_migrations").all() as Array<{
-          version: number;
-        }>
-      ).map((row) => row.version),
+      this.db
+        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
+        .all()
+        .map((row) => row.version),
     );
     if (!afterOne.has(2)) {
       const migration = this.db.transaction(() => {
@@ -306,11 +282,10 @@ export class SqliteUniverseStore implements UniverseStore {
       migration();
     }
     const afterTwo = new Set(
-      (
-        this.db.query("SELECT version FROM schema_migrations").all() as Array<{
-          version: number;
-        }>
-      ).map((row) => row.version),
+      this.db
+        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
+        .all()
+        .map((row) => row.version),
     );
     if (!afterTwo.has(3)) {
       const migration = this.db.transaction(() => {
@@ -326,5 +301,4 @@ export class SqliteUniverseStore implements UniverseStore {
   }
 }
 
-export const createMemoryStore = (): SqliteUniverseStore =>
-  new SqliteUniverseStore(":memory:");
+export const createMemoryStore = (): SqliteUniverseStore => new SqliteUniverseStore(":memory:");

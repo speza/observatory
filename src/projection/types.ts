@@ -1,13 +1,5 @@
-import type {
-  AttentionItem,
-  AttentionProjection,
-} from "../attention/attention.ts";
-import type {
-  Goal,
-  HostHealth,
-  MapPosition,
-  TrackedSession,
-} from "../universe/types.ts";
+import type { AttentionItem, AttentionProjection } from "../attention/attention.ts";
+import type { Goal, HostHealth, MapPosition, TrackedSession } from "../universe/types.ts";
 
 export type ProjectionQuery =
   | {

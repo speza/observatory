@@ -26,19 +26,11 @@ const rect = (x: number, y: number, width: number, height: number): Rect => ({
 export const layoutFor = (width: number, height: number): TuiLayout => {
   const headerHeight = Math.min(2, Math.max(0, height));
   const attentionHeight = Math.min(2, Math.max(0, height - headerHeight));
-  const footerHeight = Math.min(
-    3,
-    Math.max(0, height - headerHeight - attentionHeight),
-  );
+  const footerHeight = Math.min(3, Math.max(0, height - headerHeight - attentionHeight));
   const contentY = headerHeight + attentionHeight;
   const contentHeight = Math.max(0, height - contentY - footerHeight);
   const compact = width < 100 || height < 26;
-  const footer = rect(
-    0,
-    Math.max(0, height - footerHeight),
-    width,
-    footerHeight,
-  );
+  const footer = rect(0, Math.max(0, height - footerHeight), width, footerHeight);
   const header = rect(0, 0, width, headerHeight);
   const attention = rect(0, headerHeight, width, attentionHeight);
 

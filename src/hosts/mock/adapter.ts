@@ -11,11 +11,8 @@ import { createMockScenario, type MockScenario } from "./scenarios.ts";
 const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
   target.kind === "mock-session" ? target.token : undefined;
 
-const elapsedFrames = (
-  now: number,
-  startedAt: number,
-  tickMs: number,
-): number => Math.floor(Math.max(0, now - startedAt) / tickMs);
+const elapsedFrames = (now: number, startedAt: number, tickMs: number): number =>
+  Math.floor(Math.max(0, now - startedAt) / tickMs);
 
 /**
  * A deterministic development host. It exercises the same reconciliation,
@@ -48,8 +45,7 @@ export class MockHostAdapter implements SessionHost {
     this.liveTargets.clear();
     const observedAt = this.clock.now();
     const frameNumber =
-      elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) %
-      this.scenario.frames.length;
+      elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) % this.scenario.frames.length;
     const frame = this.scenario.frames[frameNumber];
     if (!frame) throw new Error("Mock scenario frame disappeared.");
     const sessions = frame.sessions.map((session) => ({
@@ -95,8 +91,7 @@ export class MockHostAdapter implements SessionHost {
   }
 
   async activate(access: SessionAccess): Promise<HostActionResult> {
-    if (!access.supported || !access.target)
-      return { ok: false, message: access.explanation };
+    if (!access.supported || !access.target) return { ok: false, message: access.explanation };
     const token = parseTarget(access.target);
     if (!token)
       return {

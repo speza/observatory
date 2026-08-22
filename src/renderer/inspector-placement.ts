@@ -22,13 +22,11 @@ const contains = (rect: Rect, point: PlacementPoint): boolean =>
 const intersectionArea = (first: Rect, second: Rect): number => {
   const width = Math.max(
     0,
-    Math.min(first.x + first.width, second.x + second.width) -
-      Math.max(first.x, second.x),
+    Math.min(first.x + first.width, second.x + second.width) - Math.max(first.x, second.x),
   );
   const height = Math.max(
     0,
-    Math.min(first.y + first.height, second.y + second.height) -
-      Math.max(first.y, second.y),
+    Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y),
   );
   return width * height;
 };
@@ -58,37 +56,22 @@ export const placeFloatingInspector = (
   const padding = 1;
   const gap = 2;
   const width = Math.min(size.width, Math.max(0, viewport.width - padding * 2));
-  const height = Math.min(
-    size.height,
-    Math.max(0, viewport.height - padding * 2),
-  );
+  const height = Math.min(size.height, Math.max(0, viewport.height - padding * 2));
   const minimumX = viewport.x + padding;
   const minimumY = viewport.y + padding;
-  const maximumX = Math.max(
-    minimumX,
-    viewport.x + viewport.width - padding - width,
-  );
-  const maximumY = Math.max(
-    minimumY,
-    viewport.y + viewport.height - padding - height,
-  );
+  const maximumX = Math.max(minimumX, viewport.x + viewport.width - padding - width);
+  const maximumY = Math.max(minimumY, viewport.y + viewport.height - padding - height);
 
-  if (width <= 0 || height <= 0)
-    return { x: viewport.x, y: viewport.y, width, height };
+  if (width <= 0 || height <= 0) return { x: viewport.x, y: viewport.y, width, height };
 
   const visibleObstacles = obstacles.filter(
     (obstacle) =>
-      obstacle.width > 0 &&
-      obstacle.height > 0 &&
-      intersectionArea(obstacle, viewport) > 0,
+      obstacle.width > 0 && obstacle.height > 0 && intersectionArea(obstacle, viewport) > 0,
   );
   const anchorObstacle = anchor
     ? visibleObstacles
         .filter((obstacle) => contains(obstacle, anchor))
-        .sort(
-          (first, second) =>
-            first.width * first.height - second.width * second.height,
-        )[0]
+        .sort((first, second) => first.width * first.height - second.width * second.height)[0]
     : undefined;
   const reference =
     anchorObstacle ??
@@ -119,15 +102,9 @@ export const placeFloatingInspector = (
   const addAround = (obstacle: Rect): void => {
     const centerX = obstacle.x + Math.floor(obstacle.width / 2);
     const centerY = obstacle.y + Math.floor(obstacle.height / 2);
-    addCandidate(
-      obstacle.x + obstacle.width + gap,
-      centerY - Math.floor(height / 2),
-    );
+    addCandidate(obstacle.x + obstacle.width + gap, centerY - Math.floor(height / 2));
     addCandidate(obstacle.x - width - gap, centerY - Math.floor(height / 2));
-    addCandidate(
-      centerX - Math.floor(width / 2),
-      obstacle.y + obstacle.height + gap,
-    );
+    addCandidate(centerX - Math.floor(width / 2), obstacle.y + obstacle.height + gap);
     addCandidate(centerX - Math.floor(width / 2), obstacle.y - height - gap);
   };
 
@@ -143,16 +120,12 @@ export const placeFloatingInspector = (
   const target = anchor ?? reference;
   const score = (candidate: Rect): number => {
     const overlap = visibleObstacles.reduce(
-      (total, obstacle) =>
-        total + intersectionArea(candidate, expanded(obstacle, gap)),
+      (total, obstacle) => total + intersectionArea(candidate, expanded(obstacle, gap)),
       0,
     );
     const candidateCenterX = candidate.x + candidate.width / 2;
     const candidateCenterY = candidate.y + candidate.height / 2;
-    const distance = Math.hypot(
-      candidateCenterX - target.x,
-      candidateCenterY - target.y,
-    );
+    const distance = Math.hypot(candidateCenterX - target.x, candidateCenterY - target.y);
     return overlap * 1_000_000 + distance;
   };
 

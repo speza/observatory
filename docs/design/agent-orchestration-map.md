@@ -2,9 +2,9 @@
 
 Status: corrected V0 product direction; floating-card iteration  
 Date: 2026-08-22  
-Working title: Agent Universe
+Product: Observatory — an agent observatory
 
-Technical design: [AO technical architecture](technical-architecture.md)
+Technical design: [Observatory technical architecture](technical-architecture.md)
 
 ## Summary
 
@@ -157,18 +157,18 @@ delegation and dependency visible while supporting spatial memory.
 
 The proposed visual language is:
 
-| Concept | Possible representation |
-| --- | --- |
-| Goal or outcome | Star system, planet or large region |
-| Agent session | Moving orb, spacecraft or compact child row |
-| Chief-of-staff role | Session with visible delegation relationships |
-| Child agent | Satellite linked to its parent |
-| Delegation | Outbound path from parent to child |
-| Result handoff | Return path carrying an artifact |
-| Dependency | Directed connection between outcomes |
-| Pull request or merge | Integration path back to the base branch |
-| Conflict or overlap | Intersecting or warning-marked paths |
-| Human attention | Salient pulse or halo |
+| Concept                | Possible representation                                           |
+| ---------------------- | ----------------------------------------------------------------- |
+| Goal or outcome        | Star system, planet or large region                               |
+| Agent session          | Moving orb, spacecraft or compact child row                       |
+| Chief-of-staff role    | Session with visible delegation relationships                     |
+| Child agent            | Satellite linked to its parent                                    |
+| Delegation             | Outbound path from parent to child                                |
+| Result handoff         | Return path carrying an artifact                                  |
+| Dependency             | Directed connection between outcomes                              |
+| Pull request or merge  | Integration path back to the base branch                          |
+| Conflict or overlap    | Intersecting or warning-marked paths                              |
+| Human attention        | Salient pulse or halo                                             |
 | Repository or worktree | Session inspector metadata or optional lens, never a default node |
 
 This metaphor remains provisional. It must earn its place through usability

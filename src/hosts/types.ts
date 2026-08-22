@@ -42,9 +42,6 @@ export interface HostActionResult {
 
 export interface SessionHost {
   snapshot(): Promise<HostSnapshot>;
-  access(session: {
-    readonly hostKind: string;
-    readonly nativeId: string;
-  }): Promise<SessionAccess>;
+  access(session: { readonly hostKind: string; readonly nativeId: string }): Promise<SessionAccess>;
   activate(access: SessionAccess): Promise<HostActionResult>;
 }

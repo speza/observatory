@@ -41,23 +41,17 @@ const goalPriorities = (goals: readonly Goal[]): Map<string, Priority> =>
   new Map(goals.map((goal) => [goal.id, goal.priority]));
 
 const sortAttention = (left: AttentionItem, right: AttentionItem): number => {
-  if (left.requiresHumanInput !== right.requiresHumanInput)
-    return left.requiresHumanInput ? -1 : 1;
-  const priorityDifference =
-    priorityRank(left.priority) - priorityRank(right.priority);
+  if (left.requiresHumanInput !== right.requiresHumanInput) return left.requiresHumanInput ? -1 : 1;
+  const priorityDifference = priorityRank(left.priority) - priorityRank(right.priority);
   if (priorityDifference !== 0) return priorityDifference;
-  if (left.startedAt !== right.startedAt)
-    return left.startedAt - right.startedAt;
-  if (left.lastChangedAt !== right.lastChangedAt)
-    return right.lastChangedAt - left.lastChangedAt;
+  if (left.startedAt !== right.startedAt) return left.startedAt - right.startedAt;
+  if (left.lastChangedAt !== right.lastChangedAt) return right.lastChangedAt - left.lastChangedAt;
   return left.id.localeCompare(right.id);
 };
 
-const age = (now: number, startedAt: number): number =>
-  Math.max(0, now - startedAt);
+const age = (now: number, startedAt: number): number => Math.max(0, now - startedAt);
 
-const hostLabel = (hostKind: string): string =>
-  hostKind === "herdr" ? "Herdr" : hostKind;
+const hostLabel = (hostKind: string): string => (hostKind === "herdr" ? "Herdr" : hostKind);
 
 export const evaluateAttention = (
   now: number,
@@ -71,9 +65,7 @@ export const evaluateAttention = (
   for (const session of sessions) {
     const priority = priorities.get(session.primaryGoalId ?? "") ?? "P3";
     const currentReason =
-      session.hostHealth === "live"
-        ? attentionReason(session.runtimeState)
-        : undefined;
+      session.hostHealth === "live" ? attentionReason(session.runtimeState) : undefined;
     if (currentReason) {
       const sourceLabel = hostLabel(session.hostKind);
       const startedAt = session.attentionSince ?? session.lastChangedAt;

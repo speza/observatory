@@ -14,20 +14,14 @@ const scale = { x: 0.5, y: 0.25 };
 describe("spatial viewport", () => {
   test("projects the world centre into the map centre", () => {
     expect(
-      screenPointForWorld(
-        { x: 0, y: 0 },
-        { center: { x: 0, y: 0 }, zoom: 1 },
-        bounds,
-        scale,
-      ),
+      screenPointForWorld({ x: 0, y: 0 }, { center: { x: 0, y: 0 }, zoom: 1 }, bounds, scale),
     ).toEqual({ x: 40, y: 9 });
   });
 
   test("pans by the requested cell delta in world space", () => {
-    expect(
-      panViewport({ center: { x: 0, y: 0 }, zoom: 1 }, { x: -5, y: 2 }, scale)
-        .center,
-    ).toEqual({ x: -10, y: 8 });
+    expect(panViewport({ center: { x: 0, y: 0 }, zoom: 1 }, { x: -5, y: 2 }, scale).center).toEqual(
+      { x: -10, y: 8 },
+    );
   });
 
   test("keeps the pointer world point stable while zooming", () => {
@@ -50,12 +44,8 @@ describe("spatial viewport", () => {
 
   test("clamps zoom to the portable map range", () => {
     const state = { center: { x: 0, y: 0 }, zoom: 1 } as const;
-    expect(
-      zoomViewportAt(state, 0.01, { x: 40, y: 8 }, bounds, scale).zoom,
-    ).toBe(MIN_MAP_ZOOM);
-    expect(zoomViewportAt(state, 99, { x: 40, y: 8 }, bounds, scale).zoom).toBe(
-      MAX_MAP_ZOOM,
-    );
+    expect(zoomViewportAt(state, 0.01, { x: 40, y: 8 }, bounds, scale).zoom).toBe(MIN_MAP_ZOOM);
+    expect(zoomViewportAt(state, 99, { x: 40, y: 8 }, bounds, scale).zoom).toBe(MAX_MAP_ZOOM);
   });
 
   test("fits the current world content without changing its centre", () => {

@@ -10,7 +10,7 @@ Depends on:
 
 ## Objective
 
-Build the first real version of AO that can demonstrate whether organising live
+Build the first real version of Observatory that can demonstrate whether organising live
 agent sessions around goals, attention and stable spatial memory is materially
 better than Herdr's flat session sidebar. The portable native spatial universe
 is the primary V0 surface; flat attention/grouped views are supporting lenses.

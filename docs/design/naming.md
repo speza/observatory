@@ -1,7 +1,8 @@
-# AO naming exploration
+# Observatory naming decision
 
-Status: exploratory  
-Date: 2026-08-21
+Status: decided
+
+Date: 2026-08-22
 
 ## What the name must communicate
 
@@ -29,7 +30,7 @@ see a complex system, understand its state and decide where to direct attention.
 It is calm and supervisory rather than aggressively autonomous. It also avoids
 claiming that the product owns the agents or their terminal sessions.
 
-Candidate presentation:
+Presentation:
 
 ```text
 Observatory
@@ -113,7 +114,16 @@ Risks:
 - harder to pronounce and spell;
 - describes the visual object rather than the broader supervisory product.
 
-## Current preference
+## Decision
+
+The product name is **Observatory**. Its plain-language category is **an agent
+observatory**. The product does not need `Agent` in its name.
+
+`ao` remains the executable name, repository codename and environment-variable
+prefix. It may be read as `Agent Observatory`, but that expansion is not part of
+the public product name.
+
+## Candidate ranking record
 
 The present ranking by product meaning is:
 
@@ -138,8 +148,9 @@ Attention                   ranked human-intervention view
 Inspector                   focused object detail
 ```
 
-This vocabulary is provisional. It should not be embedded deeply into code
-until the renderer prototype proves that the spatial metaphor works.
+The product and executable names are settled. Orrery, Orbital and the remaining
+interface vocabulary are still optional and should not be embedded deeply
+without a separate product decision.
 
 ## Existing GitHub landscape
 
@@ -195,5 +206,6 @@ Before publishing a final name:
    matches; and
 6. test the name aloud with prospective users.
 
-Until that work is complete, use **Observatory** as the working product name and
-retain **AO** as the stable internal codename.
+Use **Observatory** as the product name and **an agent observatory** as its
+category description. Retain **AO** as the stable internal codename while
+clearance work determines publication, organisation and package strategy.

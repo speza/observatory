@@ -50,16 +50,16 @@ integration, session discovery, or production abstractions. The earlier
 
 ## Acceptance review
 
-| Criterion | Result | Evidence |
-| --- | --- | --- |
-| Identify goal, seven sessions, selected and blocked state in three seconds | Pass at 140×35; pass with shortened captions at 80×24 | The wide scene has a strong central orb and deliberate satellite ring; compact mode preserves the central scale hierarchy and shortens only captions. |
-| Goal → Session is the only default topology | Pass | The fixture has one goal ID on every session; the renderer draws only the selected direct path. |
-| Selected path dominates without hiding other sessions | Pass | The selected orb, `▸ router-impl` caption, matching inspector title, and one solid direct tether are distinct; no other relationship bundle is drawn. |
-| Blocked attention is clear without colour alone | Pass | `! quality-evals`, pulsing halo, `!` orb glyph, and inspector `BLOCKED` copy. |
-| Intent first, infrastructure subordinate | Pass | Session descriptions and status are in the scene; repo/branch/worktree/runtime/host/context are in the inspector only. |
-| Keyboard focus, selection, inspection, zoom, reset, and suspend cleanup | Pass | Exercised live with `j`, `k`, Enter, `i`, `+`, `-`, pan keys, `r`, `t`, and `s`. |
-| Stable portable cell rendering near 30 FPS | Pass | Warmed-up readings were 30–31 FPS and approximately 0.3 ms application frame time. |
-| Terminal-heavy user would prefer it to a flat sidebar | No, not established | The scene is now materially more art-directed, but the map still has to earn the extra spatial navigation cost. No A/B task comparison was run, so preference cannot be claimed. |
+| Criterion                                                                  | Result                                                | Evidence                                                                                                                                                                         |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identify goal, seven sessions, selected and blocked state in three seconds | Pass at 140×35; pass with shortened captions at 80×24 | The wide scene has a strong central orb and deliberate satellite ring; compact mode preserves the central scale hierarchy and shortens only captions.                            |
+| Goal → Session is the only default topology                                | Pass                                                  | The fixture has one goal ID on every session; the renderer draws only the selected direct path.                                                                                  |
+| Selected path dominates without hiding other sessions                      | Pass                                                  | The selected orb, `▸ router-impl` caption, matching inspector title, and one solid direct tether are distinct; no other relationship bundle is drawn.                            |
+| Blocked attention is clear without colour alone                            | Pass                                                  | `! quality-evals`, pulsing halo, `!` orb glyph, and inspector `BLOCKED` copy.                                                                                                    |
+| Intent first, infrastructure subordinate                                   | Pass                                                  | Session descriptions and status are in the scene; repo/branch/worktree/runtime/host/context are in the inspector only.                                                           |
+| Keyboard focus, selection, inspection, zoom, reset, and suspend cleanup    | Pass                                                  | Exercised live with `j`, `k`, Enter, `i`, `+`, `-`, pan keys, `r`, `t`, and `s`.                                                                                                 |
+| Stable portable cell rendering near 30 FPS                                 | Pass                                                  | Warmed-up readings were 30–31 FPS and approximately 0.3 ms application frame time.                                                                                               |
+| Terminal-heavy user would prefer it to a flat sidebar                      | No, not established                                   | The scene is now materially more art-directed, but the map still has to earn the extra spatial navigation cost. No A/B task comparison was run, so preference cannot be claimed. |
 
 ## Observed behaviour
 

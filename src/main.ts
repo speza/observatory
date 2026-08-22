@@ -29,34 +29,24 @@ class RuntimeIds implements IdGenerator {
 }
 
 const clock = new SystemClock();
-const databasePath =
-  process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
-if (databasePath !== ":memory:")
-  mkdirSync(dirname(databasePath), { recursive: true });
+const databasePath = process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
+if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
 const store = new SqliteUniverseStore(databasePath);
 const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
 const host: SessionHost = useMockHost
   ? new MockHostAdapter({
       clock,
       scenario: createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit"),
-      ...(process.env.AO_MOCK_TICK_MS
-        ? { tickMs: Number(process.env.AO_MOCK_TICK_MS) }
-        : {}),
+      ...(process.env.AO_MOCK_TICK_MS ? { tickMs: Number(process.env.AO_MOCK_TICK_MS) } : {}),
     })
   : new HerdrHostAdapter({ clock });
-const universe = new Universe(
-  store,
-  clock,
-  new RuntimeIds(),
-  createProjectionModule(),
-);
+const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
 
 const reconcile = async (): Promise<string> => {
   const snapshot = await host.snapshot();
   const result = universe.reconcile(snapshot);
   const hostLabel = snapshot.hostKind === "mock" ? "Mock" : "Herdr";
-  if (!result.accepted)
-    return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
+  if (!result.accepted) return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
   if (!snapshot.available)
     return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
   return `${hostLabel} refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;

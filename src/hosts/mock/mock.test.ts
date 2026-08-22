@@ -14,36 +14,29 @@ describe("Mock host adapter", () => {
     expect(first.hostKind).toBe("mock");
     expect(first.sessions).toHaveLength(20);
     expect(first.diagnostics).toHaveLength(0);
-    expect(
-      first.sessions.find((session) => session.nativeId === "mock-p03")
-        ?.runtimeState,
-    ).toBe("blocked");
+    expect(first.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+      "blocked",
+    );
 
     clock.value += scenario.tickMs;
     const second = await adapter.snapshot();
     expect(second.sessions).toHaveLength(21);
-    expect(
-      second.sessions.some((session) => session.nativeId === "mock-p17"),
-    ).toBe(false);
-    expect(
-      second.sessions.find((session) => session.nativeId === "mock-p03")
-        ?.runtimeState,
-    ).toBe("working");
-    expect(
-      second.sessions.find((session) => session.nativeId === "mock-p21")
-        ?.runtimeState,
-    ).toBe("working");
+    expect(second.sessions.some((session) => session.nativeId === "mock-p17")).toBe(false);
+    expect(second.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+      "working",
+    );
+    expect(second.sessions.find((session) => session.nativeId === "mock-p21")?.runtimeState).toBe(
+      "working",
+    );
 
     clock.value += scenario.tickMs * (scenario.frames.length - 1);
     const looped = await adapter.snapshot();
-    expect(
-      looped.sessions.find((session) => session.nativeId === "mock-p03")
-        ?.runtimeState,
-    ).toBe("blocked");
-    expect(
-      looped.sessions.find((session) => session.nativeId === "mock-p01")
-        ?.hostLocator,
-    ).toBe("mock-session:mock-p01");
+    expect(looped.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+      "blocked",
+    );
+    expect(looped.sessions.find((session) => session.nativeId === "mock-p01")?.hostLocator).toBe(
+      "mock-session:mock-p01",
+    );
   });
 
   test("keeps attachment targets opaque and current-frame scoped", async () => {
@@ -68,14 +61,12 @@ describe("Mock host adapter", () => {
 
     clock.value += scenario.tickMs;
     await adapter.snapshot();
-    expect(
-      (await adapter.access({ hostKind: "mock", nativeId: "mock-p17" }))
-        .supported,
-    ).toBe(false);
-    expect(
-      (await adapter.access({ hostKind: "herdr", nativeId: "mock-p03" }))
-        .supported,
-    ).toBe(false);
+    expect((await adapter.access({ hostKind: "mock", nativeId: "mock-p17" })).supported).toBe(
+      false,
+    );
+    expect((await adapter.access({ hostKind: "herdr", nativeId: "mock-p03" })).supported).toBe(
+      false,
+    );
   });
 
   test("seeds a real goal-and-session portfolio only through Universe commands", async () => {
@@ -90,14 +81,8 @@ describe("Mock host adapter", () => {
       assignedSessions: 17,
     });
     const state = universe.snapshot();
-    expect(state.goals.map((goal) => goal.priority)).toEqual([
-      "P0",
-      "P1",
-      "P2",
-    ]);
-    expect(
-      state.sessions.filter((session) => session.primaryGoalId),
-    ).toHaveLength(17);
+    expect(state.goals.map((goal) => goal.priority)).toEqual(["P0", "P1", "P2"]);
+    expect(state.sessions.filter((session) => session.primaryGoalId)).toHaveLength(17);
     expect(seedMockPortfolio(universe)).toEqual({
       createdGoals: 0,
       assignedSessions: 0,

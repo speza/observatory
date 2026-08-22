@@ -4,13 +4,7 @@ import { makeUniverse, hostSnapshot } from "./test-support.ts";
 const observation = (
   nativeId: string,
   displayName = nativeId,
-  runtimeState:
-    | "idle"
-    | "working"
-    | "waiting"
-    | "blocked"
-    | "done"
-    | "unknown" = "idle",
+  runtimeState: "idle" | "working" | "waiting" | "blocked" | "done" | "unknown" = "idle",
 ) => ({
   nativeId,
   displayName,
@@ -36,9 +30,7 @@ describe("Universe", () => {
       }),
     ).toEqual({ ok: true, goalId: "goal-1" });
     expect(
-      universe.reconcile(
-        hostSnapshot([observation("pane-1", "live session", "working")]),
-      ).accepted,
+      universe.reconcile(hostSnapshot([observation("pane-1", "live session", "working")])).accepted,
     ).toBe(true);
     expect(
       universe.execute({
@@ -62,13 +54,9 @@ describe("Universe", () => {
       }).ok,
     ).toBe(true);
     clock.value = 1_001_000;
-    expect(
-      universe.execute({ type: "CompleteGoal", goalId: "goal-1" }).ok,
-    ).toBe(true);
+    expect(universe.execute({ type: "CompleteGoal", goalId: "goal-1" }).ok).toBe(true);
     expect(universe.snapshot().goals[0]?.status).toBe("completed");
-    expect(universe.execute({ type: "ArchiveGoal", goalId: "goal-1" }).ok).toBe(
-      true,
-    );
+    expect(universe.execute({ type: "ArchiveGoal", goalId: "goal-1" }).ok).toBe(true);
     expect(universe.snapshot().goals[0]?.status).toBe("archived");
   });
 
@@ -90,9 +78,7 @@ describe("Universe", () => {
     const moved = universe.snapshot().goals[0];
     expect(moved?.mapPosition).toEqual({ x: 42, y: -17 });
     expect(moved?.mapPositionPinned).toBe(true);
-    expect(
-      universe.execute({ type: "ResetGoalMapPosition", goalId: "goal-1" }).ok,
-    ).toBe(true);
+    expect(universe.execute({ type: "ResetGoalMapPosition", goalId: "goal-1" }).ok).toBe(true);
     expect(universe.snapshot().goals[0]?.mapPositionPinned).toBe(false);
   });
 
@@ -114,9 +100,7 @@ describe("Universe", () => {
   test("preserves human session metadata across reconciliation", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });
-    universe.reconcile(
-      hostSnapshot([observation("pane-1", "host title", "working")]),
-    );
+    universe.reconcile(hostSnapshot([observation("pane-1", "host title", "working")]));
     universe.execute({
       type: "AssignSession",
       sessionId: "session-1",
@@ -153,31 +137,21 @@ describe("Universe", () => {
 
   test("is idempotent and marks missing live sessions stale", () => {
     const { universe } = makeUniverse();
-    const first = universe.reconcile(
-      hostSnapshot([observation("pane-1"), observation("pane-2")]),
-    );
-    const second = universe.reconcile(
-      hostSnapshot([observation("pane-1"), observation("pane-2")]),
-    );
+    const first = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+    const second = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
     expect(first.addedSessionIds).toHaveLength(2);
     expect(second.addedSessionIds).toHaveLength(0);
     expect(universe.snapshot().sessions).toHaveLength(2);
-    const stale = universe.reconcile(
-      hostSnapshot([observation("pane-1")], 1_001_000),
-    );
+    const stale = universe.reconcile(hostSnapshot([observation("pane-1")], 1_001_000));
     expect(stale.staleSessionIds).toEqual(["session-2"]);
     expect(
-      universe
-        .snapshot()
-        .sessions.find((session) => session.nativeId === "pane-2")?.hostHealth,
+      universe.snapshot().sessions.find((session) => session.nativeId === "pane-2")?.hostHealth,
     ).toBe("stale");
   });
 
   test("rejects duplicate native identities without guessing", () => {
     const { universe } = makeUniverse();
-    const result = universe.reconcile(
-      hostSnapshot([observation("same"), observation("same")]),
-    );
+    const result = universe.reconcile(hostSnapshot([observation("same"), observation("same")]));
     expect(result.accepted).toBe(false);
     expect(result.error).toContain("Duplicate native identity");
     expect(universe.snapshot().sessions).toHaveLength(0);
@@ -186,9 +160,7 @@ describe("Universe", () => {
   test("rolls back a command when persistence fails", () => {
     const { universe, store } = makeUniverse();
     store.failNextSave = true;
-    expect(
-      universe.execute({ type: "CreateGoal", title: "Must not appear" }).ok,
-    ).toBe(false);
+    expect(universe.execute({ type: "CreateGoal", title: "Must not appear" }).ok).toBe(false);
     expect(universe.snapshot().goals).toHaveLength(0);
   });
 });

@@ -51,9 +51,7 @@ describe("semantic zoom", () => {
     expect(sessionLabelBudget("context", 80, false)).toBeLessThan(
       sessionLabelBudget("detail", 80, false),
     );
-    expect(goalLabelBudget("detail", 140)).toBeGreaterThan(
-      goalLabelBudget("overview", 140),
-    );
+    expect(goalLabelBudget("detail", 140)).toBeGreaterThan(goalLabelBudget("overview", 140));
     expect(isAtLeast("detail", "context")).toBe(true);
     expect(isAtLeast("overview", "context")).toBe(false);
   });

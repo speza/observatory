@@ -1,8 +1,4 @@
-import {
-  evaluateAttention,
-  formatAge,
-  type AttentionItem,
-} from "../attention/attention.ts";
+import { evaluateAttention, formatAge, type AttentionItem } from "../attention/attention.ts";
 import {
   priorityRank,
   type Goal,
@@ -27,43 +23,28 @@ import type {
   UniverseMapProjection,
 } from "./types.ts";
 
-const byAttention = (
-  attention: readonly AttentionItem[],
-): Map<string, AttentionItem> => {
+const byAttention = (attention: readonly AttentionItem[]): Map<string, AttentionItem> => {
   const result = new Map<string, AttentionItem>();
   for (const item of attention) {
-    if (item.sessionId && !result.has(item.sessionId))
-      result.set(item.sessionId, item);
+    if (item.sessionId && !result.has(item.sessionId)) result.set(item.sessionId, item);
   }
   return result;
 };
 
 const compareSessions = (left: SessionView, right: SessionView): number => {
-  if (Boolean(left.attention) !== Boolean(right.attention))
-    return left.attention ? -1 : 1;
-  if (
-    left.attention &&
-    right.attention &&
-    left.attention.startedAt !== right.attention.startedAt
-  ) {
+  if (Boolean(left.attention) !== Boolean(right.attention)) return left.attention ? -1 : 1;
+  if (left.attention && right.attention && left.attention.startedAt !== right.attention.startedAt) {
     return left.attention.startedAt - right.attention.startedAt;
   }
-  if (left.hostHealth !== right.hostHealth)
-    return left.hostHealth === "live" ? -1 : 1;
-  return (
-    left.displayName.localeCompare(right.displayName) ||
-    left.id.localeCompare(right.id)
-  );
+  if (left.hostHealth !== right.hostHealth) return left.hostHealth === "live" ? -1 : 1;
+  return left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id);
 };
 
 const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   if (hosts.length === 0) return undefined;
   return [...hosts].sort((left, right) => {
     const rank = { unavailable: 0, stale: 1, live: 2 };
-    return (
-      rank[left.status] - rank[right.status] ||
-      left.hostKind.localeCompare(right.hostKind)
-    );
+    return rank[left.status] - rank[right.status] || left.hostKind.localeCompare(right.hostKind);
   })[0];
 };
 
@@ -76,23 +57,14 @@ const projectCommandCentre = (
   now: number,
   includeArchived = false,
 ): CommandCentreProjection => {
-  const attention = evaluateAttention(
-    now,
-    state.goals,
-    state.sessions,
-    state.hosts,
-  );
+  const attention = evaluateAttention(now, state.goals, state.sessions, state.hosts);
   const attentionBySession = byAttention(attention.items);
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
-  const views = state.sessions.map(
-    (session): SessionView => ({
-      ...session,
-      goalTitle: session.primaryGoalId
-        ? goalsById.get(session.primaryGoalId)?.title
-        : undefined,
-      attention: attentionBySession.get(session.id),
-    }),
-  );
+  const views = state.sessions.map((session): SessionView => ({
+    ...session,
+    goalTitle: session.primaryGoalId ? goalsById.get(session.primaryGoalId)?.title : undefined,
+    attention: attentionBySession.get(session.id),
+  }));
 
   const goalViews = state.goals
     .filter((goal) => includeArchived || goal.status !== "archived")
@@ -103,11 +75,8 @@ const projectCommandCentre = (
       return {
         ...goal,
         sessions,
-        attentionCount: sessions.filter(
-          (session) => session.attention?.requiresHumanInput,
-        ).length,
-        staleCount: sessions.filter((session) => session.hostHealth !== "live")
-          .length,
+        attentionCount: sessions.filter((session) => session.attention?.requiresHumanInput).length,
+        staleCount: sessions.filter((session) => session.hostHealth !== "live").length,
       };
     })
     .sort((left, right) => {
@@ -115,20 +84,14 @@ const projectCommandCentre = (
         return right.attentionCount - left.attentionCount;
       if (priorityRank(left.priority) !== priorityRank(right.priority))
         return priorityRank(left.priority) - priorityRank(right.priority);
-      if (left.status !== right.status)
-        return left.status === "completed" ? 1 : -1;
-      return (
-        left.title.localeCompare(right.title) || left.id.localeCompare(right.id)
-      );
+      if (left.status !== right.status) return left.status === "completed" ? 1 : -1;
+      return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
     });
 
-  const unassigned = views
-    .filter((session) => !session.primaryGoalId)
-    .sort(compareSessions);
+  const unassigned = views.filter((session) => !session.primaryGoalId).sort(compareSessions);
   const visibleSessions = views.filter(
     (session) =>
-      includeArchived ||
-      goalsById.get(session.primaryGoalId ?? "")?.status !== "archived",
+      includeArchived || goalsById.get(session.primaryGoalId ?? "")?.status !== "archived",
   );
   return {
     kind: "command-centre",
@@ -143,8 +106,7 @@ const projectCommandCentre = (
       attention: attention.currentCount,
       uncertainty: attention.uncertaintyCount,
       unassigned: unassigned.length,
-      stale: visibleSessions.filter((session) => session.hostHealth !== "live")
-        .length,
+      stale: visibleSessions.filter((session) => session.hostHealth !== "live").length,
     },
   };
 };
@@ -211,8 +173,7 @@ const projectUniverseMap = (
   };
 };
 
-const searchable = (value: string | undefined): string =>
-  value?.toLocaleLowerCase() ?? "";
+const searchable = (value: string | undefined): string => value?.toLocaleLowerCase() ?? "";
 
 const projectSearch = (
   state: {
@@ -287,16 +248,10 @@ const projectInspector = (
   now: number,
   target: { readonly type: "goal" | "session"; readonly id: string },
 ): InspectorProjection => {
-  const attention = evaluateAttention(
-    now,
-    state.goals,
-    state.sessions,
-    state.hosts,
-  );
+  const attention = evaluateAttention(now, state.goals, state.sessions, state.hosts);
   if (target.type === "goal") {
     const goal = state.goals.find((candidate) => candidate.id === target.id);
-    if (!goal)
-      return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
+    if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
     const sessions = state.sessions
       .filter((session) => session.primaryGoalId === goal.id)
       .map((session) => sessionView(session, state.goals, attention.items))
@@ -304,11 +259,8 @@ const projectInspector = (
     const view: GoalView = {
       ...goal,
       sessions,
-      attentionCount: sessions.filter(
-        (session) => session.attention?.requiresHumanInput,
-      ).length,
-      staleCount: sessions.filter((session) => session.hostHealth !== "live")
-        .length,
+      attentionCount: sessions.filter((session) => session.attention?.requiresHumanInput).length,
+      staleCount: sessions.filter((session) => session.hostHealth !== "live").length,
     };
     return {
       kind: "goal-inspector",
@@ -323,11 +275,8 @@ const projectInspector = (
     };
   }
 
-  const session = state.sessions.find(
-    (candidate) => candidate.id === target.id,
-  );
-  if (!session)
-    return { kind: "empty-inspector", lines: ["Session no longer exists."] };
+  const session = state.sessions.find((candidate) => candidate.id === target.id);
+  if (!session) return { kind: "empty-inspector", lines: ["Session no longer exists."] };
   const view = sessionView(session, state.goals, attention.items);
   const lines = [
     `state   ${session.runtimeState} · ${session.hostHealth}`,
@@ -340,10 +289,7 @@ const projectInspector = (
     `provider ${session.provider ?? "unknown"}`,
     `goal    ${view.goalTitle ?? "unassigned"}`,
     ...(view.attention
-      ? [
-          `why     ${view.attention.explanation}`,
-          `waiting ${formatAge(view.attention.ageMs)}`,
-        ]
+      ? [`why     ${view.attention.explanation}`, `waiting ${formatAge(view.attention.ageMs)}`]
       : []),
     ...(session.description ? [session.description] : []),
   ];
@@ -365,9 +311,4 @@ export const createProjectionModule = (): ProjectionModule => ({
   },
 });
 
-export {
-  projectCommandCentre,
-  projectInspector,
-  projectSearch,
-  projectUniverseMap,
-};
+export { projectCommandCentre, projectInspector, projectSearch, projectUniverseMap };

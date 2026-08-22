@@ -38,15 +38,10 @@ describe("projections", () => {
       kind: "command-centre",
       now: 1_001_000,
     });
-    if (projection.kind !== "command-centre")
-      throw new Error("wrong projection");
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
     expect(projection.goals[0]?.title).toBe("P0 goal");
-    expect(projection.goals[0]?.sessions[0]?.displayName).toBe(
-      "blocked session",
-    );
-    expect(projection.unassigned.map((session) => session.displayName)).toEqual(
-      ["unassigned"],
-    );
+    expect(projection.goals[0]?.sessions[0]?.displayName).toBe("blocked session");
+    expect(projection.unassigned.map((session) => session.displayName)).toEqual(["unassigned"]);
     expect(projection.counts.attention).toBe(1);
   });
 
@@ -87,8 +82,7 @@ describe("projections", () => {
       target: { type: "session", id: "session-1" },
       now: 1_000_000,
     });
-    if (projection.kind !== "session-inspector")
-      throw new Error("wrong projection");
+    if (projection.kind !== "session-inspector") throw new Error("wrong projection");
     expect(projection.session.hostKind).toBe("test-host");
     expect(projection.session.repository).toBe("repo");
     expect(projection.lines.join("\n")).toContain("worktree");
@@ -98,10 +92,7 @@ describe("projections", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal", priority: "P0" });
     universe.reconcile(
-      hostSnapshot([
-        observation("pane-a", "satellite-a"),
-        observation("pane-b", "satellite-b"),
-      ]),
+      hostSnapshot([observation("pane-a", "satellite-a"), observation("pane-b", "satellite-b")]),
     );
     universe.execute({
       type: "AssignSession",
@@ -137,10 +128,7 @@ describe("projections", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal" });
     universe.reconcile(
-      hostSnapshot([
-        observation("assigned", "assigned"),
-        observation("unassigned", "unassigned"),
-      ]),
+      hostSnapshot([observation("assigned", "assigned"), observation("unassigned", "unassigned")]),
     );
     universe.execute({
       type: "AssignSession",
@@ -153,9 +141,7 @@ describe("projections", () => {
       throw new Error("wrong projection");
     expect(first.unassigned).toHaveLength(1);
     expect(first.inboxPosition).toEqual(second.inboxPosition);
-    expect(first.unassigned[0]?.mapPosition).toEqual(
-      second.unassigned[0]?.mapPosition,
-    );
+    expect(first.unassigned[0]?.mapPosition).toEqual(second.unassigned[0]?.mapPosition);
     expect(first.unassigned[0]?.goalTitle).toBeUndefined();
   });
 });

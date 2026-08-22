@@ -5,10 +5,7 @@ import type { CommandRunner } from "./runner.ts";
 import { FixedClock } from "../../universe/test-support.ts";
 
 const fixture = JSON.parse(
-  readFileSync(
-    new URL("../../../fixtures/herdr/sanitized-snapshot.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../../fixtures/herdr/sanitized-snapshot.json", import.meta.url), "utf8"),
 ) as unknown;
 
 class FakeRunner implements CommandRunner {
@@ -44,18 +41,14 @@ describe("Herdr adapter", () => {
     expect(snapshot.available).toBe(true);
     expect(snapshot.sessions).toHaveLength(3);
     expect(
-      snapshot.sessions.find((session) => session.nativeId === "fixture-w2:p1")
-        ?.runtimeState,
+      snapshot.sessions.find((session) => session.nativeId === "fixture-w2:p1")?.runtimeState,
     ).toBe("blocked");
     expect(
-      snapshot.sessions.find((session) => session.nativeId === "fixture-w1:p1")
-        ?.provider,
+      snapshot.sessions.find((session) => session.nativeId === "fixture-w1:p1")?.provider,
     ).toBe("codex");
     expect(snapshot.sessions[0]?.hostLocator).toContain("paneId");
     expect(snapshot.sessions[0]?.hostLocator).not.toContain("terminal output");
-    expect(
-      snapshot.sessions.some((session) => session.nativeId === "fixture-w1:p2"),
-    ).toBe(false);
+    expect(snapshot.sessions.some((session) => session.nativeId === "fixture-w1:p2")).toBe(false);
   });
 
   test("skips malformed observations without throwing", () => {
@@ -172,12 +165,7 @@ describe("Herdr adapter", () => {
       ok: true,
       message: "Focused the real Herdr session fixture-w2:p1.",
     });
-    expect(runner.calls.at(-1)).toEqual([
-      "herdr",
-      "agent",
-      "focus",
-      "fixture-w2:p1",
-    ]);
+    expect(runner.calls.at(-1)).toEqual(["herdr", "agent", "focus", "fixture-w2:p1"]);
   });
 
   test("does not claim access for unavailable or unknown sessions", async () => {
@@ -192,10 +180,9 @@ describe("Herdr adapter", () => {
     });
     const snapshot = await adapter.snapshot();
     expect(snapshot.available).toBe(false);
-    expect(
-      (await adapter.access({ hostKind: "herdr", nativeId: "missing" }))
-        .supported,
-    ).toBe(false);
+    expect((await adapter.access({ hostKind: "herdr", nativeId: "missing" })).supported).toBe(
+      false,
+    );
   });
 
   test("clears live attachment targets when Herdr becomes unavailable", async () => {
@@ -209,15 +196,13 @@ describe("Herdr adapter", () => {
       clock: new FixedClock(100),
     });
     await adapter.snapshot();
-    expect(
-      (await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }))
-        .supported,
-    ).toBe(true);
+    expect((await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })).supported).toBe(
+      true,
+    );
     runner.setResult({ exitCode: 1, stdout: "", stderr: "socket unavailable" });
     await adapter.snapshot();
-    expect(
-      (await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }))
-        .supported,
-    ).toBe(false);
+    expect((await adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })).supported).toBe(
+      false,
+    );
   });
 });

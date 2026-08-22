@@ -45,11 +45,7 @@ describe("attention", () => {
         session("old-p0", "blocked", "p0", 5_000, 19_000),
       ],
     );
-    expect(projection.items.map((item) => item.sessionId)).toEqual([
-      "old-p0",
-      "new-p0",
-      "old-p1",
-    ]);
+    expect(projection.items.map((item) => item.sessionId)).toEqual(["old-p0", "new-p0", "old-p1"]);
     expect(projection.currentCount).toBe(3);
     expect(projection.items[0]?.explanation).toContain("blocked");
   });

@@ -58,12 +58,8 @@ export const screenPointForWorld = (
   bounds: ViewportBounds,
   scale: ViewportScale,
 ): MapPosition => ({
-  x: Math.round(
-    bounds.x + bounds.width / 2 + (point.x - state.center.x) * scale.x,
-  ),
-  y: Math.round(
-    bounds.y + bounds.height / 2 + (point.y - state.center.y) * scale.y,
-  ),
+  x: Math.round(bounds.x + bounds.width / 2 + (point.x - state.center.x) * scale.x),
+  y: Math.round(bounds.y + bounds.height / 2 + (point.y - state.center.y) * scale.y),
 });
 
 /** Move the world beneath the viewport by a cell-space drag or key delta. */

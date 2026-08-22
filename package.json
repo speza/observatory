@@ -1,8 +1,8 @@
 {
-  "name": "ao-live-herdr-command-centre",
+  "name": "observatory",
   "version": "0.1.0",
   "private": true,
-  "description": "V0 live Herdr spatial universe/map proof of concept.",
+  "description": "An agent observatory for supervising AI agent work.",
   "type": "module",
   "scripts": {
     "dev": "bun run src/main.ts",
@@ -12,10 +12,10 @@
     "test:herdr": "bun test src/hosts/herdr/herdr.test.ts",
     "test:all": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --config .oxlintrc.json src",
-    "lint:fix": "oxlint --config .oxlintrc.json --fix src",
-    "format": "oxfmt --config .oxfmtrc.json src fixtures",
-    "format:check": "oxfmt --config .oxfmtrc.json --check src fixtures",
+    "lint": "oxlint --config .oxlintrc.json .",
+    "lint:fix": "oxlint --config .oxlintrc.json --fix .",
+    "format": "oxfmt --config .oxfmtrc.json .",
+    "format:check": "oxfmt --config .oxfmtrc.json --check .",
     "check": "bun run format:check && bun run lint && bun run typecheck"
   },
   "dependencies": {
@@ -23,8 +23,9 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "oxfmt": "0.7.0",
-    "oxlint": "0.15.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
+    "oxlint-tsgolint": "7.0.2001",
     "typescript": "5.8.3"
   }
 }

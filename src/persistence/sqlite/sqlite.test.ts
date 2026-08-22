@@ -52,9 +52,7 @@ describe("SQLite persistence", () => {
       try {
         expect(second.load()).toEqual(state);
         const recovered = makeUniverse({ store: second }).universe;
-        expect(recovered.reconcile(hostSnapshot([observation])).accepted).toBe(
-          true,
-        );
+        expect(recovered.reconcile(hostSnapshot([observation])).accepted).toBe(true);
         expect(recovered.snapshot().sessions[0]?.primaryGoalId).toBe("goal-1");
       } finally {
         second.close();
@@ -68,19 +66,13 @@ describe("SQLite persistence", () => {
   test("migrations create the complete current schema", () => {
     const store = new SqliteUniverseStore(":memory:");
     const versions = store.db
-      .query("SELECT version FROM schema_migrations ORDER BY version")
-      .all() as Array<{ version: number }>;
+      .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
+      .all();
     expect(versions.map((row) => row.version)).toEqual([1, 2, 3]);
-    const columns = store.db
-      .query("PRAGMA table_info(sessions)")
-      .all() as Array<{ name: string }>;
+    const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
-    expect(columns.map((column) => column.name)).toContain(
-      "display_name_source",
-    );
-    const goalColumns = store.db
-      .query("PRAGMA table_info(goals)")
-      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("display_name_source");
+    const goalColumns = store.db.query<{ name: string }, []>("PRAGMA table_info(goals)").all();
     expect(goalColumns.map((column) => column.name)).toContain("map_x");
     expect(goalColumns.map((column) => column.name)).toContain("map_pinned");
     store.close();
@@ -92,18 +84,14 @@ describe("SQLite persistence", () => {
     setup.universe.execute({ type: "CreateGoal", title: "Stable" });
     const before = store.load();
     const original = store.db.prepare.bind(store.db);
-    store.db.prepare = ((sql: string) => {
-      if (sql.includes("INSERT INTO goals"))
-        throw new Error("injected SQL failure");
+    store.db.prepare = (sql: string) => {
+      if (sql.includes("INSERT INTO goals")) throw new Error("injected SQL failure");
       return original(sql);
-    }) as typeof store.db.prepare;
+    };
     expect(() =>
       store.save({
         ...before,
-        goals: [
-          ...before.goals,
-          { ...before.goals[0]!, id: "goal-extra", title: "Extra" },
-        ],
+        goals: [...before.goals, { ...before.goals[0]!, id: "goal-extra", title: "Extra" }],
       }),
     ).toThrow("injected SQL failure");
     expect(store.load()).toEqual(before);

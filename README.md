@@ -1,7 +1,7 @@
-# Agent orchestration interface
+# Observatory
 
-Exploration of a goal-centred spatial universe for supervising many AI agent
-sessions across providers, repositories and git worktrees.
+An agent observatory: a goal-centred spatial universe for supervising many AI
+agent sessions across providers, repositories and git worktrees.
 
 ## V0 live Herdr universe
 
@@ -10,7 +10,7 @@ backed by SQLite. It discovers recognized live Herdr agents through
 `herdr api snapshot`, keeps human-owned goals, assignments and stable goal
 positions across restarts, and focuses a real Herdr session through the
 installed CLI. Herdr panes, tabs and workspaces are joined as session metadata
-and opaque focus targets; shell-only panes are not AO sessions. The default
+and opaque focus targets; shell-only panes are not Observatory sessions. The default
 database is `data/ao.sqlite`; set `AO_DB_PATH` to use another database.
 
 Install and verify the project:
@@ -30,7 +30,7 @@ AO_DB_PATH=/private/tmp/ao-v0-live.sqlite bun run dev
 For a repeatable dogfood loop without changing the live Herdr host, use the
 deterministic mock adapter. It starts with 20 synthetic sessions, adds sessions
 over the loop, rotates blocked/waiting/done states, and temporarily drops a
-session so AO's stale/recovery path is exercised. The optional portfolio seed
+session so Observatory's stale/recovery path is exercised. The optional portfolio seed
 creates three goals and assigns the first sessions through the same Universe
 commands used by the TUI:
 
@@ -59,12 +59,17 @@ Oxc owns the committed lint and format configuration (`.oxlintrc.json` and
 `.oxfmtrc.json`). The stable quality commands are:
 
 ```sh
-bun run format       # apply Oxfmt
-bun run format:check
+bun run format       # format every supported maintained file; run before handoff
+bun run format:check # verify repository-wide formatting without writing
 bun run lint
 bun run lint:fix
-bun run check
+bun run check        # required before commit or agent handoff
 ```
+
+Oxlint treats correctness and suspicious findings as errors, reports
+performance findings as warnings, checks imports, and runs type-aware promise
+rules. Broad stylistic and pedantic categories remain disabled so Oxfmt owns
+presentation and lint output stays actionable.
 
 At 80x24 the primary surface is a portfolio, cell-native map of goal bodies and
 their direct session satellites. The attention queue, unassigned inbox, flat
@@ -99,29 +104,29 @@ goal-only satellite view. Clicking the `INBOX` body, or its header in the
 narrow compact panel, enters an inbox-only orbit view; selecting an unassigned
 session and pressing `f` does the same.
 
-| Key | Action |
-| --- | --- |
-| `j` / `k` | Move selection through goal bodies and satellites |
-| `h` / `l` | Pan the map left/right |
-| `U` / `D` | Pan the map up/down |
-| `+` / `-` | Zoom the map |
-| `f` / `0` | Focus selected goal or inbox / reset portfolio viewport |
+| Key              | Action                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `j` / `k`        | Move selection through goal bodies and satellites                                                          |
+| `h` / `l`        | Pan the map left/right                                                                                     |
+| `U` / `D`        | Pan the map up/down                                                                                        |
+| `+` / `-`        | Zoom the map                                                                                               |
+| `f` / `0`        | Focus selected goal or inbox / reset portfolio viewport                                                    |
 | Mouse click/drag | Click anywhere in a goal body or `INBOX` to focus it; drag a goal body to move it; drag empty space to pan |
-| `v` | Toggle the supporting grouped-list lens |
-| `A` | Toggle the attention lens; dim healthy work and keep current/uncertain items in spatial context |
-| `g` | Jump to the next attention item |
-| `z` | Cycle semantic label detail without moving map nodes |
-| `Enter` | Focus the selected live Herdr session; return preserves map state |
-| `n` | Create a goal (title, description, priority) |
-| `r` / `d` | Rename or edit the selected goal/session |
-| `p` | Change selected goal priority |
-| `a` / `u` | Assign/reassign or unassign a session |
-| `c` / `x` | Confirm complete or archive a goal |
-| `/` | Search goals and session metadata |
-| `R` | Reconcile a fresh Herdr snapshot |
-| `i` | Toggle the floating inspector card |
-| `s` | Exercise suspend/resume |
-| `q` | Cleanly exit |
+| `v`              | Toggle the supporting grouped-list lens                                                                    |
+| `A`              | Toggle the attention lens; dim healthy work and keep current/uncertain items in spatial context            |
+| `g`              | Jump to the next attention item                                                                            |
+| `z`              | Cycle semantic label detail without moving map nodes                                                       |
+| `Enter`          | Focus the selected live Herdr session; return preserves map state                                          |
+| `n`              | Create a goal (title, description, priority)                                                               |
+| `r` / `d`        | Rename or edit the selected goal/session                                                                   |
+| `p`              | Change selected goal priority                                                                              |
+| `a` / `u`        | Assign/reassign or unassign a session                                                                      |
+| `c` / `x`        | Confirm complete or archive a goal                                                                         |
+| `/`              | Search goals and session metadata                                                                          |
+| `R`              | Reconcile a fresh Herdr snapshot                                                                           |
+| `i`              | Toggle the floating inspector card                                                                         |
+| `s`              | Exercise suspend/resume                                                                                    |
+| `q`              | Cleanly exit                                                                                               |
 
 Documented manual acceptance flow:
 
@@ -148,21 +153,22 @@ Documented manual acceptance flow:
    assignment remain.
 4. Have Herdr report a real pane as blocked, press `R`, and confirm the
    attention row explains the state and elapsed wait. The installed Herdr 0.8
-   CLI exposes the reliable human-input state as `blocked`; AO also accepts
+   CLI exposes the reliable human-input state as `blocked`; Observatory also accepts
    `waiting` from a host adapter. A reversible check is:
 
    ```sh
    pane_id="<real idle agent pane id from herdr api snapshot>"
    agent_label="<agent field from the same snapshot, usually claude>"
-   herdr pane report-agent "$pane_id" --source ao-v0-acceptance --agent "$agent_label" --state blocked --message "AO attention acceptance"
-   # run AO and press R
-   herdr pane report-agent "$pane_id" --source ao-v0-acceptance --agent "$agent_label" --state idle --message "AO attention acceptance restored"
+   herdr pane report-agent "$pane_id" --source observatory-v0-acceptance --agent "$agent_label" --state blocked --message "Observatory attention acceptance"
+   # run Observatory and press R
+   herdr pane report-agent "$pane_id" --source observatory-v0-acceptance --agent "$agent_label" --state idle --message "Observatory attention acceptance restored"
    ```
 
    The diagnostic count is shown in the host header. Use an idle pane for this
    check and restore it with `report-agent --state idle`; `release-agent` clears
    Herdr's recognition authority for an existing agent pane in the installed
    Herdr CLI.
+
 5. Use `/` to find a live session; accept the result and confirm the map focuses
    its owning goal and satellite. Press `Enter` to exercise focus/return and
    confirm the selected goal/session, map lens, viewport and search state are

@@ -1,14 +1,14 @@
-# AO technical architecture
+# Observatory technical architecture
 
 Status: implemented V0 boundary; future extensions remain proposed  
 Date: 2026-08-21  
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
-Technology choices: [AO technology decisions](technology-decisions.md)
+Technology choices: [Observatory technology decisions](technology-decisions.md)
 
 ## Purpose
 
-This document defines the initial technical shape of AO: a local semantic
+This document defines the initial technical shape of Observatory: a local semantic
 control plane with a portable native spatial universe and a later higher-fidelity
 web interface over agent sessions hosted by other tools.
 

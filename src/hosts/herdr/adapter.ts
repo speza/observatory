@@ -7,8 +7,7 @@ import type {
   SessionAccess,
   SessionHost,
 } from "../types.ts";
-import type { CommandRunner } from "./runner.ts";
-import { BunCommandRunner } from "./runner.ts";
+import { BunCommandRunner, type CommandRunner } from "./runner.ts";
 
 type RecordValue = Record<string, unknown>;
 
@@ -29,8 +28,7 @@ const status = (value: unknown): HostSessionObservation["runtimeState"] => {
   }
 };
 
-const nonEmptyRecord = (value: unknown): RecordValue =>
-  isRecord(value) ? value : {};
+const nonEmptyRecord = (value: unknown): RecordValue => (isRecord(value) ? value : {});
 
 const unwrapSnapshot = (value: unknown): RecordValue | undefined => {
   if (!isRecord(value)) return undefined;
@@ -49,17 +47,10 @@ const parseJson = (text: string): unknown => {
   }
 };
 
-const locator = (
-  workspaceId: string,
-  tabId: string,
-  paneId: string,
-  terminalId: string,
-): string => JSON.stringify({ workspaceId, tabId, paneId, terminalId });
+const locator = (workspaceId: string, tabId: string, paneId: string, terminalId: string): string =>
+  JSON.stringify({ workspaceId, tabId, paneId, terminalId });
 
-export const parseHerdrSnapshot = (
-  payload: unknown,
-  observedAt: number,
-): HostSnapshot => {
+export const parseHerdrSnapshot = (payload: unknown, observedAt: number): HostSnapshot => {
   const snapshot = unwrapSnapshot(payload);
   if (!snapshot) {
     return {
@@ -67,17 +58,13 @@ export const parseHerdrSnapshot = (
       available: false,
       observedAt,
       sessions: [],
-      diagnostics: [
-        "Herdr snapshot did not contain a session_snapshot result.",
-      ],
+      diagnostics: ["Herdr snapshot did not contain a session_snapshot result."],
       error: "Malformed Herdr snapshot envelope.",
     };
   }
   const panes = Array.isArray(snapshot.panes) ? snapshot.panes : [];
   const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
-  const workspaces = Array.isArray(snapshot.workspaces)
-    ? snapshot.workspaces
-    : [];
+  const workspaces = Array.isArray(snapshot.workspaces) ? snapshot.workspaces : [];
   const paneById = new Map<string, RecordValue>();
   const workspaceById = new Map<string, RecordValue>();
   const diagnostics: string[] = [];
@@ -101,19 +88,14 @@ export const parseHerdrSnapshot = (
     }
     const paneId = stringValue(item, "pane_id");
     const pane = paneId ? (paneById.get(paneId) ?? {}) : {};
-    const workspaceId =
-      stringValue(item, "workspace_id") ?? stringValue(pane, "workspace_id");
+    const workspaceId = stringValue(item, "workspace_id") ?? stringValue(pane, "workspace_id");
     const tabId = stringValue(item, "tab_id") ?? stringValue(pane, "tab_id");
-    const terminalId =
-      stringValue(item, "terminal_id") ?? stringValue(pane, "terminal_id");
+    const terminalId = stringValue(item, "terminal_id") ?? stringValue(pane, "terminal_id");
     if (!paneId || !workspaceId || !tabId || !terminalId) {
-      diagnostics.push(
-        "Skipped a Herdr agent without its opaque pane identity fields.",
-      );
+      diagnostics.push("Skipped a Herdr agent without its opaque pane identity fields.");
       continue;
     }
-    if (seen.has(paneId))
-      diagnostics.push(`Found duplicate Herdr agent pane ${paneId}.`);
+    if (seen.has(paneId)) diagnostics.push(`Found duplicate Herdr agent pane ${paneId}.`);
     else seen.add(paneId);
     const workspace = workspaceById.get(workspaceId) ?? {};
     const worktree = nonEmptyRecord(workspace.worktree);
@@ -127,8 +109,7 @@ export const parseHerdrSnapshot = (
       paneId;
     const repository = stringValue(worktree, "repo_name");
     const worktreePath = stringValue(worktree, "checkout_path");
-    const provider =
-      stringValue(item, "display_agent") ?? stringValue(item, "agent");
+    const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const observedState = status(item.agent_status ?? pane.agent_status);
     sessions.push({
       nativeId: paneId,
@@ -137,18 +118,14 @@ export const parseHerdrSnapshot = (
       runtimeStateSource: "herdr.agent_status",
       observedAt,
       ...(repository ? { repository } : {}),
-      ...(stringValue(worktree, "branch")
-        ? { branch: stringValue(worktree, "branch") }
-        : {}),
+      ...(stringValue(worktree, "branch") ? { branch: stringValue(worktree, "branch") } : {}),
       ...(worktreePath ? { worktree: worktreePath } : {}),
       ...(provider ? { provider } : {}),
       hostLocator: locator(workspaceId, tabId, paneId, terminalId),
     });
   }
-  if (!Array.isArray(snapshot.panes))
-    diagnostics.push("Herdr snapshot omitted its panes array.");
-  if (!Array.isArray(snapshot.agents))
-    diagnostics.push("Herdr snapshot omitted its agents array.");
+  if (!Array.isArray(snapshot.panes)) diagnostics.push("Herdr snapshot omitted its panes array.");
+  if (!Array.isArray(snapshot.agents)) diagnostics.push("Herdr snapshot omitted its agents array.");
   return {
     hostKind: "herdr",
     available: true,
@@ -166,10 +143,7 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly clock: Clock;
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
 
-  constructor(options: {
-    readonly runner?: CommandRunner;
-    readonly clock: Clock;
-  }) {
+  constructor(options: { readonly runner?: CommandRunner; readonly clock: Clock }) {
     this.runner = options.runner ?? new BunCommandRunner();
     this.clock = options.clock;
   }
@@ -199,10 +173,7 @@ export class HerdrHostAdapter implements SessionHost {
         error: result.stderr.trim() || `Herdr exited with ${result.exitCode}.`,
       };
     }
-    const snapshot = parseHerdrSnapshot(
-      parseJson(result.stdout),
-      this.clock.now(),
-    );
+    const snapshot = parseHerdrSnapshot(parseJson(result.stdout), this.clock.now());
     this.liveTargets.clear();
     const nativeIds = new Set<string>();
     const ambiguous = snapshot.sessions.some((session) => {
@@ -243,8 +214,7 @@ export class HerdrHostAdapter implements SessionHost {
   }
 
   async activate(access: SessionAccess): Promise<HostActionResult> {
-    if (!access.supported || !access.target)
-      return { ok: false, message: access.explanation };
+    if (!access.supported || !access.target) return { ok: false, message: access.explanation };
     const token = parseTarget(access.target);
     if (!token)
       return {

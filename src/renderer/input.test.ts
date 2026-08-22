@@ -19,9 +19,7 @@ describe("terminal text input", () => {
   });
 
   test("recognizes named delete and control-sequence erase keys", () => {
-    expect(isEraseKey(key({ name: "delete", sequence: "\u001b[3~" }))).toBe(
-      true,
-    );
+    expect(isEraseKey(key({ name: "delete", sequence: "\u001b[3~" }))).toBe(true);
     expect(isEraseKey(key({ name: "unknown", sequence: "\b" }))).toBe(true);
     expect(isEraseKey(key({ name: "unknown", sequence: "x" }))).toBe(false);
   });
@@ -29,8 +27,6 @@ describe("terminal text input", () => {
   test("keeps printable text and space input intact", () => {
     expect(typedCharacter(key())).toBe("a");
     expect(typedCharacter(key({ name: "space", sequence: " " }))).toBe(" ");
-    expect(typedCharacter(key({ name: "a", sequence: "a", ctrl: true }))).toBe(
-      "",
-    );
+    expect(typedCharacter(key({ name: "a", sequence: "a", ctrl: true }))).toBe("");
   });
 });

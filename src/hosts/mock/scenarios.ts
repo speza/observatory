@@ -72,9 +72,7 @@ const frame = (
     const definition = byId.get(nativeId);
     if (!definition) return [];
     const runtimeState = overrides[nativeId];
-    return [
-      runtimeState === undefined ? definition : { ...definition, runtimeState },
-    ];
+    return [runtimeState === undefined ? definition : { ...definition, runtimeState }];
   }),
 });
 

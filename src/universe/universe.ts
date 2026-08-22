@@ -1,9 +1,5 @@
 import type { HostSnapshot, HostSessionObservation } from "../hosts/types.ts";
-import type {
-  Projection,
-  ProjectionModule,
-  ProjectionQuery,
-} from "../projection/types.ts";
+import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
 import {
   cloneUniverseState,
   emptyUniverseState,
@@ -96,50 +92,33 @@ const normalizeText = (value: string | undefined): string | undefined => {
   return normalized ? normalized : undefined;
 };
 
-const copyOptional = (value: string | undefined): string | undefined =>
-  normalizeText(value);
+const copyOptional = (value: string | undefined): string | undefined => normalizeText(value);
 
 const findGoal = (state: UniverseState, goalId: GoalId): Goal | undefined =>
   state.goals.find((goal) => goal.id === goalId);
-const findSession = (
-  state: UniverseState,
-  sessionId: SessionId,
-): TrackedSession | undefined =>
+const findSession = (state: UniverseState, sessionId: SessionId): TrackedSession | undefined =>
   state.sessions.find((session) => session.id === sessionId);
 
-const goalLayoutOccupancy = (
-  state: UniverseState,
-  excludeGoalId?: GoalId,
-): GoalLayoutOccupancy[] =>
+const goalLayoutOccupancy = (state: UniverseState, excludeGoalId?: GoalId): GoalLayoutOccupancy[] =>
   state.goals
     .filter((goal) => goal.id !== excludeGoalId)
     .map((goal) => ({
       position: goal.mapPosition ?? defaultGoalMapPosition(goal.id),
-      sessionCount: state.sessions.filter(
-        (session) => session.primaryGoalId === goal.id,
-      ).length,
+      sessionCount: state.sessions.filter((session) => session.primaryGoalId === goal.id).length,
     }));
 
 const replaceGoal = (state: UniverseState, goal: Goal): void => {
-  state.goals = state.goals.map((candidate) =>
-    candidate.id === goal.id ? goal : candidate,
-  );
+  state.goals = state.goals.map((candidate) => (candidate.id === goal.id ? goal : candidate));
 };
 
-const replaceSession = (
-  state: UniverseState,
-  session: TrackedSession,
-): void => {
+const replaceSession = (state: UniverseState, session: TrackedSession): void => {
   state.sessions = state.sessions.map((candidate) =>
     candidate.id === session.id ? session : candidate,
   );
 };
 
 const replaceHost = (state: UniverseState, host: HostHealth): void => {
-  state.hosts = [
-    ...state.hosts.filter((candidate) => candidate.hostKind !== host.hostKind),
-    host,
-  ];
+  state.hosts = [...state.hosts.filter((candidate) => candidate.hostKind !== host.hostKind), host];
 };
 
 const isDuplicateObservation = (
@@ -297,8 +276,7 @@ export class Universe {
       case "RenameSession": {
         const displayName = normalizeText(command.displayName);
         const session = findSession(next, command.sessionId);
-        if (!displayName)
-          return { ok: false, error: "Session name is required." };
+        if (!displayName) return { ok: false, error: "Session name is required." };
         if (!session) return { ok: false, error: "Session not found." };
         replaceSession(next, {
           ...session,
@@ -393,18 +371,13 @@ export class Universe {
 
     if (!snapshot.available) {
       next.sessions = next.sessions.map((session) => {
-        if (
-          session.hostKind !== snapshot.hostKind ||
-          session.hostHealth === "unavailable"
-        )
+        if (session.hostKind !== snapshot.hostKind || session.hostHealth === "unavailable")
           return session;
         staleSessionIds.push(session.id);
         return { ...session, hostHealth: "unavailable" as const };
       });
     } else {
-      const observedIds = new Set(
-        snapshot.sessions.map((session) => session.nativeId),
-      );
+      const observedIds = new Set(snapshot.sessions.map((session) => session.nativeId));
       next.sessions = next.sessions.map((session) => {
         if (
           session.hostKind !== snapshot.hostKind ||
@@ -422,24 +395,17 @@ export class Universe {
       for (const observation of snapshot.sessions) {
         const existing = next.sessions.find(
           (session) =>
-            session.hostKind === snapshot.hostKind &&
-            session.nativeId === observation.nativeId,
+            session.hostKind === snapshot.hostKind && session.nativeId === observation.nativeId,
         );
         if (!existing) {
           const id = this.ids.next("session");
-          const session = this.sessionFromObservation(
-            id,
-            snapshot,
-            observation,
-          );
+          const session = this.sessionFromObservation(id, snapshot, observation);
           next.sessions = [...next.sessions, session];
           addedSessionIds.push(id);
           continue;
         }
         const stateChanged = existing.runtimeState !== observation.runtimeState;
-        const currentAttention = isCurrentAttentionState(
-          observation.runtimeState,
-        );
+        const currentAttention = isCurrentAttentionState(observation.runtimeState);
         const updated: TrackedSession = {
           ...existing,
           ...(existing.displayNameSource === "host"
@@ -450,9 +416,7 @@ export class Universe {
           hostHealth: "live",
           lastSeenAt: observation.observedAt,
           lastObservedAt: observation.observedAt,
-          lastChangedAt: stateChanged
-            ? observation.observedAt
-            : existing.lastChangedAt,
+          lastChangedAt: stateChanged ? observation.observedAt : existing.lastChangedAt,
           ...(currentAttention
             ? {
                 attentionSince: stateChanged
@@ -463,15 +427,9 @@ export class Universe {
           ...(observation.repository
             ? { repository: observation.repository }
             : { repository: undefined }),
-          ...(observation.branch
-            ? { branch: observation.branch }
-            : { branch: undefined }),
-          ...(observation.worktree
-            ? { worktree: observation.worktree }
-            : { worktree: undefined }),
-          ...(observation.provider
-            ? { provider: observation.provider }
-            : { provider: undefined }),
+          ...(observation.branch ? { branch: observation.branch } : { branch: undefined }),
+          ...(observation.worktree ? { worktree: observation.worktree } : { worktree: undefined }),
+          ...(observation.provider ? { provider: observation.provider } : { provider: undefined }),
           hostLocator: observation.hostLocator,
         };
         replaceSession(next, updated);
@@ -522,18 +480,10 @@ export class Universe {
       lastObservedAt: observation.observedAt,
       lastChangedAt: observation.observedAt,
       ...(attentionSince !== undefined ? { attentionSince } : {}),
-      ...(observation.repository
-        ? { repository: copyOptional(observation.repository) }
-        : {}),
-      ...(observation.branch
-        ? { branch: copyOptional(observation.branch) }
-        : {}),
-      ...(observation.worktree
-        ? { worktree: copyOptional(observation.worktree) }
-        : {}),
-      ...(observation.provider
-        ? { provider: copyOptional(observation.provider) }
-        : {}),
+      ...(observation.repository ? { repository: copyOptional(observation.repository) } : {}),
+      ...(observation.branch ? { branch: copyOptional(observation.branch) } : {}),
+      ...(observation.worktree ? { worktree: copyOptional(observation.worktree) } : {}),
+      ...(observation.provider ? { provider: copyOptional(observation.provider) } : {}),
       hostLocator: observation.hostLocator,
     };
   }

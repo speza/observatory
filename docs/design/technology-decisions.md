@@ -1,8 +1,8 @@
-# AO technology decisions
+# Observatory technology decisions
 
 Status: accepted for v0 implementation  
 Date: 2026-08-21  
-Depends on: [AO technical architecture](technical-architecture.md)
+Depends on: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision
 
@@ -91,6 +91,7 @@ It is not AO's runtime.
 Use:
 
 - Oxlint for linting;
+- Oxlint's `oxlint-tsgolint` integration for selected type-aware rules;
 - Oxfmt for formatting; and
 - Oxc's shared tooling indirectly where adopted by the build ecosystem.
 
@@ -110,6 +111,15 @@ Oxfmt is currently described as beta. AO is greenfield, so formatter migration
 compatibility is not a concern, but the version must be pinned and upgrades must
 be deliberate.
 
+The committed lint policy treats correctness and suspicious findings as errors,
+keeps performance findings visible as warnings, and enables a small set of
+import and TypeScript rules including floating and misused promise detection.
+Whole-category style, pedantic, restriction and nursery rules stay disabled:
+Oxfmt owns presentation, while lint output should remain about likely defects.
+The formatter runs over every supported maintained repository file, including
+the prototype code and committed configuration. Agents run `bun run format`
+before handoff and `bun run check` before commit or handoff.
+
 Relevant documentation:
 
 - [Oxc](https://oxc.rs/)
@@ -118,8 +128,9 @@ Relevant documentation:
 
 ### Type checking remains separate
 
-Linting does not establish that AO type-checks. CI and the local quality command
-must run a dedicated TypeScript checker.
+Type-aware lint rules do not replace a complete type check. CI and the local
+quality command run the dedicated TypeScript checker separately; Oxlint's
+experimental `typeCheck` mode remains disabled.
 
 The initial choice between `tsgo` and `tsc --noEmit` should be based on
 compatibility with the selected TypeScript configuration. This decision does not
@@ -277,6 +288,7 @@ shallow pass-through packages.
 The repository should converge on a small interface for humans, agents and CI:
 
 ```sh
+bun run format      # apply repository-wide formatting before handoff
 bun run check       # format check, lint and type check
 bun run test        # deterministic tests
 bun run test:all    # tests plus slower adapter and fixture checks

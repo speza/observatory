@@ -15,12 +15,8 @@ const goalOccupancy = (...positions: readonly { x: number; y: number }[]) =>
 
 describe("spatial positions", () => {
   test("is deterministic for durable goal and session identities", () => {
-    expect(defaultGoalMapPosition("goal-a")).toEqual(
-      defaultGoalMapPosition("goal-a"),
-    );
-    expect(
-      sessionSatellitePosition({ x: 4, y: -3 }, "goal-a", "session-a", 0, 3),
-    ).toEqual(
+    expect(defaultGoalMapPosition("goal-a")).toEqual(defaultGoalMapPosition("goal-a"));
+    expect(sessionSatellitePosition({ x: 4, y: -3 }, "goal-a", "session-a", 0, 3)).toEqual(
       sessionSatellitePosition({ x: 4, y: -3 }, "goal-a", "session-a", 0, 3),
     );
   });
@@ -28,34 +24,22 @@ describe("spatial positions", () => {
   test("does not move occupied initial goal slots when a new goal arrives", () => {
     const first = initialGoalMapPosition("goal-a", []);
     const second = initialGoalMapPosition("goal-b", goalOccupancy(first));
-    const third = initialGoalMapPosition(
-      "goal-c",
-      goalOccupancy(first, second),
-    );
+    const third = initialGoalMapPosition("goal-c", goalOccupancy(first, second));
     expect(second).not.toEqual(first);
     expect(third).not.toEqual(first);
     expect(third).not.toEqual(second);
   });
 
   test("keeps satellite cards separated when sessions share a goal", () => {
-    const sessionIds = Array.from(
-      { length: 12 },
-      (_, index) => `session-${index}`,
-    );
-    const first = sessionSatellitePositions(
-      { x: 0, y: 0 },
-      "goal-a",
-      sessionIds,
-    );
+    const sessionIds = Array.from({ length: 12 }, (_, index) => `session-${index}`);
+    const first = sessionSatellitePositions({ x: 0, y: 0 }, "goal-a", sessionIds);
     const second = sessionSatellitePositions({ x: 0, y: 0 }, "goal-a", [
       ...sessionIds,
       "session-z",
     ]);
-    expect(
-      new Set(
-        [...first.values()].map((position) => `${position.x}:${position.y}`),
-      ).size,
-    ).toBe(sessionIds.length);
+    expect(new Set([...first.values()].map((position) => `${position.x}:${position.y}`)).size).toBe(
+      sessionIds.length,
+    );
     expect(second.get("session-0")).toEqual(first.get("session-0"));
     expect(second.get("session-11")).toEqual(first.get("session-11"));
   });
@@ -63,28 +47,19 @@ describe("spatial positions", () => {
   test("keeps the first compact portfolio in one legible viewport row", () => {
     const first = initialGoalMapPosition("goal-a", []);
     const second = initialGoalMapPosition("goal-b", goalOccupancy(first));
-    const third = initialGoalMapPosition(
-      "goal-c",
-      goalOccupancy(first, second),
-    );
+    const third = initialGoalMapPosition("goal-c", goalOccupancy(first, second));
     expect([first.y, second.y, third.y]).toEqual([0, 0, 0]);
     expect(new Set([first.x, second.x, third.x]).size).toBe(3);
   });
 
   test("routes a new goal around the footprint of a loaded goal", () => {
     const first = initialGoalMapPosition("goal-a", []);
-    const second = initialGoalMapPosition(
-      "goal-b",
-      [{ position: first, sessionCount: 20 }],
-      0,
-    );
+    const second = initialGoalMapPosition("goal-b", [{ position: first, sessionCount: 20 }], 0);
     const firstFootprint = goalLayoutFootprint(20);
     const secondFootprint = goalLayoutFootprint(0);
     expect(
-      Math.abs(second.x - first.x) >=
-        firstFootprint.halfWidth + secondFootprint.halfWidth + 16 ||
-        Math.abs(second.y - first.y) >=
-          firstFootprint.halfHeight + secondFootprint.halfHeight + 12,
+      Math.abs(second.x - first.x) >= firstFootprint.halfWidth + secondFootprint.halfWidth + 16 ||
+        Math.abs(second.y - first.y) >= firstFootprint.halfHeight + secondFootprint.halfHeight + 12,
     ).toBe(true);
   });
 
@@ -107,17 +82,11 @@ describe("spatial positions", () => {
     const ids = Array.from({ length: 20 }, (_, index) => `session-${index}`);
     const positions = unassignedSessionPositions(anchor, ids);
     expect(
-      new Set(
-        [...positions.values()].map(
-          (position) => `${position.x}:${position.y}`,
-        ),
-      ).size,
+      new Set([...positions.values()].map((position) => `${position.x}:${position.y}`)).size,
     ).toBe(ids.length);
     expect(
       [...positions.values()].some(
-        (position) =>
-          Math.abs(position.x - anchor.x) > 72 ||
-          Math.abs(position.y - anchor.y) > 32,
+        (position) => Math.abs(position.x - anchor.x) > 72 || Math.abs(position.y - anchor.y) > 32,
       ),
     ).toBe(true);
     const expanded = unassignedSessionPositions(anchor, [...ids, "session-z"]);

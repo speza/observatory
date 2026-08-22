@@ -4,14 +4,7 @@ export type Priority = (typeof PRIORITIES)[number];
 export const GOAL_STATUSES = ["active", "completed", "archived"] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
-export const RUNTIME_STATES = [
-  "idle",
-  "working",
-  "waiting",
-  "blocked",
-  "done",
-  "unknown",
-] as const;
+export const RUNTIME_STATES = ["idle", "working", "waiting", "blocked", "done", "unknown"] as const;
 export type RuntimeState = (typeof RUNTIME_STATES)[number];
 
 export type GoalId = string;
@@ -89,8 +82,7 @@ export interface IdGenerator {
   next(kind: "goal" | "session"): string;
 }
 
-export const priorityRank = (priority: Priority): number =>
-  PRIORITIES.indexOf(priority);
+export const priorityRank = (priority: Priority): number => PRIORITIES.indexOf(priority);
 
 export const isCurrentAttentionState = (state: RuntimeState): boolean =>
   state === "blocked" || state === "waiting";

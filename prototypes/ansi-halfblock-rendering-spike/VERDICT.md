@@ -16,16 +16,16 @@ browser/image protocols.
 
 Observed in the focused Herdr shell pane:
 
-| Measurement | Observation |
-| --- | --- |
-| Pane | `w3D:p4`, the focused Herdr shell pane |
-| Terminal/map size | `191×59` terminal; `191×57` cells; `191×114` RGB pixels |
-| Frame rate | approximately 29–30 FPS |
-| Render time | approximately 0.7–1.0 ms/frame |
-| Output | approximately 20,198–21,503 bytes/frame, roughly 600 KB/s at 30 FPS |
-| Renderer CPU/RSS | approximately 3.1% CPU and 67,568 KB RSS in one sample |
-| Interaction | keyboard selection, zoom, focus, suspend/resume, resize path, and animation exercised |
-| Cleanup | `q` restored the shell; suspend/resume restored the alternate screen |
+| Measurement       | Observation                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| Pane              | `w3D:p4`, the focused Herdr shell pane                                                |
+| Terminal/map size | `191×59` terminal; `191×57` cells; `191×114` RGB pixels                               |
+| Frame rate        | approximately 29–30 FPS                                                               |
+| Render time       | approximately 0.7–1.0 ms/frame                                                        |
+| Output            | approximately 20,198–21,503 bytes/frame, roughly 600 KB/s at 30 FPS                   |
+| Renderer CPU/RSS  | approximately 3.1% CPU and 67,568 KB RSS in one sample                                |
+| Interaction       | keyboard selection, zoom, focus, suspend/resume, resize path, and animation exercised |
+| Cleanup           | `q` restored the shell; suspend/resume restored the alternate screen                  |
 
 The measurements show that the approach was technically viable in this local
 Herdr setup. They do not make it a good product rendering foundation.

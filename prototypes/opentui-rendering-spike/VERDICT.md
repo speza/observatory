@@ -142,8 +142,7 @@ Evidence from the live pane run:
   toggle. It held roughly `29–30 FPS` at `0.4–0.6ms` reported frame time,
   retained `N12`/`N21` as the lens changed, and exited with code 0.
 - The follow-up Observatory card pass was run in a 120×30 pane. It held roughly
-  `30 FPS` at `0.4–0.5ms`, retained `N12`/`S9`/`U9–10/s`, and exited with code
-  0. The three goal families were visibly distinct through card tint and
+  `30 FPS` at `0.4–0.5ms`, retained `N12`/`S9`/`U9–10/s`, and exited with code 0. The three goal families were visibly distinct through card tint and
   labels, while selection and attention remained separate outline/glyph
   signals.
 - The card pass is calmer and more stable than the literal circle experiment:
