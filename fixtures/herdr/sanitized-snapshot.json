@@ -1,0 +1,158 @@
+{
+  "id": "fixture:api:snapshot",
+  "result": {
+    "snapshot": {
+      "version": "0.8.0",
+      "protocol": 19,
+      "focused_workspace_id": "fixture-w1",
+      "focused_tab_id": "fixture-w1:t1",
+      "focused_pane_id": "fixture-w1:p1",
+      "workspaces": [
+        {
+          "workspace_id": "fixture-w1",
+          "number": 1,
+          "label": "alpha",
+          "focused": true,
+          "pane_count": 4,
+          "tab_count": 1,
+          "active_tab_id": "fixture-w1:t1",
+          "agent_status": "working",
+          "worktree": {
+            "repo_key": "sandbox/alpha.git",
+            "repo_name": "alpha",
+            "repo_root": "/sandbox/alpha",
+            "checkout_path": "/sandbox/alpha",
+            "is_linked_worktree": false
+          }
+        },
+        {
+          "workspace_id": "fixture-w2",
+          "number": 2,
+          "label": "beta",
+          "focused": false,
+          "pane_count": 4,
+          "tab_count": 1,
+          "active_tab_id": "fixture-w2:t1",
+          "agent_status": "idle",
+          "worktree": {
+            "repo_key": "sandbox/beta.git",
+            "repo_name": "beta",
+            "repo_root": "/sandbox/beta",
+            "checkout_path": "/sandbox/beta-worktree",
+            "is_linked_worktree": true
+          }
+        },
+        {
+          "workspace_id": "fixture-w3",
+          "number": 3,
+          "label": "research",
+          "focused": false,
+          "pane_count": 4,
+          "tab_count": 1,
+          "active_tab_id": "fixture-w3:t1",
+          "agent_status": "unknown"
+        },
+        {
+          "workspace_id": "fixture-w4",
+          "number": 4,
+          "label": "release",
+          "focused": false,
+          "pane_count": 4,
+          "tab_count": 1,
+          "active_tab_id": "fixture-w4:t1",
+          "agent_status": "done",
+          "worktree": {
+            "repo_key": "sandbox/release.git",
+            "repo_name": "release",
+            "repo_root": "/sandbox/release",
+            "checkout_path": "/sandbox/release",
+            "is_linked_worktree": false
+          }
+        }
+      ],
+      "tabs": [],
+      "layouts": [],
+      "agents": [
+        {
+          "agent": "codex",
+          "display_agent": "codex",
+          "agent_status": "working",
+          "name": "alpha-builder",
+          "title": "Alpha builder",
+          "terminal_title_stripped": "Alpha builder",
+          "cwd": "/sandbox/alpha",
+          "foreground_cwd": "/sandbox/alpha",
+          "focused": true,
+          "interactive_ready": true,
+          "launch_pending": false,
+          "screen_detection_skipped": false,
+          "workspace_id": "fixture-w1",
+          "tab_id": "fixture-w1:t1",
+          "pane_id": "fixture-w1:p1",
+          "terminal_id": "fixture-term-01",
+          "revision": 10,
+          "state_change_seq": 100
+        },
+        {
+          "agent": "claude",
+          "display_agent": "claude",
+          "agent_status": "blocked",
+          "name": "beta-reviewer",
+          "title": "Beta reviewer",
+          "terminal_title_stripped": "Beta reviewer",
+          "cwd": "/sandbox/beta-worktree",
+          "foreground_cwd": "/sandbox/beta-worktree",
+          "focused": false,
+          "interactive_ready": true,
+          "launch_pending": false,
+          "screen_detection_skipped": false,
+          "workspace_id": "fixture-w2",
+          "tab_id": "fixture-w2:t1",
+          "pane_id": "fixture-w2:p1",
+          "terminal_id": "fixture-term-05",
+          "revision": 20,
+          "state_change_seq": 200
+        },
+        {
+          "agent": "codex",
+          "display_agent": "codex",
+          "agent_status": "idle",
+          "name": "release-check",
+          "title": "Release check",
+          "terminal_title_stripped": "Release check",
+          "cwd": "/sandbox/release",
+          "foreground_cwd": "/sandbox/release",
+          "focused": false,
+          "interactive_ready": true,
+          "launch_pending": false,
+          "screen_detection_skipped": false,
+          "workspace_id": "fixture-w4",
+          "tab_id": "fixture-w4:t1",
+          "pane_id": "fixture-w4:p1",
+          "terminal_id": "fixture-term-13",
+          "revision": 30,
+          "state_change_seq": 300
+        }
+      ],
+      "panes": [
+        { "pane_id": "fixture-w1:p1", "terminal_id": "fixture-term-01", "workspace_id": "fixture-w1", "tab_id": "fixture-w1:t1", "focused": true, "agent_status": "working", "revision": 10, "terminal_title_stripped": "Alpha builder", "cwd": "/sandbox/alpha", "foreground_cwd": "/sandbox/alpha" },
+        { "pane_id": "fixture-w1:p2", "terminal_id": "fixture-term-02", "workspace_id": "fixture-w1", "tab_id": "fixture-w1:t1", "focused": false, "agent_status": "idle", "revision": 11, "terminal_title_stripped": "Alpha notes", "cwd": "/sandbox/alpha", "foreground_cwd": "/sandbox/alpha" },
+        { "pane_id": "fixture-w1:p3", "terminal_id": "fixture-term-03", "workspace_id": "fixture-w1", "tab_id": "fixture-w1:t1", "focused": false, "agent_status": "working", "revision": 12, "terminal_title_stripped": "Alpha tests", "cwd": "/sandbox/alpha", "foreground_cwd": "/sandbox/alpha" },
+        { "pane_id": "fixture-w1:p4", "terminal_id": "fixture-term-04", "workspace_id": "fixture-w1", "tab_id": "fixture-w1:t1", "focused": false, "agent_status": "unknown", "revision": 13, "terminal_title_stripped": "Alpha shell", "cwd": "/sandbox/alpha", "foreground_cwd": "/sandbox/alpha" },
+        { "pane_id": "fixture-w2:p1", "terminal_id": "fixture-term-05", "workspace_id": "fixture-w2", "tab_id": "fixture-w2:t1", "focused": false, "agent_status": "blocked", "revision": 20, "terminal_title_stripped": "Beta reviewer", "cwd": "/sandbox/beta-worktree", "foreground_cwd": "/sandbox/beta-worktree" },
+        { "pane_id": "fixture-w2:p2", "terminal_id": "fixture-term-06", "workspace_id": "fixture-w2", "tab_id": "fixture-w2:t1", "focused": false, "agent_status": "idle", "revision": 21, "terminal_title_stripped": "Beta implementation", "cwd": "/sandbox/beta-worktree", "foreground_cwd": "/sandbox/beta-worktree" },
+        { "pane_id": "fixture-w2:p3", "terminal_id": "fixture-term-07", "workspace_id": "fixture-w2", "tab_id": "fixture-w2:t1", "focused": false, "agent_status": "working", "revision": 22, "terminal_title_stripped": "Beta tests", "cwd": "/sandbox/beta-worktree", "foreground_cwd": "/sandbox/beta-worktree" },
+        { "pane_id": "fixture-w2:p4", "terminal_id": "fixture-term-08", "workspace_id": "fixture-w2", "tab_id": "fixture-w2:t1", "focused": false, "agent_status": "done", "revision": 23, "terminal_title_stripped": "Beta archive", "cwd": "/sandbox/beta-worktree", "foreground_cwd": "/sandbox/beta-worktree" },
+        { "pane_id": "fixture-w3:p1", "terminal_id": "fixture-term-09", "workspace_id": "fixture-w3", "tab_id": "fixture-w3:t1", "focused": false, "agent_status": "unknown", "revision": 31, "terminal_title_stripped": "Research one", "cwd": "/sandbox/research", "foreground_cwd": "/sandbox/research" },
+        { "pane_id": "fixture-w3:p2", "terminal_id": "fixture-term-10", "workspace_id": "fixture-w3", "tab_id": "fixture-w3:t1", "focused": false, "agent_status": "unknown", "revision": 32, "terminal_title_stripped": "Research two", "cwd": "/sandbox/research", "foreground_cwd": "/sandbox/research" },
+        { "pane_id": "fixture-w3:p3", "terminal_id": "fixture-term-11", "workspace_id": "fixture-w3", "tab_id": "fixture-w3:t1", "focused": false, "agent_status": "idle", "revision": 33, "terminal_title_stripped": "Research three", "cwd": "/sandbox/research", "foreground_cwd": "/sandbox/research" },
+        { "pane_id": "fixture-w3:p4", "terminal_id": "fixture-term-12", "workspace_id": "fixture-w3", "tab_id": "fixture-w3:t1", "focused": false, "agent_status": "working", "revision": 34, "terminal_title_stripped": "Research four", "cwd": "/sandbox/research", "foreground_cwd": "/sandbox/research" },
+        { "pane_id": "fixture-w4:p1", "terminal_id": "fixture-term-13", "workspace_id": "fixture-w4", "tab_id": "fixture-w4:t1", "focused": false, "agent_status": "done", "revision": 40, "terminal_title_stripped": "Release check", "cwd": "/sandbox/release", "foreground_cwd": "/sandbox/release" },
+        { "pane_id": "fixture-w4:p2", "terminal_id": "fixture-term-14", "workspace_id": "fixture-w4", "tab_id": "fixture-w4:t1", "focused": false, "agent_status": "idle", "revision": 41, "terminal_title_stripped": "Release notes", "cwd": "/sandbox/release", "foreground_cwd": "/sandbox/release" },
+        { "pane_id": "fixture-w4:p3", "terminal_id": "fixture-term-15", "workspace_id": "fixture-w4", "tab_id": "fixture-w4:t1", "focused": false, "agent_status": "working", "revision": 42, "terminal_title_stripped": "Release smoke", "cwd": "/sandbox/release", "foreground_cwd": "/sandbox/release" },
+        { "pane_id": "fixture-w4:p4", "terminal_id": "fixture-term-16", "workspace_id": "fixture-w4", "tab_id": "fixture-w4:t1", "focused": false, "agent_status": "unknown", "revision": 43, "terminal_title_stripped": "Release shell", "cwd": "/sandbox/release", "foreground_cwd": "/sandbox/release" }
+      ]
+    },
+    "type": "session_snapshot"
+  }
+}

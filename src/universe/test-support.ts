@@ -1,0 +1,85 @@
+import { createProjectionModule } from "../projection/projection.ts";
+import type { HostSnapshot } from "../hosts/types.ts";
+import { Universe } from "./universe.ts";
+import {
+  emptyUniverseState,
+  type Clock,
+  type IdGenerator,
+  type UniverseState,
+  type UniverseStore,
+} from "./types.ts";
+
+export class FixedClock implements Clock {
+  constructor(public value: number) {}
+  now(): number {
+    return this.value;
+  }
+}
+
+export class SequenceIds implements IdGenerator {
+  private goal = 0;
+  private session = 0;
+  next(kind: "goal" | "session"): string {
+    if (kind === "goal") return `goal-${++this.goal}`;
+    return `session-${++this.session}`;
+  }
+}
+
+export class MemoryStore implements UniverseStore {
+  state: UniverseState;
+  saves = 0;
+  failNextSave = false;
+
+  constructor(state: UniverseState = emptyUniverseState()) {
+    this.state = state;
+  }
+
+  load(): UniverseState {
+    return structuredClone(this.state) as UniverseState;
+  }
+
+  save(state: UniverseState): void {
+    if (this.failNextSave) {
+      this.failNextSave = false;
+      throw new Error("injected persistence failure");
+    }
+    this.state = structuredClone(state) as UniverseState;
+    this.saves += 1;
+  }
+}
+
+export const makeUniverse = <
+  TStore extends UniverseStore = MemoryStore,
+>(options?: {
+  readonly state?: UniverseState;
+  readonly clock?: FixedClock;
+  readonly store?: TStore;
+}): {
+  readonly universe: Universe;
+  readonly store: TStore;
+  readonly clock: FixedClock;
+} => {
+  const store = (options?.store ?? new MemoryStore(options?.state)) as TStore;
+  const clock = options?.clock ?? new FixedClock(1_000_000);
+  return {
+    universe: new Universe(
+      store,
+      clock,
+      new SequenceIds(),
+      createProjectionModule(),
+    ),
+    store,
+    clock,
+  };
+};
+
+export const hostSnapshot = (
+  sessions: HostSnapshot["sessions"],
+  observedAt = 1_000_000,
+): HostSnapshot => ({
+  hostKind: "test-host",
+  available: true,
+  observedAt,
+  sessions,
+  diagnostics: [],
+});

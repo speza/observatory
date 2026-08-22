@@ -1,0 +1,71 @@
+import { describe, expect, test } from "bun:test";
+import { evaluateAttention } from "./attention.ts";
+import type { Goal, TrackedSession } from "../universe/types.ts";
+
+const goal = (id: string, priority: Goal["priority"]): Goal => ({
+  id,
+  title: id,
+  priority,
+  status: "active",
+  createdAt: 0,
+  updatedAt: 0,
+});
+const session = (
+  id: string,
+  state: TrackedSession["runtimeState"],
+  goalId: string,
+  attentionSince: number,
+  lastChangedAt = attentionSince,
+): TrackedSession => ({
+  id,
+  hostKind: "herdr",
+  nativeId: id,
+  displayName: id,
+  displayNameSource: "host",
+  primaryGoalId: goalId,
+  runtimeState: state,
+  runtimeStateSource: "herdr.agent_status",
+  hostHealth: "live",
+  lastSeenAt: 10_000,
+  lastObservedAt: 10_000,
+  lastChangedAt,
+  ...(attentionSince ? { attentionSince } : {}),
+  hostLocator: id,
+});
+
+describe("attention", () => {
+  test("orders human input, priority, wait duration, then recent host change", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [goal("p1", "P1"), goal("p0", "P0")],
+      [
+        session("working-p0", "working", "p0", 0),
+        session("new-p0", "blocked", "p0", 18_000),
+        session("old-p1", "waiting", "p1", 5_000),
+        session("old-p0", "blocked", "p0", 5_000, 19_000),
+      ],
+    );
+    expect(projection.items.map((item) => item.sessionId)).toEqual([
+      "old-p0",
+      "new-p0",
+      "old-p1",
+    ]);
+    expect(projection.currentCount).toBe(3);
+    expect(projection.items[0]?.explanation).toContain("blocked");
+  });
+
+  test("does not promote stale last-known blocked state as current attention", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [goal("p0", "P0")],
+      [
+        { ...session("stale", "blocked", "p0", 5_000), hostHealth: "stale" },
+        session("current", "blocked", "p0", 15_000),
+      ],
+    );
+    expect(projection.currentCount).toBe(1);
+    expect(projection.uncertaintyCount).toBe(1);
+    expect(projection.items[1]?.reason).toBe("host-stale");
+    expect(projection.items[1]?.explanation).toContain("not current");
+  });
+});
