@@ -250,6 +250,12 @@ The control plane exposes an API and CLI so humans and agents can create goals,
 assign sessions, record delegation, request attention and update progress. The
 TUI and any later web or desktop clients are projections of this shared state.
 
+Optional external context is plugin-contributed. GitHub pull requests, Jira or
+Linear tickets and provider-specific facts should appear as provenance-bearing
+related resources or supporting lenses, not as hard-coded kernel fields or a
+new required topology layer. See the [plugin architecture](plugin-architecture.md)
+for the boundary and failure rules.
+
 Agent-supplied semantics are progressively enhanced:
 
 1. vanilla sessions expose whatever can be discovered safely from their process,
@@ -474,6 +480,11 @@ has three presentation tiers:
 - focus/detail: a focused goal or inbox shows larger or wrapped labels and the
   full direct orbit, while the inspector exposes complete execution metadata.
 
+At low geometric zoom, overview cards collapse to glyphs and priority markers
+because terminal cells cannot scale text. Selected and attention-bearing nodes
+keep their labels so the map remains navigable without letting fixed-width
+cards overlap.
+
 The attention lens dims healthy work while retaining the spatial positions of
 promoted sessions and their owning goals. Search focuses a result in the same
 spatial context. On narrow terminals, focus/detail is the fallback rather than
@@ -554,11 +565,19 @@ infrastructure details remain session metadata.
 Unassigned sessions remain discoverable without becoming map topology: the
 portfolio hides their cards and shows an `INBOX !N · v list` warning instead.
 The list is a supporting lens over direct Goal → Session state, not a durable
-map body. Attention and focused inbox lenses expose the compact, attention-first
-list, while a selected goal's `a` action opens its type-to-filter assignment
-picker. Goal satellites continue to use identity-derived collision-aware
-perimeter slots; this is deterministic slot allocation, not a force-directed
-graph layout or continuous auto-formatting.
+map body. Stale or unavailable host state is called out in the header and
+remains actionable through the list and attention lenses. Attention and
+focused inbox lenses expose the compact, attention-first list, while a
+selected goal's `a` action opens its type-to-filter assignment picker. Goal
+satellites continue to use
+identity-derived collision-aware perimeter slots; this is deterministic slot
+allocation, not a force-directed graph layout or continuous auto-formatting.
+
+Stale or unavailable sessions remain in those supporting lenses until a human
+selects one and confirms `x` to archive it. Archiving removes it from active
+map/list projections while retaining its identity, assignment and host history;
+a later host refresh may update the archived record but must not silently bring
+it back.
 
 Goal placement is a separate free-space operation: new goals are placed against
 the current occupied footprints, while accepted goal anchors remain stable.
@@ -568,6 +587,12 @@ contains that body and all of its direct sessions. Selecting an unassigned
 session and using focus enters the supporting inbox list lens. Creating a goal
 selects it automatically; `a` from a selected goal opens the inbox assignment
 picker, while `a` from a selected session opens the goal picker.
+
+Map keyboard navigation follows the visible hierarchy rather than flattening
+it: `j`/`k` cycles goal bodies in the portfolio, and a focused goal changes the
+sequence to its direct sessions in clockwise perimeter order. The focused inbox
+does the same for unassigned sessions; the supporting grouped list retains flat
+row navigation.
 
 The experience should remain fully keyboard operable. Selecting an item should
 open its floating inspector card; `Enter` on a session should open its real

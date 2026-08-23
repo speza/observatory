@@ -6,6 +6,8 @@ Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
 
+Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
+
 ## Purpose
 
 This document defines the initial technical shape of Observatory: a local semantic
@@ -47,6 +49,12 @@ The architecture must support:
 - a rich terminal client without making terminal rendering part of the domain;
 - future tmux and other session-host adapters; and
 - a possible AO-native multiplexer without requiring one for v1.
+
+Every optional capability is composed as a plugin at the control-plane edge.
+The Universe remains the trusted kernel; plugins translate hosts and external
+systems into typed observations, proposals and capabilities without writing
+SQLite or bypassing Universe commands. The proposed plugin boundary is defined
+separately in [Plugin architecture](plugin-architecture.md).
 
 ## System shape
 
@@ -718,14 +726,22 @@ use a focused goal/lens fallback rather than compressing the whole universe.
 Worktrees, repositories, runtimes and hosts are session metadata in the
 inspector, not navigation levels or map nodes.
 
-Unassigned live sessions are hidden from the portfolio map and represented by
-an `INBOX !N · v list` warning in the header. The inbox is a transient queue,
-not a topology node or durable domain object; it must not consume the central
-map footprint needed to understand accepted goals. Attention and focused inbox
-lenses expose an attention-first list, and a selected goal's assignment picker
-supports type-to-filter session metadata. Goal satellites continue to use
+Unassigned sessions are hidden from the portfolio map and represented by an
+`INBOX !N · v list` warning in the header. The inbox is a transient queue, not
+a topology node or durable domain object; it must not consume the central map
+footprint needed to understand accepted goals. Stale or unavailable host state
+is called out in the header and remains actionable through the list and
+attention lenses. Attention and focused inbox lenses expose an attention-first
+list, and a selected goal's assignment picker supports type-to-filter session
+metadata. Goal satellites continue to use
 identity-derived, collision-aware perimeter slots. This is deterministic slot
 allocation, not a force-directed graph layout.
+
+Stale or unavailable sessions may be explicitly archived by a human from the
+supporting list or attention lens. Archive removes the session from active
+projections without deleting its identity, assignment or observed history;
+future host reconciliation updates the archived record but does not silently
+restore it.
 
 New goals use the Layout module's nearest-free placement scan. It is dynamic at
 insertion time because it considers current footprint and occupied space, but
@@ -738,6 +754,11 @@ unassigned session and focusing it reaches the supporting inbox list lens.
 Creating a goal selects it automatically, and `a` from a selected goal opens a
 picker over unassigned sessions; `a` from a selected session retains the
 session-to-goal picker.
+
+Map keyboard navigation follows the visible hierarchy: `j`/`k` cycles goal
+bodies in the portfolio, then cycles a focused goal's direct sessions clockwise
+around its body. The focused inbox cycles unassigned sessions, while the
+supporting grouped list retains flat row navigation.
 
 The attention queue, unassigned inbox, inspector and grouped list remain
 supporting projections of the same state. A renderer can switch to them for
@@ -760,7 +781,11 @@ The renderer has semantic presentation tiers independent of camera zoom:
 overview uses compact labels and summary markers, context expands selected or
 attention-bearing labels in their owning context, and focus/detail exposes
 larger or wrapped labels plus the complete direct orbit. This is a presentation
-policy over the same projection, not a second layout or domain model.
+policy over the same projection, not a second layout or domain model. When
+geometric zoom drops below the readable cell density, overview nodes collapse
+to glyphs and priority markers; selected or attention-bearing nodes retain
+labels. Terminal zoom cannot shrink text, so density reduction must remove
+labels rather than allow fixed-width cards to overlap.
 
 Keyboard operation remains complete: type-to-find, focus navigation, inspect,
 attention navigation, attach and return-to-universe. Quick message and

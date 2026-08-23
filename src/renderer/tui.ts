@@ -8,6 +8,7 @@ import {
   type CliRenderer,
   type KeyEvent,
   type MouseEvent,
+  type PasteEvent,
   type OptimizedBuffer,
 } from "@opentui/core";
 import { Effect, Stream } from "effect";
@@ -16,6 +17,7 @@ import {
   displayHostKind,
   type HostedTerminalSession,
   type HostTerminalEvent,
+  type HostTerminalInput,
   type SessionHost,
   type TerminalDimensions,
 } from "../hosts/types.ts";
@@ -40,8 +42,9 @@ import {
 } from "../spatial/viewport.ts";
 import { placeFloatingInspector } from "./inspector-placement.ts";
 import { filterAssignableSessions } from "./assignment.ts";
-import { isEraseKey, typedCharacter } from "./input.ts";
+import { editText, insertTextAtCursor, typedCharacter } from "./input.ts";
 import { modalFrameFor } from "./modal.ts";
+import { mapSelectionCandidates, nextNavigationSelection } from "./navigation.ts";
 import { ensureTerminalDimensions, TerminalScreen, TERMINAL_COLORS } from "./terminal-screen.ts";
 import {
   nextSemanticZoom,
@@ -74,6 +77,10 @@ const COLORS = {
   completed: color("#718697"),
   selected: color("#e7fbff"),
 } as const;
+
+const MAP_FIT_PADDING_X = 26;
+const MAP_FIT_PADDING_Y = 8;
+const MAP_LABEL_ZOOM_THRESHOLD = 0.85;
 
 type Selection = { readonly type: "goal" | "session"; readonly id: string };
 type Row = Selection | { readonly type: "inbox-label"; readonly id: "inbox-label" };
@@ -148,8 +155,20 @@ type Modal =
     }
   | {
       readonly kind: "confirm";
-      readonly action: "complete" | "archive";
+      readonly action: "complete";
       readonly goalId: string;
+      readonly title: string;
+    }
+  | {
+      readonly kind: "confirm";
+      readonly action: "archive";
+      readonly goalId: string;
+      readonly title: string;
+    }
+  | {
+      readonly kind: "confirm";
+      readonly action: "archive-session";
+      readonly sessionId: string;
       readonly title: string;
     };
 
@@ -184,6 +203,11 @@ const shorten = (value: string, maximum: number): string => {
   if (value.length <= maximum) return value;
   if (maximum === 1) return value.slice(0, 1);
   return `${value.slice(0, maximum - 1)}…`;
+};
+
+const inputWithCursor = (value: string, cursor: number): string => {
+  const position = Math.max(0, Math.min(value.length, cursor));
+  return `${value.slice(0, position)}_${value.slice(position)}`;
 };
 
 const countLabel = (count: number, singular: string, plural = `${singular}s`): string =>
@@ -231,7 +255,9 @@ export class CommandCentreApp {
   private modal: Modal | undefined;
   private searchActive = false;
   private searchQuery = "";
+  private searchCursor = 0;
   private searchIndex = 0;
+  private inputCursor = 0;
   private expandedGoals = new Set<string>();
   private scrollOffset = 0;
   private viewMode: ViewMode = "map";
@@ -292,6 +318,7 @@ export class CommandCentreApp {
       this.renderer.requestRender();
     });
     this.renderer.keyInput.on("keypress", (key) => this.handleKey(key));
+    this.renderer.keyInput.on("paste", (event) => this.handlePaste(event));
     this.renderer.setTerminalTitle("Observatory — agent universe");
   }
 
@@ -551,7 +578,7 @@ export class CommandCentreApp {
       this.panel(buffer, footer, COLORS.background, COLORS.border);
       this.text(
         buffer,
-        "Ctrl-Q/Esc release  ·  all other keys route to session  ·  resize follows terminal",
+        "Ctrl-Shift-C copy  ·  Ctrl-Q/Esc release  ·  all other keys route to session",
         2,
         footer.y,
         COLORS.muted,
@@ -594,6 +621,9 @@ export class CommandCentreApp {
       content: mode.screen.toStyledText(),
       fg: TERMINAL_COLORS.text,
       bg: TERMINAL_COLORS.background,
+      selectionBg: COLORS.borderStrong,
+      selectionFg: COLORS.background,
+      selectable: true,
       zIndex: 21,
     });
     this.renderer.root.add(panel);
@@ -660,10 +690,13 @@ export class CommandCentreApp {
       const query = this.searchActive
         ? `search: ${this.searchQuery || "type to find"}`
         : `${this.viewMode === "map" ? "map" : "list lens"} · ${this.lastAction}`;
-      const warning =
-        projection.counts.unassigned > 0
-          ? `INBOX !${projection.counts.unassigned} · v list`
-          : undefined;
+      const warningParts = [
+        ...(projection.counts.unassigned > 0
+          ? [`INBOX !${projection.counts.unassigned} · v list`]
+          : []),
+        ...(projection.counts.stale > 0 ? [`STALE ?${projection.counts.stale}`] : []),
+      ];
+      const warning = warningParts.length > 0 ? warningParts.join(" · ") : undefined;
       const leftWidth = warning
         ? Math.max(1, rect.width - warning.length - 8)
         : Math.max(1, rect.width - 4);
@@ -805,7 +838,13 @@ export class CommandCentreApp {
         : []),
     ];
     if (this.mapFitPending && mapPoints.length > 0) {
-      const fit = fitViewportToPoints(mapPoints, mapSurface, baseScale, 10);
+      const fit = fitViewportToPoints(
+        mapPoints,
+        mapSurface,
+        baseScale,
+        MAP_FIT_PADDING_X,
+        MAP_FIT_PADDING_Y,
+      );
       this.mapCenter = fit.center;
       this.mapZoom = fit.zoom;
       this.mapFitPending = false;
@@ -837,7 +876,6 @@ export class CommandCentreApp {
       COLORS.faint,
       COLORS.background,
     );
-
     const worldToScreen = (point: MapPosition): MapPosition =>
       screenPointForWorld(point, { center: this.mapCenter, zoom: this.mapZoom }, mapSurface, {
         x: this.mapScaleX,
@@ -1140,6 +1178,41 @@ export class CommandCentreApp {
       this.selected?.type === "session" &&
       goal.sessions.some((session) => session.id === this.selected?.id);
     const goalAttention = goal.attentionCount > 0 || goal.staleCount > 0;
+    const compact =
+      this.semanticZoom === "overview" &&
+      this.mapZoom < MAP_LABEL_ZOOM_THRESHOLD &&
+      !selected &&
+      !selectedSession &&
+      !goalAttention;
+    if (compact) {
+      const bounds = {
+        x: point.x - 2,
+        y: point.y - 1,
+        width: 5,
+        height: 3,
+      };
+      if (
+        point.x < map.x - 2 ||
+        point.x >= map.x + map.width + 2 ||
+        point.y < map.y - 1 ||
+        point.y >= map.y + map.height + 1
+      )
+        return;
+      const border = this.priorityColor(goal.priority);
+      this.roundedPanel(buffer, bounds, COLORS.background, border);
+      this.cell(buffer, point.x, point.y, "◎", border, COLORS.background);
+      this.textCentered(buffer, goal.priority, point.x, point.y + 1, border, COLORS.background);
+      this.hitTargets.push({
+        type: "goal",
+        id: goal.id,
+        x: point.x,
+        y: point.y,
+        radiusX: 3,
+        radiusY: 2,
+        bounds,
+      });
+      return;
+    }
     const emphasis = selected || selectedSession || goalAttention;
     const level = semanticZoomLevel({
       lens: this.mapLens,
@@ -1194,9 +1267,13 @@ export class CommandCentreApp {
       ? COLORS.white
       : selectedSession
         ? COLORS.cyan
-        : muted
-          ? COLORS.faint
-          : this.priorityColor(goal.priority);
+        : goal.attentionCount > 0
+          ? COLORS.orange
+          : goal.staleCount > 0
+            ? COLORS.yellow
+            : muted
+              ? COLORS.faint
+              : this.priorityColor(goal.priority);
     const background =
       muted || goal.status === "completed" ? COLORS.background : COLORS.panelRaised;
     this.roundedPanel(buffer, bounds, background, border);
@@ -1283,6 +1360,35 @@ export class CommandCentreApp {
     const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const inboxSession = goal === undefined;
     const attention = session.attention !== undefined;
+    const compact =
+      this.semanticZoom === "overview" &&
+      this.mapZoom < MAP_LABEL_ZOOM_THRESHOLD &&
+      !selected &&
+      !attention;
+    if (compact) {
+      if (
+        point.x < map.x - 1 ||
+        point.x >= map.x + map.width + 1 ||
+        point.y < map.y - 1 ||
+        point.y >= map.y + map.height + 1
+      )
+        return;
+      const marker = statusGlyph(session, this.animationPhase);
+      const markerColor = statusColor(session);
+      const bounds = { x: point.x - 1, y: point.y - 1, width: 3, height: 3 };
+      this.roundedPanel(buffer, bounds, COLORS.background, markerColor);
+      this.cell(buffer, point.x, point.y, marker, markerColor, COLORS.background);
+      this.hitTargets.push({
+        type: "session",
+        id: session.id,
+        x: point.x,
+        y: point.y,
+        radiusX: 2,
+        radiusY: 2,
+        bounds,
+      });
+      return;
+    }
     const level = semanticZoomLevel({
       lens: this.mapLens,
       preference: this.semanticZoom,
@@ -1583,7 +1689,7 @@ export class CommandCentreApp {
     if (this.terminalMode) {
       this.text(
         buffer,
-        "Ctrl-Q/Esc release  ·  all other keys route to session  ·  resize follows terminal",
+        "Ctrl-Shift-C copy  ·  Ctrl-Q/Esc release  ·  all other keys route to session",
         rect.x + 2,
         rect.y,
         COLORS.muted,
@@ -1600,9 +1706,13 @@ export class CommandCentreApp {
       return;
     }
     const controls =
-      rect.width < 92
-        ? "j/k select  h/l pan  +/- zoom  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
-        : "j/k select  h/l/U/D pan  +/- zoom  f focus  A alerts  z detail  v list lens  n goal  r rename  p priority  a assign  c complete  x archive  / find  i card  t terminal  Enter attach  q quit";
+      this.viewMode === "map"
+        ? rect.width < 92
+          ? "j/k goals/orbit  h/l pan  +/- zoom  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
+          : "j/k goals/orbit  h/l/U/D pan  +/- zoom  f focus  A alerts  z detail  v list lens  n goal  r rename  p priority  a assign  c complete  x archive stale  / find  i card  t terminal  Enter attach  q quit"
+        : rect.width < 92
+          ? "j/k select  h/l list  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
+          : "j/k select  h/l list  f focus  A alerts  z detail  v map lens  n goal  r rename  p priority  a assign  c complete  x archive stale  / find  i card  t terminal  Enter attach  q quit";
     this.text(
       buffer,
       shorten(controls, Math.max(1, rect.width - 4)),
@@ -1644,7 +1754,14 @@ export class CommandCentreApp {
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      this.text(buffer, `/${this.searchQuery}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
+      this.text(
+        buffer,
+        `/${inputWithCursor(this.searchQuery, this.searchCursor)}`,
+        x + 2,
+        y + 3,
+        COLORS.white,
+        COLORS.panelRaised,
+      );
       const search = this.options.universe.project({
         kind: "search",
         query: this.searchQuery,
@@ -1686,7 +1803,7 @@ export class CommandCentreApp {
       );
       this.text(
         buffer,
-        `Title:       ${modal.title}${modal.field === 0 ? "_" : ""}`,
+        `Title:       ${inputWithCursor(modal.title, modal.field === 0 ? this.inputCursor : modal.title.length)}`,
         x + 2,
         y + 3,
         modal.field === 0 ? COLORS.white : COLORS.muted,
@@ -1694,7 +1811,7 @@ export class CommandCentreApp {
       );
       this.text(
         buffer,
-        `Description: ${modal.description}${modal.field === 1 ? "_" : ""}`,
+        `Description: ${inputWithCursor(modal.description, modal.field === 1 ? this.inputCursor : modal.description.length)}`,
         x + 2,
         y + 4,
         modal.field === 1 ? COLORS.white : COLORS.muted,
@@ -1728,7 +1845,14 @@ export class CommandCentreApp {
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      this.text(buffer, `${modal.value}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
+      this.text(
+        buffer,
+        inputWithCursor(modal.value, this.inputCursor),
+        x + 2,
+        y + 3,
+        COLORS.white,
+        COLORS.panelRaised,
+      );
       this.text(
         buffer,
         "Enter save · Esc cancel",
@@ -1792,7 +1916,14 @@ export class CommandCentreApp {
         COLORS.panelRaised,
         TextAttributes.BOLD,
       );
-      this.text(buffer, `Find: ${modal.query}_`, x + 2, y + 3, COLORS.white, COLORS.panelRaised);
+      this.text(
+        buffer,
+        `Find: ${inputWithCursor(modal.query, this.inputCursor)}`,
+        x + 2,
+        y + 3,
+        COLORS.white,
+        COLORS.panelRaised,
+      );
       this.text(
         buffer,
         `${sessions.length}/${projection.unassigned.length} inbox sessions · type to filter`,
@@ -1842,7 +1973,11 @@ export class CommandCentreApp {
     if (modal.kind === "confirm") {
       this.text(
         buffer,
-        modal.action === "complete" ? "COMPLETE GOAL?" : "ARCHIVE GOAL?",
+        modal.action === "complete"
+          ? "COMPLETE GOAL?"
+          : modal.action === "archive-session"
+            ? "ARCHIVE STALE SESSION?"
+            : "ARCHIVE GOAL?",
         x + 2,
         y + 1,
         COLORS.orange,
@@ -1861,7 +1996,9 @@ export class CommandCentreApp {
         buffer,
         modal.action === "complete"
           ? "This is explicit and reversible only by editing state."
-          : "This hides the goal from the default view; history is retained.",
+          : modal.action === "archive-session"
+            ? "This hides the session from active views; host history is retained."
+            : "This hides the goal from the default view; history is retained.",
         x + 2,
         y + 4,
         COLORS.muted,
@@ -1962,11 +2099,13 @@ export class CommandCentreApp {
         this.confirmGoal("complete");
         return;
       case "x":
-        this.confirmGoal("archive");
+        if (this.selected?.type === "session") this.confirmArchiveSession();
+        else this.confirmGoal("archive");
         return;
       case "/":
         this.searchActive = true;
         this.searchQuery = "";
+        this.searchCursor = 0;
         this.searchIndex = 0;
         this.lastAction = "type-to-find active";
         return;
@@ -2029,22 +2168,79 @@ export class CommandCentreApp {
         if (typedCharacter(key)) {
           this.searchActive = true;
           this.searchQuery = typedCharacter(key);
+          this.searchCursor = this.searchQuery.length;
           this.searchIndex = 0;
           this.lastAction = "type-to-find active";
         }
     }
   }
 
+  private handlePaste(event: PasteEvent): void {
+    event.preventDefault();
+    if (this.terminalMode) {
+      this.sendTerminalInput(this.terminalMode, { kind: "bytes", value: event.bytes });
+      return;
+    }
+    const pasted = new TextDecoder().decode(event.bytes);
+    if (!pasted) return;
+    if (this.searchActive) {
+      const edited = insertTextAtCursor(this.searchQuery, this.searchCursor, pasted);
+      this.searchQuery = edited.value;
+      this.searchCursor = edited.cursor;
+      this.searchIndex = 0;
+      this.selectSearchResult(
+        this.options.universe.project({
+          kind: "search",
+          query: this.searchQuery,
+          now: this.options.clock.now(),
+        }),
+      );
+      this.renderer.requestRender();
+      return;
+    }
+    const modal = this.modal;
+    if (!modal) return;
+    if (modal.kind === "session-picker") {
+      const edited = insertTextAtCursor(modal.query, this.inputCursor, pasted);
+      this.modal = { ...modal, query: edited.value, index: 0 };
+      this.inputCursor = edited.cursor;
+    } else if (modal.kind === "create-goal" && modal.field === 0) {
+      const edited = insertTextAtCursor(modal.title, this.inputCursor, pasted);
+      this.modal = { ...modal, title: edited.value };
+      this.inputCursor = edited.cursor;
+    } else if (modal.kind === "create-goal" && modal.field === 1) {
+      const edited = insertTextAtCursor(modal.description, this.inputCursor, pasted);
+      this.modal = { ...modal, description: edited.value };
+      this.inputCursor = edited.cursor;
+    } else if (modal.kind === "text") {
+      const edited = insertTextAtCursor(modal.value, this.inputCursor, pasted);
+      this.modal = { ...modal, value: edited.value };
+      this.inputCursor = edited.cursor;
+    } else {
+      return;
+    }
+    this.renderer.requestRender();
+  }
+
   private handleSearchKey(key: KeyEvent): void {
     if (key.name === "escape") {
       this.searchActive = false;
       this.searchQuery = "";
+      this.searchCursor = 0;
       this.lastAction = "search cleared";
       return;
     }
-    if (isEraseKey(key)) {
-      this.searchQuery = this.searchQuery.slice(0, -1);
+    const edited = editText(this.searchQuery, this.searchCursor, key);
+    if (edited.handled) {
+      this.searchQuery = edited.value;
+      this.searchCursor = edited.cursor;
       this.searchIndex = 0;
+      const next = this.options.universe.project({
+        kind: "search",
+        query: this.searchQuery,
+        now: this.options.clock.now(),
+      });
+      this.selectSearchResult(next);
       return;
     }
     const projection = this.options.universe.project({
@@ -2073,17 +2269,6 @@ export class CommandCentreApp {
         ? `search selected ${this.selected.id}`
         : "search had no match";
       return;
-    }
-    const character = typedCharacter(key);
-    if (character) {
-      this.searchQuery += character;
-      this.searchIndex = 0;
-      const next = this.options.universe.project({
-        kind: "search",
-        query: this.searchQuery,
-        now: this.options.clock.now(),
-      });
-      this.selectSearchResult(next);
     }
   }
 
@@ -2121,7 +2306,9 @@ export class CommandCentreApp {
         const command: UniverseCommand =
           modal.action === "complete"
             ? { type: "CompleteGoal", goalId: modal.goalId }
-            : { type: "ArchiveGoal", goalId: modal.goalId };
+            : modal.action === "archive"
+              ? { type: "ArchiveGoal", goalId: modal.goalId }
+              : { type: "ArchiveSession", sessionId: modal.sessionId };
         this.runCommand(command);
         this.modal = undefined;
       } else if (character === "n" || key.name === "escape") {
@@ -2163,7 +2350,11 @@ export class CommandCentreApp {
         return;
       }
       const sessions = filterAssignableSessions(projection.unassigned, modal.query);
-      if (key.name === "down") {
+      const edited = editText(modal.query, this.inputCursor, key);
+      if (edited.handled) {
+        this.modal = { ...modal, query: edited.value, index: 0 };
+        this.inputCursor = edited.cursor;
+      } else if (key.name === "down") {
         this.modal = {
           ...modal,
           index: Math.min(Math.max(0, sessions.length - 1), modal.index + 1),
@@ -2184,15 +2375,20 @@ export class CommandCentreApp {
           });
           this.modal = undefined;
         }
-      } else if (isEraseKey(key)) {
-        this.modal = { ...modal, query: modal.query.slice(0, -1), index: 0 };
-      } else {
-        const character = typedCharacter(key);
-        if (character) this.modal = { ...modal, query: modal.query + character, index: 0 };
       }
       return;
     }
     if (modal.kind === "create-goal") {
+      if (key.name === "tab" && key.shift) {
+        if (modal.field === 2) {
+          this.modal = { ...modal, field: 1 };
+          this.inputCursor = modal.description.length;
+        } else if (modal.field === 1) {
+          this.modal = { ...modal, field: 0 };
+          this.inputCursor = modal.title.length;
+        }
+        return;
+      }
       if (key.name === "tab" || key.name === "enter" || key.name === "return") {
         if (modal.field === 0) {
           if (!modal.title.trim()) {
@@ -2200,6 +2396,7 @@ export class CommandCentreApp {
             return;
           }
           this.modal = { ...modal, field: 1 };
+          this.inputCursor = modal.description.length;
         } else if (modal.field === 1) {
           this.modal = { ...modal, field: 2 };
         } else {
@@ -2223,18 +2420,18 @@ export class CommandCentreApp {
         this.modal = { ...modal, priority: PRIORITIES[next] ?? "P2" };
         return;
       }
-      const character = typedCharacter(key);
-      if (character) {
-        if (modal.field === 0) this.modal = { ...modal, title: modal.title + character };
-        if (modal.field === 1)
-          this.modal = { ...modal, description: modal.description + character };
-      } else if (isEraseKey(key)) {
-        if (modal.field === 0) this.modal = { ...modal, title: modal.title.slice(0, -1) };
-        if (modal.field === 1)
-          this.modal = {
-            ...modal,
-            description: modal.description.slice(0, -1),
-          };
+      if (modal.field === 0) {
+        const edited = editText(modal.title, this.inputCursor, key);
+        if (edited.handled) {
+          this.modal = { ...modal, title: edited.value };
+          this.inputCursor = edited.cursor;
+        }
+      } else if (modal.field === 1) {
+        const edited = editText(modal.description, this.inputCursor, key);
+        if (edited.handled) {
+          this.modal = { ...modal, description: edited.value };
+          this.inputCursor = edited.cursor;
+        }
       }
       return;
     }
@@ -2267,13 +2464,31 @@ export class CommandCentreApp {
         this.modal = undefined;
         return;
       }
-      const character = typedCharacter(key);
-      if (character) this.modal = { ...modal, value: modal.value + character };
-      else if (isEraseKey(key)) this.modal = { ...modal, value: modal.value.slice(0, -1) };
+      const edited = editText(modal.value, this.inputCursor, key);
+      if (edited.handled) {
+        this.modal = { ...modal, value: edited.value };
+        this.inputCursor = edited.cursor;
+      }
     }
   }
 
   private moveSelection(direction: number): void {
+    if (this.viewMode === "map") {
+      const mapProjection = this.mapProjection();
+      const candidates = mapSelectionCandidates(mapProjection, this.mapLens, this.focusGoalId);
+      const next = nextNavigationSelection(candidates, this.selected, direction);
+      if (!next) {
+        this.lastAction =
+          this.mapLens === "goal"
+            ? "Focused goal has no sessions."
+            : "No selectable map nodes. Press n to create a goal.";
+        return;
+      }
+      this.selected = next;
+      this.inspectorVisible = true;
+      this.lastAction = `selected ${next.id}`;
+      return;
+    }
     const projection = this.projection();
     const rows = this.ensureSelection(projection).filter(
       (row): row is Selection => row.type === "goal" || row.type === "session",
@@ -2290,27 +2505,6 @@ export class CommandCentreApp {
     if (next) {
       this.selected = { type: next.type, id: next.id };
       this.inspectorVisible = true;
-      if (this.viewMode === "map" && this.mapLens === "goal") {
-        const owner =
-          next.type === "goal"
-            ? projection.goals.find((goal) => goal.id === next.id)
-            : projection.goals.find((goal) =>
-                goal.sessions.some((session) => session.id === next.id),
-              );
-        if (owner && owner.id !== this.focusGoalId) {
-          this.focusGoalId = owner.id;
-          this.mapCenter = this.goalPosition(owner.id);
-          this.mapFitPending = true;
-        }
-      } else if (this.viewMode === "map" && this.mapLens === "inbox") {
-        const owner =
-          next.type === "goal"
-            ? projection.goals.find((goal) => goal.id === next.id)
-            : projection.goals.find((goal) =>
-                goal.sessions.some((session) => session.id === next.id),
-              );
-        if (owner) this.focusGoal(owner.id);
-      }
     }
     this.lastAction = `selected ${next?.id ?? "item"}`;
   }
@@ -2489,6 +2683,7 @@ export class CommandCentreApp {
   }
 
   private openCreateGoal(): void {
+    this.inputCursor = 0;
     this.modal = {
       kind: "create-goal",
       field: 0,
@@ -2502,42 +2697,46 @@ export class CommandCentreApp {
     const projection = this.projection();
     const goal = this.selectedGoal(projection);
     const session = this.selectedSession(projection);
-    if (goal)
+    if (goal) {
+      this.inputCursor = goal.title.length;
       this.modal = {
         kind: "text",
         title: "RENAME GOAL",
         value: goal.title,
         action: "rename-goal",
       };
-    else if (session)
+    } else if (session) {
+      this.inputCursor = session.displayName.length;
       this.modal = {
         kind: "text",
         title: "RENAME SESSION",
         value: session.displayName,
         action: "rename-session",
       };
-    else this.lastAction = "Select a goal or session first.";
+    } else this.lastAction = "Select a goal or session first.";
   }
 
   private openDescription(): void {
     const projection = this.projection();
     const goal = this.selectedGoal(projection);
     const session = this.selectedSession(projection);
-    if (goal)
+    if (goal) {
+      this.inputCursor = (goal.description ?? "").length;
       this.modal = {
         kind: "text",
         title: "SET GOAL DESCRIPTION",
         value: goal.description ?? "",
         action: "description-goal",
       };
-    else if (session)
+    } else if (session) {
+      this.inputCursor = (session.description ?? "").length;
       this.modal = {
         kind: "text",
         title: "SET SESSION DESCRIPTION",
         value: session.description ?? "",
         action: "description-session",
       };
-    else this.lastAction = "Select a goal or session first.";
+    } else this.lastAction = "Select a goal or session first.";
   }
 
   private cyclePriority(): void {
@@ -2558,6 +2757,7 @@ export class CommandCentreApp {
     const projection = this.projection();
     const goal = this.selectedGoal(projection);
     if (goal) {
+      this.inputCursor = 0;
       this.modal = {
         kind: "session-picker",
         goalId: goal.id,
@@ -2604,6 +2804,24 @@ export class CommandCentreApp {
       action,
       goalId: goal.id,
       title: goal.title,
+    };
+  }
+
+  private confirmArchiveSession(): void {
+    const session = this.selectedSession(this.projection());
+    if (!session) {
+      this.lastAction = "Select a session first.";
+      return;
+    }
+    if (session.hostHealth === "live") {
+      this.lastAction = "Only stale or unavailable sessions can be archived.";
+      return;
+    }
+    this.modal = {
+      kind: "confirm",
+      action: "archive-session",
+      sessionId: session.id,
+      title: session.displayName,
     };
   }
 
@@ -2766,13 +2984,21 @@ export class CommandCentreApp {
     const mode = this.terminalMode;
     if (!mode) return;
     key.preventDefault();
+    if (key.name === "c" && ((key.ctrl && key.shift) || key.meta || key.super)) {
+      this.copyTerminalSelection(mode);
+      return;
+    }
     if (key.name === "escape" || (key.ctrl && key.name === "q")) {
       void this.releaseTerminal();
       return;
     }
     const value = key.sequence || key.raw;
     if (!value) return;
-    void Effect.runPromise(mode.terminal.send({ kind: "text", value }))
+    this.sendTerminalInput(mode, { kind: "text", value });
+  }
+
+  private sendTerminalInput(mode: TerminalMode, input: HostTerminalInput): void {
+    void Effect.runPromise(mode.terminal.send(input))
       .then((result) => {
         if (!result.ok && this.terminalMode === mode) {
           mode.status = result.message;
@@ -2787,6 +3013,21 @@ export class CommandCentreApp {
       });
   }
 
+  private copyTerminalSelection(mode: TerminalMode): void {
+    const selection = this.renderer.getSelection();
+    const text = selection?.getSelectedText().replace(/\s+$/u, "") ?? "";
+    if (!text) {
+      mode.status = "Select terminal text first, then press Ctrl-Shift-C.";
+      this.renderer.requestRender();
+      return;
+    }
+    const copied = this.renderer.copyToClipboardOSC52(text);
+    mode.status = copied
+      ? `copied ${text.length} characters to the clipboard`
+      : "copy unavailable: this terminal does not support OSC52 clipboard access";
+    this.renderer.requestRender();
+  }
+
   private async attachSelected(): Promise<void> {
     const session = this.selectedSession(this.projection());
     if (!session) {
@@ -2799,6 +3040,7 @@ export class CommandCentreApp {
       selected: this.selected,
       searchActive: this.searchActive,
       searchQuery: this.searchQuery,
+      searchCursor: this.searchCursor,
       searchIndex: this.searchIndex,
       expandedGoals: new Set(this.expandedGoals),
       viewMode: this.viewMode,
@@ -2839,6 +3081,7 @@ export class CommandCentreApp {
       this.selected = savedNavigation.selected;
       this.searchActive = savedNavigation.searchActive;
       this.searchQuery = savedNavigation.searchQuery;
+      this.searchCursor = savedNavigation.searchCursor;
       this.searchIndex = savedNavigation.searchIndex;
       this.expandedGoals = new Set(savedNavigation.expandedGoals);
       this.viewMode = savedNavigation.viewMode;
@@ -2910,6 +3153,7 @@ export class CommandCentreApp {
       this.inspectorVisible = false;
       this.searchActive = false;
       this.searchQuery = "";
+      this.searchCursor = 0;
       this.lastAction = "selection cleared";
       this.renderer.requestRender();
       return;
@@ -2918,6 +3162,7 @@ export class CommandCentreApp {
     this.inspectorVisible = true;
     this.searchActive = false;
     this.searchQuery = "";
+    this.searchCursor = 0;
     this.lastAction = `mouse selected ${target.type} ${target.id}`;
     this.renderer.requestRender();
   }

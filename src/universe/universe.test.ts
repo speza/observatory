@@ -149,6 +149,43 @@ describe("Universe", () => {
     ).toBe("stale");
   });
 
+  test("archives stale sessions without deleting their identity or assignment", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Keep the context" });
+    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+    universe.execute({
+      type: "AssignSession",
+      sessionId: "session-2",
+      goalId: "goal-1",
+    });
+    expect(universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+      ok: false,
+      error: "Only stale or unavailable sessions can be archived.",
+    });
+
+    clock.value = 1_001_000;
+    universe.reconcile(hostSnapshot([observation("pane-2")], clock.value));
+    expect(universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+      ok: true,
+      sessionId: "session-1",
+    });
+    const archived = universe.snapshot().sessions.find((session) => session.id === "session-1");
+    expect(archived?.archivedAt).toBe(clock.value);
+
+    const active = universe.project({ kind: "command-centre", now: clock.value });
+    if (active.kind !== "command-centre") throw new Error("wrong projection");
+    expect(active.unassigned.map((session) => session.id)).toEqual([]);
+    expect(active.goals[0]?.sessions.map((session) => session.id)).toEqual(["session-2"]);
+    expect(active.counts.stale).toBe(0);
+    expect(active.counts.uncertainty).toBe(0);
+
+    clock.value = 1_002_000;
+    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")], clock.value));
+    const rediscovered = universe.snapshot().sessions.find((session) => session.id === "session-1");
+    expect(rediscovered?.hostHealth).toBe("live");
+    expect(rediscovered?.archivedAt).toBe(1_001_000);
+  });
+
   test("rejects duplicate native identities without guessing", () => {
     const { universe } = makeUniverse();
     const result = universe.reconcile(hostSnapshot([observation("same"), observation("same")]));

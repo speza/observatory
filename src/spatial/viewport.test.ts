@@ -71,4 +71,35 @@ describe("spatial viewport", () => {
     expect(projected.x).toBeGreaterThanOrEqual(10);
     expect(projected.y).toBeGreaterThanOrEqual(10);
   });
+
+  test("supports a wider horizontal edge buffer for rendered bodies", () => {
+    const fit = fitViewportToPoints(
+      [
+        { x: -40, y: -20 },
+        { x: 40, y: 20 },
+      ],
+      { x: 0, y: 0, width: 200, height: 100 },
+      { x: 1, y: 1 },
+      26,
+      8,
+    );
+    const fittedScale = { x: fit.zoom, y: fit.zoom };
+    const topLeft = screenPointForWorld(
+      { x: -40, y: -20 },
+      fit,
+      { x: 0, y: 0, width: 200, height: 100 },
+      fittedScale,
+    );
+    const bottomRight = screenPointForWorld(
+      { x: 40, y: 20 },
+      fit,
+      { x: 0, y: 0, width: 200, height: 100 },
+      fittedScale,
+    );
+
+    expect(topLeft.x).toBeGreaterThanOrEqual(26);
+    expect(bottomRight.x).toBeLessThanOrEqual(174);
+    expect(topLeft.y).toBeGreaterThanOrEqual(8);
+    expect(bottomRight.y).toBeLessThanOrEqual(92);
+  });
 });

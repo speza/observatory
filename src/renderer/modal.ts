@@ -24,9 +24,11 @@ const baseHeight = (kind: ModalKind): number => {
   }
 };
 
+const MAX_MODAL_WIDTH = 96;
+
 /** Center a modal and reserve a distinct footer row below its content. */
 export const modalFrameFor = (width: number, height: number, kind: ModalKind): ModalFrame => {
-  const modalWidth = Math.min(width - 4, Math.max(42, Math.floor(width * 0.76)));
+  const modalWidth = Math.min(width - 4, MAX_MODAL_WIDTH, Math.max(42, Math.floor(width * 0.76)));
   const modalHeight = Math.min(height - 4, baseHeight(kind));
   const x = Math.max(1, Math.floor((width - modalWidth) / 2));
   const y = Math.max(1, Math.floor((height - modalHeight) / 2));

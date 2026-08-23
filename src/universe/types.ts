@@ -51,6 +51,8 @@ export interface TrackedSession {
   readonly provider?: string;
   /** Opaque to the Universe module and only interpreted by the host adapter. */
   readonly hostLocator: string;
+  /** Human-controlled archive marker; archived sessions stay in history but leave active projections. */
+  readonly archivedAt?: number;
 }
 
 export interface HostHealth {

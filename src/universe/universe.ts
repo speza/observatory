@@ -68,6 +68,7 @@ export type UniverseCommand =
       readonly sessionId: SessionId;
       readonly description?: string;
     }
+  | { readonly type: "ArchiveSession"; readonly sessionId: SessionId }
   | { readonly type: "CompleteGoal"; readonly goalId: GoalId }
   | { readonly type: "ArchiveGoal"; readonly goalId: GoalId };
 
@@ -104,7 +105,9 @@ const goalLayoutOccupancy = (state: UniverseState, excludeGoalId?: GoalId): Goal
     .filter((goal) => goal.id !== excludeGoalId)
     .map((goal) => ({
       position: goal.mapPosition ?? defaultGoalMapPosition(goal.id),
-      sessionCount: state.sessions.filter((session) => session.primaryGoalId === goal.id).length,
+      sessionCount: state.sessions.filter(
+        (session) => session.primaryGoalId === goal.id && session.archivedAt === undefined,
+      ).length,
     }));
 
 const replaceGoal = (state: UniverseState, goal: Goal): void => {
@@ -235,7 +238,7 @@ export class Universe {
         const goal = findGoal(next, command.goalId);
         if (!goal) return { ok: false, error: "Goal not found." };
         const sessionCount = next.sessions.filter(
-          (session) => session.primaryGoalId === goal.id,
+          (session) => session.primaryGoalId === goal.id && session.archivedAt === undefined,
         ).length;
         replaceGoal(next, {
           ...goal,
@@ -292,6 +295,19 @@ export class Universe {
           ...session,
           description: description || undefined,
         });
+        result = { ok: true, sessionId: session.id };
+        break;
+      }
+      case "ArchiveSession": {
+        const session = findSession(next, command.sessionId);
+        if (!session) return { ok: false, error: "Session not found." };
+        if (session.archivedAt !== undefined) return { ok: true, sessionId: session.id };
+        if (session.hostHealth === "live")
+          return {
+            ok: false,
+            error: "Only stale or unavailable sessions can be archived.",
+          };
+        replaceSession(next, { ...session, archivedAt: now });
         result = { ok: true, sessionId: session.id };
         break;
       }

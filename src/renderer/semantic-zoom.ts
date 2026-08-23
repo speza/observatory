@@ -38,7 +38,8 @@ export const sessionMarker = (
   phase = 0,
 ): string => {
   if (hostHealth !== "live") return "?";
-  if (runtimeState === "blocked" || runtimeState === "waiting") return "!";
+  if (runtimeState === "blocked") return "!";
+  if (runtimeState === "waiting") return "…";
   if (runtimeState === "done") return "✓";
   if (runtimeState === "working")
     return WORKING_MARKERS[Math.floor(Math.max(0, phase) * 2) % WORKING_MARKERS.length] ?? "◐";

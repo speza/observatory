@@ -10,8 +10,8 @@
   queues, inboxes and inspectors are supporting lenses.
 - V1's durable topology is `Goal -> Session`. Repositories, worktrees and Herdr
   spaces are session metadata, not organisational nodes.
-- Goal priority, completion and archive remain human-controlled unless an
-  explicit auto policy says otherwise.
+- Goal priority, completion and session/goal archive remain human-controlled
+  unless an explicit auto policy says otherwise.
 - Preserve uncertainty. Never convert missing, stale or inferred host facts
   into accepted semantic state.
 
@@ -61,6 +61,11 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
   hover, selection and other transient presentation state in the renderer.
 - Prefer deep modules with small interfaces. Do not add pass-through layers or
   speculative seams.
+- Treat every optional capability as a plugin at the control-plane edge:
+  session hosts, provider facts, external related-work links, extra lenses and
+  skills/hooks. Plugins report typed observations or proposals through narrow
+  ports; they never write SQLite or bypass Universe commands. Read
+  `docs/design/plugin-architecture.md` before adding an integration.
 - Before changing product invariants or module interfaces, read the relevant
   files under `docs/design/` and update them with the implementation.
 

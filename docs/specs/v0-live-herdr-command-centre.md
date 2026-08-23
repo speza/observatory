@@ -82,6 +82,7 @@ start AO
   focus targets; shell-only panes are not tracked as AO sessions.
 - An unassigned-session inbox.
 - Goal create, rename, reprioritise, complete and archive actions.
+- Human-confirmed archive of stale or unavailable sessions.
 - Direct session-to-goal assignment and reassignment.
 - Goal and session search over AO names and descriptions.
 - Explainable attention based on reliable host facts and human priority.
@@ -175,6 +176,7 @@ TrackedSession {
   worktree?
   provider?
   host_locator
+  archived_at?
 }
 ```
 
@@ -187,6 +189,9 @@ Rules:
   descriptions, priorities or assignments.
 - A vanished session remains tracked and becomes stale; it is not silently
   deleted.
+- A stale or unavailable session may be explicitly archived by a human. It
+  leaves active projections but retains its identity, assignment and history;
+  rediscovery updates host facts without silently restoring it.
 - Worktree data is inspectable metadata only.
 - Unknown facts remain unknown rather than receiving inferred defaults.
 
@@ -260,7 +265,7 @@ does not render unassigned session cards; attention/focused inbox lenses expose
 their compact list. A focused goal view is the fallback when the portfolio
 contains more bodies or sessions than the terminal can show at once.
 
-The map supports deterministic free-space-aware initial placement, selected
+The map supports deterministic free-space-aware initial placement, hierarchical
 goal/session navigation, keyboard pan, zoom, focus/reset, type-to-find
 recentering, and OpenTUI mouse interaction where the terminal reports it.
 Dragging a goal persists its world-space anchor and moves its direct satellite
@@ -342,6 +347,7 @@ AssignSession
 UnassignSession
 RenameSession
 SetSessionDescription
+ArchiveSession
 CompleteGoal
 ArchiveGoal
 ```
@@ -547,7 +553,10 @@ Using the current real Herdr environment:
 10. search for another session, confirm it is focused in spatial context, and
     open or attach to it;
 11. return with the same selection and viewport as far as the host permits; and
-12. complete a goal, confirm it remains dimmed, then archive it explicitly.
+12. stop or hide a test agent, select its stale session from the list or
+    attention lens, archive it with `x`, and confirm it leaves active
+    projections while the record remains persisted; then complete a goal,
+    confirm it remains dimmed, and archive it explicitly.
 
 ## Implementation order
 

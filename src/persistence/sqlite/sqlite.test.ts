@@ -68,13 +68,28 @@ describe("SQLite persistence", () => {
     const versions = store.db
       .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
-    expect(versions.map((row) => row.version)).toEqual([1, 2, 3]);
+    expect(versions.map((row) => row.version)).toEqual([1, 2, 3, 4]);
     const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
+    expect(columns.map((column) => column.name)).toContain("archived_at");
     const goalColumns = store.db.query<{ name: string }, []>("PRAGMA table_info(goals)").all();
     expect(goalColumns.map((column) => column.name)).toContain("map_x");
     expect(goalColumns.map((column) => column.name)).toContain("map_pinned");
+    store.close();
+  });
+
+  test("persists the explicit archive marker for stale sessions", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    const setup = makeUniverse({ store });
+    setup.universe.reconcile(hostSnapshot([observation]));
+    setup.clock.value = 1_001_000;
+    setup.universe.reconcile(hostSnapshot([], setup.clock.value));
+    expect(setup.universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+      ok: true,
+      sessionId: "session-1",
+    });
+    expect(store.load().sessions[0]?.archivedAt).toBe(1_001_000);
     store.close();
   });
 

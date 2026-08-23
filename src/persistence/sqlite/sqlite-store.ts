@@ -44,6 +44,7 @@ interface SessionRow {
   worktree: string | null;
   provider: string | null;
   host_locator: string;
+  archived_at: number | null;
 }
 
 interface HostRow {
@@ -131,6 +132,7 @@ export class SqliteUniverseStore implements UniverseStore {
         if (row.branch) Object.assign(session, { branch: row.branch });
         if (row.worktree) Object.assign(session, { worktree: row.worktree });
         if (row.provider) Object.assign(session, { provider: row.provider });
+        if (row.archived_at !== null) Object.assign(session, { archivedAt: row.archived_at });
         return session;
       });
     const hosts = this.db
@@ -175,7 +177,7 @@ export class SqliteUniverseStore implements UniverseStore {
         );
       }
       const session = this.db.prepare(
-        "INSERT INTO sessions (id, host_kind, native_id, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, host_locator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO sessions (id, host_kind, native_id, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, host_locator, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const row of state.sessions) {
         session.run(
@@ -198,6 +200,7 @@ export class SqliteUniverseStore implements UniverseStore {
           row.worktree ?? null,
           row.provider ?? null,
           row.hostLocator,
+          row.archivedAt ?? null,
         );
       }
       const host = this.db.prepare(
@@ -306,6 +309,21 @@ export class SqliteUniverseStore implements UniverseStore {
         );
         this.db.exec(
           "INSERT INTO schema_migrations (version, applied_at) VALUES (3, unixepoch() * 1000)",
+        );
+      });
+      migration();
+    }
+    const afterThree = new Set(
+      this.db
+        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
+        .all()
+        .map((row) => row.version),
+    );
+    if (!afterThree.has(4)) {
+      const migration = this.db.transaction(() => {
+        this.db.exec("ALTER TABLE sessions ADD COLUMN archived_at INTEGER;");
+        this.db.exec(
+          "INSERT INTO schema_migrations (version, applied_at) VALUES (4, unixepoch() * 1000)",
         );
       });
       migration();

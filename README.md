@@ -93,7 +93,9 @@ The maintained source is checked by the vendored Anti-Slop Oxlint plugins in
 edge: `SessionHost` operations are typed Effects, terminal output is a
 cancellable Effect Stream, and the pure universe model remains ordinary
 TypeScript. Disposable prototypes are excluded from the production lint/format
-gate.
+gate. Optional capabilities follow the proposed [plugin architecture](docs/design/plugin-architecture.md)
+so external work references and future hosts do not become kernel-specific
+special cases.
 
 Oxlint treats correctness and suspicious findings as errors, reports
 performance findings as warnings, checks imports, and runs type-aware promise
@@ -111,6 +113,10 @@ attention-first inbox list, and the goal-level `a` picker supports
 type-to-filter assignment. The inbox remains a supporting lens rather than a
 topology node or a new kind of work object. Goal satellites use stable,
 identity-derived positions on the portfolio map.
+Stale or unavailable sessions remain visible in the list and attention lenses;
+select one and press `x` to confirm archiving it from active views. Archiving
+keeps its history and assignment, and a later Herdr refresh updates its facts
+without silently restoring it.
 Live-but-idle sessions use a dot; actively working sessions use a rotating
 half-moon marker and restrained green border pulse. Herdr's transient working
 marker is removed from the session name before Observatory adds its own.
@@ -137,9 +143,13 @@ goal-only satellite view. Selecting an unassigned session and pressing `f`
 opens the supporting inbox list lens. Clicking empty map space clears the
 selection and floating inspector.
 
+On the portfolio map, `j`/`k` cycles goal bodies only. After focusing a goal,
+`j`/`k` cycles that goal's sessions clockwise around the body; the inbox lens
+cycles its unassigned sessions. The grouped list keeps its flat row navigation.
+
 | Key              | Action                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
-| `j` / `k`        | Move selection through goal bodies and satellites                                                  |
+| `j` / `k`        | Portfolio: cycle goals; focused goal/inbox: cycle sessions                                         |
 | `h` / `l`        | Pan the map left/right                                                                             |
 | `U` / `D`        | Pan the map up/down                                                                                |
 | `+` / `-`        | Zoom the map                                                                                       |
@@ -155,7 +165,7 @@ selection and floating inspector.
 | `r` / `d`        | Rename or edit the selected goal/session                                                           |
 | `p`              | Change selected goal priority                                                                      |
 | `a` / `u`        | Assign from a selected goal/session or unassign a session                                          |
-| `c` / `x`        | Confirm complete or archive a goal                                                                 |
+| `c` / `x`        | Confirm complete/archive a goal, or archive a stale session                                        |
 | `/`              | Search goals and session metadata                                                                  |
 | `R`              | Reconcile a fresh Herdr snapshot                                                                   |
 | `i`              | Toggle the floating inspector card                                                                 |
@@ -210,7 +220,10 @@ list` warning; goal size follows session load, and P0 is a distinct
    restored as far as Herdr permits. Use `g` on the blocked session and confirm
    the owning goal is reachable even when the session is outside the portfolio
    viewport; use `A` to review the same item in the attention lens.
-6. Complete a goal with `c` and confirmation, observe its dimmed body, then
+6. Stop or hide a test agent so it becomes stale, select it from the list or
+   attention lens, then archive it with `x` and confirmation. Confirm it leaves
+   active projections while its identity and assignment remain persisted.
+7. Complete a goal with `c` and confirmation, observe its dimmed body, then
    archive it explicitly with `x` and confirmation.
 
 The deterministic suites are split into module, projection, SQLite migration/

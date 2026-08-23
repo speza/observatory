@@ -57,10 +57,14 @@ const projectCommandCentre = (
   now: number,
   includeArchived = false,
 ): CommandCentreProjection => {
-  const attention = evaluateAttention(now, state.goals, state.sessions, state.hosts);
+  const projectedSessions = state.sessions.filter(
+    (session) => includeArchived || session.archivedAt === undefined,
+  );
+  const activeSessions = state.sessions.filter((session) => session.archivedAt === undefined);
+  const attention = evaluateAttention(now, state.goals, activeSessions, state.hosts);
   const attentionBySession = byAttention(attention.items);
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
-  const views = state.sessions.map((session): SessionView => ({
+  const views = projectedSessions.map((session): SessionView => ({
     ...session,
     goalTitle: session.primaryGoalId ? goalsById.get(session.primaryGoalId)?.title : undefined,
     attention: attentionBySession.get(session.id),
@@ -226,7 +230,7 @@ const projectSearch = (
         context: session.primaryGoalId
           ? `session · ${session.primaryGoalId}`
           : "unassigned session",
-        status: session.runtimeState,
+        status: session.archivedAt === undefined ? session.runtimeState : "archived",
       };
       if (session.primaryGoalId) Object.assign(result, { goalId: session.primaryGoalId });
       results.push(result);
@@ -254,11 +258,12 @@ const projectInspector = (
   now: number,
   target: { readonly type: "goal" | "session"; readonly id: string },
 ): InspectorProjection => {
-  const attention = evaluateAttention(now, state.goals, state.sessions, state.hosts);
+  const activeSessions = state.sessions.filter((session) => session.archivedAt === undefined);
+  const attention = evaluateAttention(now, state.goals, activeSessions, state.hosts);
   if (target.type === "goal") {
     const goal = state.goals.find((candidate) => candidate.id === target.id);
     if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
-    const sessions = state.sessions
+    const sessions = activeSessions
       .filter((session) => session.primaryGoalId === goal.id)
       .map((session) => sessionView(session, state.goals, attention.items))
       .sort(compareSessions);

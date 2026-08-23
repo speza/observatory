@@ -144,4 +144,20 @@ describe("projections", () => {
     expect(first.unassigned[0]?.mapPosition).toEqual(second.unassigned[0]?.mapPosition);
     expect(first.unassigned[0]?.goalTitle).toBeUndefined();
   });
+
+  test("preserves stale unassigned sessions for list and attention lenses", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([observation("live", "live session"), observation("missing", "stale session")]),
+    );
+    universe.reconcile(hostSnapshot([observation("live", "live session")], 1_005_000));
+
+    const projection = universe.project({ kind: "command-centre", now: 1_005_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.counts.stale).toBe(1);
+    expect(projection.unassigned).toHaveLength(2);
+    const stale = projection.unassigned.find((session) => session.displayName === "stale session");
+    expect(stale?.hostHealth).toBe("stale");
+    expect(stale?.attention?.reason).toBe("host-stale");
+  });
 });

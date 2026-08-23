@@ -28,7 +28,8 @@ export const fitViewportToPoints = (
   points: readonly MapPosition[],
   bounds: ViewportBounds,
   scale: ViewportScale,
-  paddingCells = 10,
+  paddingXCells = 10,
+  paddingYCells = paddingXCells,
 ): ViewportState => {
   if (points.length === 0) return { center: { x: 0, y: 0 }, zoom: 1 };
   const minimumX = Math.min(...points.map((point) => point.x));
@@ -41,8 +42,8 @@ export const fitViewportToPoints = (
   };
   const width = Math.max(1, (maximumX - minimumX) * scale.x);
   const height = Math.max(1, (maximumY - minimumY) * scale.y);
-  const availableWidth = Math.max(1, bounds.width - paddingCells * 2);
-  const availableHeight = Math.max(1, bounds.height - paddingCells * 2);
+  const availableWidth = Math.max(1, bounds.width - paddingXCells * 2);
+  const availableHeight = Math.max(1, bounds.height - paddingYCells * 2);
   const zoom = clamp(
     Math.min(availableWidth / width, availableHeight / height),
     MIN_MAP_ZOOM,

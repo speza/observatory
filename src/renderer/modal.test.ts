@@ -19,4 +19,11 @@ describe("modal frame", () => {
     expect(frame.footerY).toBeGreaterThan(frame.y + 12);
     expect(frame.footerY).toBe(frame.y + frame.height - 2);
   });
+
+  test("caps wide-terminal dialogs at a readable width", () => {
+    const frame = modalFrameFor(240, 40, "confirm");
+
+    expect(frame.width).toBe(96);
+    expect(frame.x).toBe(72);
+  });
 });
