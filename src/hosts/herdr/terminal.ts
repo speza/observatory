@@ -19,6 +19,16 @@ import {
 
 type RecordValue = JsonRecord;
 
+type HerdrTerminalScrollRecord = {
+  type: "terminal.scroll";
+  direction: "up" | "down";
+  lines: number;
+  source: "wheel" | "page_key";
+  modifiers: number;
+  column?: number;
+  row?: number;
+};
+
 const recordType = (record: RecordValue): string =>
   stringValue(record, "type") ?? stringValue(record, "event") ?? stringValue(record, "kind") ?? "";
 
@@ -40,23 +50,32 @@ const encodeBase64 = (bytes: Uint8Array): string => {
   return btoa(value);
 };
 
-const looksBase64 = (value: string): boolean =>
-  value.length > 0 && value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
-
+// Host protocol strings are terminal text by default. Herdr's terminal frame
+// schema is the exception: its `bytes` field is a base64-encoded byte vector.
+// Other binary frames must use an explicit *_base64 field so ordinary text
+// cannot be silently decoded.
 const bytesFromValue = (value: JsonValue | undefined, encoded = false): Uint8Array | undefined => {
   if (Array.isArray(value) && value.every((item) => Schema.is(Schema.Number)(item)))
     return Uint8Array.from(value.map((item) => item));
   if (!Schema.is(Schema.String)(value)) return undefined;
-  if (encoded || looksBase64(value)) return decodeBase64(value);
+  if (encoded) return decodeBase64(value);
   return new TextEncoder().encode(value);
 };
 
 const frameBytes = (value: JsonValue | undefined): Uint8Array | undefined => {
   if (!isRecord(value)) return undefined;
-  for (const key of ["data_base64", "bytes_base64", "ansi_base64", "frame_base64"]) {
+  for (const key of [
+    "data_base64",
+    "bytes_base64",
+    "ansi_base64",
+    "frame_base64",
+    "payload_base64",
+  ]) {
     const bytes = bytesFromValue(value[key], true);
     if (bytes) return bytes;
   }
+  const herdrBytes = bytesFromValue(value.bytes, true);
+  if (herdrBytes) return herdrBytes;
   for (const key of ["data", "bytes", "payload", "ansi"]) {
     const bytes = bytesFromValue(value[key]);
     if (bytes) return bytes;
@@ -102,13 +121,30 @@ export class HerdrTerminalSession implements HostedTerminalSession {
 
   private async sendInternal(input: HostTerminalInput): Promise<HostActionResult> {
     if (this.released) return { ok: false, message: "The Herdr terminal has been released." };
+    if (input.kind === "scroll") {
+      if (!Number.isInteger(input.lines) || input.lines < 1 || input.lines > 65_535)
+        return { ok: false, message: "Terminal scroll lines must be a positive 16-bit integer." };
+    }
     try {
-      await writeRecord(
-        this.process,
-        input.kind === "text"
-          ? { type: "terminal.input", text: input.value }
-          : { type: "terminal.input", bytes: encodeBase64(input.value) },
-      );
+      if (input.kind === "text") {
+        await writeRecord(this.process, { type: "terminal.input", text: input.value });
+      } else if (input.kind === "bytes") {
+        await writeRecord(this.process, {
+          type: "terminal.input",
+          bytes: encodeBase64(input.value),
+        });
+      } else {
+        const record: HerdrTerminalScrollRecord = {
+          type: "terminal.scroll",
+          direction: input.direction,
+          lines: input.lines,
+          source: input.source === "page-key" ? "page_key" : "wheel",
+          modifiers: input.modifiers ?? 0,
+        };
+        if (input.column !== undefined) record.column = input.column;
+        if (input.row !== undefined) record.row = input.row;
+        await writeRecord(this.process, record);
+      }
       return { ok: true, message: "Input sent to the Herdr terminal." };
     } catch (error) {
       return {

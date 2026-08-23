@@ -49,6 +49,9 @@ v1:
 
 - **Session host** — Herdr first; later tmux, Superlogical-style hosts or an
   Observatory-owned host behind `SessionHost`.
+- **Workspace provider** — recent project locations, Git inspection and
+  worktree preparation for session launch. The first implementation is local
+  Git; it is not a new map topology node.
 - **Provider facts** — optional metadata from Claude Code, Codex, OpenCode, Pi
   or agent hooks/skills.
 - **Related work** — GitHub pull requests, Jira issues, Linear tickets and

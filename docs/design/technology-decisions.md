@@ -202,6 +202,16 @@ Relevant documentation:
 Use the imperative `@opentui/core` interface. React and Solid reconcilers add
 another programming model without providing leverage for this client.
 
+Use OpenTUI's built-in renderables for conventional interaction surfaces rather
+than rebuilding them on the framebuffer: `BoxRenderable` and `TextRenderable`
+for modal chrome, `SelectRenderable` for discrete choices, `InputRenderable`
+and `TextareaRenderable` for editable fields, and `ScrollBoxRenderable` for
+long supporting lists. Observatory's framebuffer remains responsible for the
+universe map, stars, connectors and other product-specific cell composition.
+This boundary keeps the map expressive while making selection, cursor and
+scroll behaviour consistent with OpenTUI and reusable across launch, assignment
+and future command surfaces.
+
 OpenTUI is intentionally isolated inside the terminal-renderer module. Its
 constructs, layout model and event types must not appear in Universe, Attention,
 Layout, Projection or host-adapter module interfaces. AO owns the semantic
@@ -356,9 +366,9 @@ The repository should converge on a small interface for humans, agents and CI:
 bun run format      # apply repository-wide formatting before handoff
 bun run check       # format check, lint and type check
 bun run test        # deterministic tests
-bun run test:all    # tests plus slower adapter and fixture checks
+bun run test:all    # compatibility alias for the complete test suite
 bun run dev         # live terminal command centre
-bun run test:herdr  # Herdr adapter contract and sanitised fixture checks
+bun run test:herdr  # Herdr adapter and sanitised fixture checks
 ```
 
 The exact underlying flags belong in scripts rather than agent instructions.

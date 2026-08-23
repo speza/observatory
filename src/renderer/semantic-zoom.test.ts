@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   goalLabelBudget,
+  isRecentlyDone,
   isAtLeast,
   nextSemanticZoom,
+  perspectiveNodeScale,
   semanticZoomLevel,
   sessionLabelBudget,
   sessionMarker,
@@ -15,7 +17,7 @@ describe("semantic zoom", () => {
     expect(nextSemanticZoom("detail")).toBe("overview");
   });
 
-  test("makes focused lenses detailed without moving nodes", () => {
+  test("keeps focused lenses navigable at every label level", () => {
     expect(
       semanticZoomLevel({
         lens: "portfolio",
@@ -33,6 +35,18 @@ describe("semantic zoom", () => {
       semanticZoomLevel({
         lens: "goal",
         preference: "overview",
+      }),
+    ).toBe("overview");
+    expect(
+      semanticZoomLevel({
+        lens: "goal",
+        preference: "context",
+      }),
+    ).toBe("context");
+    expect(
+      semanticZoomLevel({
+        lens: "inbox",
+        preference: "detail",
       }),
     ).toBe("detail");
     expect(
@@ -56,13 +70,38 @@ describe("semantic zoom", () => {
     expect(isAtLeast("overview", "context")).toBe(false);
   });
 
+  test("scales node geometry with camera zoom", () => {
+    expect(perspectiveNodeScale(0.65)).toBeLessThan(perspectiveNodeScale(1));
+    expect(perspectiveNodeScale(1)).toBeCloseTo(1);
+    expect(perspectiveNodeScale(2.2)).toBeGreaterThan(perspectiveNodeScale(1));
+  });
+
   test("distinguishes current attention from stale host state", () => {
     expect(sessionMarker("live", "blocked")).toBe("!");
     expect(sessionMarker("live", "waiting")).toBe("…");
     expect(sessionMarker("stale", "blocked")).toBe("?");
     expect(sessionMarker("live", "idle")).toBe("·");
+    expect(sessionMarker("live", "done")).toBe("✓");
     expect(sessionMarker("live", "working", 0)).toBe("◐");
     expect(sessionMarker("live", "working", 0.6)).toBe("◓");
     expect(sessionMarker("live", "unknown")).toBe("?");
+  });
+
+  test("keeps a completed session in the review window", () => {
+    expect(
+      isRecentlyDone({ hostHealth: "live", runtimeState: "done", lastChangedAt: 90 }, 100),
+    ).toBe(true);
+    expect(
+      isRecentlyDone(
+        { hostHealth: "live", runtimeState: "done", lastChangedAt: 0 },
+        30 * 60 * 1000 + 1,
+      ),
+    ).toBe(false);
+    expect(
+      isRecentlyDone({ hostHealth: "stale", runtimeState: "done", lastChangedAt: 90 }, 100),
+    ).toBe(false);
+    expect(
+      isRecentlyDone({ hostHealth: "live", runtimeState: "idle", lastChangedAt: 90 }, 100),
+    ).toBe(false);
   });
 });

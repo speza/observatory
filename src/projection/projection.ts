@@ -61,9 +61,13 @@ const projectCommandCentre = (
     (session) => includeArchived || session.archivedAt === undefined,
   );
   const activeSessions = state.sessions.filter((session) => session.archivedAt === undefined);
-  const attention = evaluateAttention(now, state.goals, activeSessions, state.hosts);
-  const attentionBySession = byAttention(attention.items);
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
+  const attentionSessions = activeSessions.filter(
+    (session) =>
+      includeArchived || goalsById.get(session.primaryGoalId ?? "")?.status !== "archived",
+  );
+  const attention = evaluateAttention(now, state.goals, attentionSessions, state.hosts);
+  const attentionBySession = byAttention(attention.items);
   const views = projectedSessions.map((session): SessionView => ({
     ...session,
     goalTitle: session.primaryGoalId ? goalsById.get(session.primaryGoalId)?.title : undefined,

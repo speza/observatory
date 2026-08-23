@@ -4,6 +4,7 @@ export const TERMINAL_DEFAULT_COLUMNS = 80;
 export const TERMINAL_DEFAULT_ROWS = 24;
 export const TERMINAL_MIN_COLUMNS = 24;
 export const TERMINAL_MIN_ROWS = 8;
+export const TERMINAL_MAX_SCROLLBACK = 10_000;
 
 export const TERMINAL_COLORS = {
   background: RGBA.fromHex("#08131f"),
@@ -21,8 +22,10 @@ type Cursor = { x: number; y: number };
 
 type SavedScreen = {
   cells: Cell[][];
+  history: Cell[][];
   cursor: Cursor;
   savedCursor: Cursor;
+  scrollOffset: number;
 };
 
 type Style = {
@@ -108,6 +111,8 @@ export class TerminalScreen {
   private columnCount: number;
   private rowCount: number;
   private cells: Cell[][];
+  private history: Cell[][] = [];
+  private scrollOffsetValue = 0;
   private alternate: SavedScreen | undefined;
   private cursor: Cursor = { x: 0, y: 0 };
   private savedCursor: Cursor = { x: 0, y: 0 };
@@ -121,6 +126,8 @@ export class TerminalScreen {
   private byteCount = 0;
   private ansiSequenceCount = 0;
   private isAlternateScreen = false;
+  private mouseReportingEnabled = false;
+  private sgrMouseEnabled = false;
 
   constructor(columns = TERMINAL_DEFAULT_COLUMNS, rows = TERMINAL_DEFAULT_ROWS) {
     this.columnCount = Math.max(TERMINAL_MIN_COLUMNS, columns);
@@ -148,6 +155,43 @@ export class TerminalScreen {
     return this.isAlternateScreen;
   }
 
+  get mouseReporting(): boolean {
+    return this.mouseReportingEnabled;
+  }
+
+  get sgrMouse(): boolean {
+    return this.sgrMouseEnabled;
+  }
+
+  /** Number of lines currently scrolled back from the live bottom edge. */
+  get scrollOffset(): number {
+    return this.scrollOffsetValue;
+  }
+
+  get scrollbackLines(): number {
+    return this.history.length;
+  }
+
+  get isScrolled(): boolean {
+    return this.scrollOffsetValue > 0;
+  }
+
+  scrollBy(delta: number): boolean {
+    const amount = Number.isFinite(delta) ? Math.trunc(delta) : 0;
+    const next = clamp(this.scrollOffsetValue + amount, 0, this.scrollbackLines);
+    if (next === this.scrollOffsetValue) return false;
+    this.scrollOffsetValue = next;
+    return true;
+  }
+
+  scrollToTop(): boolean {
+    return this.scrollBy(this.scrollbackLines - this.scrollOffsetValue);
+  }
+
+  scrollToBottom(): boolean {
+    return this.scrollBy(-this.scrollOffsetValue);
+  }
+
   get position(): Cursor {
     return { ...this.cursor };
   }
@@ -160,11 +204,23 @@ export class TerminalScreen {
     this.columnCount = nextColumns;
     this.rowCount = nextRows;
     this.cells = next;
+    this.history = this.resizeGrid(this.history, nextColumns, this.history.length);
+    this.scrollOffsetValue = clamp(this.scrollOffsetValue, 0, this.scrollbackLines);
     this.cursor.x = clamp(this.cursor.x, 0, nextColumns - 1);
     this.cursor.y = clamp(this.cursor.y, 0, nextRows - 1);
     this.wrapPending = false;
     if (this.alternate) {
       this.alternate.cells = this.resizeGrid(this.alternate.cells, nextColumns, nextRows);
+      this.alternate.history = this.resizeGrid(
+        this.alternate.history,
+        nextColumns,
+        this.alternate.history.length,
+      );
+      this.alternate.scrollOffset = clamp(
+        this.alternate.scrollOffset,
+        0,
+        this.alternate.history.length,
+      );
       this.alternate.cursor.x = clamp(this.alternate.cursor.x, 0, nextColumns - 1);
       this.alternate.cursor.y = clamp(this.alternate.cursor.y, 0, nextRows - 1);
       this.alternate.savedCursor.x = clamp(this.alternate.savedCursor.x, 0, nextColumns - 1);
@@ -183,8 +239,10 @@ export class TerminalScreen {
     if (trailing) this.consume(trailing);
   }
 
-  reset(): void {
+  reset(options: { readonly preserveHistory?: boolean } = {}): void {
     this.cells = this.createGrid();
+    if (!options.preserveHistory) this.history = [];
+    this.scrollOffsetValue = 0;
     this.cursor = { x: 0, y: 0 };
     this.savedCursor = { x: 0, y: 0 };
     this.style = defaultStyle();
@@ -195,12 +253,22 @@ export class TerminalScreen {
     this.cursorVisible = true;
     this.alternate = undefined;
     this.isAlternateScreen = false;
+    this.mouseReportingEnabled = false;
+    this.sgrMouseEnabled = false;
   }
 
   toStyledText(): StyledText {
     const chunks: TextChunk[] = [];
+    const rows = [...this.history, ...this.cells];
+    const end = Math.max(this.rowCount, rows.length - this.scrollOffsetValue);
+    const start = Math.max(0, end - this.rowCount);
+    const visibleRows = rows.slice(start, end);
+    while (visibleRows.length < this.rowCount)
+      visibleRows.unshift(
+        Array.from({ length: this.columnCount }, () => blankCell(this.style.fg, this.style.bg)),
+      );
     for (let y = 0; y < this.rowCount; y += 1) {
-      const row = this.cells[y]!;
+      const row = visibleRows[y]!;
       let run = "";
       let runCell = row[0]!;
       const flush = () => {
@@ -216,7 +284,8 @@ export class TerminalScreen {
       };
       for (let x = 0; x < this.columnCount; x += 1) {
         const cell = row[x]!;
-        const isCursor = this.cursorVisible && x === this.cursor.x && y === this.cursor.y;
+        const isCursor =
+          !this.isScrolled && this.cursorVisible && x === this.cursor.x && y === this.cursor.y;
         const renderCell = isCursor
           ? {
               ...cell,
@@ -338,6 +407,15 @@ export class TerminalScreen {
 
   private lineFeed(): void {
     if (this.cursor.y === this.rowCount - 1) {
+      // Agent TUIs commonly use the alternate screen. The outer terminal
+      // normally owns scrollback in that mode, but Observatory is the
+      // terminal surface now, so retain a bounded local history for both
+      // modes. The saved normal screen keeps its own history across the
+      // alternate-screen transition.
+      this.history.push(this.cells[0]!.map(cloneCell));
+      if (this.history.length > TERMINAL_MAX_SCROLLBACK)
+        this.history.splice(0, this.history.length - TERMINAL_MAX_SCROLLBACK);
+      this.scrollOffsetValue = clamp(this.scrollOffsetValue, 0, this.scrollbackLines);
       this.cells.shift();
       this.cells.push(
         Array.from({ length: this.columnCount }, () => blankCell(this.style.fg, this.style.bg)),
@@ -504,6 +582,8 @@ export class TerminalScreen {
   private handlePrivateMode(enable: boolean, params: number[]): void {
     for (const mode of params) {
       if (mode === 25) this.cursorVisible = enable;
+      if (mode === 1000 || mode === 1002 || mode === 1003) this.mouseReportingEnabled = enable;
+      if (mode === 1006) this.sgrMouseEnabled = enable;
       if (mode === 1049 || mode === 47 || mode === 1047) {
         if (enable && !this.isAlternateScreen) this.enterAlternate();
         if (!enable && this.isAlternateScreen) this.leaveAlternate();
@@ -514,10 +594,14 @@ export class TerminalScreen {
   private enterAlternate(): void {
     this.alternate = {
       cells: cloneGrid(this.cells),
+      history: cloneGrid(this.history),
       cursor: { ...this.cursor },
       savedCursor: { ...this.savedCursor },
+      scrollOffset: this.scrollOffsetValue,
     };
     this.cells = this.createGrid();
+    this.history = [];
+    this.scrollOffsetValue = 0;
     this.cursor = { x: 0, y: 0 };
     this.savedCursor = { x: 0, y: 0 };
     this.wrapPending = false;
@@ -527,8 +611,10 @@ export class TerminalScreen {
   private leaveAlternate(): void {
     if (!this.alternate) return;
     this.cells = this.alternate.cells;
+    this.history = this.alternate.history;
     this.cursor = this.alternate.cursor;
     this.savedCursor = this.alternate.savedCursor;
+    this.scrollOffsetValue = this.alternate.scrollOffset;
     this.alternate = undefined;
     this.wrapPending = false;
     this.isAlternateScreen = false;

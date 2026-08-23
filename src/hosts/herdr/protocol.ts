@@ -28,7 +28,9 @@ export const isRecord = (value: JsonValue | undefined): value is JsonRecord =>
 
 export const stringValue = (record: JsonRecord, key: string): string | undefined => {
   const value = record[key];
-  return Schema.is(Schema.String)(value) && value.length > 0 ? value : undefined;
+  if (!Schema.is(Schema.String)(value)) return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 };
 
 export const numberValue = (record: JsonRecord, ...keys: readonly string[]): number | undefined => {

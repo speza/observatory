@@ -2,6 +2,10 @@ import { Effect, Stream } from "effect";
 import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
+  HostLaunchOption,
+  HostLaunchRequest,
+  HostLaunchResult,
+  HostSessionObservation,
   HostSnapshot,
   HostTerminalEvent,
   HostedTerminalSession,
@@ -55,7 +59,12 @@ class MockTerminalSession implements HostedTerminalSession {
     return Effect.sync(() => {
       if (this.released) return { ok: false, message: "The mock terminal has been released." };
       this.inputs.push(input);
-      const value = input.kind === "text" ? input.value : new TextDecoder().decode(input.value);
+      const value =
+        input.kind === "text"
+          ? input.value
+          : input.kind === "bytes"
+            ? new TextDecoder().decode(input.value)
+            : `${input.source} ${input.direction} ${input.lines}`;
       this.push({
         kind: "frame",
         frame: { bytes: new TextEncoder().encode(`\r\nmock input: ${JSON.stringify(value)}\r\n`) },
@@ -116,6 +125,8 @@ export class MockHostAdapter implements SessionHost {
   private readonly scenario: MockScenario;
   private readonly startedAt: number;
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
+  private readonly launched = new Map<string, HostSessionObservation>();
+  private launchSequence = 0;
 
   constructor(options: {
     readonly clock: Clock;
@@ -142,10 +153,13 @@ export class MockHostAdapter implements SessionHost {
         this.scenario.frames.length;
       const frame = this.scenario.frames[frameNumber];
       if (!frame) throw new Error("Mock scenario frame disappeared.");
-      const sessions = frame.sessions.map((session) => ({
-        ...session,
-        observedAt,
-      }));
+      const sessions = [
+        ...frame.sessions.map((session) => ({
+          ...session,
+          observedAt,
+        })),
+        ...Array.from(this.launched.values(), (session) => ({ ...session, observedAt })),
+      ];
       for (const session of sessions) {
         this.liveTargets.set(session.nativeId, {
           kind: "mock-session",
@@ -166,6 +180,43 @@ export class MockHostAdapter implements SessionHost {
     );
   }
 
+  listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError> {
+    return Effect.succeed([
+      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
+      { kind: "codex", label: "Codex", description: "Codex CLI" },
+      { kind: "pi", label: "Pi", description: "Pi coding agent" },
+    ]);
+  }
+
+  launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
+    return Effect.sync(() => {
+      const agentKind = request.agentKind.trim();
+      if (!agentKind)
+        return { ok: false, message: "A mock agent kind is required." } satisfies HostLaunchResult;
+      const id = `mock-launch-${++this.launchSequence}`;
+      const displayName =
+        request.agentName?.trim() || `${agentKind} session ${this.launchSequence}`;
+      const session: HostSessionObservation = {
+        nativeId: id,
+        displayName,
+        runtimeState: "working",
+        runtimeStateSource: "mock.launch",
+        observedAt: this.clock.now(),
+        repository: "synthetic/ao-playground",
+        branch: "mock/launch",
+        worktree: request.workingDirectory,
+        provider: agentKind,
+        hostLocator: `mock-session:${id}`,
+      };
+      this.launched.set(id, session);
+      return {
+        ok: true,
+        nativeId: id,
+        message: `Started a mock ${agentKind} session in ${request.workingDirectory}.`,
+      } satisfies HostLaunchResult;
+    });
+  }
+
   access(session: {
     readonly hostKind: string;
     readonly nativeId: string;
@@ -174,16 +225,19 @@ export class MockHostAdapter implements SessionHost {
       if (session.hostKind !== "mock")
         return {
           supported: false,
+          capabilities: [],
           explanation: "This session belongs to an unsupported host.",
         } satisfies SessionAccess;
       const target = this.liveTargets.get(session.nativeId);
       if (!target)
         return {
           supported: false,
+          capabilities: [],
           explanation: "The session is not present in the latest mock frame.",
         } satisfies SessionAccess;
       return {
         supported: true,
+        capabilities: ["embedded-terminal", "native-handoff"],
         mode: "focus",
         target,
         terminalTarget: {

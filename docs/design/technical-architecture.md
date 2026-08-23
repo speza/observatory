@@ -32,6 +32,11 @@ non-destructive live map → terminal → release → map smoke. This promotes t
 host-owned capability, not the disposable AO-owned PTY, into V0. It does not add
 transcript ingestion or justify an AO-owned daemon.
 
+The terminal interaction and scroll-ownership decision is recorded in
+[Embedded terminal interaction](terminal-interaction.md). That document explains
+why host-owned scrolling is distinct from sending PageUp or mouse input to an
+agent and defines the boundary future session hosts must implement.
+
 ## Architectural objective
 
 AO must make many heterogeneous agent sessions understandable as durable,
@@ -119,7 +124,8 @@ Key invariants:
 - Repositories and worktrees may contribute to multiple goals over time.
 - Goal priority is human-authored unless an explicit auto policy allows an
   agent mutation.
-- Archive is reversible and never deletes history.
+- Archive is non-destructive and never deletes history; the V0 restore command
+  remains deferred until a history lens exists.
 - Unknown facts remain unknown; adapters cannot silently convert inference into
   accepted structure.
 
@@ -206,13 +212,12 @@ Only `SendText` is required for the first quick-interaction experiment.
 can identify and answer the prompt reliably. Clients never infer support from a
 provider name.
 
-`SessionAccess` reports capabilities per session because the same host may offer
-different operations depending on provider recognition, permissions, whether
-the process is live, and terminal protocol support. Candidate attachment modes
-are focus-existing, open-split, foreground-takeover and embedded-terminal.
-Herdr's V0 adapter supports foreground attachment and an embedded terminal;
-other hosts may return an honest unsupported result. These modes remain opaque
-outside the Session-host module.
+`SessionAccess` reports a small capability list per session because the same host
+may offer different operations depending on provider recognition, permissions,
+whether the process is live, and terminal protocol support. V0 capabilities are
+`embedded-terminal` and `native-handoff`; targets and attachment modes remain
+opaque outside the Session-host module. Herdr supports both, while another host
+may return an honest unsupported result.
 
 Do not expose Herdr workspaces, tabs and panes as universal domain concepts.
 They remain adapter details referenced through opaque native identifiers.
@@ -240,6 +245,21 @@ The Herdr adapter translates its controller stream into this capability; the
 mock adapter exercises the same contract. The renderer owns terminal-cell
 interpretation and transient panel state, while the host remains responsible
 for process ownership and cleanup.
+
+An embedded PTY is not a guarantee of native provider UI. In particular, image
+or file attachment may depend on an OS picker, terminal clipboard/graphics
+protocol or provider-specific command. Do not grow `SessionHost` into a
+universal upload interface; expose proven capabilities and retain a
+capability-gated native handoff for provider-only interactions. The TUI keeps the
+embedded terminal as the default (`t` or `Enter`) and makes native handoff an
+explicit `o` action.
+
+The first launch slice is implemented and specified in
+[session-launch.md](../specs/session-launch.md). It keeps `SessionHost` as the
+only host seam and uses a typed launch capability; project recency, Git
+inspection and worktree preparation remain a separate workspace-provider
+capability at the control-plane edge. A richer location picker and JSON command
+surface are follow-up clients of the same coordinator.
 
 ### Provider-facts module
 
@@ -574,13 +594,11 @@ The control plane should be usable from a CLI, long-running renderer and agent
 skill. The transport therefore needs request/response commands plus event
 subscriptions.
 
-Initial direction:
-
-- a local daemon;
-- JSON messages over a Unix domain socket on macOS and Linux;
-- a schema-versioned request and event protocol;
-- filesystem permissions restricting access to the current user; and
-- a later Windows named-pipe adapter if needed.
+Initial direction for session launch is a local JSON CLI/command surface that
+the TUI and an installable agent skill can call. A daemon is deliberately later:
+when a second live client or concurrent agent process needs subscriptions,
+carry the same versioned commands and events over a user-owned Unix domain
+socket on macOS/Linux (and a named-pipe adapter later if needed).
 
 An HTTP/WebSocket loopback adapter may be added for the web prototype or later
 web client. It should translate the same command/query interface rather than
@@ -688,9 +706,9 @@ until that evidence exists. External efforts such as
 session/multiplexer substrate, are monitored as possible future host adapters,
 not modelled as new AO domain objects today.
 
-The initial adapter is read-only except for explicit focus or attachment.
-Messaging, launch/stop and broader pane control can follow after live use proves
-exact-target interaction and the goal model; they are not part of V0.
+The current V0 adapter is read-only except for explicit focus, terminal access,
+session launch and the operations already proven by the live slice. Stop and
+broader pane control remain deferred.
 
 ### Deterministic mock host
 
@@ -768,35 +786,42 @@ The V0 renderer treats attention as navigation, not decoration. Current
 attention uses a steady `!` marker and owning-goal `!N` aggregate; stale or
 uncertain state uses `?` and `?N`. Human-set `P0`–`P3` priority remains a
 separate durable treatment. `g` selects and focuses the next item in the exact
-attention ordering, `f` can focus or reset the selected context, and `Enter`
-attaches to the selected hosted session. These actions may change emphasis and
-viewport, but never reflow durable positions.
+attention ordering, `f` can focus or reset the selected context, and `t`,
+`Enter` or a session double-click opens the selected hosted terminal. These
+actions may change emphasis and viewport, but never reflow durable positions.
 
 Live `working` sessions are deliberately distinct from merely live `idle`
 sessions: their marker cycles through a restrained half-moon animation and
 their map border pulses green. The animation is a progress cue, not a state
 source; the runtime state and host health remain visible in detail/list views.
+Recently completed live sessions receive the same low-noise treatment in
+reverse: a `✓` marker, muted green emphasis and completion age keep them easy
+to review briefly without turning completion into an attention condition. A
+stale or unavailable last-known `done` state keeps the uncertainty treatment.
 
 The renderer has semantic presentation tiers independent of camera zoom:
 overview uses compact labels and summary markers, context expands
 attention-bearing labels in their owning context, and the selected target gets
 the detail tier with a complete wrapped title. Focus/detail additionally
 exposes larger labels plus the complete direct orbit. This is a presentation
-policy over the same projection, not a second layout or domain model. When
-geometric zoom drops below the readable cell density, overview nodes collapse
-to glyphs and priority markers; selected or attention-bearing nodes retain
-labels. Terminal zoom cannot shrink text, so density reduction must remove
-labels rather than allow fixed-width cards to overlap.
+policy over the same projection, not a second layout or domain model. Dense
+focused goals apply the same rule deliberately: overview may collapse healthy
+satellites to status glyphs, while selected or attention-bearing nodes retain
+labels and context/detail restore progressively more identity. When geometric
+zoom drops below the readable cell density, overview nodes collapse to glyphs
+and priority markers. Terminal zoom cannot shrink text, so density reduction
+must remove labels rather than allow fixed-width cards to overlap.
 
 Keyboard operation remains complete: type-to-find, focus navigation, inspect,
-attention navigation, attach and return-to-universe. Quick message and
+attention navigation, terminal entry and return-to-universe. Quick message and
 additional lenses are later capabilities.
 
 Selecting a goal, session or inbox opens a transient floating inspector card.
 The card is anchored near its target, clamped inside the map/list surface, and
-does not reserve a permanent sidebar. Attaching is a separate action,
-normally `Enter` or double click. Capability-aware actions may appear in a
-right-click menu, but every action must also be reachable by keyboard.
+does not reserve a permanent sidebar. Opening the terminal is the direct
+session action, normally `Enter` or double click. Capability-aware actions may
+appear in a right-click menu, but every action must also be reachable by
+keyboard.
 
 ## Security and privacy
 
@@ -915,8 +940,9 @@ The v0 live Herdr slice should demonstrate:
   first an AO-owned Bun PTY for renderer fidelity, then a Herdr-backed control
   stream for durable-session behaviour.
 - Add targeted quick messages only after exact-target UX is trusted.
-- Add CLI commands and an installable skill for agent-created goals, assignment
-  and structured reporting.
+- Add the `StartSession` CLI/skill flow for agent-created goals, workspace
+  preparation and session assignment; keep the one-request contract above
+  Herdr.
 - Preserve human approval for completion and archive behaviour.
 - Introduce the local daemon and control transport when multiple clients or
   agent processes create a real need.

@@ -3,6 +3,8 @@ import {
   createCliRenderer,
   FrameBufferRenderable,
   RGBA,
+  SelectRenderable,
+  SelectRenderableEvents,
   TextAttributes,
   TextRenderable,
   type CliRenderer,
@@ -10,14 +12,18 @@ import {
   type MouseEvent,
   type PasteEvent,
   type OptimizedBuffer,
+  type SelectOption,
 } from "@opentui/core";
 import { Effect, Stream } from "effect";
 import { formatAge } from "../attention/attention.ts";
 import {
   displayHostKind,
+  hasSessionCapability,
+  type HostLaunchOption,
   type HostedTerminalSession,
   type HostTerminalEvent,
   type HostTerminalInput,
+  type SessionAccess,
   type SessionHost,
   type TerminalDimensions,
 } from "../hosts/types.ts";
@@ -40,6 +46,7 @@ import {
   screenPointForWorld,
   zoomViewportAt,
 } from "../spatial/viewport.ts";
+import { sessionSatellitePositions, unassignedSessionPositions } from "../spatial/positions.ts";
 import { placeFloatingInspector } from "./inspector-placement.ts";
 import { filterAssignableSessions } from "./assignment.ts";
 import { editText, insertTextAtCursor, typedCharacter } from "./input.ts";
@@ -48,12 +55,16 @@ import { mapSelectionCandidates, nextNavigationSelection } from "./navigation.ts
 import { ensureTerminalDimensions, TerminalScreen, TERMINAL_COLORS } from "./terminal-screen.ts";
 import {
   nextSemanticZoom,
+  perspectiveNodeScale,
+  isRecentlyDone,
   semanticZoomLevel,
   sessionLabelBudget,
   sessionMarker,
   goalLabelBudget,
   type SemanticZoomLevel,
 } from "./semantic-zoom.ts";
+import type { StartSessionCoordinator, StartSessionIntent } from "../session-launch/types.ts";
+import type { WorkspaceBrowser, WorkspaceChoice, WorkspaceProvider } from "../workspaces/types.ts";
 
 const color = (hex: string): RGBA => RGBA.fromHex(hex);
 
@@ -81,6 +92,8 @@ const COLORS = {
 const MAP_FIT_PADDING_X = 26;
 const MAP_FIT_PADDING_Y = 8;
 const MAP_LABEL_ZOOM_THRESHOLD = 0.85;
+const DENSE_FOCUS_SESSION_THRESHOLD = 8;
+const DENSE_FOCUS_COMPACT_ZOOM = 1.45;
 
 type Selection = { readonly type: "goal" | "session"; readonly id: string };
 type Row = Selection | { readonly type: "inbox-label"; readonly id: "inbox-label" };
@@ -105,6 +118,45 @@ type InboxHitTarget = {
 };
 type MapHitTarget = HitTarget | InboxHitTarget;
 
+type PendingLaunch = {
+  readonly id: string;
+  readonly goalId?: string;
+  readonly agentKind: string;
+  readonly displayName: string;
+};
+
+type PendingLaunchPlacement = {
+  readonly pending: PendingLaunch;
+  readonly goal?: MapGoalView;
+  readonly position: MapPosition;
+};
+
+type ContextActionId =
+  | "focus"
+  | "open-terminal"
+  | "inspect"
+  | "new-goal"
+  | "new-session"
+  | "assign"
+  | "unassign"
+  | "rename"
+  | "description"
+  | "priority"
+  | "complete"
+  | "archive"
+  | "attention"
+  | "list"
+  | "clear";
+
+type ContextMenu = {
+  readonly scope: "selection" | "inbox" | "empty";
+  readonly target?: Selection;
+  readonly x: number;
+  readonly y: number;
+  readonly index: number;
+  readonly actions: readonly { readonly id: ContextActionId; readonly label: string }[];
+};
+
 type DragState =
   | {
       readonly kind: "pan";
@@ -112,6 +164,7 @@ type DragState =
       readonly lastY: number;
       readonly moved: boolean;
       readonly clickTarget?: "inbox";
+      readonly clickSelection?: Selection;
     }
   | {
       readonly kind: "goal";
@@ -123,6 +176,37 @@ type DragState =
       readonly lastY: number;
       readonly moved: boolean;
     };
+
+type GoalClick = {
+  readonly id: string;
+  readonly at: number;
+};
+
+type LaunchField = "goal" | "location" | "workspace" | "branch" | "agent" | "name" | "prompt";
+
+type SessionLaunchModal = {
+  readonly kind: "session-launch";
+  readonly field: LaunchField;
+  readonly goalIndex: number;
+  readonly location: string;
+  readonly locations: readonly WorkspaceChoice[];
+  readonly locationIndex: number;
+  readonly workspaceMode: "existing" | "worktree";
+  readonly branch: string;
+  readonly agentOptions: readonly HostLaunchOption[];
+  readonly agentIndex: number;
+  readonly agentKind: string;
+  readonly sessionName: string;
+  readonly prompt: string;
+};
+
+type WorkspacePickerModal = {
+  readonly kind: "workspace-picker";
+  readonly browser: WorkspaceBrowser;
+  readonly index: number;
+  readonly loading: boolean;
+  readonly returnTo: SessionLaunchModal;
+};
 
 type Modal =
   | {
@@ -153,6 +237,8 @@ type Modal =
       readonly index: number;
       readonly query: string;
     }
+  | SessionLaunchModal
+  | WorkspacePickerModal
   | {
       readonly kind: "confirm";
       readonly action: "complete";
@@ -186,6 +272,8 @@ type TerminalMode = {
 export interface CommandCentreAppOptions {
   readonly universe: Universe;
   readonly host: SessionHost;
+  readonly startSession: StartSessionCoordinator;
+  readonly workspace: WorkspaceProvider;
   readonly clock: Clock;
   readonly refresh: Effect.Effect<string, HostError>;
   readonly initialAction?: string;
@@ -208,6 +296,24 @@ const shorten = (value: string, maximum: number): string => {
 const inputWithCursor = (value: string, cursor: number): string => {
   const position = Math.max(0, Math.min(value.length, cursor));
   return `${value.slice(0, position)}_${value.slice(position)}`;
+};
+
+const inputWithVisibleCursor = (value: string, cursor: number, maximum: number): string => {
+  const limit = Math.max(4, maximum);
+  const position = Math.max(0, Math.min(value.length, cursor));
+  const contentLimit = Math.max(1, limit - 1);
+  if (value.length <= contentLimit) return inputWithCursor(value, position);
+
+  let start = Math.max(0, Math.min(value.length - contentLimit, position - contentLimit + 1));
+  let end = Math.min(value.length, start + contentLimit);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < value.length ? "…" : "";
+  const bodyLimit = Math.max(1, contentLimit - prefix.length - suffix.length);
+  if (end - start > bodyLimit) {
+    start = Math.max(0, Math.min(value.length - bodyLimit, position - bodyLimit + 1));
+    end = Math.min(value.length, start + bodyLimit);
+  }
+  return `${start > 0 ? "…" : ""}${inputWithCursor(value.slice(start, end), position - start)}${end < value.length ? "…" : ""}`;
 };
 
 const countLabel = (count: number, singular: string, plural = `${singular}s`): string =>
@@ -274,12 +380,12 @@ const statusGlyph = (session: SessionView, phase = 0): string => {
   return sessionMarker(session.hostHealth, session.runtimeState, phase);
 };
 
-const statusColor = (session: SessionView): RGBA => {
+const statusColor = (session: SessionView, recentlyDone = false): RGBA => {
   if (session.hostHealth !== "live") return COLORS.yellow;
   if (session.runtimeState === "blocked") return COLORS.red;
   if (session.runtimeState === "waiting") return COLORS.orange;
   if (session.runtimeState === "working") return COLORS.green;
-  if (session.runtimeState === "done") return COLORS.completed;
+  if (session.runtimeState === "done") return recentlyDone ? COLORS.green : COLORS.completed;
   return COLORS.muted;
 };
 
@@ -306,14 +412,19 @@ export class CommandCentreApp {
   private mapScaleY = 0.3;
   private mapRect: Rect | undefined;
   private mapSurface: Rect | undefined;
+  private drawClip: Rect | undefined;
   private hitTargets: MapHitTarget[] = [];
   private dragState: DragState | undefined;
+  private lastGoalClick: GoalClick | undefined;
+  private lastSessionClick: GoalClick | undefined;
   private hovered: MapHitTarget | undefined;
   private floatingInspectorRect: Rect | undefined;
   private inspectorVisible = false;
   private diagnosticsVisible = true;
   private suspended = false;
   private busy = false;
+  private pendingLaunch: PendingLaunch | undefined;
+  private contextMenu: ContextMenu | undefined;
   private lastAction: string;
   private closed = false;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -325,6 +436,10 @@ export class CommandCentreApp {
   private terminalMode: TerminalMode | undefined;
   private terminalPanel: BoxRenderable | undefined;
   private terminalText: TextRenderable | undefined;
+  private pickerSelect: SelectRenderable | undefined;
+  private pickerMode: "agent" | "workspace" | undefined;
+  private readonly sessionAccessById = new Map<string, SessionAccess>();
+  private readonly sessionAccessRequests = new Set<string>();
 
   constructor(options: CommandCentreAppOptions) {
     this.options = options;
@@ -341,7 +456,8 @@ export class CommandCentreApp {
       },
       onMouseDrag: (event) => this.handleMouseDrag(event),
       onMouseDragEnd: (event) => this.handleMouseDragEnd(event),
-      onMouseScroll: (event) => this.handleMouseScroll(event),
+      onMouseScroll: (event) =>
+        this.terminalMode ? this.handleTerminalMouseScroll(event) : this.handleMouseScroll(event),
     });
     this.canvas.renderBefore = (_buffer, deltaTime) => this.renderFrame(deltaTime);
     this.renderer.root.add(this.canvas);
@@ -350,7 +466,7 @@ export class CommandCentreApp {
       this.canvas.height = height;
       if (this.terminalMode) void this.resizeTerminal(width, height);
       this.lastAction = `resized to ${width}×${height}`;
-      this.renderer.requestRender();
+      this.requestRenderIfAlive();
     });
     this.renderer.keyInput.on("keypress", (key) => this.handleKey(key));
     this.renderer.keyInput.on("paste", (event) => this.handlePaste(event));
@@ -359,6 +475,174 @@ export class CommandCentreApp {
 
   private get renderer(): CliRenderer {
     return this.options.renderer;
+  }
+
+  private requestRenderIfAlive(): void {
+    if (!this.closed && !this.renderer.isDestroyed) this.renderer.requestRender();
+  }
+
+  private workspacePickerRows(modal: WorkspacePickerModal): WorkspaceChoice[] {
+    return [
+      {
+        path: modal.browser.path,
+        label: "Use this directory",
+        kind: "workspace",
+        repository: undefined,
+        branch: undefined,
+        available: true,
+      },
+      ...modal.browser.entries,
+    ];
+  }
+
+  private pickerOptions(modal: Modal, mode: "agent" | "workspace"): SelectOption[] {
+    if (mode === "workspace" && modal.kind === "workspace-picker")
+      return this.workspacePickerRows(modal).map((entry) => ({
+        name: entry.kind === "workspace" ? entry.label : `${entry.label}/`,
+        description:
+          entry.kind === "workspace"
+            ? "Use this directory for the new session"
+            : entry.repository
+              ? `${entry.repository}${entry.branch ? ` · ${entry.branch}` : ""}`
+              : "Open directory",
+        value: entry,
+      }));
+    if (mode === "agent" && modal.kind === "session-launch")
+      return modal.agentOptions.map((option) => ({
+        name: option.label,
+        description: option.description ?? option.kind,
+        value: option.kind,
+      }));
+    return [];
+  }
+
+  private pickerNavigationKey(key: KeyEvent): boolean {
+    return ["up", "down", "j", "k", "enter", "return", "linefeed"].includes(key.name);
+  }
+
+  private syncPickerSurface(width: number, height: number): void {
+    const modal = this.modal;
+    const mode: "agent" | "workspace" | undefined =
+      modal?.kind === "workspace-picker" && !modal.loading
+        ? "workspace"
+        : modal?.kind === "session-launch" &&
+            modal.field === "agent" &&
+            modal.agentOptions.length > 0
+          ? "agent"
+          : undefined;
+    if (!mode || !modal) {
+      this.destroyPickerSurface();
+      return;
+    }
+    const options = this.pickerOptions(modal, mode);
+    if (options.length === 0) {
+      this.destroyPickerSurface();
+      return;
+    }
+    const frame = modalFrameFor(width, height, modal.kind);
+    const top =
+      mode === "workspace"
+        ? frame.y + 5
+        : frame.y + (modal.kind === "session-launch" && modal.workspaceMode === "worktree" ? 7 : 6);
+    const pickerHeight =
+      mode === "workspace"
+        ? Math.max(1, frame.footerY - top)
+        : Math.max(1, Math.min(6, options.length, frame.footerY - top));
+    const selectedIndex =
+      mode === "workspace" && modal.kind === "workspace-picker"
+        ? modal.index
+        : modal.kind === "session-launch"
+          ? modal.agentIndex
+          : 0;
+    const boundedIndex = Math.max(0, Math.min(options.length - 1, selectedIndex));
+    const left = frame.x + 2;
+    const pickerWidth = Math.max(1, frame.width - 4);
+    if (!this.pickerSelect || this.pickerMode !== mode || this.pickerSelect.isDestroyed) {
+      this.destroyPickerSurface();
+      const select = new SelectRenderable(this.renderer, {
+        id: "ao-modal-picker",
+        position: "absolute",
+        left,
+        top,
+        width: pickerWidth,
+        height: pickerHeight,
+        zIndex: 40,
+        options,
+        selectedIndex: boundedIndex,
+        backgroundColor: COLORS.panelRaised,
+        textColor: COLORS.muted,
+        focusedBackgroundColor: COLORS.panelRaised,
+        focusedTextColor: COLORS.white,
+        selectedBackgroundColor: COLORS.panel,
+        selectedTextColor: COLORS.white,
+        descriptionColor: COLORS.faint,
+        selectedDescriptionColor: COLORS.muted,
+        showDescription: false,
+        showSelectionIndicator: true,
+        showScrollIndicator: options.length > pickerHeight,
+        wrapSelection: false,
+      });
+      select.on(SelectRenderableEvents.SELECTION_CHANGED, (index: number) => {
+        this.handlePickerSelection(mode, index);
+      });
+      select.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
+        this.handlePickerItemSelected(mode, index);
+      });
+      this.renderer.root.add(select);
+      this.pickerSelect = select;
+      this.pickerMode = mode;
+      select.focus();
+      return;
+    }
+    const select = this.pickerSelect;
+    select.options = options;
+    select.left = left;
+    select.top = top;
+    select.width = pickerWidth;
+    select.height = pickerHeight;
+    if (select.getSelectedIndex() !== boundedIndex) select.setSelectedIndex(boundedIndex);
+  }
+
+  private handlePickerSelection(mode: "agent" | "workspace", index: number): void {
+    const modal = this.modal;
+    if (mode === "workspace" && modal?.kind === "workspace-picker") {
+      this.modal = { ...modal, index };
+    } else if (mode === "agent" && modal?.kind === "session-launch") {
+      const option = modal.agentOptions[index];
+      if (option)
+        this.modal = {
+          ...modal,
+          agentIndex: index,
+          agentKind: option.kind,
+        };
+    }
+    this.requestRenderIfAlive();
+  }
+
+  private handlePickerItemSelected(mode: "agent" | "workspace", index: number): void {
+    const modal = this.modal;
+    if (mode === "workspace" && modal?.kind === "workspace-picker") {
+      this.chooseWorkspaceFromPicker({ ...modal, index });
+      this.requestRenderIfAlive();
+      return;
+    }
+    if (mode === "agent" && modal?.kind === "session-launch") {
+      const option = modal.agentOptions[index];
+      if (!option) return;
+      const next = { ...modal, agentIndex: index, agentKind: option.kind };
+      this.advanceLaunchField(next, 1);
+      this.requestRenderIfAlive();
+    }
+  }
+
+  private destroyPickerSurface(): void {
+    const picker = this.pickerSelect;
+    this.pickerSelect = undefined;
+    this.pickerMode = undefined;
+    if (!picker || picker.isDestroyed) return;
+    if (picker.focused) picker.blur();
+    this.renderer.root.remove(picker);
+    picker.destroy();
   }
 
   start(): void {
@@ -371,6 +655,7 @@ export class CommandCentreApp {
   dispose(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.suspendTimer) clearTimeout(this.suspendTimer);
+    this.destroyPickerSurface();
     const terminal = this.terminalMode?.terminal;
     this.terminalMode = undefined;
     if (terminal) void Effect.runPromise(terminal.release()).catch(() => undefined);
@@ -394,6 +679,45 @@ export class CommandCentreApp {
     if (projection.kind !== "command-centre")
       throw new Error("Universe returned an unexpected projection.");
     return projection;
+  }
+
+  private requestSessionAccess(session: SessionView | undefined): void {
+    if (
+      !session ||
+      this.sessionAccessById.has(session.id) ||
+      this.sessionAccessRequests.has(session.id)
+    )
+      return;
+    this.sessionAccessRequests.add(session.id);
+    void Effect.runPromise(
+      this.options.host.access({
+        hostKind: session.hostKind,
+        nativeId: session.nativeId,
+      }),
+    )
+      .then((access) => {
+        if (this.closed) return;
+        this.sessionAccessById.set(session.id, access);
+        this.requestRenderIfAlive();
+      })
+      .catch((error) => {
+        if (this.closed) return;
+        this.sessionAccessById.set(session.id, {
+          supported: false,
+          capabilities: [],
+          explanation: `Session capabilities unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        this.requestRenderIfAlive();
+      })
+      .finally(() => this.sessionAccessRequests.delete(session.id));
+  }
+
+  private sessionCapabilityLine(access: SessionAccess): string {
+    if (!access.supported) return "surfaces unavailable";
+    const labels = access.capabilities.map((capability) =>
+      capability === "embedded-terminal" ? "embedded terminal" : "native handoff",
+    );
+    return labels.length > 0 ? `surfaces ${labels.join(" · ")}` : "surfaces unavailable";
   }
 
   private mapProjection(): UniverseMapProjection {
@@ -506,6 +830,14 @@ export class CommandCentreApp {
       projection.kind !== "empty-inspector"
     )
       throw new Error("Universe returned an unexpected inspector projection.");
+    if (projection.kind === "session-inspector") {
+      const access = this.sessionAccessById.get(projection.session.id);
+      if (access)
+        return {
+          ...projection,
+          lines: [...projection.lines, this.sessionCapabilityLine(access)],
+        };
+    }
     return projection;
   }
 
@@ -517,7 +849,7 @@ export class CommandCentreApp {
         lines: [
           `${count} unassigned sessions`,
           "select a session for host facts",
-          "t opens terminal · Enter attaches to session",
+          "t/Enter opens the selected session in the terminal",
         ],
       };
     }
@@ -535,6 +867,7 @@ export class CommandCentreApp {
     const height = this.renderer.height;
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
+    this.syncPickerSurface(width, height);
     buffer.clear(COLORS.background);
     if (this.terminalMode) {
       this.drawTerminalBackdrop(buffer, width, height);
@@ -542,6 +875,7 @@ export class CommandCentreApp {
     }
     const projection = this.projection();
     const rows = this.ensureSelection(projection);
+    this.requestSessionAccess(this.selectedSession(projection));
     const layout = layoutFor(width, height);
     this.mapRect = layout.map;
     this.mapSurface = undefined;
@@ -557,6 +891,15 @@ export class CommandCentreApp {
           this.mapSurface ?? layout.map,
           this.floatingInspector(),
           this.selectedMapAnchor(),
+          this.hitTargets.flatMap((target) => {
+            const bounds = target.bounds ?? {
+              x: target.x - target.radiusX,
+              y: target.y - target.radiusY,
+              width: target.radiusX * 2 + 1,
+              height: target.radiusY * 2 + 1,
+            };
+            return [bounds];
+          }),
         );
     } else {
       this.drawList(buffer, layout.list, projection, rows);
@@ -564,7 +907,8 @@ export class CommandCentreApp {
         this.drawFloatingInspector(buffer, layout.list, this.floatingInspector(), undefined);
     }
     this.drawFooter(buffer, layout.footer, projection);
-    if (this.searchActive || this.modal) this.drawOverlay(buffer, width, height, projection);
+    if (this.searchActive || this.modal || this.contextMenu)
+      this.drawOverlay(buffer, width, height, projection);
     if (this.diagnosticsVisible && width >= 110 && height >= 18) {
       const stats = this.renderer.getStats();
       this.text(
@@ -645,6 +989,7 @@ export class CommandCentreApp {
       title: ` ${mode.displayName} `,
       titleColor: COLORS.cyan,
       zIndex: 20,
+      onMouseScroll: (event) => this.handleTerminalMouseScroll(event),
     });
     const text = new TextRenderable(this.renderer, {
       id: "ao-embedded-terminal-text",
@@ -660,6 +1005,7 @@ export class CommandCentreApp {
       selectionFg: COLORS.background,
       selectable: true,
       zIndex: 21,
+      onMouseScroll: (event) => this.handleTerminalMouseScroll(event),
     });
     this.renderer.root.add(panel);
     this.renderer.root.add(text);
@@ -803,6 +1149,30 @@ export class CommandCentreApp {
     }
   }
 
+  private pendingLaunchPlacement(
+    projection: UniverseMapProjection,
+    visibleGoals: readonly MapGoalView[],
+  ): PendingLaunchPlacement | undefined {
+    const pending = this.pendingLaunch;
+    if (!pending) return undefined;
+    if (pending.goalId) {
+      const goal = visibleGoals.find((candidate) => candidate.id === pending.goalId);
+      if (!goal) return undefined;
+      const positions = sessionSatellitePositions(goal.mapPosition, goal.id, [
+        ...goal.sessions.map((session) => session.id),
+        pending.id,
+      ]);
+      const position = positions.get(pending.id);
+      return position ? { pending, goal, position } : undefined;
+    }
+    const positions = unassignedSessionPositions(projection.inboxPosition, [
+      ...projection.unassigned.map((session) => session.id),
+      pending.id,
+    ]);
+    const position = positions.get(pending.id);
+    return position ? { pending, position } : undefined;
+  }
+
   private drawMap(buffer: OptimizedBuffer, rect: Rect, projection: UniverseMapProjection): void {
     this.panel(buffer, rect, COLORS.background, COLORS.border);
     if (rect.width < 8 || rect.height < 5) return;
@@ -863,6 +1233,7 @@ export class CommandCentreApp {
         : this.mapLens === "inbox"
           ? []
           : projection.goals;
+    const pendingLaunch = this.pendingLaunchPlacement(projection, goals);
     const mapPoints = [
       ...goals.flatMap((goal) => [
         goal.mapPosition,
@@ -871,6 +1242,7 @@ export class CommandCentreApp {
       ...(showInbox && visibleUnassigned.length > 0 && !compactInbox
         ? [projection.inboxPosition, ...visibleUnassigned.map((session) => session.mapPosition)]
         : []),
+      ...(pendingLaunch ? [pendingLaunch.position] : []),
     ];
     if (this.mapFitPending && mapPoints.length > 0) {
       const fit = fitViewportToPoints(
@@ -922,10 +1294,10 @@ export class CommandCentreApp {
         this.cell(buffer, x, y, "·", COLORS.faint, COLORS.background);
     }
 
-    if (goals.length === 0 && visibleUnassigned.length === 0) {
+    if (goals.length === 0 && visibleUnassigned.length === 0 && !pendingLaunch) {
       this.text(
         buffer,
-        "No goals or live sessions yet — press n to create the first body.",
+        "No goals or live sessions yet — n creates a goal · N launches a session.",
         map.x + 2,
         map.y + Math.floor(map.height / 2),
         COLORS.muted,
@@ -952,8 +1324,18 @@ export class CommandCentreApp {
         this.drawMapLink(buffer, goalPoint, sessionPoint, mapSurface, goal, session);
       }
     }
+    if (pendingLaunch?.goal) {
+      this.drawMapPendingLink(
+        buffer,
+        worldToScreen(pendingLaunch.goal.mapPosition),
+        worldToScreen(pendingLaunch.position),
+        mapSurface,
+      );
+    }
     if (compactInbox) {
-      this.drawCompactInbox(buffer, map, visibleUnassigned, attentionLens);
+      this.withDrawClip(map, () =>
+        this.drawCompactInbox(buffer, map, visibleUnassigned, attentionLens),
+      );
     } else if (showInbox && visibleUnassigned.length > 0) {
       const inboxPoint = worldToScreen(projection.inboxPosition);
       for (const session of visibleUnassigned)
@@ -965,23 +1347,90 @@ export class CommandCentreApp {
           undefined,
           session,
         );
-      this.drawMapInboxBody(buffer, map, inboxPoint, visibleUnassigned);
+      this.withDrawClip(mapSurface, () =>
+        this.drawMapInboxBody(buffer, map, inboxPoint, visibleUnassigned),
+      );
     }
-    for (const goal of goals) {
-      for (const session of visibleSessions(goal))
-        this.drawMapSession(buffer, mapSurface, worldToScreen(session.mapPosition), goal, session);
-    }
-    if (showInbox && !compactInbox)
-      for (const session of visibleUnassigned)
-        this.drawMapSession(
+    this.withDrawClip(mapSurface, () => {
+      for (const goal of goals) {
+        for (const session of visibleSessions(goal))
+          if (!(this.selected?.type === "session" && this.selected.id === session.id))
+            this.drawMapSession(
+              buffer,
+              mapSurface,
+              worldToScreen(session.mapPosition),
+              goal,
+              session,
+            );
+      }
+      if (showInbox && !compactInbox)
+        for (const session of visibleUnassigned)
+          if (!(this.selected?.type === "session" && this.selected.id === session.id))
+            this.drawMapSession(
+              buffer,
+              mapSurface,
+              worldToScreen(session.mapPosition),
+              undefined,
+              session,
+            );
+      for (const goal of goals)
+        if (!(this.selected?.type === "goal" && this.selected.id === goal.id))
+          this.drawMapGoal(
+            buffer,
+            mapSurface,
+            worldToScreen(goal.mapPosition),
+            goal,
+            attentionLens,
+          );
+
+      if (pendingLaunch)
+        this.drawMapPendingLaunch(
           buffer,
           mapSurface,
-          worldToScreen(session.mapPosition),
-          undefined,
-          session,
+          worldToScreen(pendingLaunch.position),
+          pendingLaunch.pending,
         );
-    for (const goal of goals)
-      this.drawMapGoal(buffer, mapSurface, worldToScreen(goal.mapPosition), goal, attentionLens);
+
+      // Selection is the active decision point. Draw it after the rest of the
+      // topology so an overlapping body cannot visually or interactively hide
+      // the item the user is currently inspecting.
+      if (this.selected?.type === "session") {
+        for (const goal of goals) {
+          const session = visibleSessions(goal).find(
+            (candidate) => candidate.id === this.selected?.id,
+          );
+          if (session)
+            this.drawMapSession(
+              buffer,
+              mapSurface,
+              worldToScreen(session.mapPosition),
+              goal,
+              session,
+            );
+        }
+        if (showInbox && !compactInbox) {
+          const session = visibleUnassigned.find((candidate) => candidate.id === this.selected?.id);
+          if (session)
+            this.drawMapSession(
+              buffer,
+              mapSurface,
+              worldToScreen(session.mapPosition),
+              undefined,
+              session,
+            );
+        }
+      } else if (this.selected?.type === "goal") {
+        const goal = goals.find((candidate) => candidate.id === this.selected?.id);
+        if (goal)
+          this.drawMapGoal(
+            buffer,
+            mapSurface,
+            worldToScreen(goal.mapPosition),
+            goal,
+            attentionLens,
+          );
+      }
+    });
 
     if (attentionLens && projection.counts.attention === 0 && projection.counts.uncertainty === 0)
       this.text(
@@ -1005,7 +1454,7 @@ export class CommandCentreApp {
     } else if (this.mapLens === "inbox") {
       this.text(
         buffer,
-        "f portfolio · 0 reset view · t terminal · Enter attaches to the selected session",
+        "f portfolio · 0 reset view · t/Enter terminal · selected session opens directly",
         map.x + 2,
         map.y + map.height - 2,
         COLORS.faint,
@@ -1037,6 +1486,7 @@ export class CommandCentreApp {
     let y0 = Math.round(from.y);
     if (x0 === x1 && y0 === y1) return;
     const selected = this.selected?.type === "session" && this.selected.id === session.id;
+    const recentlyDone = this.sessionRecentlyDone(session);
     const linkColor = session.attention
       ? session.attention.requiresHumanInput
         ? session.runtimeState === "blocked"
@@ -1045,9 +1495,11 @@ export class CommandCentreApp {
         : COLORS.yellow
       : selected
         ? COLORS.selected
-        : goal
-          ? this.goalFamilyColor(goal.id)
-          : COLORS.connector;
+        : recentlyDone
+          ? COLORS.green
+          : goal
+            ? this.goalFamilyColor(goal.id)
+            : COLORS.connector;
     // A circular mark carries no directional bias. Bresenham keeps the
     // diagonal continuous on the terminal grid without the duplicate-cell
     // gaps produced by interpolating and rounding every step.
@@ -1078,17 +1530,105 @@ export class CommandCentreApp {
     }
   }
 
+  private drawMapPendingLink(
+    buffer: OptimizedBuffer,
+    from: { readonly x: number; readonly y: number },
+    to: { readonly x: number; readonly y: number },
+    map: Rect,
+  ): void {
+    const x1 = Math.round(to.x);
+    const y1 = Math.round(to.y);
+    let x0 = Math.round(from.x);
+    let y0 = Math.round(from.y);
+    if (x0 === x1 && y0 === y1) return;
+    const linkColor = Math.sin(this.animationPhase * Math.PI * 2) > 0 ? COLORS.green : COLORS.cyan;
+    const paint = (x: number, y: number): void => {
+      if (x >= map.x && x < map.x + map.width && y >= map.y && y < map.y + map.height)
+        this.cell(buffer, x, y, "·", linkColor, COLORS.background);
+    };
+    const deltaX = Math.abs(x1 - x0);
+    const stepX = x0 < x1 ? 1 : -1;
+    const deltaY = -Math.abs(y1 - y0);
+    const stepY = y0 < y1 ? 1 : -1;
+    let error = deltaX + deltaY;
+    let pathStep = 0;
+    while (true) {
+      if (pathStep % 2 === 0) paint(x0, y0);
+      if (x0 === x1 && y0 === y1) break;
+      const twice = 2 * error;
+      if (twice >= deltaY) {
+        error += deltaY;
+        x0 += stepX;
+      }
+      if (twice <= deltaX) {
+        error += deltaX;
+        y0 += stepY;
+      }
+      pathStep += 1;
+    }
+  }
+
+  private drawMapPendingLaunch(
+    buffer: OptimizedBuffer,
+    map: Rect,
+    point: { readonly x: number; readonly y: number },
+    pending: PendingLaunch,
+  ): void {
+    const nodeScale = perspectiveNodeScale(this.mapZoom);
+    const glyphs = ["◐", "◓", "◑", "◒"] as const;
+    const glyph = glyphs[Math.floor(this.animationPhase * 2) % glyphs.length] ?? "◐";
+    const title = `${glyph} ${shorten(pending.displayName, this.renderer.width < 100 ? 14 : 22)}`;
+    const status = `launching · ${shorten(pending.agentKind, this.renderer.width < 100 ? 12 : 18)}`;
+    const contentWidth = Math.max(title.length, status.length);
+    const maxRadiusX = this.renderer.width < 100 ? 12 : 18;
+    const radiusX = clamp(
+      Math.round((Math.ceil(contentWidth / 2) + 1) * nodeScale),
+      5,
+      Math.max(5, Math.round(maxRadiusX * nodeScale)),
+    );
+    const radiusY = clamp(Math.round(2 * nodeScale), 2, 3);
+    const bounds = {
+      x: point.x - radiusX,
+      y: point.y - radiusY,
+      width: radiusX * 2 + 1,
+      height: radiusY * 2 + 1,
+    };
+    if (
+      point.x < map.x - radiusX ||
+      point.x >= map.x + map.width + radiusX ||
+      point.y < map.y - radiusY ||
+      point.y >= map.y + map.height + radiusY
+    )
+      return;
+    const pulse = Math.sin(this.animationPhase * Math.PI * 2) > 0;
+    const border = pulse ? COLORS.green : COLORS.cyan;
+    this.roundedPanel(buffer, bounds, COLORS.panelRaised, border);
+    this.textCentered(
+      buffer,
+      title,
+      point.x,
+      point.y - 1,
+      COLORS.white,
+      COLORS.panelRaised,
+      TextAttributes.BOLD,
+    );
+    this.textCentered(buffer, status, point.x, point.y + 1, COLORS.green, COLORS.panelRaised);
+  }
+
   private drawMapInboxBody(
     buffer: OptimizedBuffer,
     map: Rect,
     point: { readonly x: number; readonly y: number },
     sessions: readonly MapSessionView[],
   ): void {
+    const scale = perspectiveNodeScale(this.mapZoom);
+    const width = Math.max(9, Math.round(13 * scale));
+    const height = Math.max(3, Math.round(5 * scale));
     const bounds = {
-      x: point.x - 6,
-      y: point.y - 2,
-      width: 13,
-      height: 5,
+      x: point.x - Math.floor(width / 2),
+      y: point.y - Math.floor(height / 2),
+      width,
+      height,
     };
     if (
       bounds.x < map.x ||
@@ -1103,11 +1643,18 @@ export class CommandCentreApp {
       id: "inbox",
       x: point.x,
       y: point.y,
-      radiusX: 7,
-      radiusY: 3,
+      radiusX: Math.ceil(width / 2),
+      radiusY: Math.ceil(height / 2),
       bounds,
     });
-    this.cell(buffer, point.x, point.y - 1, "◇", COLORS.yellow, COLORS.panel);
+    this.cell(
+      buffer,
+      point.x,
+      point.y - Math.max(1, Math.floor(height / 2) - 1),
+      "◇",
+      COLORS.yellow,
+      COLORS.panel,
+    );
     this.textCentered(
       buffer,
       "INBOX",
@@ -1173,14 +1720,15 @@ export class CommandCentreApp {
       const x = panel.x + 2 + column * columnWidth;
       const y = panel.y + 1 + row;
       const selected = this.selected?.type === "session" && this.selected.id === session.id;
+      const recentlyDone = this.sessionRecentlyDone(session);
       const glyph = statusGlyph(session, this.animationPhase);
-      const label = `${glyph === " " ? "·" : glyph} ${shorten(session.displayName, columnWidth - 4)}`;
+      const label = `${glyph === " " ? "·" : glyph} ${shorten(session.displayName, columnWidth - (recentlyDone ? 12 : 4))}${recentlyDone ? " · review" : ""}`;
       this.text(
         buffer,
         label,
         x,
         y,
-        selected ? COLORS.white : statusColor(session),
+        selected ? COLORS.white : statusColor(session, recentlyDone),
         COLORS.panel,
         selected ? TextAttributes.BOLD : TextAttributes.NONE,
       );
@@ -1256,9 +1804,10 @@ export class CommandCentreApp {
       attention: goalAttention,
     });
     const zoom = clamp(this.mapZoom, 0.65, 2.2);
+    const nodeScale = perspectiveNodeScale(zoom);
     const titleBudget = Math.min(
       goalLabelBudget(level, this.renderer.width),
-      Math.max(10, Math.floor(this.mapScaleX * (level === "detail" ? 48 : 40))),
+      Math.max(10, Math.floor(this.mapScaleX * (level === "detail" ? 48 : 40) * nodeScale)),
     );
     const fullTitle = `${goal.priority} ${goal.title}`;
     const titleLines =
@@ -1268,9 +1817,9 @@ export class CommandCentreApp {
           : wrap(fullTitle, Math.max(8, titleBudget - 2)).slice(0, 2)
         : [shorten(fullTitle, titleBudget)];
     const titleRadius = Math.ceil(Math.max(...titleLines.map((line) => line.length), 1) / 2) + 1;
-    const loadRadius = Math.round(goal.radiusX * 0.86 * zoom);
+    const loadRadius = Math.round(goal.radiusX * 0.86);
     const radiusX = clamp(
-      Math.max(loadRadius, titleRadius),
+      Math.round(Math.max(loadRadius, titleRadius) * nodeScale),
       5,
       this.renderer.width < 100
         ? level === "detail"
@@ -1286,8 +1835,10 @@ export class CommandCentreApp {
     );
     const radiusY = clamp(
       Math.max(
-        Math.round(goal.radiusY * 0.92 * zoom),
-        titleLines.length + (level === "detail" ? 1 : 0),
+        Math.round(
+          Math.max(goal.radiusY * 0.92, titleLines.length + (level === "detail" ? 1 : 0)) *
+            nodeScale,
+        ),
       ),
       2,
       5,
@@ -1397,11 +1948,18 @@ export class CommandCentreApp {
     const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const inboxSession = goal === undefined;
     const attention = session.attention !== undefined;
+    const recentlyDone = this.sessionRecentlyDone(session);
+    const denseGoalFocus =
+      !inboxSession &&
+      this.mapLens === "goal" &&
+      (goal?.sessions.length ?? 0) >= DENSE_FOCUS_SESSION_THRESHOLD;
     const compact =
       this.semanticZoom === "overview" &&
-      this.mapZoom < MAP_LABEL_ZOOM_THRESHOLD &&
       !selected &&
-      !attention;
+      !attention &&
+      !recentlyDone &&
+      (this.mapZoom < MAP_LABEL_ZOOM_THRESHOLD ||
+        (denseGoalFocus && this.mapZoom < DENSE_FOCUS_COMPACT_ZOOM));
     if (compact) {
       if (
         point.x < map.x - 1 ||
@@ -1411,7 +1969,7 @@ export class CommandCentreApp {
       )
         return;
       const marker = statusGlyph(session, this.animationPhase);
-      const markerColor = statusColor(session);
+      const markerColor = statusColor(session, recentlyDone);
       const bounds = { x: point.x - 1, y: point.y - 1, width: 3, height: 3 };
       this.roundedPanel(buffer, bounds, COLORS.background, markerColor);
       this.cell(buffer, point.x, point.y, marker, markerColor, COLORS.background);
@@ -1430,9 +1988,13 @@ export class CommandCentreApp {
       lens: this.mapLens,
       preference: this.semanticZoom,
       selected,
-      attention,
+      attention: attention || recentlyDone,
     });
-    const labelWidth = sessionLabelBudget(level, this.renderer.width, inboxSession);
+    const nodeScale = perspectiveNodeScale(this.mapZoom);
+    const labelWidth = Math.max(
+      8,
+      Math.floor(sessionLabelBudget(level, this.renderer.width, inboxSession) * nodeScale),
+    );
     const marker = statusGlyph(session, this.animationPhase);
     const titleLines =
       level === "detail"
@@ -1443,33 +2005,40 @@ export class CommandCentreApp {
     const labelLines = titleLines.map((title, index) =>
       index === 0 ? `${marker} ${title}` : title,
     );
-    if (level === "detail")
+    if (level === "detail" || recentlyDone)
       labelLines.push(
-        session.attention
-          ? `${session.attention.reason} ${formatAge(session.attention.ageMs)}`
-          : `${session.runtimeState} · ${session.provider ?? session.hostKind}`,
+        recentlyDone
+          ? `done ${formatAge(Math.max(0, this.options.clock.now() - session.lastChangedAt))} · review`
+          : session.attention
+            ? `${session.attention.reason} ${formatAge(session.attention.ageMs)}`
+            : `${session.runtimeState} · ${session.provider ?? session.hostKind}`,
       );
     const contentWidth = Math.max(3, ...labelLines.map((line) => line.length));
-    const radiusX = clamp(
-      Math.ceil(contentWidth / 2) + 1,
-      3,
+    const maxRadiusX =
       this.renderer.width < 100
         ? level === "detail"
           ? 15
-          : attention || selected
+          : attention || recentlyDone || selected
             ? 10
             : 6
         : level === "detail"
           ? 22
-          : attention || selected
+          : attention || recentlyDone || selected
             ? inboxSession
               ? 16
               : 15
             : inboxSession
               ? 12
-              : 11,
+              : 11;
+    const radiusX = clamp(
+      Math.round((Math.ceil(contentWidth / 2) + 1) * nodeScale),
+      3,
+      Math.max(3, Math.round(maxRadiusX * nodeScale)),
     );
-    const radiusY = level === "detail" ? clamp(Math.ceil(labelLines.length / 2) + 1, 2, 5) : 1;
+    const radiusY =
+      level === "detail" || recentlyDone
+        ? clamp(Math.round((Math.ceil(labelLines.length / 2) + 1) * nodeScale), 2, 7)
+        : 1;
     const bounds = {
       x: point.x - radiusX,
       y: point.y - radiusY,
@@ -1483,20 +2052,22 @@ export class CommandCentreApp {
       point.y >= map.y + map.height + radiusY
     )
       return;
-    const background = selected ? COLORS.panelRaised : COLORS.background;
+    const background = selected || recentlyDone ? COLORS.panelRaised : COLORS.background;
     const working = session.hostHealth === "live" && session.runtimeState === "working";
     const workingPulse = Math.sin(this.animationPhase * Math.PI * 2) > 0;
     const border = selected
       ? COLORS.white
       : session.attention
-        ? statusColor(session)
-        : working
-          ? workingPulse
-            ? COLORS.green
-            : COLORS.faint
-          : goal
-            ? this.goalFamilyColor(goal.id)
-            : COLORS.yellow;
+        ? statusColor(session, recentlyDone)
+        : recentlyDone
+          ? COLORS.green
+          : working
+            ? workingPulse
+              ? COLORS.green
+              : COLORS.faint
+            : goal
+              ? this.goalFamilyColor(goal.id)
+              : COLORS.yellow;
     this.roundedPanel(buffer, bounds, background, border);
     const firstLineY = point.y - Math.floor(labelLines.length / 2);
     for (const [index, line] of labelLines.entries())
@@ -1505,11 +2076,11 @@ export class CommandCentreApp {
         line,
         point.x,
         firstLineY + index,
-        index === labelLines.length - 1 && session.attention
-          ? statusColor(session)
+        index === labelLines.length - 1 && (session.attention || recentlyDone)
+          ? statusColor(session, recentlyDone)
           : selected
             ? COLORS.white
-            : statusColor(session),
+            : statusColor(session, recentlyDone),
         background,
         selected ? TextAttributes.BOLD : TextAttributes.NONE,
       );
@@ -1529,6 +2100,7 @@ export class CommandCentreApp {
     rect: Rect,
     projection: InspectorProjection,
     anchor: MapHitTarget | undefined,
+    mapObstacles: readonly Rect[] = [],
   ): void {
     const inboxCard =
       projection.kind === "empty-inspector" && !this.selected && this.mapLens === "inbox";
@@ -1542,8 +2114,21 @@ export class CommandCentreApp {
         : projection.kind === "session-inspector"
           ? `SESSION · ${projection.session.displayName}`
           : "INSPECTOR";
-    const minimumWidth = inboxCard ? 34 : projection.kind === "session-inspector" ? 46 : 38;
-    const maximumWidth = inboxCard ? 34 : projection.kind === "session-inspector" ? 64 : 52;
+    const denseFocus = this.focusedGoalSessionCount() >= DENSE_FOCUS_SESSION_THRESHOLD;
+    const minimumWidth = inboxCard
+      ? 34
+      : projection.kind === "session-inspector"
+        ? denseFocus
+          ? 38
+          : 46
+        : 38;
+    const maximumWidth = inboxCard
+      ? 34
+      : projection.kind === "session-inspector"
+        ? denseFocus
+          ? 48
+          : 64
+        : 52;
     const width = Math.min(
       rect.width - 2,
       Math.min(maximumWidth, Math.max(minimumWidth, title.length + 4)),
@@ -1551,32 +2136,31 @@ export class CommandCentreApp {
     const contentWidth = Math.max(1, width - 4);
     const titleLines = wrapFully(title, contentWidth);
     const wrappedLines = projection.lines.flatMap((line) => wrap(line, contentWidth));
-    const maxHeight = Math.min(15, rect.height - 2);
+    const maxHeight = Math.min(denseFocus ? 12 : 15, rect.height - 2);
     const visibleLines = wrappedLines.slice(0, Math.max(0, maxHeight - titleLines.length - 2));
     const height = Math.min(maxHeight, Math.max(4, titleLines.length + visibleLines.length + 2));
     const panel = placeFloatingInspector(
       rect,
       { width, height },
       anchor,
-      // The card belongs to its selected target. Unrelated map bodies may be
-      // temporarily occluded; making every body an obstacle makes the card
-      // jump unnecessarily far from the item it explains.
-      anchor
-        ? [
-            anchor.bounds ?? {
-              x: anchor.x - anchor.radiusX,
-              y: anchor.y - anchor.radiusY,
-              width: anchor.radiusX * 2 + 1,
-              height: anchor.radiusY * 2 + 1,
-            },
-          ]
-        : [],
+      denseFocus
+        ? mapObstacles
+        : anchor
+          ? [
+              anchor.bounds ?? {
+                x: anchor.x - anchor.radiusX,
+                y: anchor.y - anchor.radiusY,
+                width: anchor.radiusX * 2 + 1,
+                height: anchor.radiusY * 2 + 1,
+              },
+            ]
+          : [],
     );
     this.floatingInspectorRect = panel;
     const border = inboxCard
       ? COLORS.yellow
       : projection.kind === "session-inspector"
-        ? statusColor(projection.session)
+        ? statusColor(projection.session, this.sessionRecentlyDone(projection.session))
         : COLORS.borderStrong;
     this.roundedPanel(buffer, panel, COLORS.panelRaised, border);
     let y = panel.y + 1;
@@ -1610,13 +2194,26 @@ export class CommandCentreApp {
       inboxCard
         ? "i close · j/k select"
         : projection.kind === "session-inspector"
-          ? "i close · t terminal · Enter attach"
+          ? "i close · t/Enter terminal · o native"
           : "i close · f focus",
       panel.x + 2,
       panel.y + panel.height - 1,
       COLORS.faint,
       COLORS.panelRaised,
     );
+  }
+
+  private focusedGoalSessionCount(): number {
+    if (this.viewMode !== "map" || this.mapLens !== "goal" || !this.focusGoalId) return 0;
+    return (
+      this.mapProjection().goals.find((goal) => goal.id === this.focusGoalId)?.sessions.length ?? 0
+    );
+  }
+
+  private sessionRecentlyDone(
+    session: Pick<SessionView, "runtimeState" | "hostHealth" | "lastChangedAt">,
+  ): boolean {
+    return isRecentlyDone(session, this.options.clock.now());
   }
 
   private drawList(
@@ -1712,8 +2309,10 @@ export class CommandCentreApp {
     const selected = this.selected?.type === "session" && this.selected.id === session.id;
     const prefix = selected ? "  >" : "   ";
     const goal = session.goalTitle ? "↳" : "·";
-    const label = `${prefix}${goal} [${statusGlyph(session, this.animationPhase)}] ${session.displayName} · ${session.runtimeState}${session.hostHealth === "live" ? "" : `/${session.hostHealth}`}`;
-    const foreground = selected ? COLORS.selected : statusColor(session);
+    const recentlyDone = this.sessionRecentlyDone(session);
+    const review = recentlyDone ? " · review" : "";
+    const label = `${prefix}${goal} [${statusGlyph(session, this.animationPhase)}] ${session.displayName} · ${session.runtimeState}${session.hostHealth === "live" ? "" : `/${session.hostHealth}`}${review}`;
+    const foreground = selected ? COLORS.selected : statusColor(session, recentlyDone);
     this.text(
       buffer,
       shorten(label, Math.max(1, rect.width - 4)),
@@ -1735,7 +2334,7 @@ export class CommandCentreApp {
     if (this.terminalMode) {
       this.text(
         buffer,
-        "Ctrl-Shift-C copy  ·  Ctrl-Q/Esc release  ·  all other keys route to session",
+        "PageUp/Down host scroll  ·  Ctrl-Home/End jump  ·  Ctrl-Shift-C copy  ·  Esc release",
         rect.x + 2,
         rect.y,
         COLORS.muted,
@@ -1753,12 +2352,8 @@ export class CommandCentreApp {
     }
     const controls =
       this.viewMode === "map"
-        ? rect.width < 92
-          ? "j/k goals/orbit  h/l pan  +/- zoom  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
-          : "j/k goals/orbit  h/l/U/D pan  +/- zoom  f focus  A alerts  z detail  v list lens  n goal  r rename  p priority  a assign  c complete  x archive stale  / find  i card  t terminal  Enter attach  q quit"
-        : rect.width < 92
-          ? "j/k select  h/l list  f focus  A alerts  z detail  g jump  / find  i card  t terminal  Enter attach  q quit"
-          : "j/k select  h/l list  f focus  A alerts  z detail  v map lens  n goal  r rename  p priority  a assign  c complete  x archive stale  / find  i card  t terminal  Enter attach  q quit";
+        ? `j/k select · drag/wheel pan/zoom · Enter focus/open · m/right-click menu · / find · v list · q quit`
+        : `j/k select · Enter focus/open · m/right-click menu · v map · / find · q quit`;
     this.text(
       buffer,
       shorten(controls, Math.max(1, rect.width - 4)),
@@ -1780,12 +2375,260 @@ export class CommandCentreApp {
     }
   }
 
+  private contextMenuActions(
+    scope: ContextMenu["scope"],
+    target: Selection | undefined,
+  ): readonly { readonly id: ContextActionId; readonly label: string }[] {
+    if (scope === "empty")
+      return [
+        { id: "new-goal", label: "Create goal" },
+        { id: "new-session", label: "New session" },
+        { id: "attention", label: "Attention lens" },
+        { id: "list", label: "List view" },
+      ];
+    if (scope === "inbox")
+      return [
+        { id: "focus", label: "Focus inbox" },
+        { id: "new-session", label: "New session" },
+        { id: "list", label: "List view" },
+      ];
+    if (!target) return [];
+    const projection = this.projection();
+    if (target.type === "goal") {
+      const goal = projection.goals.find((candidate) => candidate.id === target.id);
+      return [
+        { id: "focus", label: "Focus goal" },
+        { id: "new-session", label: "New session in goal" },
+        { id: "assign", label: "Assign inbox session" },
+        { id: "inspect", label: "Show inspector" },
+        { id: "rename", label: "Rename goal" },
+        { id: "description", label: "Edit description" },
+        { id: "priority", label: "Cycle priority" },
+        goal?.status === "completed"
+          ? { id: "archive", label: "Archive goal" }
+          : { id: "complete", label: "Complete goal" },
+      ];
+    }
+    const session = this.findSession(projection, target.id);
+    return [
+      { id: "open-terminal", label: "Open terminal" },
+      { id: "focus", label: session?.primaryGoalId ? "Focus containing goal" : "Focus inbox" },
+      { id: "inspect", label: "Show inspector" },
+      session?.primaryGoalId
+        ? { id: "unassign", label: "Unassign from goal" }
+        : { id: "assign", label: "Assign to goal" },
+      { id: "rename", label: "Rename session" },
+      { id: "description", label: "Edit description" },
+      ...(session && session.hostHealth !== "live"
+        ? [{ id: "archive" as const, label: "Archive stale session" }]
+        : []),
+    ];
+  }
+
+  private contextMenuFrame(width: number, height: number, menu: ContextMenu): Rect {
+    const menuWidth = Math.max(1, Math.min(width - 2, 48));
+    const menuHeight = Math.max(1, Math.min(height - 2, menu.actions.length + 4));
+    return {
+      x: clamp(menu.x, 1, Math.max(1, width - menuWidth - 1)),
+      y: clamp(menu.y, 1, Math.max(1, height - menuHeight - 1)),
+      width: menuWidth,
+      height: menuHeight,
+    };
+  }
+
+  private contextTargetLabel(menu: ContextMenu, projection: CommandCentreProjection): string {
+    if (menu.scope === "empty") return "universe";
+    if (menu.scope === "inbox") return "inbox";
+    if (!menu.target) return "selection";
+    if (menu.target.type === "goal")
+      return projection.goals.find((goal) => goal.id === menu.target?.id)?.title ?? "goal";
+    return this.findSession(projection, menu.target.id)?.displayName ?? "session";
+  }
+
+  private drawContextMenu(
+    buffer: OptimizedBuffer,
+    width: number,
+    height: number,
+    projection: CommandCentreProjection,
+  ): void {
+    const menu = this.contextMenu;
+    if (!menu) return;
+    const rect = this.contextMenuFrame(width, height, menu);
+    this.panel(buffer, rect, COLORS.panelRaised, COLORS.borderStrong);
+    this.text(
+      buffer,
+      `ACTIONS · ${shorten(this.contextTargetLabel(menu, projection), rect.width - 12)}`,
+      rect.x + 2,
+      rect.y + 1,
+      COLORS.cyan,
+      COLORS.panelRaised,
+      TextAttributes.BOLD,
+    );
+    const firstActionY = rect.y + 2;
+    const footerY = rect.y + rect.height - 2;
+    const visibleCount = Math.max(0, Math.min(menu.actions.length, footerY - firstActionY));
+    for (const [index, action] of menu.actions.slice(0, visibleCount).entries()) {
+      this.text(
+        buffer,
+        `${index === menu.index ? "›" : " "} ${action.label}`,
+        rect.x + 2,
+        firstActionY + index,
+        index === menu.index ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+        index === menu.index ? TextAttributes.BOLD : TextAttributes.NONE,
+      );
+    }
+    if (rect.height > 2)
+      this.text(
+        buffer,
+        "j/k choose · Enter run · Esc close",
+        rect.x + 2,
+        footerY,
+        COLORS.faint,
+        COLORS.panelRaised,
+      );
+  }
+
+  private openContextMenu(
+    x: number,
+    y: number,
+    target: Selection | { readonly type: "inbox"; readonly id: "inbox" } | undefined,
+  ): void {
+    const selection = target?.type === "inbox" ? undefined : target;
+    const scope: ContextMenu["scope"] =
+      target?.type === "inbox"
+        ? "inbox"
+        : selection
+          ? "selection"
+          : this.mapLens === "inbox"
+            ? "inbox"
+            : "empty";
+    if (selection) {
+      this.selected = { ...selection };
+      this.inspectorVisible = true;
+    } else if (scope === "inbox") this.selected = undefined;
+    this.contextMenu = {
+      scope,
+      target: selection ? { ...selection } : undefined,
+      x,
+      y,
+      index: 0,
+      actions: this.contextMenuActions(scope, selection),
+    };
+    this.modal = undefined;
+    this.searchActive = false;
+    this.destroyPickerSurface();
+    this.lastAction = "action menu · choose an operation";
+    this.requestRenderIfAlive();
+  }
+
+  private executeContextAction(action: ContextActionId): void {
+    const menu = this.contextMenu;
+    if (!menu) return;
+    const target = menu.target;
+    this.contextMenu = undefined;
+    switch (action) {
+      case "focus":
+        if (menu.scope === "inbox") this.focusInbox();
+        else if (target?.type === "goal") this.focusGoal(target.id);
+        else if (target?.type === "session") {
+          const goal = this.selectedGoalForSession();
+          if (goal) this.focusGoal(goal.id);
+          else this.focusInbox();
+        }
+        return;
+      case "open-terminal":
+        void this.openTerminalSelected();
+        return;
+      case "inspect":
+        this.inspectorVisible = true;
+        this.lastAction = "inspector shown";
+        this.requestRenderIfAlive();
+        return;
+      case "new-goal":
+        this.openCreateGoal();
+        return;
+      case "new-session":
+        this.openSessionLaunch();
+        return;
+      case "assign":
+        this.openAssign();
+        return;
+      case "unassign":
+        this.unassign();
+        return;
+      case "rename":
+        this.openRename();
+        return;
+      case "description":
+        this.openDescription();
+        return;
+      case "priority":
+        this.cyclePriority();
+        return;
+      case "complete":
+        this.confirmGoal("complete");
+        return;
+      case "archive":
+        if (target?.type === "session") this.confirmArchiveSession();
+        else this.confirmGoal("archive");
+        return;
+      case "attention":
+        this.toggleAttentionLens();
+        return;
+      case "list":
+        this.viewMode = "list";
+        this.lastAction = "list lens";
+        this.requestRenderIfAlive();
+        return;
+      case "clear":
+        this.selected = undefined;
+        this.inspectorVisible = false;
+        this.lastAction = "selection cleared";
+        this.requestRenderIfAlive();
+        return;
+    }
+  }
+
+  private handleContextMenuKey(key: KeyEvent): void {
+    const menu = this.contextMenu;
+    if (!menu) return;
+    key.preventDefault();
+    if (key.name === "escape" || key.name === "m") {
+      this.contextMenu = undefined;
+      this.lastAction = "action menu closed";
+      this.requestRenderIfAlive();
+      return;
+    }
+    if (key.name === "up" || key.name === "k") {
+      this.contextMenu = { ...menu, index: Math.max(0, menu.index - 1) };
+      this.requestRenderIfAlive();
+      return;
+    }
+    if (key.name === "down" || key.name === "j") {
+      this.contextMenu = {
+        ...menu,
+        index: Math.min(Math.max(0, menu.actions.length - 1), menu.index + 1),
+      };
+      this.requestRenderIfAlive();
+      return;
+    }
+    if (key.name === "enter" || key.name === "return") {
+      const action = menu.actions[menu.index];
+      if (action) this.executeContextAction(action.id);
+    }
+  }
+
   private drawOverlay(
     buffer: OptimizedBuffer,
     width: number,
     height: number,
     projection: CommandCentreProjection,
   ): void {
+    if (!this.searchActive && !this.modal && this.contextMenu) {
+      this.drawContextMenu(buffer, width, height, projection);
+      return;
+    }
     const frame = modalFrameFor(width, height, this.modal?.kind ?? "text");
     const { x, y, width: overlayWidth, height: overlayHeight } = frame;
     const rect = { x, y, width: overlayWidth, height: overlayHeight };
@@ -1929,20 +2772,28 @@ export class CommandCentreApp {
           COLORS.orange,
           COLORS.panelRaised,
         );
-      for (const [index, goal] of goals.entries()) {
-        const prefix = index === modal.index ? ">" : " ";
+      const visibleRows = Math.max(0, frame.footerY - (y + 3));
+      const visibleStart = Math.min(
+        Math.max(0, modal.index - visibleRows + 1),
+        Math.max(0, goals.length - visibleRows),
+      );
+      const visible = goals.slice(visibleStart, visibleStart + visibleRows);
+      for (const [index, goal] of visible.entries()) {
+        const absoluteIndex = visibleStart + index;
+        const prefix = absoluteIndex === modal.index ? ">" : " ";
         this.text(
           buffer,
-          `${prefix} ${goal.priority} ${goal.title}`,
+          `${prefix} ${goal.priority} ${shorten(goal.title, overlayWidth - 10)}`,
           x + 2,
           y + 3 + index,
-          index === modal.index ? COLORS.white : COLORS.muted,
+          absoluteIndex === modal.index ? COLORS.white : COLORS.muted,
           COLORS.panelRaised,
+          absoluteIndex === modal.index ? TextAttributes.BOLD : TextAttributes.NONE,
         );
       }
       this.text(
         buffer,
-        "j/k choose · Enter assign · Esc cancel",
+        `j/k choose · ${goals.length} goals · Enter assign · Esc cancel`,
         x + 2,
         frame.footerY,
         COLORS.faint,
@@ -1996,12 +2847,13 @@ export class CommandCentreApp {
       for (const [index, session] of visible.entries()) {
         const absoluteIndex = visibleStart + index;
         const prefix = absoluteIndex === modal.index ? ">" : " ";
+        const recentlyDone = this.sessionRecentlyDone(session);
         this.text(
           buffer,
           `${prefix} ${statusGlyph(session, this.animationPhase)} ${shorten(session.displayName, overlayWidth - 10)}`,
           x + 2,
           y + 6 + index,
-          absoluteIndex === modal.index ? COLORS.white : statusColor(session),
+          absoluteIndex === modal.index ? COLORS.white : statusColor(session, recentlyDone),
           COLORS.panelRaised,
           absoluteIndex === modal.index ? TextAttributes.BOLD : TextAttributes.NONE,
         );
@@ -2009,6 +2861,127 @@ export class CommandCentreApp {
       this.text(
         buffer,
         "↑/↓ choose · type filter · Enter assign · Esc cancel",
+        x + 2,
+        frame.footerY,
+        COLORS.faint,
+        COLORS.panelRaised,
+      );
+      return;
+    }
+    if (modal.kind === "workspace-picker") {
+      this.text(
+        buffer,
+        "CHOOSE WORKSPACE",
+        x + 2,
+        y + 1,
+        COLORS.cyan,
+        COLORS.panelRaised,
+        TextAttributes.BOLD,
+      );
+      this.text(
+        buffer,
+        `Path: ${shorten(modal.browser.path, overlayWidth - 10)}`,
+        x + 2,
+        y + 3,
+        COLORS.muted,
+        COLORS.panelRaised,
+      );
+      if (modal.loading) {
+        this.text(buffer, "Reading directories…", x + 2, y + 5, COLORS.yellow, COLORS.panelRaised);
+      } else if (!this.pickerSelect) {
+        this.text(buffer, "No directories here.", x + 2, y + 5, COLORS.orange, COLORS.panelRaised);
+      }
+      this.text(
+        buffer,
+        "↑/↓ choose · Enter use · → open · ← parent · Esc cancel",
+        x + 2,
+        frame.footerY,
+        COLORS.faint,
+        COLORS.panelRaised,
+      );
+      return;
+    }
+    if (modal.kind === "session-launch") {
+      const goals = projection.goals.filter((goal) => goal.status !== "archived");
+      const goalLabel =
+        modal.goalIndex === 0 ? "Inbox" : (goals[modal.goalIndex - 1]?.title ?? "No active goal");
+      const active = (field: LaunchField): boolean => modal.field === field;
+      const selectedLocation = modal.locations[modal.locationIndex];
+      const selectedAgent = modal.agentOptions[modal.agentIndex];
+      const value = (field: LaunchField, text: string): string =>
+        active(field)
+          ? inputWithVisibleCursor(text, this.inputCursor, overlayWidth - 14)
+          : shorten(text, overlayWidth - 14);
+      this.text(
+        buffer,
+        "NEW SESSION",
+        x + 2,
+        y + 1,
+        COLORS.cyan,
+        COLORS.panelRaised,
+        TextAttributes.BOLD,
+      );
+      this.text(
+        buffer,
+        `Goal:       ${active("goal") ? `←/→ ${goalLabel}` : goalLabel}`,
+        x + 2,
+        y + 3,
+        active("goal") ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      this.text(
+        buffer,
+        `Location:   ${active("location") ? `←/→ ${selectedLocation?.label ?? "Browse…"}` : shorten(modal.location, overlayWidth - 14)}`,
+        x + 2,
+        y + 4,
+        active("location") ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      this.text(
+        buffer,
+        `Workspace:  ${active("workspace") ? `←/→ ${modal.workspaceMode}` : modal.workspaceMode}`,
+        x + 2,
+        y + 5,
+        active("workspace") ? COLORS.yellow : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      if (modal.workspaceMode === "worktree")
+        this.text(
+          buffer,
+          `Branch:     ${value("branch", modal.branch)}`,
+          x + 2,
+          y + 6,
+          active("branch") ? COLORS.white : COLORS.muted,
+          COLORS.panelRaised,
+        );
+      const agentY = y + (modal.workspaceMode === "worktree" ? 7 : 6);
+      this.text(
+        buffer,
+        `Agent:      ${active("agent") ? `←/→ ${selectedAgent?.label ?? "No host options"}` : (selectedAgent?.label ?? modal.agentKind)}`,
+        x + 2,
+        agentY,
+        active("agent") ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      this.text(
+        buffer,
+        `Name:       ${value("name", modal.sessionName || "(auto)")}`,
+        x + 2,
+        agentY + 1,
+        active("name") ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      this.text(
+        buffer,
+        `Prompt:     ${value("prompt", modal.prompt || "(none)")}`,
+        x + 2,
+        agentY + 2,
+        active("prompt") ? COLORS.white : COLORS.muted,
+        COLORS.panelRaised,
+      );
+      this.text(
+        buffer,
+        "Tab/Enter next · ↑/↓/←/→ choose · b browse · Esc cancel",
         x + 2,
         frame.footerY,
         COLORS.faint,
@@ -2076,12 +3049,17 @@ export class CommandCentreApp {
       this.handleSearchKey(key);
       return;
     }
+    if (this.pickerSelect && this.pickerNavigationKey(key)) return;
+    if (this.contextMenu) {
+      this.handleContextMenuKey(key);
+      return;
+    }
     if (this.modal) {
       this.handleModalKey(key);
       return;
     }
     const command =
-      key.shift && (key.name === "u" || key.name === "d")
+      key.shift && (key.name === "u" || key.name === "d" || key.name === "n")
         ? key.name.toUpperCase()
         : key.name === "up" || key.name === "down" || key.name === "enter" || key.name === "return"
           ? key.name
@@ -2100,6 +3078,15 @@ export class CommandCentreApp {
       case "q":
         this.shutdown();
         return;
+      case "m": {
+        const anchor = this.selectedMapAnchor();
+        this.openContextMenu(
+          anchor?.x ?? Math.floor(this.renderer.width / 2),
+          anchor?.y ?? Math.floor(this.renderer.height / 2),
+          this.selected,
+        );
+        return;
+      }
       case "j":
       case "down":
         this.moveSelection(1);
@@ -2114,6 +3101,9 @@ export class CommandCentreApp {
         return;
       case "n":
         this.openCreateGoal();
+        return;
+      case "N":
+        this.openSessionLaunch();
         return;
       case "r":
         this.openRename();
@@ -2162,6 +3152,9 @@ export class CommandCentreApp {
       case "t":
         void this.openTerminalSelected();
         return;
+      case "o":
+        void this.handoffSelected();
+        return;
       case "f":
         this.toggleMapFocus();
         return;
@@ -2197,7 +3190,8 @@ export class CommandCentreApp {
         return;
       case "enter":
       case "return":
-        void this.attachSelected();
+        if (this.selected?.type === "goal") this.focusGoal(this.selected.id);
+        else void this.openTerminalSelected();
         return;
       case "escape":
         if (this.mapLens === "goal" || this.mapLens === "attention" || this.mapLens === "inbox") {
@@ -2225,6 +3219,10 @@ export class CommandCentreApp {
     event.preventDefault();
     if (this.terminalMode) {
       this.sendTerminalInput(this.terminalMode, { kind: "bytes", value: event.bytes });
+      return;
+    }
+    if (this.pickerSelect) {
+      event.preventDefault();
       return;
     }
     const pasted = new TextDecoder().decode(event.bytes);
@@ -2257,6 +3255,27 @@ export class CommandCentreApp {
     } else if (modal.kind === "create-goal" && modal.field === 1) {
       const edited = insertTextAtCursor(modal.description, this.inputCursor, pasted);
       this.modal = { ...modal, description: edited.value };
+      this.inputCursor = edited.cursor;
+    } else if (
+      modal.kind === "session-launch" &&
+      modal.field !== "goal" &&
+      modal.field !== "workspace" &&
+      modal.field !== "location" &&
+      modal.field !== "agent"
+    ) {
+      const currentValue =
+        modal.field === "branch"
+          ? modal.branch
+          : modal.field === "name"
+            ? modal.sessionName
+            : modal.prompt;
+      const edited = insertTextAtCursor(currentValue, this.inputCursor, pasted);
+      this.modal =
+        modal.field === "branch"
+          ? { ...modal, branch: edited.value }
+          : modal.field === "name"
+            ? { ...modal, sessionName: edited.value }
+            : { ...modal, prompt: edited.value };
       this.inputCursor = edited.cursor;
     } else if (modal.kind === "text") {
       const edited = insertTextAtCursor(modal.value, this.inputCursor, pasted);
@@ -2338,11 +3357,273 @@ export class CommandCentreApp {
     }
   }
 
+  private openWorkspacePicker(path: string, returnTo: SessionLaunchModal): void {
+    const workspace = this.options.workspace;
+    if (!workspace.browse) {
+      this.lastAction = "This workspace provider does not support directory browsing.";
+      return;
+    }
+    this.modal = {
+      kind: "workspace-picker",
+      browser: { path, entries: [] },
+      index: 0,
+      loading: true,
+      returnTo,
+    };
+    this.requestRenderIfAlive();
+    void Effect.runPromise(workspace.browse(path))
+      .then((browser) => {
+        const modal = this.modal;
+        if (!modal || modal.kind !== "workspace-picker") return;
+        this.modal = { ...modal, browser, loading: false, index: 0 };
+        this.requestRenderIfAlive();
+      })
+      .catch((error) => {
+        if (this.modal?.kind !== "workspace-picker") return;
+        this.modal = this.modal.returnTo;
+        this.lastAction = `workspace browse failed: ${error instanceof Error ? error.message : String(error)}`;
+        this.inputCursor = returnTo.location.length;
+        this.requestRenderIfAlive();
+      });
+  }
+
+  private chooseWorkspaceFromPicker(modal: WorkspacePickerModal): void {
+    const rows = this.workspacePickerRows(modal);
+    const selected = rows[modal.index];
+    if (!selected) return;
+    const locations = [...modal.returnTo.locations];
+    const existingIndex = locations.findIndex((choice) => choice.path === selected.path);
+    const locationIndex = existingIndex >= 0 ? existingIndex : locations.length;
+    if (existingIndex < 0)
+      locations.push({
+        path: selected.path,
+        label: selected.label,
+        kind: "workspace",
+        repository: selected.repository,
+        branch: selected.branch,
+        available: selected.available,
+      });
+    this.modal = {
+      ...modal.returnTo,
+      location: selected.path,
+      locations,
+      locationIndex,
+    };
+    this.destroyPickerSurface();
+    this.inputCursor = selected.path.length;
+  }
+
+  private handleWorkspacePickerKey(modal: WorkspacePickerModal, key: KeyEvent): void {
+    if (modal.loading) return;
+    const rows = this.workspacePickerRows(modal);
+    if (rows.length === 0) return;
+    if (key.name === "up" || key.name === "k") {
+      this.modal = { ...modal, index: (modal.index - 1 + rows.length) % rows.length };
+      return;
+    }
+    if (key.name === "down" || key.name === "j") {
+      this.modal = { ...modal, index: (modal.index + 1) % rows.length };
+      return;
+    }
+    if (key.name === "left" || key.name === "backspace") {
+      if (modal.browser.parentPath)
+        this.openWorkspacePicker(modal.browser.parentPath, modal.returnTo);
+      return;
+    }
+    if (key.name === "right") {
+      const selected = rows[modal.index];
+      if (selected && selected.kind === "directory")
+        this.openWorkspacePicker(selected.path, modal.returnTo);
+      return;
+    }
+    if (key.name === "enter" || key.name === "return") this.chooseWorkspaceFromPicker(modal);
+  }
+
+  private launchFields(modal: Extract<Modal, { readonly kind: "session-launch" }>): LaunchField[] {
+    return modal.workspaceMode === "worktree"
+      ? ["goal", "location", "workspace", "branch", "agent", "name", "prompt"]
+      : ["goal", "location", "workspace", "agent", "name", "prompt"];
+  }
+
+  private launchFieldCursor(modal: Extract<Modal, { readonly kind: "session-launch" }>): number {
+    switch (modal.field) {
+      case "location":
+        return modal.location.length;
+      case "branch":
+        return modal.branch.length;
+      case "agent":
+        return modal.agentKind.length;
+      case "name":
+        return modal.sessionName.length;
+      case "prompt":
+        return modal.prompt.length;
+      default:
+        return 0;
+    }
+  }
+
+  private advanceLaunchField(
+    modal: Extract<Modal, { readonly kind: "session-launch" }>,
+    direction: 1 | -1,
+  ): void {
+    const fields = this.launchFields(modal);
+    const current = fields.indexOf(modal.field);
+    const next = fields[(current + direction + fields.length) % fields.length] ?? "goal";
+    this.modal = { ...modal, field: next };
+    if (next !== "agent") this.destroyPickerSurface();
+    this.inputCursor = this.launchFieldCursor({ ...modal, field: next });
+  }
+
+  private handleSessionLaunchKey(
+    modal: Extract<Modal, { readonly kind: "session-launch" }>,
+    key: KeyEvent,
+  ): void {
+    const projection = this.projection();
+    const goals = projection.goals.filter((goal) => goal.status !== "archived");
+    if (modal.field === "goal") {
+      if (key.name === "left" || key.name === "k" || key.name === "up")
+        this.modal = { ...modal, goalIndex: Math.max(0, modal.goalIndex - 1) };
+      else if (key.name === "right" || key.name === "j" || key.name === "down")
+        this.modal = {
+          ...modal,
+          goalIndex: Math.min(goals.length, modal.goalIndex + 1),
+        };
+      else if (key.name === "enter" || key.name === "return" || key.name === "tab")
+        this.advanceLaunchField(modal, 1);
+      return;
+    }
+    if (modal.field === "location") {
+      if (key.name === "b") {
+        this.openWorkspacePicker(modal.location, modal);
+        return;
+      }
+      if (key.name === "up" || key.name === "down" || key.name === "left" || key.name === "right") {
+        if (modal.locations.length === 0) return;
+        const direction = key.name === "up" || key.name === "left" ? -1 : 1;
+        const current = modal.locationIndex >= 0 ? modal.locationIndex : direction > 0 ? -1 : 0;
+        const locationIndex =
+          (current + direction + modal.locations.length) % modal.locations.length;
+        const location = modal.locations[locationIndex]?.path;
+        if (location) {
+          this.modal = { ...modal, location, locationIndex };
+          this.inputCursor = location.length;
+        }
+        return;
+      }
+      if (key.name === "enter" || key.name === "return" || key.name === "tab") {
+        this.advanceLaunchField(modal, 1);
+      }
+      return;
+    }
+    if (modal.field === "agent") {
+      if (key.name === "up" || key.name === "down" || key.name === "left" || key.name === "right") {
+        if (modal.agentOptions.length === 0) return;
+        const direction = key.name === "up" || key.name === "left" ? -1 : 1;
+        const current = modal.agentIndex >= 0 ? modal.agentIndex : direction > 0 ? -1 : 0;
+        const agentIndex =
+          (current + direction + modal.agentOptions.length) % modal.agentOptions.length;
+        const agent = modal.agentOptions[agentIndex];
+        if (agent) this.modal = { ...modal, agentIndex, agentKind: agent.kind };
+        return;
+      }
+      if (key.name === "enter" || key.name === "return" || key.name === "tab") {
+        if (modal.agentOptions.length === 0) {
+          this.lastAction = "No launch-capable agents are available from the host.";
+          return;
+        }
+        this.advanceLaunchField(modal, 1);
+      }
+      return;
+    }
+    if (modal.field === "workspace") {
+      if (key.name === "left" || key.name === "right" || key.name === "j" || key.name === "k") {
+        const workspaceMode = modal.workspaceMode === "existing" ? "worktree" : "existing";
+        this.modal = { ...modal, workspaceMode };
+        this.inputCursor = workspaceMode === "worktree" ? modal.branch.length : 0;
+      } else if (key.name === "enter" || key.name === "return" || key.name === "tab") {
+        this.advanceLaunchField(modal, 1);
+      }
+      return;
+    }
+    if (key.name === "enter" || key.name === "return" || key.name === "tab") {
+      if (modal.field === "branch" && !modal.branch.trim()) {
+        this.lastAction = "A branch name is required for a worktree.";
+        return;
+      }
+      if (modal.field === "prompt" && key.name !== "tab") void this.submitSessionLaunch(modal);
+      else this.advanceLaunchField(modal, 1);
+      return;
+    }
+    const currentValue =
+      modal.field === "branch"
+        ? modal.branch
+        : modal.field === "name"
+          ? modal.sessionName
+          : modal.prompt;
+    const edited = editText(currentValue, this.inputCursor, key);
+    if (!edited.handled) return;
+    this.inputCursor = edited.cursor;
+    this.modal =
+      modal.field === "branch"
+        ? { ...modal, branch: edited.value }
+        : modal.field === "name"
+          ? { ...modal, sessionName: edited.value }
+          : { ...modal, prompt: edited.value };
+  }
+
+  private async submitSessionLaunch(
+    modal: Extract<Modal, { readonly kind: "session-launch" }>,
+  ): Promise<void> {
+    const projection = this.projection();
+    const goals = projection.goals.filter((goal) => goal.status !== "archived");
+    const selectedGoal = goals[modal.goalIndex - 1];
+    const intent: StartSessionIntent = {
+      requestId: `launch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      goal: selectedGoal ? { kind: "goal", goalId: selectedGoal.id } : { kind: "inbox" },
+      workspace:
+        modal.workspaceMode === "worktree"
+          ? { kind: "worktree", repositoryPath: modal.location, branch: modal.branch }
+          : { kind: "existing", path: modal.location },
+      agent: { kind: modal.agentKind.trim() },
+      sessionName: modal.sessionName.trim() || undefined,
+      prompt: modal.prompt.trim() || undefined,
+      mode: "manual",
+    };
+    this.pendingLaunch = {
+      id: `pending:${intent.requestId}`,
+      goalId: selectedGoal?.id,
+      agentKind: intent.agent.kind,
+      displayName: intent.sessionName ?? `${intent.agent.kind} session`,
+    };
+    this.modal = undefined;
+    this.destroyPickerSurface();
+    this.busy = true;
+    this.lastAction = `starting ${intent.agent.kind} session…`;
+    this.requestRenderIfAlive();
+    try {
+      const result = await Effect.runPromise(this.options.startSession.start(intent));
+      this.lastAction = result.warnings?.length
+        ? `${result.message} ${result.warnings.join(" ")}`
+        : result.message;
+      this.sessionAccessById.clear();
+      if (result.sessionId) this.selected = { type: "session", id: result.sessionId };
+      if (result.goalId) this.focusGoal(result.goalId);
+      else if (result.sessionId) this.focusInbox();
+    } catch (error) {
+      this.lastAction = `session launch failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.pendingLaunch = undefined;
+      this.busy = false;
+      this.requestRenderIfAlive();
+    }
+  }
+
   private handleModalKey(key: KeyEvent): void {
     const modal = this.modal;
     if (!modal) return;
     if (key.name === "escape") {
-      this.modal = undefined;
+      this.modal = modal.kind === "workspace-picker" ? modal.returnTo : undefined;
+      this.destroyPickerSurface();
       this.lastAction = "action cancelled";
       return;
     }
@@ -2360,6 +3641,14 @@ export class CommandCentreApp {
       } else if (character === "n" || key.name === "escape") {
         this.modal = undefined;
       }
+      return;
+    }
+    if (modal.kind === "workspace-picker") {
+      this.handleWorkspacePickerKey(modal, key);
+      return;
+    }
+    if (modal.kind === "session-launch") {
+      this.handleSessionLaunchKey(modal, key);
       return;
     }
     if (modal.kind === "goal-picker") {
@@ -2636,6 +3925,7 @@ export class CommandCentreApp {
       this.lastAction = "Goal is no longer visible.";
       return;
     }
+    this.lastGoalClick = undefined;
     this.viewMode = "map";
     this.mapLens = "goal";
     this.focusGoalId = goal.id;
@@ -2737,6 +4027,61 @@ export class CommandCentreApp {
       description: "",
       priority: "P2",
     };
+  }
+
+  private openSessionLaunch(): void {
+    const projection = this.projection();
+    const selectedGoal = this.selectedGoal(projection) ?? this.selectedGoalForSession();
+    const goals = projection.goals.filter((goal) => goal.status !== "archived");
+    const selectedGoalIndex = selectedGoal
+      ? Math.max(0, goals.findIndex((goal) => goal.id === selectedGoal.id) + 1)
+      : 0;
+    this.inputCursor = 0;
+    this.modal = {
+      kind: "session-launch",
+      field: "goal",
+      goalIndex: selectedGoalIndex,
+      location: process.cwd(),
+      locations: [],
+      locationIndex: -1,
+      workspaceMode: "existing",
+      branch: "feat/observatory-session",
+      agentOptions: [],
+      agentIndex: -1,
+      agentKind: "",
+      sessionName: "",
+      prompt: "",
+    };
+    this.requestRenderIfAlive();
+    void Promise.all([
+      Effect.runPromise(this.options.workspace.listChoices()),
+      Effect.runPromise(this.options.host.listLaunchOptions()),
+    ])
+      .then(([locations, agentOptions]) => {
+        const modal = this.modal;
+        if (!modal || modal.kind !== "session-launch") return;
+        const locationIndex = locations.findIndex((choice) => choice.path === modal.location);
+        const preferredAgentIndex = Math.max(
+          0,
+          agentOptions.findIndex((option) => option.kind === "codex"),
+        );
+        const agent = agentOptions[preferredAgentIndex];
+        this.modal = {
+          ...modal,
+          locations,
+          locationIndex,
+          agentOptions,
+          agentIndex: agent ? preferredAgentIndex : -1,
+          agentKind: agent?.kind ?? "",
+        };
+        this.requestRenderIfAlive();
+      })
+      .catch((error) => {
+        if (this.modal?.kind === "session-launch") {
+          this.lastAction = `launch choices unavailable: ${error instanceof Error ? error.message : String(error)}`;
+          this.requestRenderIfAlive();
+        }
+      });
   }
 
   private openRename(): void {
@@ -2895,11 +4240,12 @@ export class CommandCentreApp {
     this.lastAction = manual ? "refreshing host snapshot…" : this.lastAction;
     try {
       this.lastAction = await Effect.runPromise(this.options.refresh);
+      this.sessionAccessById.clear();
     } catch (error) {
       this.lastAction = `refresh failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       this.busy = false;
-      this.renderer.requestRender();
+      this.requestRenderIfAlive();
     }
   }
 
@@ -2918,12 +4264,13 @@ export class CommandCentreApp {
           nativeId: session.nativeId,
         }),
       );
+      this.sessionAccessById.set(session.id, access);
       if (!access.supported) {
         this.lastAction = access.explanation;
         return;
       }
-      if (!access.terminalTarget) {
-        this.lastAction = `${session.displayName} has no embedded terminal; press Enter to attach.`;
+      if (!hasSessionCapability(access, "embedded-terminal") || !access.terminalTarget) {
+        this.lastAction = `${session.displayName} has no embedded terminal capability.`;
         return;
       }
       const dimensions = ensureTerminalDimensions(
@@ -2954,7 +4301,7 @@ export class CommandCentreApp {
       this.lastAction = `terminal open failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       this.busy = false;
-      this.renderer.requestRender();
+      this.requestRenderIfAlive();
     }
   }
 
@@ -2965,7 +4312,7 @@ export class CommandCentreApp {
           Effect.sync(() => {
             if (this.terminalMode !== mode || this.closed) return;
             this.applyTerminalEvent(mode, event);
-            this.renderer.requestRender();
+            this.requestRenderIfAlive();
           }),
         ),
       );
@@ -2973,14 +4320,14 @@ export class CommandCentreApp {
         mode.closed = true;
         mode.status = "The terminal stream ended.";
         this.updateTerminalSurface(mode);
-        this.renderer.requestRender();
+        this.requestRenderIfAlive();
       }
     } catch (error) {
       if (this.terminalMode !== mode || this.closed) return;
       mode.closed = true;
       mode.status = `terminal stream failed: ${error instanceof Error ? error.message : String(error)}`;
       this.updateTerminalSurface(mode);
-      this.renderer.requestRender();
+      this.requestRenderIfAlive();
     }
   }
 
@@ -2995,9 +4342,9 @@ export class CommandCentreApp {
       mode.dimensions = ensureTerminalDimensions(frame.columns, frame.rows);
       mode.screen.resize(mode.dimensions.columns, mode.dimensions.rows);
     }
-    if (frame.full) mode.screen.reset();
+    if (frame.full) mode.screen.reset({ preserveHistory: true });
     mode.screen.write(frame.bytes);
-    mode.status = `live · ${mode.screen.bytes} bytes · ${mode.screen.ansiSequences} control sequences`;
+    mode.status = this.terminalStatus(mode);
     this.updateTerminalSurface(mode);
   }
 
@@ -3011,9 +4358,15 @@ export class CommandCentreApp {
     mode.screen.resize(dimensions.columns, dimensions.rows);
     this.resizeTerminalSurface();
     this.updateTerminalSurface(mode);
-    const result = await Effect.runPromise(mode.terminal.resize(dimensions));
-    if (!result.ok && this.terminalMode === mode) mode.status = result.message;
-    this.renderer.requestRender();
+    try {
+      const result = await Effect.runPromise(mode.terminal.resize(dimensions));
+      if (!result.ok && this.terminalMode === mode) mode.status = result.message;
+    } catch (error) {
+      if (this.terminalMode === mode)
+        mode.status = `terminal resize failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.requestRenderIfAlive();
+    }
   }
 
   private async releaseTerminal(): Promise<void> {
@@ -3021,9 +4374,14 @@ export class CommandCentreApp {
     if (!mode) return;
     this.terminalMode = undefined;
     this.destroyTerminalSurface();
-    const result = await Effect.runPromise(mode.terminal.release());
-    this.lastAction = result.message;
-    if (!this.closed) this.renderer.requestRender();
+    try {
+      const result = await Effect.runPromise(mode.terminal.release());
+      this.lastAction = result.message;
+    } catch (error) {
+      this.lastAction = `terminal release failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.requestRenderIfAlive();
+    }
   }
 
   private handleTerminalKey(key: KeyEvent): void {
@@ -3038,9 +4396,109 @@ export class CommandCentreApp {
       void this.releaseTerminal();
       return;
     }
+    if (key.name === "pageup" || key.name === "kppageup") {
+      this.sendTerminalScroll(mode, "up", "page-key", Math.max(1, mode.screen.rows - 1));
+      return;
+    }
+    if (key.name === "pagedown" || key.name === "kppagedown") {
+      this.sendTerminalScroll(mode, "down", "page-key", Math.max(1, mode.screen.rows - 1));
+      return;
+    }
+    if (key.ctrl && key.name === "home") {
+      if (mode.screen.alternateScreen) {
+        this.sendTerminalKey(mode, key);
+        return;
+      }
+      if (mode.screen.scrollToTop()) {
+        mode.status = this.terminalStatus(mode);
+        this.updateTerminalSurface(mode);
+        this.requestRenderIfAlive();
+      } else this.sendTerminalKey(mode, key);
+      return;
+    }
+    if (key.ctrl && key.name === "end") {
+      if (mode.screen.alternateScreen) {
+        this.sendTerminalKey(mode, key);
+        return;
+      }
+      if (mode.screen.scrollToBottom()) {
+        mode.status = this.terminalStatus(mode);
+        this.updateTerminalSurface(mode);
+        this.requestRenderIfAlive();
+      } else this.sendTerminalKey(mode, key);
+      return;
+    }
+    if (mode.screen.isScrolled) {
+      mode.screen.scrollToBottom();
+      mode.status = this.terminalStatus(mode);
+      this.updateTerminalSurface(mode);
+      this.requestRenderIfAlive();
+    }
     const value = key.sequence || key.raw;
     if (!value) return;
     this.sendTerminalInput(mode, { kind: "text", value });
+  }
+
+  private scrollTerminal(mode: TerminalMode, delta: number): boolean {
+    if (!mode.screen.scrollBy(delta)) return false;
+    mode.status = this.terminalStatus(mode);
+    this.updateTerminalSurface(mode);
+    this.requestRenderIfAlive();
+    return true;
+  }
+
+  private terminalStatus(mode: TerminalMode): string {
+    return mode.screen.isScrolled
+      ? `scrollback · ${mode.screen.scrollOffset} lines back`
+      : `live · ${mode.screen.bytes} bytes · ${mode.screen.ansiSequences} control sequences`;
+  }
+
+  private handleTerminalMouseScroll(event: MouseEvent): void {
+    const mode = this.terminalMode;
+    if (!mode) return;
+    const direction =
+      event.scroll?.direction ??
+      (event.button === 4 || event.button === 64
+        ? "up"
+        : event.button === 5 || event.button === 65
+          ? "down"
+          : undefined);
+    if (direction !== "up" && direction !== "down") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Herdr's wheel source is deliberately forwarded to an agent when it has
+    // enabled mouse reporting. Observatory owns the viewport, so use the
+    // host's page-key scroll source for every wheel gesture instead. This is
+    // reliable for both normal transcripts and full-screen agent TUIs.
+    const amount = Math.max(1, Math.min(20, Math.round(event.scroll?.delta ?? 1))) * 3;
+    this.sendTerminalScroll(mode, direction, "page-key", amount, event);
+  }
+
+  private sendTerminalKey(mode: TerminalMode, key: KeyEvent): void {
+    const value = key.sequence || key.raw;
+    if (value) this.sendTerminalInput(mode, { kind: "text", value });
+  }
+
+  private sendTerminalScroll(
+    mode: TerminalMode,
+    direction: "up" | "down",
+    source: "wheel" | "page-key",
+    lines: number,
+    event?: MouseEvent,
+  ): void {
+    const column = event ? clamp(event.x - 1, 1, mode.dimensions.columns) : undefined;
+    const row = event ? clamp(event.y - 2, 1, mode.dimensions.rows) : undefined;
+    mode.status = `scrolling session ${direction === "up" ? "up" : "down"}…`;
+    this.sendTerminalInput(mode, {
+      kind: "scroll",
+      direction,
+      lines: Math.max(1, Math.min(65_535, Math.trunc(lines))),
+      source,
+      column,
+      row,
+      modifiers: 0,
+    });
+    this.requestRenderIfAlive();
   }
 
   private sendTerminalInput(mode: TerminalMode, input: HostTerminalInput): void {
@@ -3048,13 +4506,13 @@ export class CommandCentreApp {
       .then((result) => {
         if (!result.ok && this.terminalMode === mode) {
           mode.status = result.message;
-          this.renderer.requestRender();
+          this.requestRenderIfAlive();
         }
       })
       .catch(() => {
         if (this.terminalMode === mode) {
           mode.status = "terminal input failed";
-          this.renderer.requestRender();
+          this.requestRenderIfAlive();
         }
       });
   }
@@ -3074,10 +4532,10 @@ export class CommandCentreApp {
     this.renderer.requestRender();
   }
 
-  private async attachSelected(): Promise<void> {
+  private async handoffSelected(): Promise<void> {
     const session = this.selectedSession(this.projection());
     if (!session) {
-      this.lastAction = "Select a session to attach.";
+      this.lastAction = "Select a session for native handoff.";
       return;
     }
     if (this.busy) return;
@@ -3108,11 +4566,14 @@ export class CommandCentreApp {
           nativeId: session.nativeId,
         }),
       );
-      if (!access.supported) {
-        this.lastAction = access.explanation;
+      this.sessionAccessById.set(session.id, access);
+      if (!hasSessionCapability(access, "native-handoff") || !access.target) {
+        this.lastAction = access.supported
+          ? `${session.displayName} has no native handoff; use the embedded terminal.`
+          : access.explanation;
         return;
       }
-      this.lastAction = `attaching to ${session.displayName} via ${displayHostKind(session.hostKind)}…`;
+      this.lastAction = `opening native UI for ${session.displayName} via ${displayHostKind(session.hostKind)}…`;
       this.renderer.suspend();
       rendererSuspended = true;
       this.suspended = true;
@@ -3120,7 +4581,7 @@ export class CommandCentreApp {
       this.lastAction = result.message;
       refreshAfterReturn = result.ok;
     } catch (error) {
-      this.lastAction = `attach failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.lastAction = `native handoff failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       if (rendererSuspended && !this.renderer.isDestroyed) this.renderer.resume();
       this.suspended = false;
@@ -3141,12 +4602,51 @@ export class CommandCentreApp {
       this.scrollOffset = savedNavigation.scrollOffset;
       this.busy = false;
       if (refreshAfterReturn) void this.refreshFromHost(false);
-      this.renderer.requestRender();
+      this.requestRenderIfAlive();
     }
   }
 
   private handleMouse(event: MouseEvent): void {
     if (this.terminalMode) return;
+    if (event.type === "down" && this.contextMenu) {
+      if (event.button === 0) {
+        event.preventDefault();
+        const menu = this.contextMenu;
+        const rect = this.contextMenuFrame(this.renderer.width, this.renderer.height, menu);
+        const firstActionY = rect.y + 2;
+        const footerY = rect.y + rect.height - 2;
+        const index = event.y - firstActionY;
+        if (
+          event.x >= rect.x &&
+          event.x < rect.x + rect.width &&
+          event.y >= firstActionY &&
+          event.y < footerY &&
+          index >= 0 &&
+          index < menu.actions.length
+        ) {
+          this.contextMenu = { ...menu, index };
+          const action = menu.actions[index];
+          if (action) this.executeContextAction(action.id);
+        } else {
+          this.contextMenu = undefined;
+          this.lastAction = "action menu closed";
+          this.requestRenderIfAlive();
+        }
+        return;
+      }
+      if (event.button === 2) {
+        event.preventDefault();
+        this.openContextMenu(event.x, event.y, this.contextTargetAt(event.x, event.y));
+        return;
+      }
+      return;
+    }
+    if (this.modal || this.searchActive) return;
+    if (event.type === "down" && event.button === 2) {
+      event.preventDefault();
+      this.openContextMenu(event.x, event.y, this.contextTargetAt(event.x, event.y));
+      return;
+    }
     if (event.type === "down") {
       this.handleMouseDown(event);
       return;
@@ -3156,6 +4656,31 @@ export class CommandCentreApp {
       return;
     }
     if (event.type === "move") this.handleMouseMove(event);
+  }
+
+  private contextTargetForHit(
+    target: MapHitTarget | undefined,
+  ): Selection | { readonly type: "inbox"; readonly id: "inbox" } | undefined {
+    if (!target) return undefined;
+    if (target.type === "inbox") return { type: "inbox", id: "inbox" };
+    return { type: target.type, id: target.id };
+  }
+
+  private contextTargetAt(
+    x: number,
+    y: number,
+  ): Selection | { readonly type: "inbox"; readonly id: "inbox" } | undefined {
+    if (this.viewMode === "map") {
+      return this.contextTargetForHit(
+        this.mapRect && this.inRect(x, y, this.mapRect) ? this.nearestHit(x, y) : undefined,
+      );
+    }
+    const rect = layoutFor(this.renderer.width, this.renderer.height).list;
+    if (!this.inRect(x, y, rect)) return undefined;
+    const row = this.rows(this.projection())[this.scrollOffset + y - rect.y - 1];
+    return row?.type === "goal" || row?.type === "session"
+      ? { type: row.type, id: row.id }
+      : undefined;
   }
 
   private selectedMapAnchor(): MapHitTarget | undefined {
@@ -3193,8 +4718,12 @@ export class CommandCentreApp {
             lastY: event.y,
             moved: false,
             clickTarget: target?.type === "inbox" ? "inbox" : undefined,
+            clickSelection:
+              target?.type === "session" ? { type: "session", id: target.id } : undefined,
           };
     if (!target) {
+      this.lastGoalClick = undefined;
+      this.lastSessionClick = undefined;
       this.selected = undefined;
       this.inspectorVisible = false;
       this.searchActive = false;
@@ -3204,6 +4733,8 @@ export class CommandCentreApp {
       this.renderer.requestRender();
       return;
     }
+    if (target.type !== "goal") this.lastGoalClick = undefined;
+    if (target.type !== "session") this.lastSessionClick = undefined;
     this.selected = target.type === "inbox" ? undefined : { type: target.type, id: target.id };
     this.inspectorVisible = true;
     this.searchActive = false;
@@ -3220,6 +4751,7 @@ export class CommandCentreApp {
     const deltaY = event.y - (state.kind === "goal" ? state.startY : state.lastY);
     if (deltaX === 0 && deltaY === 0) return;
     if (state.kind === "goal") {
+      this.lastGoalClick = undefined;
       const result = this.options.universe.execute({
         type: "SetGoalMapPosition",
         goalId: state.goalId,
@@ -3240,6 +4772,7 @@ export class CommandCentreApp {
         ? `moving goal ${state.goalId}`
         : (result.error ?? "goal move rejected");
     } else {
+      this.lastSessionClick = undefined;
       this.mapCenter = panViewport(
         { center: this.mapCenter, zoom: this.mapZoom },
         { x: -deltaX, y: -deltaY },
@@ -3262,11 +4795,39 @@ export class CommandCentreApp {
     if (!state) return;
     this.dragState = undefined;
     if (state.kind === "goal") {
-      if (!state.moved) this.focusGoal(state.goalId);
-      else this.lastAction = `moved goal ${state.goalId}; satellites followed`;
+      if (state.moved) {
+        this.lastGoalClick = undefined;
+        this.lastAction = `moved goal ${state.goalId}; satellites followed`;
+      } else {
+        const now = performance.now();
+        const doubleClick =
+          this.lastGoalClick?.id === state.goalId && now - this.lastGoalClick.at <= 350;
+        this.lastGoalClick = doubleClick ? undefined : { id: state.goalId, at: now };
+        if (doubleClick) this.focusGoal(state.goalId);
+        else {
+          this.lastAction = `selected goal ${state.goalId} · Enter or double-click to focus`;
+          this.renderer.requestRender();
+        }
+      }
+    } else if (!state.moved && state.clickSelection?.type === "session") {
+      this.lastGoalClick = undefined;
+      const now = performance.now();
+      const doubleClick =
+        this.lastSessionClick?.id === state.clickSelection.id &&
+        now - this.lastSessionClick.at <= 350;
+      this.lastSessionClick = doubleClick ? undefined : { id: state.clickSelection.id, at: now };
+      if (doubleClick) void this.openTerminalSelected();
+      else {
+        this.lastAction = `selected session · Enter or double-click to open terminal`;
+        this.renderer.requestRender();
+      }
     } else if (!state.moved && state.clickTarget === "inbox") {
+      this.lastGoalClick = undefined;
+      this.lastSessionClick = undefined;
       this.focusInbox();
     } else if (state.moved) {
+      this.lastGoalClick = undefined;
+      this.lastSessionClick = undefined;
       this.lastAction = "mouse pan complete";
     }
   }
@@ -3293,7 +4854,14 @@ export class CommandCentreApp {
       const dx = (x - target.x) / Math.max(1, target.radiusX);
       const dy = (y - target.y) / Math.max(1, target.radiusY);
       const distance = inBounds ? -1 : dx * dx + dy * dy;
-      if ((inBounds || distance <= 1.4) && distance < bestDistance) {
+      const selected = target.type === this.selected?.type && target.id === this.selected?.id;
+      const bestSelected = best
+        ? best.type === this.selected?.type && best.id === this.selected?.id
+        : false;
+      if (
+        (inBounds || distance <= 1.4) &&
+        (distance < bestDistance || (distance === bestDistance && selected && !bestSelected))
+      ) {
         best = target;
         bestDistance = distance;
       }
@@ -3351,6 +4919,39 @@ export class CommandCentreApp {
     return colors[Math.abs(hash) % colors.length] ?? COLORS.cyan;
   }
 
+  private withDrawClip<T>(clip: Rect, draw: () => T): T {
+    const previous = this.drawClip;
+    this.drawClip = clip;
+    try {
+      return draw();
+    } finally {
+      this.drawClip = previous;
+    }
+  }
+
+  private visibleRect(rect: Rect): Rect | undefined {
+    const clip = this.drawClip;
+    const left = Math.max(0, clip?.x ?? 0, rect.x);
+    const top = Math.max(0, clip?.y ?? 0, rect.y);
+    const right = Math.min(
+      this.renderer.width,
+      clip ? clip.x + clip.width : this.renderer.width,
+      rect.x + rect.width,
+    );
+    const bottom = Math.min(
+      this.renderer.height,
+      clip ? clip.y + clip.height : this.renderer.height,
+      rect.y + rect.height,
+    );
+    if (right <= left || bottom <= top) return undefined;
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  private fillRect(buffer: OptimizedBuffer, rect: Rect, background: RGBA): void {
+    const visible = this.visibleRect(rect);
+    if (visible) buffer.fillRect(visible.x, visible.y, visible.width, visible.height, background);
+  }
+
   private textCentered(
     buffer: OptimizedBuffer,
     value: string,
@@ -3373,7 +4974,7 @@ export class CommandCentreApp {
 
   private roundedPanel(buffer: OptimizedBuffer, rect: Rect, background: RGBA, border: RGBA): void {
     if (rect.width <= 0 || rect.height <= 0) return;
-    buffer.fillRect(rect.x, rect.y, rect.width, rect.height, background);
+    this.fillRect(buffer, rect, background);
     if (rect.width === 1 || rect.height === 1) {
       this.cell(buffer, rect.x, rect.y, "·", border, background);
       return;
@@ -3400,7 +5001,7 @@ export class CommandCentreApp {
 
   private panel(buffer: OptimizedBuffer, rect: Rect, background: RGBA, border: RGBA): void {
     if (rect.width <= 0 || rect.height <= 0) return;
-    buffer.fillRect(rect.x, rect.y, rect.width, rect.height, background);
+    this.fillRect(buffer, rect, background);
     if (rect.width < 2 || rect.height < 2) return;
     this.hline(buffer, rect.x + 1, rect.y, rect.width - 2, "─", border, background);
     this.hline(
@@ -3444,7 +5045,16 @@ export class CommandCentreApp {
     background: RGBA,
     attributes = TextAttributes.NONE,
   ): void {
-    if (x < 0 || y < 0 || x >= this.renderer.width || y >= this.renderer.height) return;
+    const clip = this.drawClip;
+    if (
+      x < 0 ||
+      y < 0 ||
+      x >= this.renderer.width ||
+      y >= this.renderer.height ||
+      (clip !== undefined &&
+        (x < clip.x || x >= clip.x + clip.width || y < clip.y || y >= clip.y + clip.height))
+    )
+      return;
     buffer.setCell(x, y, glyph, foreground, background, attributes);
   }
 
@@ -3457,12 +5067,18 @@ export class CommandCentreApp {
     background: RGBA,
     attributes = TextAttributes.NONE,
   ): void {
-    if (y < 0 || y >= this.renderer.height || x >= this.renderer.width) return;
-    const available = this.renderer.width - Math.max(0, x);
+    if (y < 0 || y >= this.renderer.height) return;
+    const clip = this.drawClip;
+    if (clip && (y < clip.y || y >= clip.y + clip.height)) return;
+    const left = Math.max(0, clip?.x ?? 0);
+    const right = Math.min(this.renderer.width, clip ? clip.x + clip.width : this.renderer.width);
+    const startX = Math.max(x, left);
+    const sourceOffset = Math.max(0, left - x);
+    const available = Math.min(value.length - sourceOffset, right - startX);
     if (available <= 0) return;
     buffer.drawText(
-      value.slice(0, available),
-      Math.max(0, x),
+      value.slice(sourceOffset, sourceOffset + available),
+      startX,
       y,
       foreground,
       background,

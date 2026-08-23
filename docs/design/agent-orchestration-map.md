@@ -478,8 +478,10 @@ has three presentation tiers:
 - context: attention-bearing nodes receive expanded labels while their owning
   goal or inbox remains visible; the selected node receives the detail tier so
   its title remains fully identifiable; and
-- focus/detail: a focused goal or inbox shows larger or wrapped labels and the
-  full direct orbit, while the inspector exposes complete execution metadata.
+- focus/detail: a focused goal or inbox keeps the full direct orbit while
+  following the current label tier; dense healthy satellites may be compact
+  status markers in overview, with context/detail restoring short or wrapped
+  labels, while the inspector exposes complete execution metadata.
 
 At low geometric zoom, overview cards collapse to glyphs and priority markers
 because terminal cells cannot scale text. Selected and attention-bearing nodes

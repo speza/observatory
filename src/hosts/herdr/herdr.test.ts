@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Stream } from "effect";
 import { readFileSync } from "node:fs";
 import { parseHerdrSnapshot, HerdrHostAdapter } from "./adapter.ts";
+import { openHerdrTerminal } from "./terminal.ts";
 import type { CommandRunner, TerminalCommandRunner, TerminalProcess } from "./runner.ts";
 import type { HostTerminalEvent } from "../types.ts";
 import { FixedClock } from "../../universe/test-support.ts";
@@ -14,17 +15,30 @@ const fixture = parseJsonValue(
 class FakeRunner implements CommandRunner {
   readonly calls: string[][] = [];
   readonly options: { readonly interactive?: boolean }[] = [];
+  private readonly queuedResults: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  }[];
   private result: {
     readonly exitCode: number;
     readonly stdout: string;
     readonly stderr: string;
   };
-  constructor(result: {
-    readonly exitCode: number;
-    readonly stdout: string;
-    readonly stderr: string;
-  }) {
+  constructor(
+    result: {
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    },
+    queuedResults: readonly {
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    }[] = [],
+  ) {
     this.result = result;
+    this.queuedResults = [...queuedResults];
   }
   setResult(result: {
     readonly exitCode: number;
@@ -36,7 +50,7 @@ class FakeRunner implements CommandRunner {
   async run(argv: readonly string[], options?: { readonly interactive?: boolean }) {
     this.calls.push([...argv]);
     this.options.push(options ?? {});
-    return this.result;
+    return this.queuedResults.shift() ?? this.result;
   }
 }
 
@@ -47,17 +61,28 @@ class FakeTerminalProcess implements TerminalProcess {
   readonly stderr: AsyncIterable<Uint8Array> = (async function* () {})();
   readonly exited = Promise.resolve(0);
 
-  constructor(events: readonly HostTerminalEvent[]) {
+  constructor(
+    events: readonly HostTerminalEvent[],
+    encoding: "base64" | "bytes" | "text" = "base64",
+  ) {
     this.stdout = (async function* () {
       const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
       for (const event of events) {
         yield encoder.encode(
           JSON.stringify(
             event.kind === "frame"
-              ? {
-                  type: "terminal.frame",
-                  data_base64: btoa(String.fromCharCode(...event.frame.bytes)),
-                }
+              ? encoding === "base64"
+                ? {
+                    type: "terminal.frame",
+                    data_base64: btoa(String.fromCharCode(...event.frame.bytes)),
+                  }
+                : encoding === "bytes"
+                  ? {
+                      type: "terminal.frame",
+                      bytes: btoa(String.fromCharCode(...event.frame.bytes)),
+                    }
+                  : { type: "terminal.frame", data: decoder.decode(event.frame.bytes) }
               : { type: "terminal.closed", reason: event.reason },
           ) + "\n",
         );
@@ -78,8 +103,11 @@ class FakeTerminalRunner implements TerminalCommandRunner {
   readonly calls: string[][] = [];
   readonly process: FakeTerminalProcess;
 
-  constructor(events: readonly HostTerminalEvent[]) {
-    this.process = new FakeTerminalProcess(events);
+  constructor(
+    events: readonly HostTerminalEvent[],
+    encoding: "base64" | "bytes" | "text" = "base64",
+  ) {
+    this.process = new FakeTerminalProcess(events, encoding);
   }
 
   spawnTerminal(argv: readonly string[]): TerminalProcess {
@@ -89,6 +117,15 @@ class FakeTerminalRunner implements TerminalCommandRunner {
 }
 
 describe("Herdr adapter", () => {
+  test("offers the initial curated launch set", async () => {
+    const adapter = new HerdrHostAdapter({ clock: new FixedClock(12_345) });
+    expect(await Effect.runPromise(adapter.listLaunchOptions())).toEqual([
+      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
+      { kind: "codex", label: "Codex", description: "Codex CLI" },
+      { kind: "pi", label: "Pi", description: "Pi coding agent" },
+    ]);
+  });
+
   test("parses recognized agents into sessions and ignores non-agent panes", () => {
     const snapshot = parseHerdrSnapshot(fixture, 12_345);
     expect(snapshot.available).toBe(true);
@@ -192,6 +229,13 @@ describe("Herdr adapter", () => {
     );
     expect(empty.available).toBe(true);
     expect(empty.sessions).toHaveLength(0);
+
+    const incomplete = parseHerdrSnapshot(
+      { result: { snapshot: { panes: [], workspaces: [] } } },
+      101,
+    );
+    expect(incomplete.available).toBe(false);
+    expect(incomplete.error).toContain("required session inventory");
   });
 
   test("does not treat panes as sessions when the agent list is empty", () => {
@@ -237,6 +281,7 @@ describe("Herdr adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
+    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff"]);
     expect(access.mode).toBe("attach");
     expect(access.target?.kind).toBe("herdr-agent-attach");
     expect(access.target?.token).toBe("fixture-w2:p1");
@@ -246,6 +291,163 @@ describe("Herdr adapter", () => {
     });
     expect(runner.calls.at(-1)).toEqual(["herdr", "agent", "attach", "fixture-w2:p1"]);
     expect(runner.options.at(-1)).toEqual({ interactive: true });
+  });
+
+  test("launches through a Herdr workspace and agent command without leaking pane topology", async () => {
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({
+      runner,
+      clock: new FixedClock(100),
+    });
+    const result = await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-herdr-test",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+        agentName: "launch-check",
+        prompt: "start safely",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(runner.calls).toContainEqual([
+      "herdr",
+      "workspace",
+      "create",
+      "--cwd",
+      "/sandbox/alpha",
+      "--label",
+      "launch-check",
+      "--no-focus",
+    ]);
+    expect(runner.calls).toContainEqual([
+      "herdr",
+      "agent",
+      "start",
+      "launch-check",
+      "--kind",
+      "codex",
+      "--pane",
+      "fixture-w1:p2",
+      "--timeout",
+      "30000",
+    ]);
+    expect(runner.calls).toContainEqual([
+      "herdr",
+      "agent",
+      "prompt",
+      "fixture-w1:p2",
+      "start safely",
+    ]);
+  });
+
+  test("uses the workspace creation response for the new root pane", async () => {
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(fixture),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: { root_pane: { pane_id: "created-workspace:p1" } },
+          }),
+          stderr: "",
+        },
+      ],
+    );
+    const adapter = new HerdrHostAdapter({
+      runner,
+      clock: new FixedClock(100),
+    });
+
+    const result = await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-herdr-root-pane",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+        agentName: "root-pane-check",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(runner.calls).toContainEqual([
+      "herdr",
+      "agent",
+      "start",
+      "root-pane-check",
+      "--kind",
+      "codex",
+      "--pane",
+      "created-workspace:p1",
+      "--timeout",
+      "30000",
+    ]);
+    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(2);
+  });
+
+  test("retries while the new root shell is settling", async () => {
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(fixture),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: { root_pane: { pane_id: "settling-workspace:p1" } },
+          }),
+          stderr: "",
+        },
+        {
+          exitCode: 1,
+          stdout: "",
+          stderr: JSON.stringify({ error: { code: "agent_pane_busy" } }),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(fixture),
+          stderr: "",
+        },
+      ],
+    );
+    const adapter = new HerdrHostAdapter({
+      runner,
+      clock: new FixedClock(100),
+    });
+
+    const result = await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-herdr-settling-pane",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+        agentName: "settling-pane-check",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      runner.calls.filter(
+        (call) => call[0] === "herdr" && call[1] === "agent" && call[2] === "start",
+      ),
+    ).toHaveLength(2);
   });
 
   test("does not claim access for unavailable or unknown sessions", async () => {
@@ -260,10 +462,11 @@ describe("Herdr adapter", () => {
     });
     const snapshot = await Effect.runPromise(adapter.snapshot());
     expect(snapshot.available).toBe(false);
-    expect(
-      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "missing" })))
-        .supported,
-    ).toBe(false);
+    const missing = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "missing" }),
+    );
+    expect(missing.supported).toBe(false);
+    expect(missing.capabilities).toEqual([]);
   });
 
   test("clears live attachment targets when Herdr becomes unavailable", async () => {
@@ -338,12 +541,79 @@ describe("Herdr adapter", () => {
       ok: true,
       message: "Input sent to the Herdr terminal.",
     });
+    expect(
+      await Effect.runPromise(
+        opened.terminal!.send({
+          kind: "scroll",
+          direction: "up",
+          lines: 12,
+          source: "wheel",
+          column: 4,
+          row: 5,
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: "Input sent to the Herdr terminal.",
+    });
+    expect(JSON.parse(String(terminalRunner.process.writes[1]))).toEqual({
+      type: "terminal.scroll",
+      direction: "up",
+      lines: 12,
+      source: "wheel",
+      column: 4,
+      row: 5,
+      modifiers: 0,
+    });
+    await Effect.runPromise(
+      opened.terminal!.send({
+        kind: "scroll",
+        direction: "down",
+        lines: 23,
+        source: "page-key",
+      }),
+    );
+    expect(JSON.parse(String(terminalRunner.process.writes[2]))).toMatchObject({
+      type: "terminal.scroll",
+      direction: "down",
+      lines: 23,
+      source: "page_key",
+    });
     expect(await Effect.runPromise(opened.terminal!.resize({ columns: 90, rows: 30 }))).toEqual({
       ok: true,
       message: "Resized Herdr terminal to 90×30.",
     });
     expect((await Effect.runPromise(opened.terminal!.release())).ok).toBe(true);
     expect(terminalRunner.process.killed).toBe(true);
-    expect(terminalRunner.process.writes).toHaveLength(3);
+    expect(terminalRunner.process.writes).toHaveLength(5);
+  });
+
+  test("treats untagged terminal frame data as text", async () => {
+    const terminalRunner = new FakeTerminalRunner(
+      [{ kind: "frame", frame: { bytes: new TextEncoder().encode("test") } }],
+      "text",
+    );
+    const terminal = openHerdrTerminal(terminalRunner, "target", { columns: 80, rows: 24 });
+    const events = Array.from(await Effect.runPromise(Stream.runCollect(terminal.events)));
+    expect(events[0]).toMatchObject({
+      kind: "frame",
+      frame: { bytes: new TextEncoder().encode("test") },
+    });
+    await Effect.runPromise(terminal.release());
+  });
+
+  test("decodes Herdr's base64-encoded bytes frame field", async () => {
+    const terminalRunner = new FakeTerminalRunner(
+      [{ kind: "frame", frame: { bytes: new TextEncoder().encode("hello") } }],
+      "bytes",
+    );
+    const terminal = openHerdrTerminal(terminalRunner, "target", { columns: 80, rows: 24 });
+    const events = Array.from(await Effect.runPromise(Stream.runCollect(terminal.events)));
+
+    expect(events[0]).toMatchObject({
+      kind: "frame",
+      frame: { bytes: new TextEncoder().encode("hello") },
+    });
+    await Effect.runPromise(terminal.release());
   });
 });

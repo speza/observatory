@@ -5,8 +5,8 @@
   "description": "An agent observatory for supervising AI agent work.",
   "type": "module",
   "scripts": {
-    "dev": "bun run src/main.ts",
-    "dev:mock": "AO_HOST=mock AO_MOCK_SCENARIO=orbit AO_MOCK_SEED=portfolio AO_DB_PATH=${TMPDIR:-/tmp}/ao-mock.sqlite bun run src/main.ts",
+    "dev": "bun --watch run src/main.ts",
+    "dev:mock": "AO_HOST=mock AO_MOCK_SCENARIO=orbit AO_MOCK_SEED=portfolio AO_DB_PATH=${TMPDIR:-/tmp}/ao-mock.sqlite bun --watch run src/main.ts",
     "dev:interaction-poc": "bun run src/prototypes/agent-interaction-poc.ts",
     "dev:pty-poc": "bun run src/prototypes/pty-terminal-poc.ts",
     "dev:herdr-terminal-poc": "bun run src/prototypes/herdr-terminal-poc.ts",

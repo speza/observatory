@@ -3,7 +3,7 @@
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { delimiter, dirname } from "node:path";
 import { HerdrHostAdapter } from "./hosts/herdr/adapter.ts";
 import { MockHostAdapter } from "./hosts/mock/adapter.ts";
 import { createMockScenario } from "./hosts/mock/scenarios.ts";
@@ -12,7 +12,9 @@ import { displayHostKind, type SessionHost } from "./hosts/types.ts";
 import { SqliteUniverseStore } from "./persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "./projection/projection.ts";
 import { createCommandCentreRenderer } from "./renderer/tui.ts";
+import { createStartSessionCoordinator } from "./session-launch/coordinator.ts";
 import { Universe } from "./universe/universe.ts";
+import { LocalWorkspaceProvider } from "./workspaces/local.ts";
 import type { Clock, IdGenerator } from "./universe/types.ts";
 
 class SystemClock implements Clock {
@@ -37,10 +39,15 @@ const program = Effect.scoped(
     if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
     const store = new SqliteUniverseStore(databasePath);
     const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
-    const mockScenario = createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit");
-    const mockTickMs = Number(process.env.AO_MOCK_TICK_MS ?? mockScenario.tickMs);
     const host: SessionHost = useMockHost
-      ? new MockHostAdapter({ clock, scenario: mockScenario, tickMs: mockTickMs })
+      ? (() => {
+          const scenario = createMockScenario(process.env.AO_MOCK_SCENARIO ?? "orbit");
+          return new MockHostAdapter({
+            clock,
+            scenario,
+            tickMs: Number(process.env.AO_MOCK_TICK_MS ?? scenario.tickMs),
+          });
+        })()
       : new HerdrHostAdapter({ clock });
     const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
 
@@ -61,11 +68,31 @@ const program = Effect.scoped(
       if (seeded.createdGoals > 0)
         initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedSessions} sessions`;
     }
+    const configuredWorkspaceLocations = (process.env.AO_WORKSPACE_LOCATIONS ?? "")
+      .split(delimiter)
+      .map((location) => location.trim())
+      .filter(Boolean);
+    const discoveredWorkspaceLocations = universe
+      .snapshot()
+      .sessions.filter((session) => session.archivedAt === undefined)
+      .map((session) => session.worktree)
+      .filter((path): path is string => Boolean(path));
+    const workspace = new LocalWorkspaceProvider({
+      locations: [...configuredWorkspaceLocations, ...discoveredWorkspaceLocations],
+    });
+    const startSession = createStartSessionCoordinator({
+      universe,
+      host,
+      workspace,
+      refresh: reconcile,
+    });
     const app = yield* Effect.tryPromise({
       try: () =>
         createCommandCentreRenderer({
           universe,
           host,
+          startSession,
+          workspace,
           clock,
           refresh: reconcile,
           initialAction: initialMessage,

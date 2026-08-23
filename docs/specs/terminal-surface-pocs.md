@@ -13,11 +13,12 @@ Can Observatory keep its map-first TUI while giving a terminal purist access to
 the real native CLI, without building a universal fake chat client or committing
 to an Observatory-owned multiplexer too early?
 
-The current V0 answer has two routes: `t` opens a host-owned Herdr terminal
-surface inside Observatory, while `Enter` remains foreground attachment to the
-native CLI. Both routes return to the preserved map. The embedded route proves
-the narrow first interaction surface; it does not claim to reproduce every
-provider-specific terminal feature.
+The current V0 answer is a host-owned Herdr terminal surface inside
+Observatory. `t`, `Enter` and a session double-click open the same embedded
+terminal and return to the preserved map. Foreground attachment remains a
+capability seam for future hosts, but is not the primary interaction. The
+embedded route proves the narrow first interaction surface; it does not claim
+to reproduce every provider-specific terminal feature.
 
 These experiments separate that rendering question from the much larger question
 of who owns persistent agent processes.
@@ -150,7 +151,7 @@ select session
 Pass means Herdr can remain the V0 session runtime while Observatory adds a
 native terminal lens. That pass is now implemented behind `SessionHost` and
 exercised through the mock adapter and a live map → terminal → release → map
-smoke. Foreground attach remains the fallback for unsupported sessions and the
+smoke. Foreground attach remains an adapter capability for unsupported sessions and the
 reference path for provider-native features not covered by the embedded lens.
 
 ## Evidence log — 2026-08-22
@@ -272,7 +273,7 @@ it merely to make POC A work.
    Herdr session through the observe/control stream.
 3. Keep the production `t` lens deliberately narrow and dogfood it against the
    map: map → terminal → map, with selection and attention state preserved.
-4. Compare it with foreground `Enter` attachment on real work before adding
+4. Compare it with the direct `Enter` terminal path on real work before adding
    provider-specific messaging, transcript features or another host adapter.
 5. Only revisit an AO-owned runtime if Herdr cannot provide the required
    lifecycle and control experience.

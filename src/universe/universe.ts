@@ -373,6 +373,20 @@ export class Universe {
     const updatedSessionIds: SessionId[] = [];
     const staleSessionIds: SessionId[] = [];
     const now = snapshot.observedAt;
+    const previousHost = this.state.hosts.find(
+      (candidate) => candidate.hostKind === snapshot.hostKind,
+    );
+    if (previousHost?.lastObservedAt !== undefined && now < previousHost.lastObservedAt) {
+      const error = `Out-of-order ${snapshot.hostKind} snapshot ignored: ${now} is older than ${previousHost.lastObservedAt}.`;
+      return {
+        accepted: false,
+        addedSessionIds: [],
+        updatedSessionIds: [],
+        staleSessionIds: [],
+        diagnostics: [...diagnostics, error],
+        error,
+      };
+    }
     const hostStatusValue: HostHealth["status"] = snapshot.available ? "live" : "unavailable";
     const hostStatus = {
       hostKind: snapshot.hostKind,
@@ -380,6 +394,8 @@ export class Universe {
       diagnosticCount: diagnostics.length,
     };
     if (snapshot.available) Object.assign(hostStatus, { lastObservedAt: now });
+    else if (previousHost?.lastObservedAt !== undefined)
+      Object.assign(hostStatus, { lastObservedAt: previousHost.lastObservedAt });
     if (snapshot.error) Object.assign(hostStatus, { lastError: snapshot.error });
     replaceHost(next, hostStatus);
 
@@ -391,7 +407,7 @@ export class Universe {
         return { ...session, hostHealth: "unavailable" as const };
       });
     } else {
-      const observedIds = new Set(snapshot.sessions.map((session) => session.nativeId));
+      const observedIds = new Set(snapshot.sessions.map((session) => session.nativeId.trim()));
       next.sessions = next.sessions.map((session) => {
         if (
           session.hostKind !== snapshot.hostKind ||
@@ -409,13 +425,20 @@ export class Universe {
       for (const observation of snapshot.sessions) {
         const existing = next.sessions.find(
           (session) =>
-            session.hostKind === snapshot.hostKind && session.nativeId === observation.nativeId,
+            session.hostKind === snapshot.hostKind &&
+            session.nativeId.trim() === observation.nativeId.trim(),
         );
         if (!existing) {
           const id = this.ids.next("session");
           const session = this.sessionFromObservation(id, snapshot, observation);
           next.sessions = [...next.sessions, session];
           addedSessionIds.push(id);
+          continue;
+        }
+        if (observation.observedAt < existing.lastObservedAt) {
+          diagnostics.push(
+            `Ignored an older observation for ${observation.nativeId.trim()}: ${observation.observedAt} is older than ${existing.lastObservedAt}.`,
+          );
           continue;
         }
         const stateChanged = existing.runtimeState !== observation.runtimeState;
@@ -481,7 +504,7 @@ export class Universe {
     const session = {
       id,
       hostKind: snapshot.hostKind,
-      nativeId: observation.nativeId,
+      nativeId: observation.nativeId.trim(),
       displayName: observation.displayName,
       displayNameSource: "host" as const,
       runtimeState: observation.runtimeState,
@@ -509,7 +532,7 @@ export const createEmptyUniverse = (
   ids: IdGenerator,
   projections: ProjectionModule,
 ): Universe => {
-  if (store.load().goals.length === 0 && store.load().sessions.length === 0)
-    store.save(emptyUniverseState());
+  const state = store.load();
+  if (state.goals.length === 0 && state.sessions.length === 0) store.save(emptyUniverseState());
   return new Universe(store, clock, ids, projections);
 };

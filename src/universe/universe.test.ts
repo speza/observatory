@@ -5,12 +5,13 @@ const observation = (
   nativeId: string,
   displayName = nativeId,
   runtimeState: "idle" | "working" | "waiting" | "blocked" | "done" | "unknown" = "idle",
+  observedAt = 1_000_000,
 ) => ({
   nativeId,
   displayName,
   runtimeState,
   runtimeStateSource: "test-host",
-  observedAt: 1_000_000,
+  observedAt,
   repository: "repo",
   branch: "main",
   worktree: `/worktrees/${nativeId}`,
@@ -147,6 +148,64 @@ describe("Universe", () => {
     expect(
       universe.snapshot().sessions.find((session) => session.nativeId === "pane-2")?.hostHealth,
     ).toBe("stale");
+  });
+
+  test("rejects out-of-order snapshots without regressing accepted state", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([observation("pane-1", "newer", "blocked", 2_000_000)], 2_000_000),
+    );
+    const older = universe.reconcile(
+      hostSnapshot([observation("pane-1", "older", "idle", 1_000_000)], 1_000_000),
+    );
+    expect(older.accepted).toBe(false);
+    expect(older.error).toContain("Out-of-order");
+    expect(universe.snapshot().sessions[0]?.runtimeState).toBe("blocked");
+    expect(universe.snapshot().hosts[0]?.lastObservedAt).toBe(2_000_000);
+  });
+
+  test("ignores an older session observation inside a newer snapshot", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([observation("pane-1", "newer", "blocked", 2_000_000)], 2_000_000),
+    );
+    const result = universe.reconcile(
+      hostSnapshot([observation("pane-1", "older", "idle", 1_000_000)], 3_000_000),
+    );
+    expect(result.accepted).toBe(true);
+    expect(result.updatedSessionIds).toHaveLength(0);
+    expect(result.diagnostics.join(" ")).toContain("Ignored an older observation");
+    expect(universe.snapshot().sessions[0]?.runtimeState).toBe("blocked");
+    expect(universe.snapshot().hosts[0]?.lastObservedAt).toBe(3_000_000);
+  });
+
+  test("preserves host observation age while the host is unavailable", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(hostSnapshot([observation("pane-1")], 1_000_000));
+    universe.reconcile({
+      hostKind: "test-host",
+      available: false,
+      observedAt: 1_010_000,
+      sessions: [],
+      diagnostics: [],
+      error: "socket unavailable",
+    });
+    expect(universe.snapshot().hosts[0]?.lastObservedAt).toBe(1_000_000);
+    const projection = universe.project({ kind: "command-centre", now: 1_010_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.attention.items.find((item) => item.targetType === "host")?.ageMs).toBe(
+      10_000,
+    );
+  });
+
+  test("normalizes native identities at the reconciliation boundary", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(hostSnapshot([observation(" pane-1 ", "first")], 1_000_000));
+    universe.reconcile(
+      hostSnapshot([observation("pane-1", "second", "idle", 1_001_000)], 1_001_000),
+    );
+    expect(universe.snapshot().sessions).toHaveLength(1);
+    expect(universe.snapshot().sessions[0]?.nativeId).toBe("pane-1");
   });
 
   test("archives stale sessions without deleting their identity or assignment", () => {

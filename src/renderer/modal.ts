@@ -1,4 +1,11 @@
-export type ModalKind = "create-goal" | "text" | "goal-picker" | "session-picker" | "confirm";
+export type ModalKind =
+  | "create-goal"
+  | "text"
+  | "goal-picker"
+  | "session-picker"
+  | "session-launch"
+  | "workspace-picker"
+  | "confirm";
 
 export interface ModalFrame {
   readonly x: number;
@@ -17,6 +24,10 @@ const baseHeight = (kind: ModalKind): number => {
       return 10;
     case "session-picker":
       return 15;
+    case "session-launch":
+      return 14;
+    case "workspace-picker":
+      return 18;
     case "confirm":
       return 7;
     case "text":

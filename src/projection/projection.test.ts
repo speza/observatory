@@ -73,6 +73,23 @@ describe("projections", () => {
     ]);
   });
 
+  test("does not surface attention for sessions hidden under archived goals", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Archived goal" });
+    universe.reconcile(hostSnapshot([observation("pane", "blocked", "blocked")]));
+    universe.execute({
+      type: "AssignSession",
+      sessionId: "session-1",
+      goalId: "goal-1",
+    });
+    universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
+    universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.counts.attention).toBe(0);
+    expect(projection.attention.items).toHaveLength(0);
+  });
+
   test("inspector reports host facts without making infrastructure nodes", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });

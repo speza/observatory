@@ -6,6 +6,15 @@ import { createMockScenario } from "./scenarios.ts";
 import { seedMockPortfolio } from "./seed.ts";
 
 describe("Mock host adapter", () => {
+  test("offers the same curated launch set as the live host", async () => {
+    const adapter = new MockHostAdapter({ clock: new FixedClock(10_000) });
+    expect(await Effect.runPromise(adapter.listLaunchOptions())).toEqual([
+      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
+      { kind: "codex", label: "Codex", description: "Codex CLI" },
+      { kind: "pi", label: "Pi", description: "Pi coding agent" },
+    ]);
+  });
+
   test("loops deterministic session frames and exposes state transitions", async () => {
     const clock = new FixedClock(10_000);
     const scenario = createMockScenario();
@@ -53,6 +62,7 @@ describe("Mock host adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
+    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff"]);
     expect(access.target).toEqual({
       kind: "mock-session",
       token: "mock-p03",
@@ -68,10 +78,11 @@ describe("Mock host adapter", () => {
       (await Effect.runPromise(adapter.access({ hostKind: "mock", nativeId: "mock-p17" })))
         .supported,
     ).toBe(false);
-    expect(
-      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "mock-p03" })))
-        .supported,
-    ).toBe(false);
+    const unsupported = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "mock-p03" }),
+    );
+    expect(unsupported.supported).toBe(false);
+    expect(unsupported.capabilities).toEqual([]);
   });
 
   test("seeds a real goal-and-session portfolio only through Universe commands", async () => {
@@ -116,6 +127,29 @@ describe("Mock host adapter", () => {
     expect(await Effect.runPromise(opened.terminal!.release())).toEqual({
       ok: true,
       message: "Released mock terminal mock-p01.",
+    });
+  });
+
+  test("launches a synthetic session that appears on the next snapshot", async () => {
+    const clock = new FixedClock(50_000);
+    const adapter = new MockHostAdapter({ clock });
+    const launched = await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-test",
+        workingDirectory: "/synthetic/project",
+        agentKind: "codex",
+        agentName: "launch-test",
+      }),
+    );
+    expect(launched.ok).toBe(true);
+    expect(launched.nativeId).toBe("mock-launch-1");
+    const snapshot = await Effect.runPromise(adapter.snapshot());
+    expect(
+      snapshot.sessions.find((session) => session.nativeId === launched.nativeId),
+    ).toMatchObject({
+      displayName: "launch-test",
+      provider: "codex",
+      worktree: "/synthetic/project",
     });
   });
 });

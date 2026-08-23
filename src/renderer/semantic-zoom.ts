@@ -4,6 +4,26 @@ export type SemanticZoomLevel = "overview" | "context" | "detail";
 
 export type SemanticZoomLens = "portfolio" | "attention" | "goal" | "inbox";
 
+/** Keep a completed session visibly reviewable for a short, deterministic window. */
+export const DONE_REVIEW_WINDOW_MS = 30 * 60 * 1000;
+
+export const isRecentlyDone = (
+  session: Pick<TrackedSession, "runtimeState" | "hostHealth" | "lastChangedAt">,
+  now: number,
+  windowMs = DONE_REVIEW_WINDOW_MS,
+): boolean =>
+  session.hostHealth === "live" &&
+  session.runtimeState === "done" &&
+  Math.max(0, now - session.lastChangedAt) <= Math.max(0, windowMs);
+
+/**
+ * Scale node geometry with the camera without changing the durable world
+ * layout. The neutral scale is one at the default zoom, so focused cards keep
+ * their existing size until the user deliberately zooms in or out.
+ */
+export const perspectiveNodeScale = (zoom: number): number =>
+  Math.max(0.75, Math.min(1.5, 0.55 + 0.45 * zoom));
+
 const levelRank = {
   overview: 0,
   context: 1,
@@ -28,11 +48,12 @@ export const semanticZoomLevel = (input: {
   // detail tier even when the surrounding portfolio remains compact; the
   // selected card should spend space on identity before secondary metadata.
   if (input.selected) return "detail";
-  if (input.lens === "goal" || input.lens === "inbox") return "detail";
-  const contextual = Boolean(input.selected || input.attention);
-  if (input.preference === "detail" || (input.preference === "context" && contextual))
-    return "detail";
-  if (input.preference === "context" || contextual) return "context";
+  // Focused lenses used to force every satellite into detail mode. That made
+  // the semantic-zoom control ineffective exactly where density is highest.
+  // The lens changes the topology; the user's label preference still controls
+  // how much each non-selected body says.
+  if (input.preference === "detail") return "detail";
+  if (input.preference === "context" || input.attention) return "context";
   return "overview";
 };
 

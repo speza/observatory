@@ -56,7 +56,17 @@ export type HostTerminalEvent =
 
 export type HostTerminalInput =
   | { readonly kind: "text"; readonly value: string }
-  | { readonly kind: "bytes"; readonly value: Uint8Array };
+  | { readonly kind: "bytes"; readonly value: Uint8Array }
+  | {
+      /** Scroll the host-owned viewport without pretending this is agent input. */
+      readonly kind: "scroll";
+      readonly direction: "up" | "down";
+      readonly lines: number;
+      readonly source: "wheel" | "page-key";
+      readonly column?: number;
+      readonly row?: number;
+      readonly modifiers?: number;
+    };
 
 /** A host-owned terminal stream. The host owns the process and its lifecycle. */
 export interface HostedTerminalSession {
@@ -72,8 +82,13 @@ export interface HostTerminalOpenResult {
   readonly terminal?: HostedTerminalSession;
 }
 
+/** A deliberately small, session-specific set of interaction surfaces. */
+export type SessionCapability = "embedded-terminal" | "native-handoff";
+
 export interface SessionAccess {
   readonly supported: boolean;
+  /** Capabilities proven for this particular session by the host adapter. */
+  readonly capabilities: readonly SessionCapability[];
   readonly mode?: "focus" | "attach";
   readonly target?: OpaqueAccessTarget;
   /** Optional host-owned terminal capability for this session. */
@@ -81,13 +96,43 @@ export interface SessionAccess {
   readonly explanation: string;
 }
 
+export const hasSessionCapability = (
+  access: SessionAccess,
+  capability: SessionCapability,
+): boolean => access.supported && access.capabilities.includes(capability);
+
 export interface HostActionResult {
   readonly ok: boolean;
   readonly message: string;
 }
 
+export interface HostLaunchRequest {
+  readonly workingDirectory: string;
+  readonly agentKind: string;
+  readonly agentName?: string;
+  readonly args?: readonly string[];
+  readonly prompt?: string;
+  readonly requestId: string;
+}
+
+export interface HostLaunchOption {
+  /** Opaque to the control plane; passed back to the host when selected. */
+  readonly kind: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface HostLaunchResult {
+  readonly ok: boolean;
+  readonly message: string;
+  /** Host-defined identity, used only to match a later snapshot observation. */
+  readonly nativeId?: string;
+}
+
 export interface SessionHost {
   snapshot(): Effect.Effect<HostSnapshot, HostError>;
+  listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError>;
+  launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError>;
   access(session: {
     readonly hostKind: string;
     readonly nativeId: string;

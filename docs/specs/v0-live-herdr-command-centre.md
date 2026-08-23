@@ -44,7 +44,7 @@ Using at least 15 real mixed active and idle Herdr agent sessions, the user can:
    sessions individually;
 2. explain the purpose and state of active goals in under two minutes;
 3. jump to a named or attention-bearing session, see its owning context, and
-   attach to the correct live session in under ten seconds;
+   open its embedded terminal in under ten seconds;
 4. restart AO without losing accepted goals, priorities or assignments; and
 5. use AO's spatial universe rather than opening Herdr's sidebar first for
    orientation during a one-week dogfood period; and
@@ -66,7 +66,7 @@ start AO
   -> surface explainable attention
   -> search or navigate to a session
   -> inspect its execution metadata
-  -> open an embedded Herdr terminal, or foreground-attach to the real session
+  -> open the selected session in an embedded Herdr terminal
   -> return to the same AO selection
   -> explicitly complete and later archive the goal
 ```
@@ -91,8 +91,7 @@ start AO
 - Supporting attention, grouped-list, search, inspector and inbox lenses.
 - Deterministic goal placement with durable goal map positions.
 - Session inspector metadata.
-- Focus or foreground attachment to the real Herdr session.
-- Optional host-owned embedded terminal with frame, input, resize and release.
+- Host-owned embedded terminal with frame, input, resize and release.
 - Restoration of AO selection after returning where the host permits it.
 
 ### Explicitly excluded
@@ -218,6 +217,10 @@ If Herdr is unavailable or the observation is stale, AO shows that uncertainty
 and retains the last known organisation. It must not continue presenting an old
 blocked state as current without its age.
 
+Archived goals and their assigned sessions are excluded from the default active
+attention queue along with the archived goal's hidden map/list projection. An
+explicit history query may still include their stored metadata.
+
 The attention presentation and navigation contract is:
 
 - a current attention session has a steady `!` marker and increments its owning
@@ -225,9 +228,13 @@ The attention presentation and navigation contract is:
 - stale or uncertain state uses a distinct `?` marker and `?N` goal badge;
 - the queue, focused view and inspector expose the reason and how long the
   condition has been present;
+- a live session that has just entered `done` remains gently review-visible for
+  a short window: its `✓` marker and muted green treatment remain visible with
+  a completion age, without becoming a new attention state;
 - `g` cycles items in the ordering above, selects the session and focuses its
   owning goal or inbox context; `f` can focus or reset that context manually;
-- `Enter` attaches the selected session to the real Herdr session; and
+- `t`, `Enter` or a session double-click opens the selected session in the
+  host-owned terminal lens; and
 - attention changes emphasis, counters and jump targets but never changes
   durable map positions or causes an automatic reflow.
 
@@ -291,16 +298,18 @@ semantic zoom changes label and metadata density without moving nodes:
 - context expands attention-bearing labels while retaining the owning goal or
   inbox-list context; the selected target receives the detail tier so its full
   title remains identifiable; and
-- focus/detail shows a focused goal with larger or wrapped labels and its
-  complete direct orbit, while the floating inspector exposes full session
+- focus/detail keeps the complete direct orbit while following the selected
+  label tier: dense focused goals may collapse healthy satellites to animated
+  status markers in overview, context restores short labels, and detail shows
+  larger or wrapped labels; the floating inspector exposes full session
   metadata.
 
 The attention jump is the fastest path to intervention: `g` selects and focuses
-the next ordered attention item, `f` is the manual focus/reset action, `t` opens
-the host-owned terminal lens, and `Enter` foreground-attaches. Healthy or
-unrelated work may be dimmed by the attention lens, but its spatial position
-remains stable. Focus/detail is the narrow-terminal fallback; the portfolio
-must not compress every label until the map is unreadable.
+the next ordered attention item, `f` is the manual focus/reset action, and
+`t`, `Enter` or a session double-click opens the host-owned terminal lens.
+Healthy or unrelated work may be dimmed by the attention lens, but its spatial
+position remains stable. Focus/detail is the narrow-terminal fallback; the
+portfolio must not compress every label until the map is unreadable.
 
 Required operations are keyboard-complete:
 
@@ -311,7 +320,7 @@ Required operations are keyboard-complete:
 - create, rename and reprioritise a goal;
 - assign or reassign a session;
 - inspect metadata;
-- open an embedded terminal or foreground-attach to the selected session;
+- open the selected session in an embedded terminal;
 - release the embedded terminal and return with map state;
 - complete and archive a goal; and
 - quit without terminal corruption.
@@ -386,9 +395,9 @@ otherwise.
 For Herdr, `snapshot.agents` is the authoritative session inventory;
 `snapshot.panes`, tabs and workspaces only enrich those observations with
 topology, worktree and focus metadata. A pane without a recognized agent is not
-an AO session. `access` returns opaque foreground-attach and optional terminal
-targets. `openTerminal` translates the host-owned stream into frame, input,
-resize and release operations. AO does not reconstruct Herdr's workspace, tab
+an AO session. `access` returns a session-specific capability list plus opaque
+foreground-handoff and optional terminal targets. `openTerminal` translates the
+host-owned stream into frame, input, resize and release operations. AO does not reconstruct Herdr's workspace, tab
 and pane hierarchy in its domain.
 
 ### Attention module
@@ -460,29 +469,31 @@ On startup and manual refresh:
 Reconciliation is idempotent. Retrying the same snapshot cannot duplicate a
 session or remove user-authored metadata.
 
-## Terminal, attach and return
+## Terminal and return
 
 AO asks the Herdr adapter for the selected session's access capability. V0
-opens a host-owned embedded terminal with `t` when the capability is available.
-The cell-native renderer forwards input and resize and releases the controller
-with Ctrl-Q or Esc. `Enter` remains the foreground-attach fallback to the
-selected Herdr agent, so the path works even when Observatory is running in a
-different Ghostty tab. Herdr owns the PTY in both cases; AO does not own a
-durable process or multiplexer.
+opens a host-owned embedded terminal with `t`, `Enter` or a session double-click
+when the capability is available. The cell-native renderer forwards input and
+resize and releases the controller with Ctrl-Q or Esc. Herdr owns the PTY; AO
+does not own a durable process or multiplexer. Foreground attachment remains a
+host capability for future fallback routes, but is not the primary V0 session
+interaction.
 
 The TUI keeps the selected goal, selected session, search query, expanded state,
 map lens, focused goal, map centre and zoom while the embedded surface is open.
 When control returns, it restores that state and refreshes the host snapshot.
 
-If no embedded or foreground route is available, the inspector explains that
-limitation instead of offering a dead action.
+If no embedded terminal is available, the inspector explains that limitation
+instead of offering a dead action.
 
 ## Error behaviour
 
 - **Herdr unavailable:** show the stored universe with a prominent stale-host
-  state and permit metadata edits; disable live attachment.
+  state and permit metadata edits; disable live terminal entry.
 - **Malformed host record:** skip only that observation, surface a diagnostic
   count and retain previous accepted state.
+- **Incomplete host snapshot:** treat a missing required inventory array as an
+  unavailable host snapshot; retain the previous accepted session inventory.
 - **Duplicate native identity:** reject ambiguous reconciliation and show a
   diagnostic; do not guess.
 - **Session disappears:** retain it as stale under its goal.
@@ -510,7 +521,7 @@ limitation instead of offering a dead action.
   focused fallback.
 - Attention navigation tests for the exact ordering, reason/age presentation,
   owning-goal `!N`/`?N` aggregation, stable positions and the `g` then `Enter`
-  attach path.
+  terminal path.
 - Semantic-zoom tests that expose more label/detail in context and focus views
   without reflowing durable map positions.
 - Assignment-picker tests for inbox-first filtering and session-to-goal
@@ -523,7 +534,8 @@ limitation instead of offering a dead action.
 - Parse a real sanitised snapshot.
 - Use recognized agent records as sessions and exclude pane-only terminals.
 - Preserve opaque native identifiers.
-- Report supported attachment capability accurately.
+- Report supported terminal capability accurately for the primary interaction;
+  keep any foreground-attachment target opaque for future fallback routes.
 - Open the host-owned terminal capability with opaque targets and dimensions;
   translate frames, input, resize, release and stream errors.
 - Handle unavailable, empty and malformed responses.
@@ -549,10 +561,9 @@ Using the current real Herdr environment:
    terminal, send a harmless printable key, resize the terminal, and release
    with Ctrl-Q;
 9. confirm the same selection, floating card, map lens, semantic detail tier
-   and viewport return; use `Enter` to exercise foreground attachment as the
-   fallback;
+   and viewport return; use `Enter` again to exercise the direct terminal path;
 10. search for another session, confirm it is focused in spatial context, and
-    open or attach to it;
+    open it with `Enter`;
 11. return with the same selection and viewport as far as the host permits; and
 12. stop or hide a test agent, select its stale session from the list or
     attention lens, archive it with `x`, and confirm it leaves active
@@ -567,7 +578,7 @@ Using the current real Herdr environment:
 4. Implement Herdr snapshot parsing and reconciliation tests.
 5. Implement Attention, universe-map and supporting projections.
 6. Build the portable native OpenTUI spatial universe over those projections.
-7. Add map focus/attachment and full return-state restoration.
+7. Add map focus and full terminal return-state restoration.
 8. Add the optional host-owned terminal stream, cell renderer and reversible
    terminal lens over the same selection state.
 9. Run the manual acceptance flow and begin one-week dogfood.
@@ -581,7 +592,7 @@ anticipation.
 Record:
 
 - time to identify all waiting sessions;
-- time to find and attach to a named session;
+- time to find and open a named session in the terminal;
 - missed or falsely promoted attention items;
 - number of sessions opened merely to rediscover purpose;
 - goal/assignment edits required per day;
