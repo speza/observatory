@@ -43,6 +43,15 @@ const commandErrorCode = (result: CommandResult): string | undefined => {
   return stringValue(nonEmptyRecord(payload.error), "code");
 };
 
+const commandErrorMessage = (result: CommandResult): string | undefined => {
+  const payload = parseJsonValue(result.stderr) ?? parseJsonValue(result.stdout);
+  if (!isRecord(payload)) return undefined;
+  return stringValue(nonEmptyRecord(payload.error), "message");
+};
+
+const commandFailureMessage = (result: CommandResult, fallback: string): string =>
+  commandErrorMessage(result) ?? (result.stderr.trim() || result.stdout.trim() || fallback);
+
 const createLaunchTrace = (): LaunchTrace => {
   const path = process.env.AO_LAUNCH_LOG?.trim();
   if (!path) return async () => {};
@@ -230,6 +239,21 @@ const createdRootPaneId = (payload: JsonValue | undefined): string | undefined =
   return stringValue(rootPane, "pane_id") ?? stringValue(rootPane, "id");
 };
 
+const generatedAgentName = (agentKind: string, requestId: string): string => {
+  const kind =
+    agentKind
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9_-]/gu, "-")
+      .replace(/^[^a-z]+/u, "") || "agent";
+  const suffix =
+    requestId
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9_-]/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(-24) || "launch";
+  return `${kind.slice(0, Math.max(1, 31 - suffix.length))}-${suffix}`;
+};
+
 const paneBusy = (result: CommandResult): boolean => {
   return commandErrorCode(result) === "agent_pane_busy";
 };
@@ -342,7 +366,7 @@ export class HerdrHostAdapter implements SessionHost {
         if (workspace.exitCode !== 0)
           return {
             ok: false,
-            message: workspace.stderr.trim() || "Herdr could not create a launch workspace.",
+            message: commandFailureMessage(workspace, "Herdr could not create a launch workspace."),
           };
         let paneId = workspaceRootPaneId;
         if (!paneId) {
@@ -355,8 +379,10 @@ export class HerdrHostAdapter implements SessionHost {
           if (workspaceSnapshot.exitCode !== 0)
             return {
               ok: false,
-              message:
-                workspaceSnapshot.stderr.trim() || "Herdr could not inspect the launch workspace.",
+              message: commandFailureMessage(
+                workspaceSnapshot,
+                "Herdr could not inspect the launch workspace.",
+              ),
             };
           paneId = launchPaneFor(parseJsonValue(workspaceSnapshot.stdout), workingDirectory);
         }
@@ -366,7 +392,8 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "Herdr created the workspace but no interactive shell pane was found.",
           };
-        const name = request.agentName?.trim() || `${agentKind}-${request.requestId.slice(0, 8)}`;
+        const name =
+          request.agentName?.trim() || generatedAgentName(agentKind, request.requestId.trim());
         const args = [
           "herdr",
           "agent",
@@ -384,7 +411,7 @@ export class HerdrHostAdapter implements SessionHost {
         if (started.exitCode !== 0)
           return {
             ok: false,
-            message: started.stderr.trim() || `Herdr could not start ${agentKind}.`,
+            message: commandFailureMessage(started, `Herdr could not start ${agentKind}.`),
           };
         let promptWarning = "";
         if (request.prompt?.trim()) {
@@ -402,7 +429,10 @@ export class HerdrHostAdapter implements SessionHost {
             promptProvided: true,
           });
           if (prompted.exitCode !== 0)
-            promptWarning = prompted.stderr.trim() || "Initial prompt could not be delivered.";
+            promptWarning = commandFailureMessage(
+              prompted,
+              "Initial prompt could not be delivered.",
+            );
         }
         const after = await this.snapshotInternal();
         await trace("launch.after-snapshot", {
@@ -453,7 +483,7 @@ export class HerdrHostAdapter implements SessionHost {
         observedAt: this.clock.now(),
         sessions: [],
         diagnostics: [],
-        error: result.stderr.trim() || `Herdr exited with ${result.exitCode}.`,
+        error: commandFailureMessage(result, `Herdr exited with ${result.exitCode}.`),
       };
     }
     const snapshot = parseHerdrSnapshot(parseJsonValue(result.stdout), this.clock.now());

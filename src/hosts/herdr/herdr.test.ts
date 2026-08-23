@@ -344,6 +344,90 @@ describe("Herdr adapter", () => {
     ]);
   });
 
+  test("generates distinct names from the request suffix when no name is supplied", async () => {
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({
+      runner,
+      clock: new FixedClock(100),
+    });
+
+    await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-m123456789-abc123",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+      }),
+    );
+    await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-m123456789-def456",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+      }),
+    );
+
+    const names = runner.calls
+      .filter((call) => call[0] === "herdr" && call[1] === "agent" && call[2] === "start")
+      .map((call) => call[3]);
+    expect(names).toEqual(["codex-launch-m123456789-abc123", "codex-launch-m123456789-def456"]);
+  });
+
+  test("returns Herdr's structured launch error to the caller", async () => {
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(fixture),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: {
+              root_pane: { pane_id: "duplicate-name:p1" },
+            },
+          }),
+          stderr: "",
+        },
+        {
+          exitCode: 1,
+          stdout: JSON.stringify({
+            error: {
+              code: "agent_name_taken",
+              message: "agent name codex-launch-m is already used",
+            },
+          }),
+          stderr: "",
+        },
+      ],
+    );
+    const adapter = new HerdrHostAdapter({
+      runner,
+      clock: new FixedClock(100),
+    });
+
+    const result = await Effect.runPromise(
+      adapter.launch({
+        requestId: "launch-m123456789-duplicate",
+        workingDirectory: "/sandbox/alpha",
+        agentKind: "codex",
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      message: "agent name codex-launch-m is already used",
+    });
+  });
+
   test("uses the workspace creation response for the new root pane", async () => {
     const runner = new FakeRunner(
       {
