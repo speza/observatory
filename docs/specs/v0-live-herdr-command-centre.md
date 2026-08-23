@@ -288,8 +288,9 @@ semantic zoom changes label and metadata density without moving nodes:
 
 - overview shows the portfolio, short labels, goal body size, priority,
   attention counts and direct tethers;
-- context expands the selected or attention-bearing labels while retaining the
-  owning goal or inbox-list context; and
+- context expands attention-bearing labels while retaining the owning goal or
+  inbox-list context; the selected target receives the detail tier so its full
+  title remains identifiable; and
 - focus/detail shows a focused goal with larger or wrapped labels and its
   complete direct orbit, while the floating inspector exposes full session
   metadata.

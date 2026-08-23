@@ -28,7 +28,7 @@ describe("semantic zoom", () => {
         preference: "overview",
         selected: true,
       }),
-    ).toBe("context");
+    ).toBe("detail");
     expect(
       semanticZoomLevel({
         lens: "goal",

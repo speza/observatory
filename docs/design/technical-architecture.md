@@ -778,9 +778,10 @@ their map border pulses green. The animation is a progress cue, not a state
 source; the runtime state and host health remain visible in detail/list views.
 
 The renderer has semantic presentation tiers independent of camera zoom:
-overview uses compact labels and summary markers, context expands selected or
-attention-bearing labels in their owning context, and focus/detail exposes
-larger or wrapped labels plus the complete direct orbit. This is a presentation
+overview uses compact labels and summary markers, context expands
+attention-bearing labels in their owning context, and the selected target gets
+the detail tier with a complete wrapped title. Focus/detail additionally
+exposes larger labels plus the complete direct orbit. This is a presentation
 policy over the same projection, not a second layout or domain model. When
 geometric zoom drops below the readable cell density, overview nodes collapse
 to glyphs and priority markers; selected or attention-bearing nodes retain

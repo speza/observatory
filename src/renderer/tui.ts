@@ -235,6 +235,41 @@ const wrap = (value: string, maximum: number): string[] => {
   );
 };
 
+// Selected cards are an identification surface, so they may wrap a long
+// branch-like token over several rows instead of hiding the end behind an
+// ellipsis. Unselected labels keep using `wrap`, which deliberately favours a
+// compact map over exhaustive copy.
+const wrapFully = (value: string, maximum: number): string[] => {
+  if (maximum <= 1) return [shorten(value, maximum)];
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (word.length <= maximum) {
+      if (!line) line = word;
+      else if (line.length + word.length + 1 <= maximum) line += ` ${word}`;
+      else {
+        lines.push(line);
+        line = word;
+      }
+      continue;
+    }
+    if (line) {
+      lines.push(line);
+      line = "";
+    }
+    let offset = 0;
+    while (word.length - offset > maximum) {
+      lines.push(word.slice(offset, offset + maximum));
+      offset += maximum;
+    }
+    line = word.slice(offset);
+  }
+  if (line) lines.push(line);
+  return lines;
+};
+
 const statusGlyph = (session: SessionView, phase = 0): string => {
   return sessionMarker(session.hostHealth, session.runtimeState, phase);
 };
@@ -1228,7 +1263,9 @@ export class CommandCentreApp {
     const fullTitle = `${goal.priority} ${goal.title}`;
     const titleLines =
       level === "detail"
-        ? wrap(fullTitle, Math.max(8, titleBudget - 2)).slice(0, 2)
+        ? selected
+          ? wrapFully(fullTitle, Math.max(8, titleBudget - 2))
+          : wrap(fullTitle, Math.max(8, titleBudget - 2)).slice(0, 2)
         : [shorten(fullTitle, titleBudget)];
     const titleRadius = Math.ceil(Math.max(...titleLines.map((line) => line.length), 1) / 2) + 1;
     const loadRadius = Math.round(goal.radiusX * 0.86 * zoom);
@@ -1293,11 +1330,11 @@ export class CommandCentreApp {
         ? COLORS.completed
         : family;
     this.cell(buffer, point.x, point.y - radiusY + 1, "◎", coreColor, background);
-    const titleY = point.y - (titleLines.length > 1 ? 1 : 0);
+    const titleY = titleLines.length > 1 ? point.y - Math.ceil(titleLines.length / 2) : point.y;
     for (const [index, title] of titleLines.entries())
       this.textCentered(
         buffer,
-        shorten(title, Math.max(3, radiusX * 2 - 2)),
+        selected ? title : shorten(title, Math.max(3, radiusX * 2 - 2)),
         point.x,
         titleY + index,
         muted ? COLORS.faint : selected ? COLORS.white : COLORS.text,
@@ -1315,7 +1352,7 @@ export class CommandCentreApp {
         buffer,
         shorten(details, Math.max(3, radiusX * 2 - 2)),
         point.x,
-        Math.min(point.y + radiusY - 1, point.y + 2),
+        Math.min(point.y + radiusY - 1, titleY + titleLines.length),
         goal.attentionCount > 0
           ? COLORS.orange
           : goal.staleCount > 0
@@ -1399,7 +1436,9 @@ export class CommandCentreApp {
     const marker = statusGlyph(session, this.animationPhase);
     const titleLines =
       level === "detail"
-        ? wrap(session.displayName, Math.max(8, labelWidth - 2)).slice(0, 2)
+        ? selected
+          ? wrapFully(session.displayName, Math.max(8, labelWidth - 2))
+          : wrap(session.displayName, Math.max(8, labelWidth - 2)).slice(0, 2)
         : [shorten(session.displayName, Math.max(3, labelWidth - 2))];
     const labelLines = titleLines.map((title, index) =>
       index === 0 ? `${marker} ${title}` : title,
@@ -1430,7 +1469,7 @@ export class CommandCentreApp {
               ? 12
               : 11,
     );
-    const radiusY = level === "detail" ? (labelLines.length > 2 ? 3 : 2) : 1;
+    const radiusY = level === "detail" ? clamp(Math.ceil(labelLines.length / 2) + 1, 2, 5) : 1;
     const bounds = {
       x: point.x - radiusX,
       y: point.y - radiusY,
@@ -1503,15 +1542,18 @@ export class CommandCentreApp {
         : projection.kind === "session-inspector"
           ? `SESSION · ${projection.session.displayName}`
           : "INSPECTOR";
+    const minimumWidth = inboxCard ? 34 : projection.kind === "session-inspector" ? 46 : 38;
+    const maximumWidth = inboxCard ? 34 : projection.kind === "session-inspector" ? 64 : 52;
     const width = Math.min(
       rect.width - 2,
-      inboxCard ? 34 : projection.kind === "session-inspector" ? 46 : 38,
+      Math.min(maximumWidth, Math.max(minimumWidth, title.length + 4)),
     );
     const contentWidth = Math.max(1, width - 4);
+    const titleLines = wrapFully(title, contentWidth);
     const wrappedLines = projection.lines.flatMap((line) => wrap(line, contentWidth));
-    const maxHeight = Math.min(13, rect.height - 2);
-    const visibleLines = wrappedLines.slice(0, Math.max(1, maxHeight - 3));
-    const height = Math.min(maxHeight, Math.max(4, visibleLines.length + 3));
+    const maxHeight = Math.min(15, rect.height - 2);
+    const visibleLines = wrappedLines.slice(0, Math.max(0, maxHeight - titleLines.length - 2));
+    const height = Math.min(maxHeight, Math.max(4, titleLines.length + visibleLines.length + 2));
     const panel = placeFloatingInspector(
       rect,
       { width, height },
@@ -1537,16 +1579,20 @@ export class CommandCentreApp {
         ? statusColor(projection.session)
         : COLORS.borderStrong;
     this.roundedPanel(buffer, panel, COLORS.panelRaised, border);
-    this.text(
-      buffer,
-      shorten(title, Math.max(1, panel.width - 4)),
-      panel.x + 2,
-      panel.y,
-      COLORS.cyan,
-      COLORS.panelRaised,
-      TextAttributes.BOLD,
-    );
     let y = panel.y + 1;
+    for (const line of titleLines) {
+      if (y >= panel.y + panel.height - 2) break;
+      this.text(
+        buffer,
+        line,
+        panel.x + 2,
+        y - 1,
+        COLORS.cyan,
+        COLORS.panelRaised,
+        TextAttributes.BOLD,
+      );
+      y += 1;
+    }
     for (const line of visibleLines) {
       if (y >= panel.y + panel.height - 2) break;
       this.text(

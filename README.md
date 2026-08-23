@@ -127,8 +127,9 @@ Selecting a goal or session opens a transient floating inspector card
 near the selected item. It is clamped inside the map, never reserves a
 permanent sidebar, and can be hidden with `i`; `Enter` on a session still
 attaches to the real Herdr target. On a narrow terminal the card shortens its
-copy and the focused goal/list lens is preferred over compressing the whole
-universe. Creating a goal selects it automatically; `a` then opens an inbox
+lower-priority copy while preserving the selected title, and the focused
+goal/list lens is preferred over compressing the whole universe. Creating a
+goal selects it automatically; `a` then opens an inbox
 picker so sessions can be assigned without first navigating to an individual
 session.
 

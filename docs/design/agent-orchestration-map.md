@@ -475,8 +475,9 @@ has three presentation tiers:
 
 - overview: the portfolio map, short labels, body size, priority, attention
   counts and direct tethers;
-- context: selected and attention-bearing nodes receive expanded labels while
-  their owning goal or inbox remains visible; and
+- context: attention-bearing nodes receive expanded labels while their owning
+  goal or inbox remains visible; the selected node receives the detail tier so
+  its title remains fully identifiable; and
 - focus/detail: a focused goal or inbox shows larger or wrapped labels and the
   full direct orbit, while the inspector exposes complete execution metadata.
 

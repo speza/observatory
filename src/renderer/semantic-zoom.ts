@@ -24,6 +24,10 @@ export const semanticZoomLevel = (input: {
   readonly selected?: boolean;
   readonly attention?: boolean;
 }): SemanticZoomLevel => {
+  // The selected target is the user's current decision point. Give it the
+  // detail tier even when the surrounding portfolio remains compact; the
+  // selected card should spend space on identity before secondary metadata.
+  if (input.selected) return "detail";
   if (input.lens === "goal" || input.lens === "inbox") return "detail";
   const contextual = Boolean(input.selected || input.attention);
   if (input.preference === "detail" || (input.preference === "context" && contextual))
