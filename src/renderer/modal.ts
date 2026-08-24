@@ -2,8 +2,10 @@ export type ModalKind =
   | "create-goal"
   | "text"
   | "goal-picker"
-  | "session-picker"
-  | "session-launch"
+  | "agent-picker"
+  | "related-agents"
+  | "linked-execution-picker"
+  | "agent-launch"
   | "workspace-picker"
   | "confirm";
 
@@ -22,9 +24,13 @@ const baseHeight = (kind: ModalKind): number => {
       return 9;
     case "goal-picker":
       return 10;
-    case "session-picker":
+    case "agent-picker":
       return 15;
-    case "session-launch":
+    case "related-agents":
+      return 20;
+    case "linked-execution-picker":
+      return 14;
+    case "agent-launch":
       return 14;
     case "workspace-picker":
       return 18;

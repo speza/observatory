@@ -4,7 +4,7 @@ import {
   type HostHealth,
   type Priority,
   type RuntimeState,
-  type TrackedSession,
+  type Agent,
 } from "../universe/types.ts";
 import { displayHostKind } from "../hosts/types.ts";
 
@@ -12,9 +12,9 @@ export type AttentionReason = "blocked" | "waiting" | "host-stale";
 
 export interface AttentionItem {
   readonly id: string;
-  readonly targetType: "session" | "host";
+  readonly targetType: "agent" | "host";
   readonly targetId: string;
-  readonly sessionId?: string;
+  readonly agentId?: string;
   readonly goalId?: string;
   readonly reason: AttentionReason;
   readonly requiresHumanInput: boolean;
@@ -55,56 +55,56 @@ const age = (now: number, startedAt: number): number => Math.max(0, now - starte
 export const evaluateAttention = (
   now: number,
   goals: readonly Goal[],
-  sessions: readonly TrackedSession[],
+  agents: readonly Agent[],
   hosts: readonly HostHealth[] = [],
 ): AttentionProjection => {
   const priorities = goalPriorities(goals);
   const items: AttentionItem[] = [];
 
-  for (const session of sessions) {
-    const priority = priorities.get(session.primaryGoalId ?? "") ?? "P3";
+  for (const agent of agents) {
+    const priority = priorities.get(agent.primaryGoalId ?? "") ?? "P3";
     const currentReason =
-      session.hostHealth === "live" ? attentionReason(session.runtimeState) : undefined;
+      agent.hostHealth === "live" ? attentionReason(agent.runtimeState) : undefined;
     if (currentReason) {
-      const sourceLabel = displayHostKind(session.hostKind);
-      const startedAt = session.attentionSince ?? session.lastChangedAt;
+      const sourceLabel = displayHostKind(agent.hostKind);
+      const startedAt = agent.attentionSince ?? agent.lastChangedAt;
       items.push({
-        id: `${session.id}:${currentReason}`,
-        targetType: "session",
-        targetId: session.id,
-        sessionId: session.id,
-        goalId: session.primaryGoalId,
+        id: `${agent.id}:${currentReason}`,
+        targetType: "agent",
+        targetId: agent.id,
+        agentId: agent.id,
+        goalId: agent.primaryGoalId,
         reason: currentReason,
         requiresHumanInput: true,
         startedAt,
-        lastChangedAt: session.lastChangedAt,
+        lastChangedAt: agent.lastChangedAt,
         ageMs: age(now, startedAt),
         priority,
-        runtimeState: session.runtimeState,
+        runtimeState: agent.runtimeState,
         explanation:
           currentReason === "blocked"
-            ? `${sourceLabel} reports that this session is blocked and may need human input.`
-            : `${sourceLabel} reports that this session is waiting for human input.`,
+            ? `${sourceLabel} reports that this agent is blocked and may need human input.`
+            : `${sourceLabel} reports that this agent is waiting for human input.`,
       });
     }
 
-    if (session.hostHealth !== "live") {
-      const sourceLabel = displayHostKind(session.hostKind);
-      const startedAt = session.lastSeenAt;
+    if (agent.hostHealth !== "live") {
+      const sourceLabel = displayHostKind(agent.hostKind);
+      const startedAt = agent.lastSeenAt;
       items.push({
-        id: `${session.id}:host-stale`,
-        targetType: "session",
-        targetId: session.id,
-        sessionId: session.id,
-        goalId: session.primaryGoalId,
+        id: `${agent.id}:host-stale`,
+        targetType: "agent",
+        targetId: agent.id,
+        agentId: agent.id,
+        goalId: agent.primaryGoalId,
         reason: "host-stale",
         requiresHumanInput: false,
         startedAt,
-        lastChangedAt: session.lastObservedAt,
+        lastChangedAt: agent.lastObservedAt,
         ageMs: age(now, startedAt),
         priority,
-        runtimeState: session.runtimeState,
-        explanation: `The last ${sourceLabel} observation is ${session.hostHealth}; the last known ${session.runtimeState} state is not current.`,
+        runtimeState: agent.runtimeState,
+        explanation: `The last ${sourceLabel} observation is ${agent.hostHealth}; the last known ${agent.runtimeState} state is not current.`,
       });
     }
   }

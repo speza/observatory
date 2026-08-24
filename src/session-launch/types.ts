@@ -2,7 +2,7 @@ import type { Effect } from "effect";
 import type { SessionHost } from "../hosts/types.ts";
 import type { HostError } from "../hosts/errors.ts";
 import type { Universe } from "../universe/universe.ts";
-import type { GoalId, SessionId } from "../universe/types.ts";
+import type { GoalId, AgentId } from "../universe/types.ts";
 import type {
   PreparedWorkspace,
   WorkspaceProvider,
@@ -30,7 +30,7 @@ export type LaunchGoal =
     }
   | { readonly kind: "inbox" };
 
-export interface StartSessionIntent {
+export interface StartAgentIntent {
   readonly requestId: string;
   readonly goal: LaunchGoal;
   readonly workspace: WorkspaceSelection;
@@ -40,25 +40,25 @@ export interface StartSessionIntent {
     readonly args?: readonly string[];
   };
   readonly prompt?: string;
-  readonly sessionName?: string;
+  readonly agentName?: string;
   readonly mode?: "manual" | "auto" | "hybrid";
 }
 
-export interface StartSessionResult {
+export interface StartAgentResult {
   readonly status: "started" | "already-observed" | "pending" | "failed";
   readonly message: string;
   readonly requestId: string;
   readonly goalId?: GoalId;
-  readonly sessionId?: SessionId;
+  readonly agentId?: AgentId;
   readonly workspace?: PreparedWorkspace;
   readonly warnings?: readonly string[];
 }
 
-export interface StartSessionCoordinator {
-  start(intent: StartSessionIntent): Effect.Effect<StartSessionResult, LaunchError>;
+export interface StartAgentCoordinator {
+  start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
 }
 
-export interface StartSessionCoordinatorOptions {
+export interface StartAgentCoordinatorOptions {
   readonly universe: Universe;
   readonly host: SessionHost;
   readonly workspace: WorkspaceProvider;

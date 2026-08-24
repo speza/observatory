@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { filterAssignableSessions } from "./assignment.ts";
-import type { SessionView } from "../projection/types.ts";
+import { filterAssignableAgents } from "./assignment.ts";
+import type { AgentView } from "../projection/types.ts";
 
-const session = (overrides: Partial<SessionView> = {}): SessionView => ({
-  id: overrides.id ?? "session-1",
+const agent = (overrides: Partial<AgentView> = {}): AgentView => ({
+  id: overrides.id ?? "agent-1",
   hostKind: "mock",
   nativeId: "native-1",
   displayName: "Model router implementation",
@@ -14,28 +14,26 @@ const session = (overrides: Partial<SessionView> = {}): SessionView => ({
   lastSeenAt: 1,
   lastObservedAt: 1,
   lastChangedAt: 1,
-  hostLocator: "mock://session-1",
+  hostLocator: "mock://agent-1",
   ...overrides,
 });
 
 describe("assignment picker", () => {
-  test("starts with the complete inbox and matches useful session metadata", () => {
-    const sessions = [
-      session(),
-      session({ id: "session-2", displayName: "Memory reminders", repository: "observatory" }),
+  test("starts with the complete inbox and matches useful agent metadata", () => {
+    const agents = [
+      agent(),
+      agent({ id: "agent-2", displayName: "Memory reminders", repository: "observatory" }),
     ];
 
-    expect(filterAssignableSessions(sessions, "")).toEqual(sessions);
-    expect(filterAssignableSessions(sessions, "observatory").map((item) => item.id)).toEqual([
-      "session-2",
+    expect(filterAssignableAgents(agents, "")).toEqual(agents);
+    expect(filterAssignableAgents(agents, "observatory").map((item) => item.id)).toEqual([
+      "agent-2",
     ]);
-    expect(filterAssignableSessions(sessions, "ROUTER").map((item) => item.id)).toEqual([
-      "session-1",
-    ]);
+    expect(filterAssignableAgents(agents, "ROUTER").map((item) => item.id)).toEqual(["agent-1"]);
   });
 
   test("returns an empty result when the inbox input has no match", () => {
-    const sessions = [session()];
-    expect(filterAssignableSessions(sessions, "missing")).toHaveLength(0);
+    const agents = [agent()];
+    expect(filterAssignableAgents(agents, "missing")).toHaveLength(0);
   });
 });

@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import {
   type Goal,
   type HostHealth,
-  type TrackedSession,
+  type Agent,
   type UniverseState,
   type UniverseStore,
 } from "../../universe/types.ts";
@@ -24,7 +24,7 @@ interface GoalRow {
   map_pinned: number;
 }
 
-interface SessionRow {
+interface AgentRow {
   id: string;
   host_kind: string;
   native_id: string;
@@ -43,8 +43,16 @@ interface SessionRow {
   branch: string | null;
   worktree: string | null;
   provider: string | null;
+  execution_container_id: string | null;
+  execution_container_label: string | null;
   host_locator: string;
   archived_at: number | null;
+}
+
+interface RelatedAgentDismissalRow {
+  goal_id: string;
+  agent_id: string;
+  dismissed_at: number;
 }
 
 interface HostRow {
@@ -59,7 +67,7 @@ const asPriority = (value: string): Goal["priority"] =>
   value === "P0" || value === "P1" || value === "P2" || value === "P3" ? value : "P2";
 const asGoalStatus = (value: string): Goal["status"] =>
   value === "active" || value === "completed" || value === "archived" ? value : "active";
-const asRuntimeState = (value: string): TrackedSession["runtimeState"] =>
+const asRuntimeState = (value: string): Agent["runtimeState"] =>
   value === "idle" ||
   value === "working" ||
   value === "waiting" ||
@@ -68,9 +76,9 @@ const asRuntimeState = (value: string): TrackedSession["runtimeState"] =>
   value === "unknown"
     ? value
     : "unknown";
-const asHealth = (value: string): TrackedSession["hostHealth"] =>
+const asHealth = (value: string): Agent["hostHealth"] =>
   value === "live" || value === "stale" || value === "unavailable" ? value : "stale";
-const asSource = (value: string): TrackedSession["displayNameSource"] =>
+const asSource = (value: string): Agent["displayNameSource"] =>
   value === "human" ? "human" : "host";
 
 export class SqliteUniverseStore implements UniverseStore {
@@ -106,11 +114,11 @@ export class SqliteUniverseStore implements UniverseStore {
           });
         return goal;
       });
-    const sessions = this.db
-      .query<SessionRow, []>("SELECT * FROM sessions ORDER BY display_name, id")
+    const agents = this.db
+      .query<AgentRow, []>("SELECT * FROM agents ORDER BY display_name, id")
       .all()
       .map((row) => {
-        const session = {
+        const agent = {
           id: row.id,
           hostKind: row.host_kind,
           nativeId: row.native_id,
@@ -124,16 +132,22 @@ export class SqliteUniverseStore implements UniverseStore {
           lastChangedAt: row.last_changed_at,
           hostLocator: row.host_locator,
         };
-        if (row.description) Object.assign(session, { description: row.description });
-        if (row.primary_goal_id) Object.assign(session, { primaryGoalId: row.primary_goal_id });
+        if (row.description) Object.assign(agent, { description: row.description });
+        if (row.primary_goal_id) Object.assign(agent, { primaryGoalId: row.primary_goal_id });
         if (row.attention_since !== null)
-          Object.assign(session, { attentionSince: row.attention_since });
-        if (row.repository) Object.assign(session, { repository: row.repository });
-        if (row.branch) Object.assign(session, { branch: row.branch });
-        if (row.worktree) Object.assign(session, { worktree: row.worktree });
-        if (row.provider) Object.assign(session, { provider: row.provider });
-        if (row.archived_at !== null) Object.assign(session, { archivedAt: row.archived_at });
-        return session;
+          Object.assign(agent, { attentionSince: row.attention_since });
+        if (row.repository) Object.assign(agent, { repository: row.repository });
+        if (row.branch) Object.assign(agent, { branch: row.branch });
+        if (row.worktree) Object.assign(agent, { worktree: row.worktree });
+        if (row.provider) Object.assign(agent, { provider: row.provider });
+        if (row.execution_container_id)
+          Object.assign(agent, {
+            executionContainer: row.execution_container_label
+              ? { id: row.execution_container_id, label: row.execution_container_label }
+              : { id: row.execution_container_id },
+          });
+        if (row.archived_at !== null) Object.assign(agent, { archivedAt: row.archived_at });
+        return agent;
       });
     const hosts = this.db
       .query<HostRow, []>("SELECT * FROM hosts ORDER BY host_kind")
@@ -151,12 +165,24 @@ export class SqliteUniverseStore implements UniverseStore {
         if (row.last_error) Object.assign(host, { lastError: row.last_error });
         return host;
       });
-    return { version: 1, goals, sessions, hosts };
+    const relatedAgentDismissals = this.db
+      .query<RelatedAgentDismissalRow, []>(
+        "SELECT goal_id, agent_id, dismissed_at FROM related_agent_dismissals ORDER BY goal_id, agent_id",
+      )
+      .all()
+      .map((row) => ({
+        goalId: row.goal_id,
+        agentId: row.agent_id,
+        dismissedAt: row.dismissed_at,
+      }));
+    return { version: 1, goals, agents, hosts, relatedAgentDismissals };
   }
 
   save(state: UniverseState): void {
     const write = this.db.transaction(() => {
-      this.db.exec("DELETE FROM sessions; DELETE FROM goals; DELETE FROM hosts;");
+      this.db.exec(
+        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM hosts;",
+      );
       const goal = this.db.prepare(
         "INSERT INTO goals (id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
@@ -176,11 +202,11 @@ export class SqliteUniverseStore implements UniverseStore {
           row.mapPositionPinned ? 1 : 0,
         );
       }
-      const session = this.db.prepare(
-        "INSERT INTO sessions (id, host_kind, native_id, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, host_locator, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      const agent = this.db.prepare(
+        "INSERT INTO agents (id, host_kind, native_id, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, host_locator, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
-      for (const row of state.sessions) {
-        session.run(
+      for (const row of state.agents) {
+        agent.run(
           row.id,
           row.hostKind,
           row.nativeId,
@@ -199,6 +225,8 @@ export class SqliteUniverseStore implements UniverseStore {
           row.branch ?? null,
           row.worktree ?? null,
           row.provider ?? null,
+          row.executionContainer?.id ?? null,
+          row.executionContainer?.label ?? null,
           row.hostLocator,
           row.archivedAt ?? null,
         );
@@ -214,6 +242,11 @@ export class SqliteUniverseStore implements UniverseStore {
           row.lastError ?? null,
           row.diagnosticCount,
         );
+      const dismissal = this.db.prepare(
+        "INSERT INTO related_agent_dismissals (goal_id, agent_id, dismissed_at) VALUES (?, ?, ?)",
+      );
+      for (const row of state.relatedAgentDismissals ?? [])
+        dismissal.run(row.goalId, row.agentId, row.dismissedAt);
     });
     write();
   }
@@ -223,111 +256,69 @@ export class SqliteUniverseStore implements UniverseStore {
   }
 
   private migrate(): void {
-    this.db.exec(
-      "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
-    );
-    const applied = new Set(
-      this.db
-        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
-        .all()
-        .map((row) => row.version),
-    );
-    if (!applied.has(1)) {
-      const migration = this.db.transaction(() => {
-        this.db.exec(`
-          CREATE TABLE goals (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            description TEXT,
-            priority TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            completed_at INTEGER,
-            archived_at INTEGER
-          );
-          CREATE TABLE sessions (
-            id TEXT PRIMARY KEY,
-            host_kind TEXT NOT NULL,
-            native_id TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            description TEXT,
-            primary_goal_id TEXT,
-            runtime_state TEXT NOT NULL,
-            runtime_state_source TEXT NOT NULL,
-            host_health TEXT NOT NULL,
-            last_seen_at INTEGER NOT NULL,
-            last_observed_at INTEGER NOT NULL,
-            attention_since INTEGER,
-            repository TEXT,
-            branch TEXT,
-            worktree TEXT,
-            provider TEXT,
-            host_locator TEXT NOT NULL,
-            UNIQUE(host_kind, native_id),
-            FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
-          );
-          CREATE TABLE hosts (
-            host_kind TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            last_observed_at INTEGER,
-            last_error TEXT,
-            diagnostic_count INTEGER NOT NULL DEFAULT 0
-          );
-          INSERT INTO schema_migrations (version, applied_at) VALUES (1, unixepoch() * 1000);
-        `);
-      });
-      migration();
-    }
-    const afterOne = new Set(
-      this.db
-        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
-        .all()
-        .map((row) => row.version),
-    );
-    if (!afterOne.has(2)) {
-      const migration = this.db.transaction(() => {
-        this.db.exec(
-          "ALTER TABLE sessions ADD COLUMN display_name_source TEXT NOT NULL DEFAULT 'host'; ALTER TABLE sessions ADD COLUMN last_changed_at INTEGER NOT NULL DEFAULT 0;",
-        );
-        this.db.exec(
-          "INSERT INTO schema_migrations (version, applied_at) VALUES (2, unixepoch() * 1000)",
-        );
-      });
-      migration();
-    }
-    const afterTwo = new Set(
-      this.db
-        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
-        .all()
-        .map((row) => row.version),
-    );
-    if (!afterTwo.has(3)) {
-      const migration = this.db.transaction(() => {
-        this.db.exec(
-          "ALTER TABLE goals ADD COLUMN map_x REAL; ALTER TABLE goals ADD COLUMN map_y REAL; ALTER TABLE goals ADD COLUMN map_pinned INTEGER NOT NULL DEFAULT 0;",
-        );
-        this.db.exec(
-          "INSERT INTO schema_migrations (version, applied_at) VALUES (3, unixepoch() * 1000)",
-        );
-      });
-      migration();
-    }
-    const afterThree = new Set(
-      this.db
-        .query<{ version: number }, []>("SELECT version FROM schema_migrations")
-        .all()
-        .map((row) => row.version),
-    );
-    if (!afterThree.has(4)) {
-      const migration = this.db.transaction(() => {
-        this.db.exec("ALTER TABLE sessions ADD COLUMN archived_at INTEGER;");
-        this.db.exec(
-          "INSERT INTO schema_migrations (version, applied_at) VALUES (4, unixepoch() * 1000)",
-        );
-      });
-      migration();
-    }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        priority TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        archived_at INTEGER,
+        map_x REAL,
+        map_y REAL,
+        map_pinned INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        host_kind TEXT NOT NULL,
+        native_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        display_name_source TEXT NOT NULL,
+        description TEXT,
+        primary_goal_id TEXT,
+        runtime_state TEXT NOT NULL,
+        runtime_state_source TEXT NOT NULL,
+        host_health TEXT NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        last_observed_at INTEGER NOT NULL,
+        last_changed_at INTEGER NOT NULL,
+        attention_since INTEGER,
+        repository TEXT,
+        branch TEXT,
+        worktree TEXT,
+        provider TEXT,
+        execution_container_id TEXT,
+        execution_container_label TEXT,
+        host_locator TEXT NOT NULL,
+        archived_at INTEGER,
+        UNIQUE(host_kind, native_id),
+        FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
+      );
+      CREATE TABLE IF NOT EXISTS hosts (
+        host_kind TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        last_observed_at INTEGER,
+        last_error TEXT,
+        diagnostic_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS related_agent_dismissals (
+        goal_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        dismissed_at INTEGER NOT NULL,
+        PRIMARY KEY(goal_id, agent_id),
+        FOREIGN KEY(goal_id) REFERENCES goals(id),
+        FOREIGN KEY(agent_id) REFERENCES agents(id)
+      );
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (1, unixepoch() * 1000);
+    `);
   }
 }
 

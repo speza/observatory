@@ -106,7 +106,7 @@ const terminalRecordReason = (value: RecordValue): string | undefined =>
 
 const mockFrame = (): string => {
   const escape = String.fromCharCode(27);
-  const output = `${escape}[2J${escape}[H${escape}[1;36mHERDR MOCK TERMINAL${escape}[0m\r\n${escape}[32mserver-owned session${escape}[0m\r\n\r\nType into the surface. Ctrl-Q releases it.\r\n`;
+  const output = `${escape}[2J${escape}[H${escape}[1;36mHERDR MOCK TERMINAL${escape}[0m\r\n${escape}[32mserver-owned agent${escape}[0m\r\n\r\nType into the surface. Ctrl-Q releases it.\r\n`;
   return JSON.stringify({
     type: "terminal.frame",
     data: encodeBase64(new TextEncoder().encode(output)),
@@ -126,7 +126,7 @@ const spawnController = (
       { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
     );
   }
-  const command = ["herdr", "terminal", "session", mode, target];
+  const command = ["herdr", "terminal", "agent", mode, target];
   if (mode === "control") command.push("--takeover");
   command.push("--cols", String(columns), "--rows", String(rows));
   return Bun.spawn(command, { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
@@ -174,7 +174,7 @@ const main = async (): Promise<void> => {
     width: renderer.width - 2,
     height: 1,
     content:
-      "Herdr owns the process  ·  Ctrl-Q release  ·  all other keys go to the selected session  ·  resize follows the window",
+      "Herdr owns the process  ·  Ctrl-Q release  ·  all other keys go to the selected agent  ·  resize follows the window",
     fg: COLORS.muted,
     bg: COLORS.background,
   });

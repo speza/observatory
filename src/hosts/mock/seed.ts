@@ -2,7 +2,7 @@ import type { Universe } from "../../universe/universe.ts";
 
 export interface MockSeedResult {
   readonly createdGoals: number;
-  readonly assignedSessions: number;
+  readonly assignedAgents: number;
 }
 
 const goals = [
@@ -15,7 +15,7 @@ const goals = [
   },
   {
     id: "mock-goal-host",
-    title: "Session host integration",
+    title: "Agent host integration",
     description: "Synthetic host activity for attention and attach flows.",
     priority: "P1" as const,
     nativeIds: ["mock-p07", "mock-p08", "mock-p09", "mock-p10", "mock-p11", "mock-p12"],
@@ -30,7 +30,7 @@ const goals = [
 ] as const;
 
 export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
-  if (universe.snapshot().goals.length > 0) return { createdGoals: 0, assignedSessions: 0 };
+  if (universe.snapshot().goals.length > 0) return { createdGoals: 0, assignedAgents: 0 };
 
   let createdGoals = 0;
   for (const goal of goals) {
@@ -45,22 +45,22 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
     createdGoals += 1;
   }
 
-  const sessionsByNativeId = new Map(
-    universe.snapshot().sessions.map((session) => [session.nativeId, session.id]),
+  const agentsByNativeId = new Map(
+    universe.snapshot().agents.map((agent) => [agent.nativeId, agent.id]),
   );
-  let assignedSessions = 0;
+  let assignedAgents = 0;
   for (const goal of goals) {
     for (const nativeId of goal.nativeIds) {
-      const sessionId = sessionsByNativeId.get(nativeId);
-      if (!sessionId) continue;
+      const agentId = agentsByNativeId.get(nativeId);
+      if (!agentId) continue;
       const result = universe.execute({
-        type: "AssignSession",
-        sessionId,
+        type: "AssignAgent",
+        agentId,
         goalId: goal.id,
       });
-      if (!result.ok) throw new Error(result.error ?? "Could not assign mock session.");
-      assignedSessions += 1;
+      if (!result.ok) throw new Error(result.error ?? "Could not assign mock agent.");
+      assignedAgents += 1;
     }
   }
-  return { createdGoals, assignedSessions };
+  return { createdGoals, assignedAgents };
 };

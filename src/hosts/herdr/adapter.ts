@@ -6,10 +6,11 @@ import type {
   HostLaunchOption,
   HostLaunchRequest,
   HostLaunchResult,
-  HostSessionObservation,
+  HostAgentObservation,
   HostSnapshot,
   OpaqueAccessTarget,
-  SessionAccess,
+  LinkedExecution,
+  AgentAccess,
   SessionHost,
   TerminalDimensions,
   HostTerminalOpenResult,
@@ -71,7 +72,7 @@ const stripWorkingMarker = (value: string): string => {
   const stripped = value.replace(/^[◐◓◑◒]\s*/u, "").trim();
   return stripped || value;
 };
-const status = (value: JsonValue | undefined): HostSessionObservation["runtimeState"] => {
+const status = (value: JsonValue | undefined): HostAgentObservation["runtimeState"] => {
   switch (value) {
     case "idle":
     case "working":
@@ -106,8 +107,8 @@ export const parseHerdrSnapshot = (
       hostKind: "herdr",
       available: false,
       observedAt,
-      sessions: [],
-      diagnostics: ["Herdr snapshot did not contain a session_snapshot result."],
+      agents: [],
+      diagnostics: ["Herdr snapshot did not contain an agent inventory result."],
       error: "Malformed Herdr snapshot envelope.",
     };
   }
@@ -120,13 +121,13 @@ export const parseHerdrSnapshot = (
       hostKind: "herdr",
       available: false,
       observedAt,
-      sessions: [],
+      agents: [],
       diagnostics: [`Herdr snapshot omitted required ${missing.join(" and ")} array(s).`],
-      error: "Malformed Herdr snapshot: required session inventory is incomplete.",
+      error: "Malformed Herdr snapshot: required agent inventory is incomplete.",
     };
   }
   const panes = snapshot.panes;
-  const agents = snapshot.agents;
+  const agentRecords = snapshot.agents;
   const workspaces = Array.isArray(snapshot.workspaces) ? snapshot.workspaces : [];
   const paneById = new Map<string, RecordValue>();
   const workspaceById = new Map<string, RecordValue>();
@@ -142,9 +143,9 @@ export const parseHerdrSnapshot = (
     if (workspaceId) workspaceById.set(workspaceId, record);
   }
 
-  const sessions: HostSessionObservation[] = [];
+  const observations: HostAgentObservation[] = [];
   const seen = new Set<string>();
-  for (const item of agents) {
+  for (const item of agentRecords) {
     if (!isRecord(item)) {
       diagnostics.push("Skipped a non-object Herdr agent record.");
       continue;
@@ -175,6 +176,7 @@ export const parseHerdrSnapshot = (
     const worktreePath = stringValue(worktree, "checkout_path");
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
+    const executionContainerLabel = stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
       nativeId: paneId,
@@ -183,12 +185,15 @@ export const parseHerdrSnapshot = (
       runtimeStateSource: "herdr.agent_status",
       observedAt,
       hostLocator: locator(workspaceId, tabId, paneId, terminalId),
+      executionContainer: executionContainerLabel
+        ? { id: workspaceId, label: executionContainerLabel }
+        : { id: workspaceId },
     };
     if (repository) Object.assign(observation, { repository });
     if (branch) Object.assign(observation, { branch });
     if (worktreePath) Object.assign(observation, { worktree: worktreePath });
     if (provider) Object.assign(observation, { provider });
-    sessions.push(observation);
+    observations.push(observation);
   }
   if (!Array.isArray(snapshot.workspaces))
     diagnostics.push("Herdr snapshot omitted its optional workspaces array.");
@@ -196,7 +201,7 @@ export const parseHerdrSnapshot = (
     hostKind: "herdr",
     available: true,
     observedAt,
-    sessions,
+    agents: observations,
     diagnostics,
   };
 };
@@ -208,6 +213,198 @@ const normalizedPath = (value: string): string => value.replace(/\\/gu, "/").rep
 
 const paneWorkingDirectory = (pane: RecordValue): string | undefined =>
   stringValue(pane, "cwd") ?? stringValue(pane, "foreground_cwd");
+
+const terminalFingerprintForPane = (pane: RecordValue): string | undefined => {
+  const workspaceId = stringValue(pane, "workspace_id");
+  const tabId = stringValue(pane, "tab_id");
+  const paneId = stringValue(pane, "pane_id");
+  const terminalId = stringValue(pane, "terminal_id");
+  if (!workspaceId || !tabId || !paneId || !terminalId) return undefined;
+  return JSON.stringify({ workspaceId, tabId, paneId, terminalId });
+};
+
+const herdrTarget = (
+  kind: string,
+  token: string,
+  fingerprint: string | undefined,
+): OpaqueAccessTarget => {
+  const target = { kind, token };
+  if (fingerprint) return { ...target, fingerprint };
+  return target;
+};
+
+const openLinkedExecutionTerminalTarget = (target: OpaqueAccessTarget): string | undefined =>
+  target.kind === "herdr-terminal-control" ? target.token : undefined;
+
+const preparedShellWorkingDirectory = (target: OpaqueAccessTarget): string | undefined =>
+  target.kind === "herdr-prepared-shell" ? target.token : undefined;
+
+type PreparedShellTarget = {
+  readonly ownerToken: string;
+  readonly workingDirectory: string;
+  readonly target: string;
+  readonly fingerprint: string;
+};
+
+const preparedShellKey = (ownerToken: string, workingDirectory: string): string =>
+  `${ownerToken}\u0000${normalizedPath(workingDirectory)}`;
+
+const paneWorkingDirectoriesFor = (payload: JsonValue | undefined): Map<string, string> => {
+  const snapshot = unwrapSnapshot(payload);
+  const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
+  const result = new Map<string, string>();
+  for (const item of panes) {
+    const pane = nonEmptyRecord(item);
+    const paneId = stringValue(pane, "pane_id");
+    const workingDirectory = paneWorkingDirectory(pane);
+    if (paneId && workingDirectory) result.set(paneId, normalizedPath(workingDirectory));
+  }
+  return result;
+};
+
+const paneFingerprintsFor = (payload: JsonValue | undefined): Map<string, string> => {
+  const snapshot = unwrapSnapshot(payload);
+  const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
+  const result = new Map<string, string>();
+  for (const item of panes) {
+    const pane = nonEmptyRecord(item);
+    const paneId = stringValue(pane, "pane_id");
+    const fingerprint = terminalFingerprintForPane(pane);
+    if (paneId && fingerprint) result.set(paneId, fingerprint);
+  }
+  return result;
+};
+
+const newPaneFor = (
+  payload: JsonValue | undefined,
+  beforePaneIds: ReadonlySet<string>,
+  workingDirectory: string,
+): string | undefined => {
+  const wanted = normalizedPath(workingDirectory);
+  const snapshot = unwrapSnapshot(payload);
+  const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
+  const agentPaneIds = new Set(
+    (snapshot && Array.isArray(snapshot.agents) ? snapshot.agents : [])
+      .map((agent) => (isRecord(agent) ? stringValue(agent, "pane_id") : undefined))
+      .filter((paneId): paneId is string => Boolean(paneId)),
+  );
+  const candidates = panes
+    .map(nonEmptyRecord)
+    .map((pane) => ({
+      paneId: stringValue(pane, "pane_id"),
+      workingDirectory: paneWorkingDirectory(pane),
+    }))
+    .filter((pane): pane is { paneId: string; workingDirectory: string } => {
+      const paneId = pane.paneId;
+      const candidateWorkingDirectory = pane.workingDirectory;
+      return (
+        paneId !== undefined &&
+        candidateWorkingDirectory !== undefined &&
+        !beforePaneIds.has(paneId) &&
+        !agentPaneIds.has(paneId) &&
+        normalizedPath(candidateWorkingDirectory) === wanted
+      );
+    });
+  return candidates.length === 1 ? candidates[0]?.paneId : undefined;
+};
+
+/**
+ * Observe shell-only panes as transient linkedExecutions to their matching agent.
+ * The returned values deliberately contain only opaque terminal targets; the
+ * Herdr workspace/tab/pane topology stays inside this adapter.
+ */
+const linkedExecutionsFor = (
+  payload: JsonValue | undefined,
+  agents: readonly HostAgentObservation[],
+): Map<string, readonly LinkedExecution[]> => {
+  const snapshot = unwrapSnapshot(payload);
+  const linkedExecutions = new Map<string, readonly LinkedExecution[]>();
+  if (!snapshot || !Array.isArray(snapshot.panes)) return linkedExecutions;
+
+  const panes = snapshot.panes.map(nonEmptyRecord);
+  const paneById = new Map<string, RecordValue>();
+  for (const pane of panes) {
+    const paneId = stringValue(pane, "pane_id");
+    if (paneId) paneById.set(paneId, pane);
+  }
+  const agentPaneIds = new Set(
+    (Array.isArray(snapshot.agents) ? snapshot.agents : [])
+      .map((agent) => (isRecord(agent) ? stringValue(agent, "pane_id") : undefined))
+      .filter((paneId): paneId is string => Boolean(paneId)),
+  );
+
+  for (const agent of agents) {
+    const agentPane = paneById.get(agent.nativeId);
+    const workspaceId = agentPane ? stringValue(agentPane, "workspace_id") : undefined;
+    const workingDirectory =
+      agent.worktree ?? (agentPane ? paneWorkingDirectory(agentPane) : undefined);
+    const ownerFingerprint = agentPane ? terminalFingerprintForPane(agentPane) : undefined;
+    const wanted = workingDirectory ? normalizedPath(workingDirectory) : undefined;
+    const observed = panes
+      .filter((pane) => {
+        const paneId = stringValue(pane, "pane_id");
+        const paneWorkspaceId = stringValue(pane, "workspace_id");
+        const paneCwd = paneWorkingDirectory(pane);
+        return (
+          Boolean(paneId) &&
+          paneId !== agent.nativeId &&
+          Boolean(workspaceId) &&
+          paneWorkspaceId === workspaceId &&
+          Boolean(wanted) &&
+          Boolean(paneCwd) &&
+          normalizedPath(paneCwd!) === wanted
+        );
+      })
+      .map((pane, index): LinkedExecution | undefined => {
+        const paneId = stringValue(pane, "pane_id");
+        if (!paneId) return undefined;
+        const title =
+          stringValue(pane, "terminal_title_stripped") ??
+          stringValue(pane, "terminal_title") ??
+          `Linked terminal ${index + 1}`;
+        const fingerprint = terminalFingerprintForPane(pane);
+        return {
+          kind: agentPaneIds.has(paneId) ? "agent" : "shell",
+          label: stripWorkingMarker(title),
+          owner: herdrTarget("herdr-agent-attach", agent.nativeId, ownerFingerprint),
+          workingDirectory,
+          target: fingerprint
+            ? { kind: "herdr-terminal-control", token: paneId, fingerprint }
+            : undefined,
+          available: fingerprint !== undefined,
+          source: "observed",
+          explanation: fingerprint
+            ? agentPaneIds.has(paneId)
+              ? "Sibling Herdr agent in the same worktree."
+              : "Existing Herdr shell in the agent worktree."
+            : "Herdr did not provide a complete terminal identity for this linked pane.",
+        };
+      })
+      .filter(
+        (linkedExecution): linkedExecution is LinkedExecution => linkedExecution !== undefined,
+      );
+
+    if (observed.length > 0) {
+      linkedExecutions.set(agent.nativeId, observed);
+      continue;
+    }
+    if (workingDirectory) {
+      linkedExecutions.set(agent.nativeId, [
+        {
+          kind: "shell",
+          label: "Linked shell",
+          owner: herdrTarget("herdr-agent-attach", agent.nativeId, ownerFingerprint),
+          workingDirectory,
+          target: { kind: "herdr-prepared-shell", token: workingDirectory },
+          available: true,
+          source: "prepared",
+          explanation: `Herdr will prepare a linked shell in ${workingDirectory}.`,
+        },
+      ]);
+    }
+  }
+  return linkedExecutions;
+};
 
 const launchPaneFor = (
   payload: JsonValue | undefined,
@@ -300,6 +497,11 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly terminalRunner: TerminalCommandRunner | undefined;
   private readonly clock: Clock;
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
+  private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
+  private readonly livePaneWorkingDirectories = new Map<string, string>();
+  private readonly liveTerminalFingerprints = new Map<string, string>();
+  private readonly liveAgentFingerprints = new Map<string, string>();
+  private readonly preparedShellTargets = new Map<string, PreparedShellTarget>();
 
   constructor(options: {
     readonly runner?: CommandRunner;
@@ -342,10 +544,10 @@ export class HerdrHostAdapter implements SessionHost {
         const before = await this.snapshotInternal();
         await trace("launch.before-snapshot", {
           available: before.available,
-          sessionCount: before.sessions.length,
+          agentCount: before.agents.length,
           error: before.error,
         });
-        const workspaceLabel = request.agentName?.trim() || `${agentKind} session`;
+        const workspaceLabel = request.agentName?.trim() || `${agentKind} agent`;
         const workspace = await this.runner.run([
           "herdr",
           "workspace",
@@ -437,23 +639,23 @@ export class HerdrHostAdapter implements SessionHost {
         const after = await this.snapshotInternal();
         await trace("launch.after-snapshot", {
           available: after.available,
-          sessionCount: after.sessions.length,
+          agentCount: after.agents.length,
           error: after.error,
         });
-        const beforeIds = new Set(before.sessions.map((session) => session.nativeId));
-        const candidate = after.sessions.find(
-          (session) =>
-            !beforeIds.has(session.nativeId) &&
-            (session.nativeId === paneId ||
-              session.displayName === name ||
-              session.worktree === workingDirectory),
+        const beforeIds = new Set(before.agents.map((agent) => agent.nativeId));
+        const candidate = after.agents.find(
+          (agent) =>
+            !beforeIds.has(agent.nativeId) &&
+            (agent.nativeId === paneId ||
+              agent.displayName === name ||
+              agent.worktree === workingDirectory),
         );
         return {
           ok: true,
           nativeId: candidate?.nativeId,
           message: candidate
             ? `Started ${agentKind} in Herdr${promptWarning ? ` · warning: ${promptWarning}` : ""}.`
-            : `Started ${agentKind} in Herdr; waiting for the new session to appear${promptWarning ? ` · warning: ${promptWarning}` : ""}.`,
+            : `Started ${agentKind} in Herdr; waiting for the new agent to appear${promptWarning ? ` · warning: ${promptWarning}` : ""}.`,
         };
       },
       catch: (error) =>
@@ -463,79 +665,153 @@ export class HerdrHostAdapter implements SessionHost {
 
   private async snapshotInternal(): Promise<HostSnapshot> {
     this.liveTargets.clear();
+    this.liveLinkedExecutions.clear();
+    this.livePaneWorkingDirectories.clear();
+    this.liveTerminalFingerprints.clear();
+    this.liveAgentFingerprints.clear();
     let result;
     try {
       result = await this.runner.run(["herdr", "api", "snapshot"]);
     } catch (error) {
+      this.preparedShellTargets.clear();
       return {
         hostKind: "herdr",
         available: false,
         observedAt: this.clock.now(),
-        sessions: [],
+        agents: [],
         diagnostics: [],
         error: error instanceof Error ? error.message : String(error),
       };
     }
     if (result.exitCode !== 0) {
+      this.preparedShellTargets.clear();
       return {
         hostKind: "herdr",
         available: false,
         observedAt: this.clock.now(),
-        sessions: [],
+        agents: [],
         diagnostics: [],
         error: commandFailureMessage(result, `Herdr exited with ${result.exitCode}.`),
       };
     }
-    const snapshot = parseHerdrSnapshot(parseJsonValue(result.stdout), this.clock.now());
+    const parsedPayload = parseJsonValue(result.stdout);
+    const snapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
+    if (!snapshot.available) {
+      this.preparedShellTargets.clear();
+      return snapshot;
+    }
+    for (const [paneId, workingDirectory] of paneWorkingDirectoriesFor(parsedPayload))
+      this.livePaneWorkingDirectories.set(paneId, workingDirectory);
+    for (const [paneId, fingerprint] of paneFingerprintsFor(parsedPayload))
+      this.liveTerminalFingerprints.set(paneId, fingerprint);
+    for (const [key, prepared] of this.preparedShellTargets) {
+      if (
+        this.livePaneWorkingDirectories.get(prepared.target) !==
+          normalizedPath(prepared.workingDirectory) ||
+        this.liveTerminalFingerprints.get(prepared.target) !== prepared.fingerprint
+      )
+        this.preparedShellTargets.delete(key);
+    }
+    const linkedExecutions = linkedExecutionsFor(parsedPayload, snapshot.agents);
     this.liveTargets.clear();
     const nativeIds = new Set<string>();
-    const ambiguous = snapshot.sessions.some((session) => {
-      if (nativeIds.has(session.nativeId)) return true;
-      nativeIds.add(session.nativeId);
+    const ambiguous = snapshot.agents.some((agent) => {
+      if (nativeIds.has(agent.nativeId)) return true;
+      nativeIds.add(agent.nativeId);
       return false;
     });
     if (!ambiguous)
-      for (const session of snapshot.sessions)
-        this.liveTargets.set(session.nativeId, {
-          kind: "herdr-agent-attach",
-          token: session.nativeId,
-        });
+      for (const agent of snapshot.agents) {
+        const fingerprint = this.liveTerminalFingerprints.get(agent.nativeId);
+        if (fingerprint) this.liveAgentFingerprints.set(agent.nativeId, fingerprint);
+        this.liveTargets.set(
+          agent.nativeId,
+          herdrTarget("herdr-agent-attach", agent.nativeId, fingerprint),
+        );
+        const agentLinkedExecutions = linkedExecutions.get(agent.nativeId);
+        if (agentLinkedExecutions)
+          this.liveLinkedExecutions.set(agent.nativeId, agentLinkedExecutions);
+      }
     return snapshot;
   }
 
-  access(session: {
+  access(agentRef: {
     readonly hostKind: string;
     readonly nativeId: string;
-  }): Effect.Effect<SessionAccess, HostError> {
+  }): Effect.Effect<AgentAccess, HostError> {
     return Effect.sync(() => {
-      if (session.hostKind !== "herdr")
+      if (agentRef.hostKind !== "herdr")
         return {
           supported: false,
           capabilities: [],
-          explanation: "This session belongs to an unsupported host.",
-        } satisfies SessionAccess;
-      const target = this.liveTargets.get(session.nativeId);
+          linkedExecutions: [],
+          explanation: "This agent belongs to an unsupported host.",
+        } satisfies AgentAccess;
+      const target = this.liveTargets.get(agentRef.nativeId);
       if (!target)
         return {
           supported: false,
           capabilities: [],
-          explanation: "The session is not present in the latest Herdr snapshot.",
-        } satisfies SessionAccess;
+          linkedExecutions: [],
+          explanation: "The agent is not present in the latest Herdr snapshot.",
+        } satisfies AgentAccess;
+      const linkedExecutions = this.liveLinkedExecutions.get(agentRef.nativeId) ?? [];
+      const fingerprint = this.liveAgentFingerprints.get(agentRef.nativeId);
       return {
         supported: true,
-        capabilities: ["embedded-terminal", "native-handoff"],
+        capabilities: [
+          ...(fingerprint ? ["embedded-terminal" as const] : []),
+          "native-handoff",
+          ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
+            ? ["linked-terminal" as const]
+            : []),
+        ],
         mode: "attach",
         target,
-        terminalTarget: {
-          kind: "herdr-terminal-control",
-          token: session.nativeId,
-        },
-        explanation: "Attach directly or open an embedded terminal for the running Herdr session.",
-      } satisfies SessionAccess;
+        terminalTarget: fingerprint
+          ? { kind: "herdr-terminal-control", token: agentRef.nativeId, fingerprint }
+          : undefined,
+        linkedExecutions,
+        explanation: "Attach directly or open an embedded terminal for the running Herdr agent.",
+      } satisfies AgentAccess;
     });
   }
 
-  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError> {
+  private currentLinkedExecution(execution: LinkedExecution): LinkedExecution | undefined {
+    const ownerToken = parseTarget(execution.owner);
+    if (!ownerToken) return undefined;
+    const desiredToken = execution.target
+      ? openLinkedExecutionTerminalTarget(execution.target)
+      : undefined;
+    return (this.liveLinkedExecutions.get(ownerToken) ?? []).find((candidate) => {
+      const candidateToken = candidate.target
+        ? openLinkedExecutionTerminalTarget(candidate.target)
+        : undefined;
+      return (
+        candidate.kind === execution.kind &&
+        candidate.source === execution.source &&
+        candidateToken === desiredToken &&
+        candidate.target?.fingerprint === execution.target?.fingerprint &&
+        normalizedPath(candidate.workingDirectory ?? "") ===
+          normalizedPath(execution.workingDirectory ?? "")
+      );
+    });
+  }
+
+  private currentShellFor(
+    ownerToken: string,
+    workingDirectory: string,
+  ): LinkedExecution | undefined {
+    const wanted = normalizedPath(workingDirectory);
+    return (this.liveLinkedExecutions.get(ownerToken) ?? []).find(
+      (candidate) =>
+        candidate.kind === "shell" &&
+        candidate.source === "observed" &&
+        normalizedPath(candidate.workingDirectory ?? "") === wanted,
+    );
+  }
+
+  activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
     return Effect.tryPromise({
       try: async () => {
         if (!access.supported || !access.target) return { ok: false, message: access.explanation };
@@ -545,6 +821,17 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr attachment target is invalid or unsupported.",
           };
+        const snapshot = await this.snapshotInternal();
+        if (
+          !snapshot.available ||
+          !this.liveTargets.has(token) ||
+          !access.target.fingerprint ||
+          this.liveAgentFingerprints.get(token) !== access.target.fingerprint
+        )
+          return {
+            ok: false,
+            message: snapshot.error ?? "The Herdr agent target is no longer available.",
+          };
         const result = await this.runner.run(["herdr", "agent", "attach", token], {
           interactive: true,
         });
@@ -553,45 +840,207 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: result.stderr.trim() || `Herdr could not attach to ${token}.`,
           };
-        return { ok: true, message: `Attached to the real Herdr session ${token}.` };
+        return { ok: true, message: `Attached to the real Herdr agent ${token}.` };
       },
-      catch: () => hostError("host.activate", "Herdr could not attach to the session."),
+      catch: () => hostError("host.activate", "Herdr could not attach to the agent."),
     });
   }
 
   openTerminal(
-    access: SessionAccess,
+    access: AgentAccess,
     dimensions: TerminalDimensions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
-    return Effect.sync(() => {
-      if (!access.supported || !access.terminalTarget)
-        return {
-          ok: false,
-          message: "This session does not expose an embedded Herdr terminal.",
-        } satisfies HostTerminalOpenResult;
-      if (!this.terminalRunner)
-        return {
-          ok: false,
-          message: "The configured Herdr command runner cannot stream terminals.",
-        } satisfies HostTerminalOpenResult;
-      const token = parseHerdrTerminalTarget(access.terminalTarget);
-      if (!token)
-        return {
-          ok: false,
-          message: "The Herdr terminal target is invalid or unsupported.",
-        } satisfies HostTerminalOpenResult;
-      try {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!access.supported || !access.terminalTarget)
+          return {
+            ok: false,
+            message: "This agent does not expose an embedded Herdr terminal.",
+          } satisfies HostTerminalOpenResult;
+        if (!this.terminalRunner)
+          return {
+            ok: false,
+            message: "The configured Herdr command runner cannot stream terminals.",
+          } satisfies HostTerminalOpenResult;
+        const token = parseHerdrTerminalTarget(access.terminalTarget);
+        if (!token)
+          return {
+            ok: false,
+            message: "The Herdr terminal target is invalid or unsupported.",
+          } satisfies HostTerminalOpenResult;
+        const snapshot = await this.snapshotInternal();
+        if (
+          !snapshot.available ||
+          !this.liveTargets.has(token) ||
+          !access.terminalTarget.fingerprint ||
+          this.liveTerminalFingerprints.get(token) !== access.terminalTarget.fingerprint
+        )
+          return {
+            ok: false,
+            message: snapshot.error ?? "The Herdr terminal target is no longer available.",
+          } satisfies HostTerminalOpenResult;
+        try {
+          return {
+            ok: true,
+            terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
+            message: `Opened an embedded Herdr terminal for ${token}.`,
+          } satisfies HostTerminalOpenResult;
+        } catch (error) {
+          return {
+            ok: false,
+            message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
+          } satisfies HostTerminalOpenResult;
+        }
+      },
+      catch: (error) =>
+        hostError("host.openTerminal", error instanceof Error ? error.message : String(error)),
+    });
+  }
+
+  openLinkedExecutionTerminal(
+    linkedExecution: LinkedExecution,
+    dimensions: TerminalDimensions,
+  ): Effect.Effect<HostTerminalOpenResult, HostError> {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!linkedExecution.available || !linkedExecution.target)
+          return {
+            ok: false,
+            message: linkedExecution.explanation,
+          } satisfies HostTerminalOpenResult;
+        if (!this.terminalRunner)
+          return {
+            ok: false,
+            message: "The configured Herdr command runner cannot stream linked terminals.",
+          } satisfies HostTerminalOpenResult;
+
+        const snapshot = await this.snapshotInternal();
+        if (!snapshot.available)
+          return {
+            ok: false,
+            message: snapshot.error ?? "Herdr is unavailable; the linked execution is uncertain.",
+          } satisfies HostTerminalOpenResult;
+
+        const ownerToken = parseTarget(linkedExecution.owner);
+        if (!ownerToken)
+          return {
+            ok: false,
+            message: "The Herdr linked execution owner is invalid or unsupported.",
+          } satisfies HostTerminalOpenResult;
+        const ownerTarget = this.liveTargets.get(ownerToken);
+        if (
+          !ownerTarget ||
+          (linkedExecution.owner.fingerprint !== undefined &&
+            ownerTarget.fingerprint !== linkedExecution.owner.fingerprint)
+        )
+          return {
+            ok: false,
+            message: "The linked execution's parent Agent is no longer available.",
+          } satisfies HostTerminalOpenResult;
+
+        const currentExecution = this.currentLinkedExecution(linkedExecution);
+        const workingDirectory = preparedShellWorkingDirectory(linkedExecution.target);
+        let target = currentExecution?.target
+          ? openLinkedExecutionTerminalTarget(currentExecution.target)
+          : undefined;
+        let targetFingerprint = currentExecution?.target?.fingerprint;
+        let prepared = false;
+        if (!target && workingDirectory) {
+          const observedShell = this.currentShellFor(ownerToken, workingDirectory);
+          if (observedShell?.target) {
+            target = openLinkedExecutionTerminalTarget(observedShell.target);
+            targetFingerprint = observedShell.target.fingerprint;
+          }
+        }
+        if (!target && workingDirectory) {
+          const key = preparedShellKey(ownerToken, workingDirectory);
+          const cached = this.preparedShellTargets.get(key);
+          if (cached) {
+            if (
+              this.livePaneWorkingDirectories.get(cached.target) !==
+                normalizedPath(cached.workingDirectory) ||
+              this.liveTerminalFingerprints.get(cached.target) !== cached.fingerprint
+            ) {
+              this.preparedShellTargets.delete(key);
+              return {
+                ok: false,
+                message: "The prepared linked shell is no longer available; refresh and retry.",
+              } satisfies HostTerminalOpenResult;
+            }
+            target = cached.target;
+            targetFingerprint = cached.fingerprint;
+            prepared = true;
+          }
+        }
+        if (!target && workingDirectory) {
+          const beforePaneIds = new Set(this.livePaneWorkingDirectories.keys());
+          const created = await this.runner.run([
+            "herdr",
+            "workspace",
+            "create",
+            "--cwd",
+            workingDirectory,
+            "--label",
+            "AO linked terminal",
+            "--no-focus",
+          ]);
+          if (created.exitCode !== 0)
+            return {
+              ok: false,
+              message: commandFailureMessage(
+                created,
+                "Herdr could not prepare a linked shell workspace.",
+              ),
+            } satisfies HostTerminalOpenResult;
+          target = createdRootPaneId(parseJsonValue(created.stdout));
+          const afterCreate = await this.runner.run(["herdr", "api", "snapshot"]);
+          if (afterCreate.exitCode === 0) {
+            const afterPayload = parseJsonValue(afterCreate.stdout);
+            const afterFingerprints = paneFingerprintsFor(afterPayload);
+            if (target) {
+              const afterCwd = paneWorkingDirectoriesFor(afterPayload).get(target);
+              targetFingerprint = afterFingerprints.get(target);
+              if (afterCwd !== normalizedPath(workingDirectory) || targetFingerprint === undefined)
+                target = undefined;
+            }
+            if (!target) {
+              target = newPaneFor(afterPayload, beforePaneIds, workingDirectory);
+              targetFingerprint = target ? afterFingerprints.get(target) : undefined;
+            }
+          }
+          if (!target || !targetFingerprint)
+            return {
+              ok: false,
+              message: "Herdr created a linked workspace but could not identify its shell pane.",
+            } satisfies HostTerminalOpenResult;
+          this.preparedShellTargets.set(preparedShellKey(ownerToken, workingDirectory), {
+            ownerToken,
+            workingDirectory,
+            target,
+            fingerprint: targetFingerprint,
+          });
+          prepared = true;
+        }
+        if (!target || !targetFingerprint)
+          return {
+            ok: false,
+            message: currentExecution
+              ? "The Herdr linked terminal target is invalid or unsupported."
+              : "The selected linked execution is no longer available.",
+          } satisfies HostTerminalOpenResult;
         return {
           ok: true,
-          terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
-          message: `Opened an embedded Herdr terminal for ${token}.`,
+          terminal: openHerdrTerminal(this.terminalRunner, target, dimensions),
+          message: prepared
+            ? `Opened a Herdr linked terminal in ${workingDirectory}.`
+            : `Opened the existing Herdr linked terminal ${target}.`,
         } satisfies HostTerminalOpenResult;
-      } catch (error) {
-        return {
-          ok: false,
-          message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
-        } satisfies HostTerminalOpenResult;
-      }
+      },
+      catch: (error) =>
+        hostError(
+          "host.openLinkedExecutionTerminal",
+          error instanceof Error ? error.message : String(error),
+        ),
     });
   }
 }

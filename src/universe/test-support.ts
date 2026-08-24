@@ -18,10 +18,10 @@ export class FixedClock implements Clock {
 
 export class SequenceIds implements IdGenerator {
   private goal = 0;
-  private session = 0;
-  next(kind: "goal" | "session"): string {
+  private agent = 0;
+  next(kind: "goal" | "agent"): string {
     if (kind === "goal") return `goal-${++this.goal}`;
-    return `session-${++this.session}`;
+    return `agent-${++this.agent}`;
   }
 }
 
@@ -71,12 +71,12 @@ export const makeUniverse = <TStore extends UniverseStore = MemoryStore>(options
 };
 
 export const hostSnapshot = (
-  sessions: HostSnapshot["sessions"],
+  agents: HostSnapshot["agents"],
   observedAt = 1_000_000,
 ): HostSnapshot => ({
   hostKind: "test-host",
   available: true,
   observedAt,
-  sessions,
+  agents,
   diagnostics: [],
 });

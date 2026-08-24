@@ -31,12 +31,12 @@ describe("Universe", () => {
       }),
     ).toEqual({ ok: true, goalId: "goal-1" });
     expect(
-      universe.reconcile(hostSnapshot([observation("pane-1", "live session", "working")])).accepted,
+      universe.reconcile(hostSnapshot([observation("pane-1", "live agent", "working")])).accepted,
     ).toBe(true);
     expect(
       universe.execute({
-        type: "AssignSession",
-        sessionId: "session-1",
+        type: "AssignAgent",
+        agentId: "agent-1",
         goalId: "goal-1",
       }).ok,
     ).toBe(true);
@@ -91,30 +91,96 @@ describe("Universe", () => {
     universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
     expect(
       universe.execute({
-        type: "AssignSession",
-        sessionId: "session-1",
+        type: "AssignAgent",
+        agentId: "agent-1",
         goalId: "goal-1",
       }),
-    ).toEqual({ ok: false, error: "Archived goals cannot receive sessions." });
+    ).toEqual({ ok: false, error: "Archived goals cannot receive agents." });
   });
 
-  test("preserves human session metadata across reconciliation", () => {
+  test("adopts related agents in a human-controlled batch and preserves dismissal state", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Primary outcome" });
+    universe.execute({ type: "CreateGoal", title: "Other outcome" });
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("target"),
+          executionContainer: { id: "container-1", label: "Primary outcome" },
+        },
+        {
+          ...observation("candidate"),
+          executionContainer: { id: "container-1", label: "Primary outcome" },
+        },
+        {
+          ...observation("assigned"),
+          executionContainer: { id: "container-1", label: "Primary outcome" },
+        },
+      ]),
+    );
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    universe.execute({ type: "AssignAgent", agentId: "agent-3", goalId: "goal-2" });
+
+    expect(
+      universe.execute({
+        type: "DismissRelatedAgents",
+        goalId: "goal-1",
+        agentIds: ["agent-2"],
+      }),
+    ).toEqual({
+      ok: true,
+      goalId: "goal-1",
+      affectedAgentIds: ["agent-2"],
+    });
+    expect(universe.snapshot().relatedAgentDismissals).toEqual([
+      { goalId: "goal-1", agentId: "agent-2", dismissedAt: 1_000_000 },
+    ]);
+
+    expect(
+      universe.execute({
+        type: "AdoptRelatedAgents",
+        goalId: "goal-1",
+        agentIds: ["agent-2", "agent-3"],
+      }),
+    ).toEqual({
+      ok: false,
+      error: "assigned is already attached to another goal.",
+    });
+    expect(universe.snapshot().agents[1]?.primaryGoalId).toBeUndefined();
+    expect(universe.snapshot().agents[2]?.primaryGoalId).toBe("goal-2");
+
+    expect(
+      universe.execute({
+        type: "AdoptRelatedAgents",
+        goalId: "goal-1",
+        agentIds: ["agent-2"],
+      }),
+    ).toEqual({
+      ok: true,
+      goalId: "goal-1",
+      affectedAgentIds: ["agent-2"],
+    });
+    expect(universe.snapshot().agents[1]?.primaryGoalId).toBe("goal-1");
+    expect(universe.snapshot().relatedAgentDismissals).toEqual([]);
+  });
+
+  test("preserves human agent metadata across reconciliation", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });
     universe.reconcile(hostSnapshot([observation("pane-1", "host title", "working")]));
     universe.execute({
-      type: "AssignSession",
-      sessionId: "session-1",
+      type: "AssignAgent",
+      agentId: "agent-1",
       goalId: "goal-1",
     });
     universe.execute({
-      type: "RenameSession",
-      sessionId: "session-1",
+      type: "RenameAgent",
+      agentId: "agent-1",
       displayName: "My accepted name",
     });
     universe.execute({
-      type: "SetSessionDescription",
-      sessionId: "session-1",
+      type: "SetAgentDescription",
+      agentId: "agent-1",
       description: "Human context",
     });
     clock.value = 1_002_000;
@@ -129,25 +195,44 @@ describe("Universe", () => {
         1_002_000,
       ),
     );
-    const session = universe.snapshot().sessions[0];
-    expect(session?.displayName).toBe("My accepted name");
-    expect(session?.description).toBe("Human context");
-    expect(session?.primaryGoalId).toBe("goal-1");
-    expect(session?.runtimeState).toBe("blocked");
+    const agent = universe.snapshot().agents[0];
+    expect(agent?.displayName).toBe("My accepted name");
+    expect(agent?.description).toBe("Human context");
+    expect(agent?.primaryGoalId).toBe("goal-1");
+    expect(agent?.runtimeState).toBe("blocked");
   });
 
-  test("is idempotent and marks missing live sessions stale", () => {
+  test("is idempotent and marks missing live agents stale", () => {
     const { universe } = makeUniverse();
     const first = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
     const second = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
-    expect(first.addedSessionIds).toHaveLength(2);
-    expect(second.addedSessionIds).toHaveLength(0);
-    expect(universe.snapshot().sessions).toHaveLength(2);
+    expect(first.addedAgentIds).toHaveLength(2);
+    expect(second.addedAgentIds).toHaveLength(0);
+    expect(universe.snapshot().agents).toHaveLength(2);
     const stale = universe.reconcile(hostSnapshot([observation("pane-1")], 1_001_000));
-    expect(stale.staleSessionIds).toEqual(["session-2"]);
+    expect(stale.staleAgentIds).toEqual(["agent-2"]);
     expect(
-      universe.snapshot().sessions.find((session) => session.nativeId === "pane-2")?.hostHealth,
+      universe.snapshot().agents.find((agent) => agent.nativeId === "pane-2")?.hostHealth,
     ).toBe("stale");
+  });
+
+  test("only reconciles a shell as an Agent after the host recognises it", () => {
+    const { universe } = makeUniverse();
+    expect(universe.reconcile(hostSnapshot([])).accepted).toBe(true);
+    expect(universe.snapshot().agents).toHaveLength(0);
+
+    const promoted = observation("shell-pane", "promoted agent", "working");
+    const first = universe.reconcile(hostSnapshot([promoted]));
+    expect(first.addedAgentIds).toEqual(["agent-1"]);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      id: "agent-1",
+      nativeId: "shell-pane",
+      displayName: "promoted agent",
+    });
+
+    const second = universe.reconcile(hostSnapshot([promoted], 1_001_000));
+    expect(second.addedAgentIds).toHaveLength(0);
+    expect(universe.snapshot().agents).toHaveLength(1);
   });
 
   test("rejects out-of-order snapshots without regressing accepted state", () => {
@@ -160,11 +245,11 @@ describe("Universe", () => {
     );
     expect(older.accepted).toBe(false);
     expect(older.error).toContain("Out-of-order");
-    expect(universe.snapshot().sessions[0]?.runtimeState).toBe("blocked");
+    expect(universe.snapshot().agents[0]?.runtimeState).toBe("blocked");
     expect(universe.snapshot().hosts[0]?.lastObservedAt).toBe(2_000_000);
   });
 
-  test("ignores an older session observation inside a newer snapshot", () => {
+  test("ignores an older agent observation inside a newer snapshot", () => {
     const { universe } = makeUniverse();
     universe.reconcile(
       hostSnapshot([observation("pane-1", "newer", "blocked", 2_000_000)], 2_000_000),
@@ -173,9 +258,9 @@ describe("Universe", () => {
       hostSnapshot([observation("pane-1", "older", "idle", 1_000_000)], 3_000_000),
     );
     expect(result.accepted).toBe(true);
-    expect(result.updatedSessionIds).toHaveLength(0);
+    expect(result.updatedAgentIds).toHaveLength(0);
     expect(result.diagnostics.join(" ")).toContain("Ignored an older observation");
-    expect(universe.snapshot().sessions[0]?.runtimeState).toBe("blocked");
+    expect(universe.snapshot().agents[0]?.runtimeState).toBe("blocked");
     expect(universe.snapshot().hosts[0]?.lastObservedAt).toBe(3_000_000);
   });
 
@@ -186,7 +271,7 @@ describe("Universe", () => {
       hostKind: "test-host",
       available: false,
       observedAt: 1_010_000,
-      sessions: [],
+      agents: [],
       diagnostics: [],
       error: "socket unavailable",
     });
@@ -204,43 +289,43 @@ describe("Universe", () => {
     universe.reconcile(
       hostSnapshot([observation("pane-1", "second", "idle", 1_001_000)], 1_001_000),
     );
-    expect(universe.snapshot().sessions).toHaveLength(1);
-    expect(universe.snapshot().sessions[0]?.nativeId).toBe("pane-1");
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]?.nativeId).toBe("pane-1");
   });
 
-  test("archives stale sessions without deleting their identity or assignment", () => {
+  test("archives stale agents without deleting their identity or assignment", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Keep the context" });
     universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
     universe.execute({
-      type: "AssignSession",
-      sessionId: "session-2",
+      type: "AssignAgent",
+      agentId: "agent-2",
       goalId: "goal-1",
     });
-    expect(universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+    expect(universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
       ok: false,
-      error: "Only stale or unavailable sessions can be archived.",
+      error: "Only stale or unavailable agents can be archived.",
     });
 
     clock.value = 1_001_000;
     universe.reconcile(hostSnapshot([observation("pane-2")], clock.value));
-    expect(universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+    expect(universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
       ok: true,
-      sessionId: "session-1",
+      agentId: "agent-1",
     });
-    const archived = universe.snapshot().sessions.find((session) => session.id === "session-1");
+    const archived = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
     expect(archived?.archivedAt).toBe(clock.value);
 
     const active = universe.project({ kind: "command-centre", now: clock.value });
     if (active.kind !== "command-centre") throw new Error("wrong projection");
-    expect(active.unassigned.map((session) => session.id)).toEqual([]);
-    expect(active.goals[0]?.sessions.map((session) => session.id)).toEqual(["session-2"]);
+    expect(active.unassigned.map((agent) => agent.id)).toEqual([]);
+    expect(active.goals[0]?.agents.map((agent) => agent.id)).toEqual(["agent-2"]);
     expect(active.counts.stale).toBe(0);
     expect(active.counts.uncertainty).toBe(0);
 
     clock.value = 1_002_000;
     universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")], clock.value));
-    const rediscovered = universe.snapshot().sessions.find((session) => session.id === "session-1");
+    const rediscovered = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
     expect(rediscovered?.hostHealth).toBe("live");
     expect(rediscovered?.archivedAt).toBe(1_001_000);
   });
@@ -250,7 +335,7 @@ describe("Universe", () => {
     const result = universe.reconcile(hostSnapshot([observation("same"), observation("same")]));
     expect(result.accepted).toBe(false);
     expect(result.error).toContain("Duplicate native identity");
-    expect(universe.snapshot().sessions).toHaveLength(0);
+    expect(universe.snapshot().agents).toHaveLength(0);
   });
 
   test("rolls back a command when persistence fails", () => {

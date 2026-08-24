@@ -5,10 +5,10 @@ import type { WorkspaceError } from "../workspaces/types.ts";
 import {
   launchError,
   type LaunchError,
-  type StartSessionCoordinator,
-  type StartSessionCoordinatorOptions,
-  type StartSessionIntent,
-  type StartSessionResult,
+  type StartAgentCoordinator,
+  type StartAgentCoordinatorOptions,
+  type StartAgentIntent,
+  type StartAgentResult,
 } from "./types.ts";
 
 const mapWorkspaceError = (error: WorkspaceError): LaunchError =>
@@ -16,15 +16,15 @@ const mapWorkspaceError = (error: WorkspaceError): LaunchError =>
 
 const mapHostError = (error: HostError): LaunchError => launchError(error.operation, error.message);
 
-const sessionName = (intent: StartSessionIntent): string | undefined =>
-  intent.sessionName?.trim() || intent.agent.name?.trim() || undefined;
+const agentName = (intent: StartAgentIntent): string | undefined =>
+  intent.agentName?.trim() || intent.agent.name?.trim() || undefined;
 
-export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
-  private readonly receipts = new Map<string, StartSessionResult>();
+export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
+  private readonly receipts = new Map<string, StartAgentResult>();
 
-  constructor(private readonly options: StartSessionCoordinatorOptions) {}
+  constructor(private readonly options: StartAgentCoordinatorOptions) {}
 
-  start(intent: StartSessionIntent): Effect.Effect<StartSessionResult, LaunchError> {
+  start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError> {
     return Effect.gen(this, function* () {
       const requestId = intent.requestId.trim();
       if (!requestId)
@@ -35,7 +35,7 @@ export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
           ...previous,
           status: "already-observed",
           message: `Request ${requestId} was already processed: ${previous.message}`,
-        } satisfies StartSessionResult;
+        } satisfies StartAgentResult;
       const agentKind = intent.agent.kind.trim();
       if (!agentKind)
         return yield* Effect.fail(launchError("launch.validate", "An agent kind is required."));
@@ -48,7 +48,7 @@ export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
         .launch({
           workingDirectory: prepared.path,
           agentKind,
-          agentName: sessionName(intent),
+          agentName: agentName(intent),
           args: intent.agent.args,
           prompt: intent.prompt?.trim() || undefined,
           requestId,
@@ -62,49 +62,49 @@ export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
           workspace: prepared,
           warnings: prepared.warnings,
           message: launched.message,
-        } satisfies StartSessionResult;
+        } satisfies StartAgentResult;
         this.receipts.set(requestId, failed);
         return failed;
       }
       yield* this.options.refresh.pipe(Effect.mapError(mapHostError));
-      const session = this.findLaunchedSession(
-        before.sessions.map((candidate) => candidate.id),
+      const agent = this.findLaunchedAgent(
+        before.agents.map((candidate) => candidate.id),
         launched.nativeId,
         prepared.path,
         agentKind,
-        sessionName(intent),
+        agentName(intent),
       );
-      if (session && goalId) {
+      if (agent && goalId) {
         const assigned = this.options.universe.execute({
-          type: "AssignSession",
-          sessionId: session.id,
+          type: "AssignAgent",
+          agentId: agent.id,
           goalId,
         });
         if (!assigned.ok)
           return yield* Effect.fail(
             launchError(
               "launch.assign",
-              assigned.error ?? "The launched session could not be assigned.",
+              assigned.error ?? "The launched agent could not be assigned.",
             ),
           );
       }
-      const result: StartSessionResult = {
-        status: session ? "started" : "pending",
+      const result: StartAgentResult = {
+        status: agent ? "started" : "pending",
         requestId,
         goalId,
-        sessionId: session?.id,
+        agentId: agent?.id,
         workspace: prepared,
         warnings: prepared.warnings,
-        message: session
+        message: agent
           ? `Started ${agentKind}${goalId ? " and assigned it to the goal" : ""}.`
-          : `Started ${agentKind}; waiting for the host session to appear.`,
+          : `Started ${agentKind}; waiting for the host agent to appear.`,
       };
       this.receipts.set(requestId, result);
       return result;
     });
   }
 
-  private resolveGoal(intent: StartSessionIntent): Effect.Effect<GoalId | undefined, LaunchError> {
+  private resolveGoal(intent: StartAgentIntent): Effect.Effect<GoalId | undefined, LaunchError> {
     const goalIntent = intent.goal;
     if (goalIntent.kind === "inbox") return Effect.succeed(undefined);
     if (goalIntent.kind === "goal") {
@@ -127,7 +127,7 @@ export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
     return Effect.succeed(result.goalId);
   }
 
-  private findLaunchedSession(
+  private findLaunchedAgent(
     beforeIds: readonly string[],
     nativeId: string | undefined,
     workingDirectory: string,
@@ -135,21 +135,21 @@ export class DefaultStartSessionCoordinator implements StartSessionCoordinator {
     displayName: string | undefined,
   ) {
     const before = new Set(beforeIds);
-    const sessions = this.options.universe
+    const agents = this.options.universe
       .snapshot()
-      .sessions.filter((session) => !before.has(session.id) && session.archivedAt === undefined);
+      .agents.filter((agent) => !before.has(agent.id) && agent.archivedAt === undefined);
     return (
-      sessions.find((session) => nativeId !== undefined && session.nativeId === nativeId) ??
-      sessions.find(
-        (session) =>
-          session.worktree === workingDirectory &&
-          (session.provider === agentKind || session.displayName === displayName),
+      agents.find((agent) => nativeId !== undefined && agent.nativeId === nativeId) ??
+      agents.find(
+        (agent) =>
+          agent.worktree === workingDirectory &&
+          (agent.provider === agentKind || agent.displayName === displayName),
       ) ??
-      sessions.find((session) => session.displayName === displayName)
+      agents.find((agent) => agent.displayName === displayName)
     );
   }
 }
 
-export const createStartSessionCoordinator = (
-  options: StartSessionCoordinatorOptions,
-): StartSessionCoordinator => new DefaultStartSessionCoordinator(options);
+export const createStartAgentCoordinator = (
+  options: StartAgentCoordinatorOptions,
+): StartAgentCoordinator => new DefaultStartAgentCoordinator(options);

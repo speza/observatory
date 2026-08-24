@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { displayHostKind, hasSessionCapability } from "./types.ts";
+import { displayHostKind, hasAgentCapability } from "./types.ts";
 
 describe("host labels", () => {
   test("formats opaque host kinds without a provider-specific map", () => {
@@ -8,14 +8,15 @@ describe("host labels", () => {
     expect(displayHostKind("  ")).toBe("Host");
   });
 
-  test("checks only capabilities proven by the session host", () => {
+  test("checks only capabilities proven by the agent host", () => {
     const access = {
       supported: true,
       capabilities: ["embedded-terminal"] as const,
+      linkedExecutions: [],
       explanation: "fixture",
     };
-    expect(hasSessionCapability(access, "embedded-terminal")).toBe(true);
-    expect(hasSessionCapability(access, "native-handoff")).toBe(false);
-    expect(hasSessionCapability({ ...access, supported: false }, "embedded-terminal")).toBe(false);
+    expect(hasAgentCapability(access, "embedded-terminal")).toBe(true);
+    expect(hasAgentCapability(access, "native-handoff")).toBe(false);
+    expect(hasAgentCapability({ ...access, supported: false }, "embedded-terminal")).toBe(false);
   });
 });

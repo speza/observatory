@@ -21,7 +21,7 @@ Type checking             tsgo or tsc --noEmit
 Testing                   bun test
 Terminal renderer         OpenTUI, portable spatial cells
 Web renderer              Browser Canvas/WebGL, deferred until after live TUI proof
-Live session host         Herdr (required for V0/V1 live mode)
+Live agent host         Herdr (required for V0/V1 live mode)
 Local transport           Schema-validated JSON over a Unix socket
 ```
 
@@ -40,7 +40,7 @@ AO's initial implementation is primarily:
 - a portable terminal command centre.
 
 It does not own pseudo-terminal process lifetime, persistence or remote
-attachment. Those responsibilities remain behind the Session-host seam. The
+attachment. Those responsibilities remain behind the `SessionHost` seam. The
 implemented Herdr lens renders a host-owned terminal stream with a small
 cell-native VT model; a disposable Bun PTY experiment remains evidence for
 renderer feasibility, not a production runtime decision. The staged scope and
@@ -83,7 +83,7 @@ Effect is adopted now for the asynchronous application edge rather than
 introduced as a second domain model. `SessionHost` operations are typed Effects
 with a small `HostError`, and host-owned terminal output is an Effect Stream.
 This gives Observatory structured cancellation and resource finalization around
-Herdr/mock sessions, while the TUI remains an imperative OpenTUI boundary that
+Herdr/mock agents, while the TUI remains an imperative OpenTUI boundary that
 executes those Effects. `BunRuntime.runMain` owns the executable lifecycle.
 
 The pure `universe/`, `attention/`, `spatial/`, `projection/` and persistence
@@ -183,7 +183,7 @@ pointer interaction and richer relationship exploration.
 
 The browser renderer remains deferred as a fidelity expansion until the live
 native spatial slice proves the goal, attention and spatial-memory model with
-real sessions. It will be an ordinary local web
+real agents. It will be an ordinary local web
 client served by AO, not an Electron application.
 
 ## Terminal renderer: OpenTUI
@@ -229,7 +229,7 @@ they create compatibility and custom-renderer complexity without providing the
 flexibility of a real canvas.
 
 Therefore v0 uses ordinary terminal cells, typography, colour and restrained
-motion for a spatial universe of goal bodies and direct session satellites. It
+motion for a spatial universe of goal bodies and direct agent satellites. It
 does not emit graphics protocols or revive a custom ANSI raster engine. OpenTUI
 remains isolated inside the terminal-renderer module, so it can still be
 replaced if live use exposes input, lifecycle or portability failures.
@@ -241,14 +241,14 @@ mouse-protocol, scrollback or provider-specific full-screen parity; `Enter`
 foreground attachment remains available when native parity matters.
 
 The live renderer keeps the map full width rather than allocating a permanent
-right-hand inspector. Selecting a goal, session or inbox opens a transient
+right-hand inspector. Selecting a goal, agent or inbox opens a transient
 floating card anchored near that item; the card is clamped to the map and
 shortens on narrow terminals. The portfolio does not spend map space on
-unassigned sessions: it reports the inbox count as a visible warning, then
+unassigned agents: it reports the inbox count as a visible warning, then
 lets the operator open the list lens when they want to triage it. Attention and
 focused-inbox lenses can use a compact vertical list, while the goal-level `a`
 action opens a searchable assignment picker. These are presentation lenses
-over Goal → Session state, not new domain nodes or a richer graphics mode.
+over Goal → Agent state, not new domain nodes or a richer graphics mode.
 
 Evidence:
 
@@ -256,15 +256,15 @@ Evidence:
 - [Native visual-fidelity spike](../../prototypes/opentui-visual-fidelity/VERDICT.md)
 - [ANSI half-block spike](../../prototypes/ansi-halfblock-rendering-spike/VERDICT.md)
 
-## Live session integration: Herdr first
+## Live agent integration: Herdr first
 
-Herdr is the first live Session-host adapter because it already exposes
+Herdr is the first live Agent-host adapter because it already exposes
 snapshots, events, agent state, worktree provenance and attachment operations
 across several agent providers. The terminal-surface POC demonstrated a live
 Herdr observe/control stream rendered through the OpenTUI panel, with the
 Herdr-owned agent surviving release. The production TUI now exposes that stream
 as an embedded terminal lens; foreground attach remains the fallback for
-unsupported sessions and provider-native features outside the lens.
+unsupported agents and provider-native features outside the lens.
 
 Herdr's terminal control stream is the V0 embedded-terminal path. Herdr
 continues to own the agent process and PTY; Observatory only renders the stream

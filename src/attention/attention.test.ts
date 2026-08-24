@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { evaluateAttention } from "./attention.ts";
-import type { Goal, TrackedSession } from "../universe/types.ts";
+import type { Goal, Agent } from "../universe/types.ts";
 
 const goal = (id: string, priority: Goal["priority"]): Goal => ({
   id,
@@ -10,14 +10,14 @@ const goal = (id: string, priority: Goal["priority"]): Goal => ({
   createdAt: 0,
   updatedAt: 0,
 });
-const session = (
+const agent = (
   id: string,
-  state: TrackedSession["runtimeState"],
+  state: Agent["runtimeState"],
   goalId: string,
   attentionSince: number,
   lastChangedAt = attentionSince,
-): TrackedSession => {
-  const result: TrackedSession = {
+): Agent => {
+  const result: Agent = {
     id,
     hostKind: "herdr",
     nativeId: id,
@@ -42,13 +42,13 @@ describe("attention", () => {
       20_000,
       [goal("p1", "P1"), goal("p0", "P0")],
       [
-        session("working-p0", "working", "p0", 0),
-        session("new-p0", "blocked", "p0", 18_000),
-        session("old-p1", "waiting", "p1", 5_000),
-        session("old-p0", "blocked", "p0", 5_000, 19_000),
+        agent("working-p0", "working", "p0", 0),
+        agent("new-p0", "blocked", "p0", 18_000),
+        agent("old-p1", "waiting", "p1", 5_000),
+        agent("old-p0", "blocked", "p0", 5_000, 19_000),
       ],
     );
-    expect(projection.items.map((item) => item.sessionId)).toEqual(["old-p0", "new-p0", "old-p1"]);
+    expect(projection.items.map((item) => item.agentId)).toEqual(["old-p0", "new-p0", "old-p1"]);
     expect(projection.currentCount).toBe(3);
     expect(projection.items[0]?.explanation).toContain("blocked");
   });
@@ -58,8 +58,8 @@ describe("attention", () => {
       20_000,
       [goal("p0", "P0")],
       [
-        { ...session("stale", "blocked", "p0", 5_000), hostHealth: "stale" },
-        session("current", "blocked", "p0", 15_000),
+        { ...agent("stale", "blocked", "p0", 5_000), hostHealth: "stale" },
+        agent("current", "blocked", "p0", 15_000),
       ],
     );
     expect(projection.currentCount).toBe(1);

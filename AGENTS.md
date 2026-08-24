@@ -3,14 +3,14 @@
 ## Product constraints
 
 - Observatory is an agent observatory: a local semantic control plane for
-  supervising agent sessions. `AO` remains its internal codename and command/
+  supervising agent executions. `AO` remains its internal codename and command/
   environment-variable prefix. It is not an agent runtime or terminal
   multiplexer.
 - The spatial universe is the primary product hypothesis. Lists, attention
   queues, inboxes and inspectors are supporting lenses.
-- V1's durable topology is `Goal -> Session`. Repositories, worktrees and Herdr
-  spaces are session metadata, not organisational nodes.
-- Goal priority, completion and session/goal archive remain human-controlled
+- V1's durable topology is `Goal -> Agent`. Repositories, worktrees and Herdr
+  spaces are agent metadata, not organisational nodes.
+- Goal priority, completion and agent/goal archive remain human-controlled
   unless an explicit auto policy says otherwise.
 - Preserve uncertainty. Never convert missing, stale or inferred host facts
   into accepted semantic state.

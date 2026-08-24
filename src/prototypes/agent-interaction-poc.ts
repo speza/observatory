@@ -21,7 +21,7 @@ interface Message {
   readonly body: string;
 }
 
-interface Session {
+interface Agent {
   readonly id: string;
   readonly title: string;
   readonly provider: string;
@@ -33,7 +33,7 @@ interface Session {
 }
 
 interface State {
-  readonly sessions: Session[];
+  readonly agents: Agent[];
   selected: number;
   mode: Mode;
   draft: string;
@@ -65,26 +65,26 @@ const capabilityColour: Record<Capability, string> = {
   "read-only": DIM,
 };
 
-function session(
+function agent(
   id: string,
   title: string,
   provider: string,
   host: string,
   capability: Capability,
-  status: Session["status"],
+  status: Agent["status"],
   transcriptSource: string,
   messages: Message[],
-): Session {
+): Agent {
   return { id, title, provider, host, capability, status, transcriptSource, messages };
 }
 
 const state: State = {
-  sessions: [
-    session("chief", "chief-of-staff", "Codex", "Herdr", "native-chat", "working", "provider API", [
-      { author: "agent", body: "I found three sessions that need a decision." },
+  agents: [
+    agent("chief", "chief-of-staff", "Codex", "Herdr", "native-chat", "working", "provider API", [
+      { author: "agent", body: "I found three agents that need a decision." },
       { author: "system", body: "Native conversation channel is available." },
     ]),
-    session(
+    agent(
       "review",
       "router-review",
       "Claude Code",
@@ -97,7 +97,7 @@ const state: State = {
         { author: "system", body: "Messages are queued through the transcript hook." },
       ],
     ),
-    session(
+    agent(
       "shell",
       "migration-shell",
       "PI",
@@ -107,7 +107,7 @@ const state: State = {
       "terminal pane only",
       [{ author: "agent", body: "I am running a long migration command." }],
     ),
-    session(
+    agent(
       "ghost",
       "old-ghostty-tab",
       "OpenCode",
@@ -121,15 +121,15 @@ const state: State = {
   selected: 0,
   mode: "browse",
   draft: "",
-  notice: "Select a session, then try m, t, r or n.",
+  notice: "Select an agent, then try m, t, r or n.",
   frame: 0,
 };
 
-function selectedSession(): Session {
-  return state.sessions[state.selected]!;
+function selectedAgent(): Agent {
+  return state.agents[state.selected]!;
 }
 
-function statusColour(status: Session["status"]): string {
+function statusColour(status: Agent["status"]): string {
   if (status === "working") return GREEN;
   if (status === "blocked") return RED;
   if (status === "waiting") return YELLOW;
@@ -141,7 +141,7 @@ function writeLine(value = ""): void {
 }
 
 function render(): void {
-  const current = selectedSession();
+  const current = selectedAgent();
   const width = Math.max(72, Math.min(process.stdout.columns || 100, 120));
   const divider = `${DIM}${"─".repeat(width)}${RESET}`;
 
@@ -152,7 +152,7 @@ function render(): void {
   );
   writeLine(divider);
   writeLine(`${BOLD}SESSIONS${RESET} ${DIM}(synthetic host capabilities)${RESET}`);
-  for (const [index, item] of state.sessions.entries()) {
+  for (const [index, item] of state.agents.entries()) {
     const pointer = index === state.selected ? `${CYAN}▸${RESET}` : " ";
     const capability = `${capabilityColour[item.capability]}${capabilityLabel[item.capability]}${RESET}`;
     writeLine(
@@ -199,17 +199,17 @@ function render(): void {
   writeLine(divider);
   writeLine(`${BOLD}STATUS${RESET} ${state.notice}`);
   writeLine(
-    `${DIM}[j/k] select  [m] message  [r] refresh transcript  [t] terminal  [n] new session  [q] quit${RESET}`,
+    `${DIM}[j/k] select  [m] message  [r] refresh transcript  [t] terminal  [n] new agent  [q] quit${RESET}`,
   );
   state.frame += 1;
 }
 
-function addMessage(item: Session, message: Message): void {
+function addMessage(item: Agent, message: Message): void {
   item.messages.push(message);
 }
 
 function enterCompose(): void {
-  const item = selectedSession();
+  const item = selectedAgent();
   if (item.capability === "native-chat" || item.capability === "transcript-chat") {
     state.mode = "compose";
     state.draft = "";
@@ -219,11 +219,11 @@ function enterCompose(): void {
   state.notice =
     item.capability === "terminal-only"
       ? "No message channel. Use t to open the terminal instead."
-      : "Read-only session: no message or terminal channel is available.";
+      : "Read-only agent: no message or terminal channel is available.";
 }
 
 function sendMessage(): void {
-  const item = selectedSession();
+  const item = selectedAgent();
   const body = state.draft.trim();
   if (!body) {
     state.notice = "Empty message discarded.";
@@ -246,9 +246,9 @@ function sendMessage(): void {
 }
 
 function refreshTranscript(): void {
-  const item = selectedSession();
+  const item = selectedAgent();
   if (item.capability === "read-only") {
-    state.notice = "This session has no transcript locator; metadata only.";
+    state.notice = "This agent has no transcript locator; metadata only.";
     return;
   }
   addMessage(item, {
@@ -259,9 +259,9 @@ function refreshTranscript(): void {
 }
 
 function beginTerminal(): void {
-  const item = selectedSession();
+  const item = selectedAgent();
   if (item.capability === "read-only") {
-    state.notice = "No terminal target is known for this session.";
+    state.notice = "No terminal target is known for this agent.";
     return;
   }
   state.mode = "terminal";
@@ -281,9 +281,9 @@ function createSession(choice: string): void {
     return;
   }
   const [capability, provider, transcriptSource] = definition;
-  const id = `new-${state.sessions.length + 1}`;
-  state.sessions.push(
-    session(
+  const id = `new-${state.agents.length + 1}`;
+  state.agents.push(
+    agent(
       id,
       `new-${provider.toLowerCase().replaceAll(" ", "-")}`,
       provider,
@@ -294,18 +294,18 @@ function createSession(choice: string): void {
       [{ author: "system", body: "Launch requested from Observatory." }],
     ),
   );
-  state.selected = state.sessions.length - 1;
+  state.selected = state.agents.length - 1;
   state.mode = "browse";
-  state.notice = `Created ${state.sessions[state.selected]!.title}; the host would now start it.`;
+  state.notice = `Created ${state.agents[state.selected]!.title}; the host would now start it.`;
 }
 
 function handleBrowse(input: string): void {
   if (input === "j") {
-    state.selected = (state.selected + 1) % state.sessions.length;
-    state.notice = `Selected ${selectedSession().title}.`;
+    state.selected = (state.selected + 1) % state.agents.length;
+    state.notice = `Selected ${selectedAgent().title}.`;
   } else if (input === "k") {
-    state.selected = (state.selected - 1 + state.sessions.length) % state.sessions.length;
-    state.notice = `Selected ${selectedSession().title}.`;
+    state.selected = (state.selected - 1 + state.agents.length) % state.agents.length;
+    state.notice = `Selected ${selectedAgent().title}.`;
   } else if (input === "m") {
     enterCompose();
   } else if (input === "r") {
@@ -314,7 +314,7 @@ function handleBrowse(input: string): void {
     beginTerminal();
   } else if (input === "n") {
     state.mode = "launch";
-    state.notice = "Choose the capability you want the new host session to expose.";
+    state.notice = "Choose the capability you want the new host agent to expose.";
   }
 }
 
@@ -340,7 +340,7 @@ function handleInput(input: string): void {
   } else if (state.mode === "launch") {
     if (input === "\u001b") {
       state.mode = "browse";
-      state.notice = "New session cancelled.";
+      state.notice = "New agent cancelled.";
     } else {
       createSession(input);
     }

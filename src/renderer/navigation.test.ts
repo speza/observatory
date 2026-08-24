@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { MapGoalView, MapSessionView, UniverseMapProjection } from "../projection/types.ts";
+import type { MapGoalView, MapAgentView, UniverseMapProjection } from "../projection/types.ts";
 import {
-  clockwiseSessions,
+  clockwiseAgents,
   mapSelectionCandidates,
   nextNavigationSelection,
   type NavigationSelection,
 } from "./navigation.ts";
 
-const session = (id: string, x: number, y: number): MapSessionView => {
-  const value: MapSessionView = {
+const agent = (id: string, x: number, y: number): MapAgentView => {
+  const value: MapAgentView = {
     id,
     displayName: id,
     description: "",
@@ -30,7 +30,7 @@ const session = (id: string, x: number, y: number): MapSessionView => {
   return value;
 };
 
-const goal = (sessions: readonly MapSessionView[]): MapGoalView => {
+const goal = (agents: readonly MapAgentView[]): MapGoalView => {
   const value: MapGoalView = {
     id: "goal-a",
     title: "Goal A",
@@ -40,7 +40,7 @@ const goal = (sessions: readonly MapSessionView[]): MapGoalView => {
     createdAt: 0,
     updatedAt: 0,
     mapPosition: { x: 0, y: 0 },
-    sessions,
+    agents,
     attentionCount: 0,
     staleCount: 0,
     radiusX: 5,
@@ -60,7 +60,7 @@ const mapProjection = (goals: readonly MapGoalView[]): UniverseMapProjection => 
     inboxPosition: { x: -100, y: 0 },
     counts: {
       goals: goals.length,
-      sessions: goals.reduce((total, current) => total + current.sessions.length, 0),
+      agents: goals.reduce((total, current) => total + current.agents.length, 0),
       attention: 0,
       uncertainty: 0,
       unassigned: 0,
@@ -71,14 +71,14 @@ const mapProjection = (goals: readonly MapGoalView[]): UniverseMapProjection => 
 };
 
 describe("map navigation", () => {
-  test("orders focused goal sessions clockwise from the top", () => {
+  test("orders focused goal agents clockwise from the top", () => {
     const focused = goal([
-      session("left", -1, 0),
-      session("bottom", 0, 1),
-      session("top", 0, -1),
-      session("right", 1, 0),
+      agent("left", -1, 0),
+      agent("bottom", 0, 1),
+      agent("top", 0, -1),
+      agent("right", 1, 0),
     ]);
-    expect(clockwiseSessions(focused).map((item) => item.id)).toEqual([
+    expect(clockwiseAgents(focused).map((item) => item.id)).toEqual([
       "top",
       "right",
       "bottom",
@@ -86,23 +86,23 @@ describe("map navigation", () => {
     ]);
   });
 
-  test("keeps portfolio navigation on goals and focused navigation on sessions", () => {
-    const focused = goal([session("session-a", 0, -1), session("session-b", 1, 0)]);
+  test("keeps portfolio navigation on goals and focused navigation on agents", () => {
+    const focused = goal([agent("agent-a", 0, -1), agent("agent-b", 1, 0)]);
     const projection = mapProjection([focused]);
     expect(mapSelectionCandidates(projection, "portfolio", undefined)).toEqual([
       { type: "goal", id: "goal-a" },
     ]);
     expect(mapSelectionCandidates(projection, "goal", "goal-a")).toEqual([
-      { type: "session", id: "session-a" },
-      { type: "session", id: "session-b" },
+      { type: "agent", id: "agent-a" },
+      { type: "agent", id: "agent-b" },
     ]);
   });
 
   test("wraps selection and chooses the nearest end when entering a lens", () => {
     const candidates: readonly NavigationSelection[] = [
-      { type: "session", id: "top" },
-      { type: "session", id: "right" },
-      { type: "session", id: "bottom" },
+      { type: "agent", id: "top" },
+      { type: "agent", id: "right" },
+      { type: "agent", id: "bottom" },
     ];
     expect(nextNavigationSelection(candidates, candidates[2], 1)).toEqual(candidates[0]);
     expect(nextNavigationSelection(candidates, candidates[0], -1)).toEqual(candidates[2]);

@@ -11,7 +11,7 @@ describe("modal frame", () => {
   });
 
   test("shares centered geometry across modal kinds", () => {
-    const frame = modalFrameFor(100, 30, "session-picker");
+    const frame = modalFrameFor(100, 30, "agent-picker");
 
     expect(frame.x).toBeGreaterThan(0);
     expect(frame.y).toBeGreaterThan(0);

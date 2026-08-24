@@ -1,5 +1,5 @@
 import type { Effect, Stream } from "effect";
-import type { RuntimeState } from "../universe/types.ts";
+import type { ExecutionContainerRef, RuntimeState } from "../universe/types.ts";
 import type { HostError } from "./errors.ts";
 
 /** Convert an opaque host kind into a readable label without knowing a host's brand. */
@@ -9,7 +9,7 @@ export const displayHostKind = (hostKind: string): string => {
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
-export interface HostSessionObservation {
+export interface HostAgentObservation {
   readonly nativeId: string;
   readonly displayName: string;
   readonly runtimeState: RuntimeState;
@@ -19,7 +19,9 @@ export interface HostSessionObservation {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
-  /** Serialized and opaque outside the session-host adapter. */
+  /** Optional host-observed execution context; its identity is opaque to core. */
+  readonly executionContainer?: ExecutionContainerRef;
+  /** Serialized and opaque outside the agent-host adapter. */
   readonly hostLocator: string;
 }
 
@@ -27,7 +29,7 @@ export interface HostSnapshot {
   readonly hostKind: string;
   readonly available: boolean;
   readonly observedAt: number;
-  readonly sessions: readonly HostSessionObservation[];
+  readonly agents: readonly HostAgentObservation[];
   readonly diagnostics: readonly string[];
   readonly error?: string;
 }
@@ -35,6 +37,8 @@ export interface HostSnapshot {
 export interface OpaqueAccessTarget {
   readonly kind: string;
   readonly token: string;
+  /** Adapter-owned binding used to reject a reused host identity. */
+  readonly fingerprint?: string;
 }
 
 export interface TerminalDimensions {
@@ -82,24 +86,38 @@ export interface HostTerminalOpenResult {
   readonly terminal?: HostedTerminalSession;
 }
 
-/** A deliberately small, session-specific set of interaction surfaces. */
-export type SessionCapability = "embedded-terminal" | "native-handoff";
-
-export interface SessionAccess {
-  readonly supported: boolean;
-  /** Capabilities proven for this particular session by the host adapter. */
-  readonly capabilities: readonly SessionCapability[];
-  readonly mode?: "focus" | "attach";
+/** A transient host-provided execution surface associated with one agent. */
+export interface LinkedExecution {
+  readonly kind: "shell" | "agent";
+  readonly label: string;
+  /** Opaque identity of the parent host agent; only the host adapter interprets it. */
+  readonly owner: OpaqueAccessTarget;
+  readonly workingDirectory?: string;
+  /** Opaque to Observatory; only the selected host adapter may interpret it. */
   readonly target?: OpaqueAccessTarget;
-  /** Optional host-owned terminal capability for this session. */
-  readonly terminalTarget?: OpaqueAccessTarget;
+  readonly available: boolean;
+  readonly source: "observed" | "prepared";
   readonly explanation: string;
 }
 
-export const hasSessionCapability = (
-  access: SessionAccess,
-  capability: SessionCapability,
-): boolean => access.supported && access.capabilities.includes(capability);
+/** A deliberately small, agent-specific set of interaction surfaces. */
+export type AgentCapability = "embedded-terminal" | "native-handoff" | "linked-terminal";
+
+export interface AgentAccess {
+  readonly supported: boolean;
+  /** Capabilities proven for this particular agent by the host adapter. */
+  readonly capabilities: readonly AgentCapability[];
+  readonly mode?: "focus" | "attach";
+  readonly target?: OpaqueAccessTarget;
+  /** Optional host-owned terminal capability for this agent. */
+  readonly terminalTarget?: OpaqueAccessTarget;
+  /** Existing or host-prepared linked executions, never durable AO agents. */
+  readonly linkedExecutions: readonly LinkedExecution[];
+  readonly explanation: string;
+}
+
+export const hasAgentCapability = (access: AgentAccess, capability: AgentCapability): boolean =>
+  access.supported && access.capabilities.includes(capability);
 
 export interface HostActionResult {
   readonly ok: boolean;
@@ -133,13 +151,17 @@ export interface SessionHost {
   snapshot(): Effect.Effect<HostSnapshot, HostError>;
   listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError>;
   launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError>;
-  access(session: {
+  access(agent: {
     readonly hostKind: string;
     readonly nativeId: string;
-  }): Effect.Effect<SessionAccess, HostError>;
-  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError>;
+  }): Effect.Effect<AgentAccess, HostError>;
+  activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError>;
   openTerminal(
-    access: SessionAccess,
+    access: AgentAccess,
+    dimensions: TerminalDimensions,
+  ): Effect.Effect<HostTerminalOpenResult, HostError>;
+  openLinkedExecutionTerminal(
+    execution: LinkedExecution,
     dimensions: TerminalDimensions,
   ): Effect.Effect<HostTerminalOpenResult, HostError>;
 }

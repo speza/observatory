@@ -63,7 +63,7 @@ Risks:
 
 ### Orbital
 
-**Orbital** describes the experience of the interface: goals, agent sessions and
+**Orbital** describes the experience of the interface: goals, agents and
 repositories arranged as a changing spatial system.
 
 Candidate presentation:
@@ -93,7 +93,7 @@ Risks:
 
 An **orrery** is a mechanical model of celestial bodies and their orbits. It is
 an unusually exact description of the proposed spatial interface: goals as
-major bodies, with agent sessions arranged around them.
+major bodies, with agents arranged around them.
 
 Candidate presentation:
 
@@ -162,17 +162,17 @@ understanding and steering model internals. There are also several smaller
 projects using `agent-observatory` for telemetry, performance and cost
 monitoring.
 
-The broader agent-session-management category is increasingly active:
+The broader agent-management category is increasingly active:
 
 - [Agent Deck](https://github.com/asheshgoplani/agent-deck) manages multi-provider
-  sessions, groups, worktrees, status and cost;
+  agents, groups, worktrees, status and cost;
 - [Cogitator](https://github.com/guilhermehto/cogitator) surfaces agent attention
   and worktrees through a TUI;
 - [CCManager](https://github.com/kbwo/ccmanager) manages multiple coding-agent
   providers and worktrees;
 - [Agent Manager](https://github.com/YoanWai/agent-manager) provides grouped
-  sessions, status, prompting and diff review;
-- [aimux](https://github.com/zanetworker/aimux) combines session management with
+  agents, status, prompting and diff review;
+- [aimux](https://github.com/zanetworker/aimux) combines agent management with
   tracing, cost and code review;
 - [Stoneforge](https://github.com/stoneforge-ai/stoneforge) owns a more autonomous
   orchestration runtime; and
@@ -182,7 +182,7 @@ The broader agent-session-management category is increasingly active:
 No project found in the initial search clearly combines AO's complete thesis:
 durable cross-repository goals, stable spatial organisation, delegation and Git
 relationships, explainable human attention, provider-independent hosted
-sessions and a terminal-native universe.
+agents and a terminal-native universe.
 
 That is an initial landscape scan, not exhaustive market or legal diligence.
 

@@ -5,22 +5,26 @@ import type {
   HostLaunchOption,
   HostLaunchRequest,
   HostLaunchResult,
-  HostSessionObservation,
+  HostAgentObservation,
   HostSnapshot,
   HostTerminalEvent,
   HostedTerminalSession,
   OpaqueAccessTarget,
-  SessionAccess,
+  AgentAccess,
   SessionHost,
   TerminalDimensions,
   HostTerminalInput,
   HostTerminalOpenResult,
+  LinkedExecution,
 } from "../types.ts";
 import { hostError, type HostError } from "../errors.ts";
 import { createMockScenario, type MockScenario } from "./scenarios.ts";
 
 const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
-  target.kind === "mock-session" ? target.token : undefined;
+  target.kind === "mock-agent" ? target.token : undefined;
+
+const parseLinkedExecutionTarget = (target: OpaqueAccessTarget): string | undefined =>
+  target.kind === "mock-linked-execution" ? target.token : undefined;
 
 const elapsedFrames = (now: number, startedAt: number, tickMs: number): number =>
   Math.floor(Math.max(0, now - startedAt) / tickMs);
@@ -34,7 +38,7 @@ class MockTerminalSession implements HostedTerminalSession {
   private released = false;
 
   constructor(
-    private readonly sessionName: string,
+    private readonly agentName: string,
     dimensions: TerminalDimensions,
   ) {
     this.queued = [
@@ -42,7 +46,7 @@ class MockTerminalSession implements HostedTerminalSession {
         kind: "frame",
         frame: {
           bytes: new TextEncoder().encode(
-            `\u001b[2J\u001b[H\u001b[1;36mMOCK TERMINAL\u001b[0m\r\n${sessionName}\r\n\r\nType here; Ctrl-Q releases this deterministic session.\r\n`,
+            `\u001b[2J\u001b[H\u001b[1;36mMOCK TERMINAL\u001b[0m\r\n${agentName}\r\n\r\nType here; Ctrl-Q releases this deterministic agent.\r\n`,
           ),
           columns: dimensions.columns,
           rows: dimensions.rows,
@@ -51,7 +55,7 @@ class MockTerminalSession implements HostedTerminalSession {
       },
     ];
     this.events = Stream.fromAsyncIterable(this.readEvents(), () =>
-      hostError("mock-terminal.events", `Mock terminal stream failed for ${sessionName}.`),
+      hostError("mock-terminal.events", `Mock terminal stream failed for ${agentName}.`),
     );
   }
 
@@ -91,7 +95,7 @@ class MockTerminalSession implements HostedTerminalSession {
       if (this.released) return { ok: true, message: "Mock terminal already released." };
       this.released = true;
       this.push({ kind: "closed", reason: "Released by Observatory." });
-      return { ok: true, message: `Released mock terminal ${this.sessionName}.` };
+      return { ok: true, message: `Released mock terminal ${this.agentName}.` };
     });
   }
 
@@ -118,14 +122,16 @@ class MockTerminalSession implements HostedTerminalSession {
 /**
  * A deterministic development host. It exercises the same reconciliation,
  * projection, attention and attachment paths as Herdr without inventing a
- * renderer-only fixture or copying any private session content.
+ * renderer-only fixture or copying any private agent content.
  */
 export class MockHostAdapter implements SessionHost {
   private readonly clock: Clock;
   private readonly scenario: MockScenario;
   private readonly startedAt: number;
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
-  private readonly launched = new Map<string, HostSessionObservation>();
+  private readonly liveLinkedExecutionTargets = new Map<string, string>();
+  private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
+  private readonly launched = new Map<string, HostAgentObservation>();
   private launchSequence = 0;
 
   constructor(options: {
@@ -147,30 +153,72 @@ export class MockHostAdapter implements SessionHost {
   snapshot(): Effect.Effect<HostSnapshot, HostError> {
     return Effect.sync(() => {
       this.liveTargets.clear();
+      this.liveLinkedExecutionTargets.clear();
+      this.liveLinkedExecutions.clear();
       const observedAt = this.clock.now();
       const frameNumber =
         elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) %
         this.scenario.frames.length;
       const frame = this.scenario.frames[frameNumber];
       if (!frame) throw new Error("Mock scenario frame disappeared.");
-      const sessions = [
-        ...frame.sessions.map((session) => ({
-          ...session,
+      const agents = [
+        ...frame.agents.map((agent) => ({
+          ...agent,
           observedAt,
         })),
-        ...Array.from(this.launched.values(), (session) => ({ ...session, observedAt })),
+        ...Array.from(this.launched.values(), (agent) => ({ ...agent, observedAt })),
       ];
-      for (const session of sessions) {
-        this.liveTargets.set(session.nativeId, {
-          kind: "mock-session",
-          token: session.nativeId,
+      for (const agent of agents) {
+        this.liveTargets.set(agent.nativeId, {
+          kind: "mock-agent",
+          token: agent.nativeId,
         });
+        if (agent.worktree) {
+          const shellToken = `${agent.nativeId}:shell`;
+          const watcherToken = `${agent.nativeId}:watcher`;
+          const siblingToken = `${agent.nativeId}:sibling-agent`;
+          this.liveLinkedExecutionTargets.set(shellToken, agent.nativeId);
+          this.liveLinkedExecutionTargets.set(watcherToken, agent.nativeId);
+          this.liveLinkedExecutionTargets.set(siblingToken, agent.nativeId);
+          this.liveLinkedExecutions.set(agent.nativeId, [
+            {
+              kind: "shell",
+              label: "Mock linked shell",
+              owner: { kind: "mock-agent", token: agent.nativeId },
+              workingDirectory: agent.worktree,
+              target: { kind: "mock-linked-execution", token: shellToken },
+              available: true,
+              source: "observed",
+              explanation: "Deterministic linked shell for the selected mock agent.",
+            },
+            {
+              kind: "shell",
+              label: "Mock test watcher",
+              owner: { kind: "mock-agent", token: agent.nativeId },
+              workingDirectory: agent.worktree,
+              target: { kind: "mock-linked-execution", token: watcherToken },
+              available: true,
+              source: "observed",
+              explanation: "Deterministic second linked shell for the selected mock agent.",
+            },
+            {
+              kind: "agent",
+              label: "Mock sibling agent",
+              owner: { kind: "mock-agent", token: agent.nativeId },
+              workingDirectory: agent.worktree,
+              target: { kind: "mock-linked-execution", token: siblingToken },
+              available: true,
+              source: "observed",
+              explanation: "Deterministic sibling agent surface in the same host context.",
+            },
+          ]);
+        }
       }
       return {
         hostKind: "mock",
         available: true,
         observedAt,
-        sessions,
+        agents,
         diagnostics: [],
       } satisfies HostSnapshot;
     }).pipe(
@@ -194,9 +242,8 @@ export class MockHostAdapter implements SessionHost {
       if (!agentKind)
         return { ok: false, message: "A mock agent kind is required." } satisfies HostLaunchResult;
       const id = `mock-launch-${++this.launchSequence}`;
-      const displayName =
-        request.agentName?.trim() || `${agentKind} session ${this.launchSequence}`;
-      const session: HostSessionObservation = {
+      const displayName = request.agentName?.trim() || `${agentKind} agent ${this.launchSequence}`;
+      const agent: HostAgentObservation = {
         nativeId: id,
         displayName,
         runtimeState: "working",
@@ -206,50 +253,60 @@ export class MockHostAdapter implements SessionHost {
         branch: "mock/launch",
         worktree: request.workingDirectory,
         provider: agentKind,
-        hostLocator: `mock-session:${id}`,
+        hostLocator: `mock-agent:${id}`,
       };
-      this.launched.set(id, session);
+      this.launched.set(id, agent);
       return {
         ok: true,
         nativeId: id,
-        message: `Started a mock ${agentKind} session in ${request.workingDirectory}.`,
+        message: `Started a mock ${agentKind} agent in ${request.workingDirectory}.`,
       } satisfies HostLaunchResult;
     });
   }
 
-  access(session: {
+  access(agent: {
     readonly hostKind: string;
     readonly nativeId: string;
-  }): Effect.Effect<SessionAccess, HostError> {
+  }): Effect.Effect<AgentAccess, HostError> {
     return Effect.sync(() => {
-      if (session.hostKind !== "mock")
+      if (agent.hostKind !== "mock")
         return {
           supported: false,
           capabilities: [],
-          explanation: "This session belongs to an unsupported host.",
-        } satisfies SessionAccess;
-      const target = this.liveTargets.get(session.nativeId);
+          linkedExecutions: [],
+          explanation: "This agent belongs to an unsupported host.",
+        } satisfies AgentAccess;
+      const target = this.liveTargets.get(agent.nativeId);
       if (!target)
         return {
           supported: false,
           capabilities: [],
-          explanation: "The session is not present in the latest mock frame.",
-        } satisfies SessionAccess;
+          linkedExecutions: [],
+          explanation: "The agent is not present in the latest mock frame.",
+        } satisfies AgentAccess;
+      const linkedExecutions = this.liveLinkedExecutions.get(agent.nativeId) ?? [];
       return {
         supported: true,
-        capabilities: ["embedded-terminal", "native-handoff"],
+        capabilities: [
+          "embedded-terminal",
+          "native-handoff",
+          ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
+            ? ["linked-terminal" as const]
+            : []),
+        ],
         mode: "focus",
         target,
         terminalTarget: {
           kind: "mock-terminal",
-          token: session.nativeId,
+          token: agent.nativeId,
         },
+        linkedExecutions,
         explanation: "Simulate focus or open an embedded terminal in the deterministic mock host.",
-      } satisfies SessionAccess;
+      } satisfies AgentAccess;
     });
   }
 
-  activate(access: SessionAccess): Effect.Effect<HostActionResult, HostError> {
+  activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
     return Effect.sync(() => {
       if (!access.supported || !access.target) return { ok: false, message: access.explanation };
       const token = parseTarget(access.target);
@@ -261,21 +318,21 @@ export class MockHostAdapter implements SessionHost {
       if (!this.liveTargets.has(token))
         return {
           ok: false,
-          message: "The session is no longer present in the latest mock frame.",
+          message: "The agent is no longer present in the latest mock frame.",
         };
-      return { ok: true, message: `Simulated focus for mock session ${token}.` };
+      return { ok: true, message: `Simulated focus for mock agent ${token}.` };
     });
   }
 
   openTerminal(
-    access: SessionAccess,
+    access: AgentAccess,
     dimensions: TerminalDimensions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.sync(() => {
       if (!access.supported || !access.terminalTarget)
         return {
           ok: false,
-          message: "This mock session does not expose an embedded terminal.",
+          message: "This mock agent does not expose an embedded terminal.",
         } satisfies HostTerminalOpenResult;
       if (access.terminalTarget.kind !== "mock-terminal")
         return {
@@ -290,12 +347,53 @@ export class MockHostAdapter implements SessionHost {
       if (!this.liveTargets.has(access.terminalTarget.token))
         return {
           ok: false,
-          message: "The session is no longer present in the latest mock frame.",
+          message: "The agent is no longer present in the latest mock frame.",
         } satisfies HostTerminalOpenResult;
       return {
         ok: true,
         message: `Opened an embedded mock terminal for ${access.terminalTarget.token}.`,
         terminal: new MockTerminalSession(access.terminalTarget.token, dimensions),
+      } satisfies HostTerminalOpenResult;
+    });
+  }
+
+  openLinkedExecutionTerminal(
+    linkedExecution: LinkedExecution,
+    dimensions: TerminalDimensions,
+  ): Effect.Effect<HostTerminalOpenResult, HostError> {
+    return Effect.sync(() => {
+      if (!linkedExecution.available || !linkedExecution.target)
+        return {
+          ok: false,
+          message: linkedExecution.explanation,
+        } satisfies HostTerminalOpenResult;
+      const token = parseLinkedExecutionTarget(linkedExecution.target);
+      if (!token)
+        return {
+          ok: false,
+          message: "The mock linked terminal target is invalid or unsupported.",
+        } satisfies HostTerminalOpenResult;
+      if (!this.liveLinkedExecutionTargets.has(token))
+        return {
+          ok: false,
+          message: "The selected linked execution is no longer available.",
+        } satisfies HostTerminalOpenResult;
+      const owner = linkedExecution.owner;
+      const ownerToken = parseTarget(owner);
+      if (!ownerToken || this.liveLinkedExecutionTargets.get(token) !== ownerToken)
+        return {
+          ok: false,
+          message: "The selected linked execution belongs to a different mock agent.",
+        } satisfies HostTerminalOpenResult;
+      if (dimensions.columns < 1 || dimensions.rows < 1)
+        return {
+          ok: false,
+          message: "Terminal dimensions must be positive.",
+        } satisfies HostTerminalOpenResult;
+      return {
+        ok: true,
+        message: `Opened a mock linked terminal for ${token}.`,
+        terminal: new MockTerminalSession(linkedExecution.label, dimensions),
       } satisfies HostTerminalOpenResult;
     });
   }

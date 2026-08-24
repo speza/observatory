@@ -4,6 +4,7 @@ import { makeUniverse, FixedClock } from "../../universe/test-support.ts";
 import { MockHostAdapter } from "./adapter.ts";
 import { createMockScenario } from "./scenarios.ts";
 import { seedMockPortfolio } from "./seed.ts";
+import { defineSessionHostContractTests } from "../session-host-contract.test-support.ts";
 
 describe("Mock host adapter", () => {
   test("offers the same curated launch set as the live host", async () => {
@@ -15,37 +16,37 @@ describe("Mock host adapter", () => {
     ]);
   });
 
-  test("loops deterministic session frames and exposes state transitions", async () => {
+  test("loops deterministic agent frames and exposes state transitions", async () => {
     const clock = new FixedClock(10_000);
     const scenario = createMockScenario();
     const adapter = new MockHostAdapter({ clock, scenario });
 
     const first = await Effect.runPromise(adapter.snapshot());
     expect(first.hostKind).toBe("mock");
-    expect(first.sessions).toHaveLength(20);
+    expect(first.agents).toHaveLength(20);
     expect(first.diagnostics).toHaveLength(0);
-    expect(first.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+    expect(first.agents.find((agent) => agent.nativeId === "mock-p03")?.runtimeState).toBe(
       "blocked",
     );
 
     clock.value += scenario.tickMs;
     const second = await Effect.runPromise(adapter.snapshot());
-    expect(second.sessions).toHaveLength(21);
-    expect(second.sessions.some((session) => session.nativeId === "mock-p17")).toBe(false);
-    expect(second.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+    expect(second.agents).toHaveLength(21);
+    expect(second.agents.some((agent) => agent.nativeId === "mock-p17")).toBe(false);
+    expect(second.agents.find((agent) => agent.nativeId === "mock-p03")?.runtimeState).toBe(
       "working",
     );
-    expect(second.sessions.find((session) => session.nativeId === "mock-p21")?.runtimeState).toBe(
+    expect(second.agents.find((agent) => agent.nativeId === "mock-p21")?.runtimeState).toBe(
       "working",
     );
 
     clock.value += scenario.tickMs * (scenario.frames.length - 1);
     const looped = await Effect.runPromise(adapter.snapshot());
-    expect(looped.sessions.find((session) => session.nativeId === "mock-p03")?.runtimeState).toBe(
+    expect(looped.agents.find((agent) => agent.nativeId === "mock-p03")?.runtimeState).toBe(
       "blocked",
     );
-    expect(looped.sessions.find((session) => session.nativeId === "mock-p01")?.hostLocator).toBe(
-      "mock-session:mock-p01",
+    expect(looped.agents.find((agent) => agent.nativeId === "mock-p01")?.hostLocator).toBe(
+      "mock-agent:mock-p01",
     );
   });
 
@@ -62,14 +63,25 @@ describe("Mock host adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
-    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff"]);
+    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
+    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions.map((execution) => execution.kind)).toEqual([
+      "shell",
+      "shell",
+      "agent",
+    ]);
+    expect(access.linkedExecutions.map((execution) => execution.label)).toEqual([
+      "Mock linked shell",
+      "Mock test watcher",
+      "Mock sibling agent",
+    ]);
     expect(access.target).toEqual({
-      kind: "mock-session",
+      kind: "mock-agent",
       token: "mock-p03",
     });
     expect(await Effect.runPromise(adapter.activate(access))).toEqual({
       ok: true,
-      message: "Simulated focus for mock session mock-p03.",
+      message: "Simulated focus for mock agent mock-p03.",
     });
 
     clock.value += scenario.tickMs;
@@ -85,7 +97,7 @@ describe("Mock host adapter", () => {
     expect(unsupported.capabilities).toEqual([]);
   });
 
-  test("seeds a real goal-and-session portfolio only through Universe commands", async () => {
+  test("seeds a real goal-and-agent portfolio only through Universe commands", async () => {
     const clock = new FixedClock(30_000);
     const { universe } = makeUniverse({ clock });
     const adapter = new MockHostAdapter({ clock });
@@ -94,14 +106,14 @@ describe("Mock host adapter", () => {
 
     expect(seedMockPortfolio(universe)).toEqual({
       createdGoals: 3,
-      assignedSessions: 17,
+      assignedAgents: 17,
     });
     const state = universe.snapshot();
     expect(state.goals.map((goal) => goal.priority)).toEqual(["P0", "P1", "P2"]);
-    expect(state.sessions.filter((session) => session.primaryGoalId)).toHaveLength(17);
+    expect(state.agents.filter((agent) => agent.primaryGoalId)).toHaveLength(17);
     expect(seedMockPortfolio(universe)).toEqual({
       createdGoals: 0,
-      assignedSessions: 0,
+      assignedAgents: 0,
     });
   });
 
@@ -130,7 +142,25 @@ describe("Mock host adapter", () => {
     });
   });
 
-  test("launches a synthetic session that appears on the next snapshot", async () => {
+  test("provides a deterministic linked shell execution stream", async () => {
+    const clock = new FixedClock(45_000);
+    const adapter = new MockHostAdapter({ clock });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    const linkedExecution = access.linkedExecutions[0];
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
+    );
+    expect(opened.ok).toBe(true);
+    expect(await Effect.runPromise(Stream.runHead(opened.terminal!.events))).toMatchObject({
+      _tag: "Some",
+    });
+    await Effect.runPromise(opened.terminal!.release());
+  });
+
+  test("launches a synthetic agent that appears on the next snapshot", async () => {
     const clock = new FixedClock(50_000);
     const adapter = new MockHostAdapter({ clock });
     const launched = await Effect.runPromise(
@@ -144,12 +174,18 @@ describe("Mock host adapter", () => {
     expect(launched.ok).toBe(true);
     expect(launched.nativeId).toBe("mock-launch-1");
     const snapshot = await Effect.runPromise(adapter.snapshot());
-    expect(
-      snapshot.sessions.find((session) => session.nativeId === launched.nativeId),
-    ).toMatchObject({
+    expect(snapshot.agents.find((agent) => agent.nativeId === launched.nativeId)).toMatchObject({
       displayName: "launch-test",
       provider: "codex",
       worktree: "/synthetic/project",
     });
   });
+});
+
+defineSessionHostContractTests("Mock", () => {
+  const clock = new FixedClock(60_000);
+  return {
+    host: new MockHostAdapter({ clock, scenario: createMockScenario() }),
+    agent: { hostKind: "mock", nativeId: "mock-p01" },
+  };
 });

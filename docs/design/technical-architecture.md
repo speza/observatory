@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
-Status: implemented V0 boundary; Herdr terminal lens added, future extensions remain proposed
-Date: 2026-08-22
+Status: implemented V0 boundary; linked execution surfaces added, future extensions remain proposed
+Date: 2026-08-24
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
@@ -12,7 +12,7 @@ Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
 This document defines the initial technical shape of Observatory: a local semantic
 control plane with a portable native spatial universe and a later higher-fidelity
-web interface over agent sessions hosted by other tools.
+web interface over agents hosted by other tools.
 
 The implementation language and initial toolchain are selected separately in
 the technology decision record. Disposable renderer experiments established the
@@ -25,7 +25,7 @@ plane and do not change the implemented V0 boundary by themselves.
 
 The 2026-08-22 evidence pass found both experiments technically plausible:
 Bun/OpenTUI can host a small native terminal surface, and Herdr can stream a
-live session into the same panel while retaining process ownership after
+live agent into the same panel while retaining process ownership after
 release. The first Herdr-backed embedded-terminal slice is now implemented
 behind the SessionHost seam and has passed deterministic mock coverage plus a
 non-destructive live map → terminal → release → map smoke. This promotes the
@@ -35,24 +35,29 @@ transcript ingestion or justify an AO-owned daemon.
 The terminal interaction and scroll-ownership decision is recorded in
 [Embedded terminal interaction](terminal-interaction.md). That document explains
 why host-owned scrolling is distinct from sending PageUp or mouse input to an
-agent and defines the boundary future session hosts must implement.
+agent and defines the boundary future agent hosts must implement.
+The [agent and linked execution model](../specs/agent-execution-model.md) and
+[contextual linked execution surface](../specs/contextual-companion-surfaces.md)
+decision extend the same boundary to transient shells and sibling-agent
+surfaces beside the selected Agent. Native diff/review presentation is
+deferred; users can run those tools inside a linked shell.
 
 ## Architectural objective
 
-AO must make many heterogeneous agent sessions understandable as durable,
+AO must make many heterogeneous agents understandable as durable,
 goal-centred work without becoming coupled to a particular agent provider,
 terminal multiplexer or renderer.
 
 The architecture must support:
 
-- vanilla Claude Code, Codex, OpenCode and Pi sessions;
+- vanilla Claude Code, Codex, OpenCode and Pi agents;
 - optional skills and hooks for richer semantic reporting;
 - goals spanning repositories, worktrees and providers;
 - human and agent mutation through the same interface;
 - completed disposable rendering experiments followed by a live Herdr walking
   slice;
 - a rich terminal client without making terminal rendering part of the domain;
-- future tmux and other session-host adapters; and
+- future tmux and other agent-host adapters; and
 - a possible AO-native multiplexer without requiring one for v1.
 
 Every optional capability is composed as a plugin at the control-plane edge.
@@ -76,7 +81,7 @@ separately in [Plugin architecture](plugin-architecture.md).
 │         └──────────── persistent local state ──┘                 │
 └───────────────┬───────────────────┬──────────────────┬───────────┘
                 │                   │                  │
-        session-host seam    provider-facts seam    Git seam
+        agent-host seam    provider-facts seam    Git seam
                 │                   │                  │
          ┌──────┴──────┐      ┌─────┴──────┐      repository /
          │             │      │            │      worktree state
@@ -100,7 +105,7 @@ query projections and submit commands; they do not read the store directly.
 
 ### Universe module
 
-The Universe module owns goals, tracked sessions, typed relationships,
+The Universe module owns goals, tracked agents, typed relationships,
 lifecycle, priority, acceptance and archive state.
 
 Its interface is command/query oriented:
@@ -118,10 +123,12 @@ interface.
 Key invariants:
 
 - A goal is the largest durable organisational object.
-- V1 has no durable organisational object between a goal and its sessions.
-- A tracked worker session has at most one primary goal.
-- A session may reference other goals without owning work within them.
+- V1 has no durable organisational object between a goal and its agents.
+- A tracked worker agent has at most one primary goal.
+- An Agent may reference other goals without owning work within them.
 - Repositories and worktrees may contribute to multiple goals over time.
+- Observed execution-container, repository and worktree matches are evidence for
+  related-agent candidates, never accepted assignment by themselves.
 - Goal priority is human-authored unless an explicit auto policy allows an
   agent mutation.
 - Archive is non-destructive and never deletes history; the V0 restore command
@@ -135,16 +142,16 @@ without another container. If real usage shows that crowded goals need an
 independently named, prioritised and completed intermediate object, revisit
 nested goals, workstreams or derived clusters as a new model decision.
 
-### Session-host module
+### Agent-host module
 
-The Session-host module hides how terminal sessions are discovered, persisted,
+The Agent-host module hides how terminal agents are discovered, persisted,
 launched, inspected and attached. Herdr and tmux are adapters at this seam; a
 future AO-native multiplexer would be another adapter.
 
 #### Host abstraction policy
 
 Herdr is the required live host for V0/V1. This keeps the first product slice
-focused and lets Herdr own session persistence, process lifetime and PTY
+focused and lets Herdr own agent persistence, process lifetime and PTY
 transport. It does not make Herdr a dependency of the semantic control plane.
 
 `SessionHost` is the sole external-host seam. Only the Herdr adapter and the
@@ -170,6 +177,11 @@ second cancellation protocol. Effect stops at the host/runtime edge: the
 Universe, persistence records and projections remain ordinary TypeScript data
 and deterministic functions.
 
+Host observations may include an optional opaque execution-container reference.
+The adapter owns its meaning and identity; core modules may compare exact
+references as provenance-bearing evidence but do not expose the host's
+workspace, tab or pane concepts as domain objects.
+
 The replacement test is architectural, not aspirational: selecting a future
 tmux adapter, Superlogical-style host or AO-owned multiplexer at composition
 time must leave Universe, persistence, projections and renderers unchanged.
@@ -178,73 +190,86 @@ host is developed further. The mock host supplies deterministic contract
 coverage; every production adapter also needs sanitised fixtures and a live
 smoke path where available.
 
-The v1 interface should remain smaller than the underlying host interfaces:
+The implemented V0/V1 host interface remains smaller than the underlying host
+interfaces:
 
 ```text
-snapshot()                         -> Effect<HostSnapshot, HostError>
-watch(cursor)                      -> Stream<HostObservation, HostError>
-launch(LaunchRequest)              -> Effect<LaunchResult, HostError>
-access(HostedSessionId)            -> Effect<SessionAccess, HostError>
-interact(HostedSessionId,
-         SessionInteraction)       -> Effect<InteractionResult, HostError>
-capabilities()                     -> Effect<HostCapabilities, HostError>
+snapshot()                                      -> Effect<HostSnapshot, HostError>
+listLaunchOptions()                             -> Effect<HostLaunchOption[], HostError>
+launch(HostLaunchRequest)                       -> Effect<HostLaunchResult, HostError>
+access({ hostKind, nativeId })                  -> Effect<AgentAccess, HostError>
+activate(AgentAccess)                           -> Effect<HostActionResult, HostError>
+openTerminal(AgentAccess, TerminalDimensions)  -> Effect<HostTerminalOpenResult, HostError>
+openLinkedExecutionTerminal(LinkedExecution,
+                             TerminalDimensions)
+                                                -> Effect<HostTerminalOpenResult, HostError>
 ```
 
-`snapshot` and `watch` provide reconciliation plus live updates. `launch`
-creates a hosted session but does not assign semantic meaning; the control plane
-does that atomically around the launch workflow. `access` returns the
-session-specific capabilities and opaque attachment targets understood by the
-relevant client or launcher.
+V0 obtains fresh snapshots on a renderer-controlled polling interval, including
+while embedded terminal surfaces are open so shell-to-Agent promotion remains
+observable. `Ctrl-Shift-R` provides an immediate refresh without reserving
+ordinary `R` input from the focused shell. A future host event stream may
+reduce polling, but it is not part of this seam yet.
+`launch` creates a host execution but does not assign semantic meaning;
+reconciliation must observe the resulting Agent before the coordinator assigns
+it to a Goal. `access` returns the capabilities and opaque attachment targets
+proven for the selected Agent.
 
-`SessionInteraction` is a closed tagged set rather than an arbitrary host
-command. Initial candidates are:
-
-```text
-ReadRecentOutput
-SendText
-AnswerPrompt
-Resume
-Stop
-```
-
-Only `SendText` is required for the first quick-interaction experiment.
-`AnswerPrompt` is available only when the combined host and provider integration
-can identify and answer the prompt reliably. Clients never infer support from a
-provider name.
-
-`SessionAccess` reports a small capability list per session because the same host
+`AgentAccess` reports a small capability list per agent because the same host
 may offer different operations depending on provider recognition, permissions,
 whether the process is live, and terminal protocol support. V0 capabilities are
-`embedded-terminal` and `native-handoff`; targets and attachment modes remain
-opaque outside the Session-host module. Herdr supports both, while another host
-may return an honest unsupported result.
+`embedded-terminal`, `native-handoff` and, where proven, `linked-terminal`
+together with transient `LinkedExecution` descriptors. Targets and attachment
+modes remain opaque outside the Agent-host module. Herdr supports
+the proven capabilities, while another host may return an honest unsupported
+result.
 
 Do not expose Herdr workspaces, tabs and panes as universal domain concepts.
 They remain adapter details referenced through opaque native identifiers.
 
-Resizing and unrestricted terminal input are not part of the typed `interact`
-interface. Quick messages and structured answers cross that operation. A host
-may separately expose an optional embedded-terminal attachment capability with
-an opaque byte stream plus input, resize and detach operations. The host still
-owns the PTY and its lifecycle; clients only render and transport it. Hosts that
-cannot provide this capability fall back to another attachment mode. This keeps
-the module deep and avoids copying Herdr or tmux mechanics into every caller.
+Terminal input, resize and release are capabilities of the host-owned terminal
+stream returned by `openTerminal` or `openLinkedExecutionTerminal`. The host
+still owns the PTY and its lifecycle; clients only render and transport it.
+Hosts that cannot provide a capability return an explicit unsupported result.
+This keeps the module deep and avoids copying Herdr or tmux mechanics into
+every caller.
 
 The implemented shape is deliberately small:
 
 ```text
-openTerminal(SessionAccess, TerminalDimensions)
+openTerminal(AgentAccess, TerminalDimensions)
   -> Effect<HostTerminalOpenResult, HostError>
        events: Stream<frame | closed, HostError>
        send(text | bytes): Effect<HostActionResult, HostError>
        resize(columns, rows): Effect<HostActionResult, HostError>
        release(): Effect<HostActionResult, HostError>
+
+openLinkedExecutionTerminal(LinkedExecution, TerminalDimensions)
+  -> Effect<HostTerminalOpenResult, HostError>
 ```
 
-The Herdr adapter translates its controller stream into this capability; the
-mock adapter exercises the same contract. The renderer owns terminal-cell
-interpretation and transient panel state, while the host remains responsible
-for process ownership and cleanup.
+Linked execution owners, terminal targets and target identity bindings remain
+opaque host values. Adapters revalidate them against a fresh snapshot before
+attaching or taking over a terminal, and fail closed when the binding is
+missing, stale or reused.
+
+The Herdr adapter translates both terminal capabilities into its controller
+stream; the mock adapter exercises the same contract. Herdr may discover
+shell-only panes by matching an Agent's opaque host context and working
+directory, or prepare a linked shell when no existing one is available. It also
+classifies recognised sibling agents as linked executions. The adapter returns
+only opaque targets and human-readable explanations: Herdr workspaces, tabs,
+panes and split layouts never become Observatory nodes.
+
+The renderer owns terminal-cell interpretation and the two transient surface
+slots. It can show a map beside a linked execution, or an Agent terminal beside
+one, and cycles focus explicitly between them. Modal pickers are rendered in a
+root overlay above terminal surfaces so selection remains visible and
+interactive. The host remains responsible for
+process ownership, resize and release. Releasing a linked execution releases
+Observatory's controller; it must not silently terminate an existing user-owned
+shell process. Native diff/review presentation is intentionally outside this
+interface: the linked shell is the flexible surface for those workflows.
 
 An embedded PTY is not a guarantee of native provider UI. In particular, image
 or file attachment may depend on an OS picker, terminal clipboard/graphics
@@ -264,24 +289,24 @@ surface are follow-up clients of the same coordinator.
 ### Provider-facts module
 
 The Provider-facts module enriches a host observation with facts specific to an
-agent CLI. A session host knows where a process runs; a provider adapter knows
+agent CLI. An agent host knows where a process runs; a provider adapter knows
 what the process means.
 
 ```text
 recognise(HostObservation)          -> Recognition
-inspect(NativeSessionReference)     -> ProviderFacts
-watch(NativeSessionReference)       -> EventStream<ProviderObservation>?
+inspect(NativeAgentReference)     -> ProviderFacts
+watch(NativeAgentReference)       -> EventStream<ProviderObservation>?
 ```
 
 Candidate facts include:
 
-- provider and native session identifier;
+- provider and native agent identifier;
 - native transcript locator;
 - agent-reported title or objective;
 - runtime state and the source of that state;
 - last activity time;
 - context usage where exposed; and
-- parent session identity where exposed.
+- parent agent identity where exposed.
 
 AO does not ingest transcripts in v1. It stores a native locator so a user or
 chief-of-staff agent can retrieve the transcript through the provider's normal
@@ -315,9 +340,9 @@ It owns:
 - optional pull-request and checks references when another adapter supplies
   them.
 
-New write-capable implementation sessions should receive a fresh worktree by
+New write-capable implementation agents should receive a fresh worktree by
 default. Sharing an existing worktree requires an explicit override unless the
-new session is declared read-only.
+new agent is declared read-only.
 
 ### Attention module
 
@@ -383,12 +408,31 @@ Initial projections:
 - portfolio: active goals plus one level of children;
 - focused goal: expanded work, agent and Git relationships;
 - attention queue: ordered signals with explanations;
+- code contexts: observed repository/worktree groups with agents;
+- code-context map: the same observed groups rendered as derived map bodies
+  with agent satellites;
+- related agents: evidence-backed candidates around a selected goal, with
+  explicit adopt or dismiss commands;
 - search: active and archived metadata results;
 - catch-up: changes since a cursor grouped by goal; and
 - inspector: one object's full known facts and provenance.
 
 Deep blocked descendants appear as warnings on collapsed ancestors. Selecting a
 warning returns a projection that reveals the relevant path.
+
+The code-context projections are an experimental supporting lens. They derive
+repository, worktree and unknown-context groups from current agent
+observations; the map projection adds deterministic positions for the derived
+cluster bodies and their agent satellites. Agents remain the only
+selectable records. These projections do not write accepted state, create
+project nodes or change Goal → Agent assignment. A separate persisted
+worktree/context record remains deferred until real usage shows that agent
+metadata is insufficient. The related-agent projection does not create a
+project, workstream or execution-container node: it compares current
+observations, preserves confidence and assignment ownership, and only changes
+Goal → Agent state after an explicit human command. Dismissals are durable per
+goal/agent pair so the same rejected evidence does not repeatedly interrupt
+the user.
 
 ### Layout module
 
@@ -409,7 +453,7 @@ Rules:
   goal and direct-satellite footprints;
 - manual movement pins nodes;
 - moving a goal moves its derived direct-satellite positions without persisting
-  separate session coordinates;
+  separate agent coordinates;
 - explicit formatting may preserve pinned nodes;
 - layout mutations are undoable; and
 - renderers scale and clip logical coordinates to their viewport.
@@ -422,7 +466,7 @@ premature.
 
 V1 search covers AO-owned metadata only:
 
-- goal and session names;
+- goal and agent names;
 - descriptions;
 - provider, repository, branch and worktree metadata; and
 - active and archived state.
@@ -439,7 +483,7 @@ identifiers are stored as locators, never used as primary AO identity.
 Goal
   id, title, description?, priority?, lifecycle, acceptance, version
 
-TrackedSession
+Agent
   id, primary_goal_id?, host_ref, provider_ref?, display_name,
   access_mode, lifecycle, acceptance, version
 
@@ -449,8 +493,8 @@ RepositoryRef
 WorktreeRef
   id, repository_id, path, branch, base_ref?, lifecycle
 
-SessionWorktree
-  session_id, worktree_id, access_mode
+AgentWorktree
+  agent_id, worktree_id, access_mode
 
 Relationship
   id, type, from_id, to_id, acceptance, source, version
@@ -511,14 +555,14 @@ RenameGoal
 SetGoalPriority
 CompleteGoal
 ArchiveGoal
-AssignSession
-ImportSession
+AssignAgent
+ImportAgent
 ProposeRelationship
 AcceptProposal
 RejectProposal
 PlaceNode
 FormatSelection
-LaunchSession
+LaunchAgent
 ReportAttention
 ResolveAttention
 ```
@@ -531,10 +575,10 @@ The CLI is a thin caller of this interface. An illustrative surface is:
 
 ```sh
 ao goal create --title "Ship model router" --priority p1
-ao session import <native-ref> --goal <goal-id>
-ao session launch --goal <goal-id> --provider codex --host herdr
+ao agent import <native-ref> --goal <goal-id>
+ao agent launch --goal <goal-id> --provider codex --host herdr
 ao relation propose --type delegated-to --from <parent> --to <child>
-ao attention request --session <id> --type question --summary "Choose cache policy"
+ao attention request --agent <id> --type question --summary "Choose cache policy"
 ao goal context <goal-id> --format json
 ```
 
@@ -543,28 +587,27 @@ walking slice.
 
 ## Reconciliation and event flow
 
-AO must reconcile snapshots and event streams because hosts or clients can stop
-while sessions continue running.
+AO reconciles host snapshots because hosts or clients can stop while Agents
+continue running. V0 uses renderer-triggered snapshot polling; host event
+streams remain a future optimisation rather than a domain dependency.
 
 ```text
-startup
+startup / refresh
   -> load accepted AO state
-  -> ask each host for a snapshot
-  -> match native sessions to tracked sessions
-  -> place unknown sessions in the discovery inbox
-  -> inspect provider and Git facts
+  -> ask the host for a snapshot
+  -> match native agents to tracked Agents
+  -> add newly observed Agents to the unassigned inbox
   -> evaluate attention
   -> publish updated projections
-  -> subscribe from the host cursor
 ```
 
 Observations are idempotent and may arrive out of order. Each adapter supplies a
 source-native identity and observed timestamp. Reconciliation must never create
 a trusted goal or relationship from process discovery alone.
 
-Newly discovered sessions do not appear in the accepted universe until a user
-imports them or an authorised agent assigns them. They remain searchable in a
-discovery inbox.
+Newly discovered Agents are durable host observations in the unassigned inbox;
+they do not receive a Goal assignment without an explicit human command. A
+shell-only pane that is absent from `snapshot.agents` is not reconciled at all.
 
 ## Persistence
 
@@ -594,7 +637,7 @@ The control plane should be usable from a CLI, long-running renderer and agent
 skill. The transport therefore needs request/response commands plus event
 subscriptions.
 
-Initial direction for session launch is a local JSON CLI/command surface that
+Initial direction for agent launch is a local JSON CLI/command surface that
 the TUI and an installable agent skill can call. A daemon is deliberately later:
 when a second live client or concurrent agent process needs subscriptions,
 carry the same versioned commands and events over a user-owned Unix domain
@@ -627,9 +670,9 @@ be able to:
 - subscribe to projection changes;
 - submit domain commands;
 - retain local viewport state; and
-- request session access;
+- request agent access;
 - invoke a host attachment target; and
-- submit a supported session interaction.
+- submit a supported agent interaction.
 
 The first overview shows goals and one level of children. Additional delegation
 and Git edges are lenses. Attention from hidden descendants is aggregated on the
@@ -643,7 +686,7 @@ human_priority
 attention_required
 recency
 active_agent_count
-total_session_count
+total_agent_count
 context_pressure
 lifecycle
 acceptance
@@ -665,37 +708,37 @@ must retain this state while an attachment target is active and restore it when
 the user returns.
 
 The inspector projection supplies AO-owned facts and provenance. Supported
-actions and attachment targets come from `SessionAccess`; recent output comes
+actions and attachment targets come from `AgentAccess`; recent output comes
 from the typed `ReadRecentOutput` interaction. None are copied into the
 projection or persisted as generic metadata. A renderer combines these sources
 in its floating inspector card without weakening their provenance.
 
 The floating inspector card is not a universal chat client. In V0 it supports
-inspection and routes into the authoritative hosted session. Messaging,
+inspection and routes into the authoritative hosted agent. Messaging,
 structured answers and approval controls are later capabilities, not part of the
 first live walking slice.
 
 ## Herdr adapter: first live slice
 
 Deterministic fixtures and the live Herdr adapter provide the first real pair
-required to justify the Session-host seam.
+required to justify the Agent-host seam.
 
 The live adapter should use:
 
-- a session snapshot for bootstrap, with recognized agent records as the
-  session inventory;
+- an agent snapshot for bootstrap, with recognized agent records as the
+  agent inventory;
 - event subscription for ongoing workspace, pane and agent changes;
 - opaque workspace/tab/pane identifiers as native locators and metadata;
-- agent status and session identity where available;
+- agent status and agent identity where available;
 - worktree provenance from Herdr plus canonical Git inspection from AO;
 - an attachment target that directly attaches the current terminal to the
   relevant pane;
 - recent pane output for an optional read-only preview.
 
-The adapter must translate Herdr-specific hierarchy into hosted-session facts.
+The adapter must translate Herdr-specific hierarchy into hosted-agent facts.
 For the current V0 adapter, `snapshot.agents` is authoritative: pane, tab and
-workspace records are joined only to enrich an agent session and provide its
-opaque focus target. A shell-only pane is not promoted into a hosted session.
+workspace records are joined only to enrich an agent and provide its
+opaque focus target. A shell-only pane is not promoted into a hosted agent.
 The Universe module must not depend on Herdr record types.
 
 This first-party adapter is intentionally the only live host in V0/V1. The
@@ -703,11 +746,11 @@ boundary is considered successful when a later host can implement the same
 contract without changing the semantic model; no multi-host feature is implied
 until that evidence exists. External efforts such as
 [Superlogical](https://www.superlogical.com/), which describe a broader
-session/multiplexer substrate, are monitored as possible future host adapters,
+agent/multiplexer substrate, are monitored as possible future host adapters,
 not modelled as new AO domain objects today.
 
 The current V0 adapter is read-only except for explicit focus, terminal access,
-session launch and the operations already proven by the live slice. Stop and
+agent launch and the operations already proven by the live slice. Stop and
 broader pane control remain deferred.
 
 ### Deterministic mock host
@@ -716,15 +759,15 @@ The project also includes a development-only `MockHostAdapter`. It implements
 the same `SessionHost` interface as Herdr and is selected only by the explicit
 `AO_HOST=mock` composition setting. A clock-driven scenario selects immutable
 frames rather than sleeping or mutating a second domain model. Each frame emits
-stable synthetic native identities, opaque access targets and sanitized session
-metadata. The real Universe reconciliation, stale-session handling, attention
+stable synthetic native identities, opaque access targets and sanitized agent
+metadata. The real Universe reconciliation, stale-agent handling, attention
 evaluation, projections, layout and TUI attachment-return path therefore run
 unchanged.
 
-The default `orbit` scenario starts at twenty sessions, introduces additional
-sessions, rotates working/idle/waiting/blocked/done states and omits one session
+The default `orbit` scenario starts at twenty agents, introduces additional
+agents, rotates working/idle/waiting/blocked/done states and omits one agent
 for a frame to exercise recovery. `AO_MOCK_SEED=portfolio` is an explicit
-development convenience that creates three synthetic goals and assigns sessions
+development convenience that creates three synthetic goals and assigns agents
 through `Universe.execute`; it never runs for the live Herdr host. The mock
 attachment action is intentionally local and reports simulated focus rather
 than claiming to control a real terminal.
@@ -737,26 +780,26 @@ semantic motion. It does not emulate a graphical canvas or provide a second
 enhanced-graphics mode in v0.
 
 The default projection is a portfolio map of stable goal bodies and direct
-session satellites. Goal size communicates session load, human-set priority has
+agent satellites. Goal size communicates agent load, human-set priority has
 a persistent visual treatment, and blocked/waiting attention reaches the owning
 goal even when the satellite is outside the current viewport. Narrow terminals
 use a focused goal/lens fallback rather than compressing the whole universe.
-Worktrees, repositories, runtimes and hosts are session metadata in the
+Worktrees, repositories, runtimes and hosts are agent metadata in the
 inspector, not navigation levels or map nodes.
 
-Unassigned sessions are hidden from the portfolio map and represented by an
+Unassigned agents are hidden from the portfolio map and represented by an
 `INBOX !N · v list` warning in the header. The inbox is a transient queue, not
 a topology node or durable domain object; it must not consume the central map
 footprint needed to understand accepted goals. Stale or unavailable host state
 is called out in the header and remains actionable through the list and
 attention lenses. Attention and focused inbox lenses expose an attention-first
-list, and a selected goal's assignment picker supports type-to-filter session
+list, and a selected goal's assignment picker supports type-to-filter agent
 metadata. Goal satellites continue to use
 identity-derived, collision-aware perimeter slots. This is deterministic slot
 allocation, not a force-directed graph layout.
 
-Stale or unavailable sessions may be explicitly archived by a human from the
-supporting list or attention lens. Archive removes the session from active
+Stale or unavailable agents may be explicitly archived by a human from the
+supporting list or attention lens. Archive removes the agent from active
 projections without deleting its identity, assignment or observed history;
 future host reconciliation updates the archived record but does not silently
 restore it.
@@ -764,18 +807,18 @@ restore it.
 New goals use the Layout module's nearest-free placement scan. It is dynamic at
 insertion time because it considers current footprint and occupied space, but
 it does not continuously reflow accepted goals. A manually dragged goal stores
-its world-space anchor and its direct session satellites continue to derive
+its world-space anchor and its direct agent satellites continue to derive
 their positions relative to that anchor. Clicking or focusing a goal selects a
 goal-only map projection in the renderer; that view contains the goal and all
-of its direct sessions, not repositories, worktrees or panes. Selecting an
-unassigned session and focusing it reaches the supporting inbox list lens.
+of its direct agents, not repositories, worktrees or panes. Selecting an
+unassigned agent and focusing it reaches the supporting inbox list lens.
 Creating a goal selects it automatically, and `a` from a selected goal opens a
-picker over unassigned sessions; `a` from a selected session retains the
-session-to-goal picker.
+picker over unassigned agents; `a` from a selected agent retains the
+agent-to-goal picker.
 
 Map keyboard navigation follows the visible hierarchy: `j`/`k` cycles goal
-bodies in the portfolio, then cycles a focused goal's direct sessions clockwise
-around its body. The focused inbox cycles unassigned sessions, while the
+bodies in the portfolio, then cycles a focused goal's direct agents clockwise
+around its body. The focused inbox cycles unassigned agents, while the
 supporting grouped list retains flat row navigation.
 
 The attention queue, unassigned inbox, inspector and grouped list remain
@@ -787,14 +830,14 @@ attention uses a steady `!` marker and owning-goal `!N` aggregate; stale or
 uncertain state uses `?` and `?N`. Human-set `P0`–`P3` priority remains a
 separate durable treatment. `g` selects and focuses the next item in the exact
 attention ordering, `f` can focus or reset the selected context, and `t`,
-`Enter` or a session double-click opens the selected hosted terminal. These
+`Enter` or an agent double-click opens the selected hosted terminal. These
 actions may change emphasis and viewport, but never reflow durable positions.
 
-Live `working` sessions are deliberately distinct from merely live `idle`
-sessions: their marker cycles through a restrained half-moon animation and
+Live `working` agents are deliberately distinct from merely live `idle`
+agents: their marker cycles through a restrained half-moon animation and
 their map border pulses green. The animation is a progress cue, not a state
 source; the runtime state and host health remain visible in detail/list views.
-Recently completed live sessions receive the same low-noise treatment in
+Recently completed live agents receive the same low-noise treatment in
 reverse: a `✓` marker, muted green emphasis and completion age keep them easy
 to review briefly without turning completion into an attention condition. A
 stale or unavailable last-known `done` state keeps the uncertainty treatment.
@@ -816,12 +859,14 @@ Keyboard operation remains complete: type-to-find, focus navigation, inspect,
 attention navigation, terminal entry and return-to-universe. Quick message and
 additional lenses are later capabilities.
 
-Selecting a goal, session or inbox opens a transient floating inspector card.
+Selecting a goal, agent or inbox opens a transient floating inspector card.
 The card is anchored near its target, clamped inside the map/list surface, and
 does not reserve a permanent sidebar. Opening the terminal is the direct
-session action, normally `Enter` or double click. Capability-aware actions may
+agent action, normally `Enter` or double click. Capability-aware actions may
 appear in a right-click menu, but every action must also be reachable by
-keyboard.
+keyboard. Opening that menu is transient: it records a context target without
+changing primary selection or inspector state. Choosing an action explicitly
+promotes the target when the action needs primary context.
 
 ## Security and privacy
 
@@ -841,7 +886,7 @@ V1 is local-only and single-user.
 
 Implementation and fixtures must remain clean-room: no employer code,
 confidential information, customer data, internal designs, credentials, work
-accounts or proprietary session transcripts.
+accounts or proprietary agent transcripts.
 
 ## Failure handling
 
@@ -850,14 +895,14 @@ accounts or proprietary session transcripts.
 - Duplicate discovery: reconcile by host plus native identifier, then provider
   identity where available.
 - Missing transcript: keep the locator and display unavailable rather than
-  deleting the session.
+  deleting the agent.
 - Stale agent report: show source and age; a fresher deterministic host fact may
   supersede runtime state.
-- Launch succeeds but assignment fails: retain the discovered session in the
+- Launch succeeds but assignment fails: retain the discovered agent in the
   inbox and report the partial result.
-- Assignment succeeds but launch fails: do not leave a phantom live session;
+- Assignment succeeds but launch fails: do not leave a phantom live agent;
   preserve the failed launch event for inspection.
-- Renderer disconnect: hosted sessions and the control plane continue running.
+- Renderer disconnect: hosted agents and the control plane continue running.
 
 ## Testing strategy
 
@@ -865,7 +910,7 @@ accounts or proprietary session transcripts.
 
 Use synthetic or sanitised fixtures representing at least:
 
-- 20–30 mixed active and idle sessions;
+- 20–30 mixed active and idle agents;
 - several goals across multiple repositories;
 - a cross-repository goal;
 - parent-child delegation;
@@ -886,7 +931,7 @@ Use synthetic or sanitised fixtures representing at least:
 
 ### Adapter contract tests
 
-Every session-host adapter runs the same contract suite for snapshot,
+Every agent-host adapter runs the same contract suite for snapshot,
 reconciliation, watch recovery, access capability reporting, attachment targets
 and each interaction it claims to support. Provider adapters run shared tests
 for recognition, missing metadata, stale locators and malformed native state.
@@ -895,14 +940,14 @@ for recognition, missing metadata, stale locators and malformed native state.
 
 The v0 live Herdr slice should demonstrate:
 
-1. discover existing vanilla sessions into an unassigned inbox;
-2. create a goal and assign a session directly to it;
+1. discover existing vanilla agents into an unassigned inbox;
+2. create a goal and assign an agent directly to it;
 3. rename and reprioritise the goal;
 4. restart AO and recover the accepted organisation;
 5. surface an explainable blocked or waiting attention signal;
-6. find a goal or session by name;
-7. inspect session execution metadata without introducing infrastructure nodes;
-8. focus or attach to the real hosted session; and
+6. find a goal or agent by name;
+7. inspect agent execution metadata without introducing infrastructure nodes;
+8. focus or attach to the real hosted agent; and
 9. complete and archive a goal only through an explicit human action.
 
 ## Delivery sequence
@@ -919,29 +964,29 @@ The v0 live Herdr slice should demonstrate:
 
 - Implement only the Universe, Attention, Projection and SQLite behaviour needed
   by the v0 workflow.
-- Add Herdr snapshot discovery and focus/attachment through the Session-host
+- Add Herdr snapshot discovery and focus/attachment through the Agent-host
   interface.
-- Build the native goal-centred universe map, direct session satellites,
+- Build the native goal-centred universe map, direct agent satellites,
   unassigned inbox, inspector, supporting list lens and search.
 - Keep the process in-process; do not add a daemon solely for this slice.
-- Dogfood with real sessions before broadening the model.
+- Dogfood with real agents before broadening the model.
 
 ### Phase 2 — live-state hardening
 
 - Add Herdr watch/reconciliation and stale-host recovery.
 - Add the minimum provider recognition needed for reliable attention signals.
-- Add Git/worktree inspection as session metadata and conflict warnings.
-- Run the one-week test with at least 15 real recognized agent sessions; do not
-  count shell-only panes, tabs or workspaces as sessions.
+- Add Git/worktree inspection as agent metadata and conflict warnings.
+- Run the one-week test with at least 15 real recognized agents; do not
+  count shell-only panes, tabs or workspaces as agents.
 
 ### Phase 3 — interaction and agent integration
 
 - Run the [native terminal surface POCs](../specs/terminal-surface-pocs.md):
   first an AO-owned Bun PTY for renderer fidelity, then a Herdr-backed control
-  stream for durable-session behaviour.
+  stream for durable-agent behaviour.
 - Add targeted quick messages only after exact-target UX is trusted.
-- Add the `StartSession` CLI/skill flow for agent-created goals, workspace
-  preparation and session assignment; keep the one-request contract above
+- Add the `StartAgent` CLI/skill flow for agent-created goals, workspace
+  preparation and agent assignment; keep the one-request contract above
   Herdr.
 - Preserve human approval for completion and archive behaviour.
 - Introduce the local daemon and control transport when multiple clients or
@@ -951,14 +996,14 @@ The v0 live Herdr slice should demonstrate:
 
 - Build the high-fidelity spatial canvas over the accepted control-plane
   projections.
-- Add embedded xterm.js sessions only where the host exposes an interactive
+- Add embedded xterm.js agents only where the host exposes an interactive
   terminal capability.
 - Keep the browser client local; do not require Electron.
 
 ### Phase 5 — broader hosting
 
 - Add tmux after the Herdr interface has survived real use.
-- Evaluate other durable session hosts, including Superlogical, through the
+- Evaluate other durable agent hosts, including Superlogical, through the
   adapter contract rather than by importing their internal model.
 - Add skills and hooks for enhanced reporting.
 - Revisit launch, input and lifecycle capabilities.
@@ -979,22 +1024,22 @@ The v0 live Herdr slice should demonstrate:
 ## Technical success criteria
 
 - A renderer can be replaced without changing domain or host adapters.
-- A session host can be replaced without changing domain or renderers.
+- An agent host can be replaced without changing domain or renderers.
 - Replay and live Herdr observations produce the same projections.
-- Vanilla sessions are useful without AO-specific hooks.
-- Enhanced metadata can arrive without restarting or recreating a session.
-- Adding an unrelated session does not disrupt the current terminal selection.
-- A blocked session inside a collapsed goal reaches the overview with an
+- Vanilla agents are useful without AO-specific hooks.
+- Enhanced metadata can arrive without restarting or recreating an agent.
+- Adding an unrelated agent does not disrupt the current terminal selection.
+- A blocked agent inside a collapsed goal reaches the overview with an
   explanation.
-- Goal positions remain stable when unrelated sessions are discovered, and
+- Goal positions remain stable when unrelated agents are discovered, and
   accepted goal positions survive SQLite restart.
 - Type-to-find and attention navigation place a selected result in its owning
   goal context.
-- Agent retries do not duplicate goals, sessions or relationships.
+- Agent retries do not duplicate goals, agents or relationships.
 - No transcript contents are required to reconstruct the universe after restart.
 - The live Herdr adapter can disconnect and reconcile without losing accepted
   state.
-- A user can inspect and message one supported session without leaving the map,
+- A user can inspect and message one supported agent without leaving the map,
   then attach and return without losing local navigation state.
 
 ## Open technical questions
@@ -1005,7 +1050,7 @@ The v0 live Herdr slice should demonstrate:
 - Which attention signals can be derived reliably without hooks?
 - How should stale observations expire while preserving historical catch-up?
 - What capability model supports host differences without producing a shallow,
-  sprawling Session-host interface?
+  sprawling Agent-host interface?
 - At what scale does the graph need level-of-detail aggregation beyond one
   visible child layer?
 - What is the smallest safe auto-mode policy users will trust?

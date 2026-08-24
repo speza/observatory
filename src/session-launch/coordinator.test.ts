@@ -8,7 +8,7 @@ import type {
   WorkspaceProvider,
   WorkspaceSelection,
 } from "../workspaces/types.ts";
-import { createStartSessionCoordinator } from "./coordinator.ts";
+import { createStartAgentCoordinator } from "./coordinator.ts";
 
 class TestWorkspaceProvider implements WorkspaceProvider {
   listChoices() {
@@ -26,8 +26,8 @@ class TestWorkspaceProvider implements WorkspaceProvider {
   }
 }
 
-describe("session launch coordinator", () => {
-  test("launches, reconciles and assigns a session exactly once", async () => {
+describe("agent launch coordinator", () => {
+  test("launches, reconciles and assigns an agent exactly once", async () => {
     const clock = new FixedClock(60_000);
     const { universe } = makeUniverse({ clock });
     const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
@@ -39,7 +39,7 @@ describe("session launch coordinator", () => {
       const result = universe.reconcile(snapshot);
       return result.accepted ? "refreshed" : "rejected";
     });
-    const coordinator = createStartSessionCoordinator({
+    const coordinator = createStartAgentCoordinator({
       universe,
       host,
       workspace: new TestWorkspaceProvider(),
@@ -50,18 +50,18 @@ describe("session launch coordinator", () => {
       goal: { kind: "goal", goalId: goal.goalId! } as const,
       workspace: { kind: "existing", path: "/synthetic/project" } as const,
       agent: { kind: "codex" },
-      sessionName: "coordinator session",
+      agentName: "coordinator agent",
     };
     const first = await Effect.runPromise(coordinator.start(intent));
     expect(first.status).toBe("started");
-    expect(first.sessionId).toBeDefined();
+    expect(first.agentId).toBeDefined();
     expect(
-      universe.snapshot().sessions.find((session) => session.id === first.sessionId)?.primaryGoalId,
+      universe.snapshot().agents.find((agent) => agent.id === first.agentId)?.primaryGoalId,
     ).toBe(goal.goalId);
     const second = await Effect.runPromise(coordinator.start(intent));
     expect(second.status).toBe("already-observed");
-    expect(
-      universe.snapshot().sessions.filter((session) => session.provider === "codex"),
-    ).toHaveLength(1);
+    expect(universe.snapshot().agents.filter((agent) => agent.provider === "codex")).toHaveLength(
+      1,
+    );
   });
 });

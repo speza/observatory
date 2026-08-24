@@ -1,5 +1,11 @@
 import type { AttentionItem, AttentionProjection } from "../attention/attention.ts";
-import type { Goal, HostHealth, MapPosition, TrackedSession } from "../universe/types.ts";
+import type {
+  Goal,
+  HostHealth,
+  MapPosition,
+  RelatedAgentDismissal,
+  Agent,
+} from "../universe/types.ts";
 
 export type ProjectionQuery =
   | {
@@ -12,23 +18,39 @@ export type ProjectionQuery =
       readonly now: number;
       readonly includeArchived?: boolean;
     }
+  | {
+      readonly kind: "code-contexts";
+      readonly now: number;
+      readonly includeArchived?: boolean;
+    }
+  | {
+      readonly kind: "code-context-map";
+      readonly now: number;
+      readonly includeArchived?: boolean;
+    }
+  | {
+      readonly kind: "related-agents";
+      readonly now: number;
+      readonly goalId: string;
+      readonly includeDismissed?: boolean;
+    }
   | { readonly kind: "search"; readonly now: number; readonly query: string }
   | {
       readonly kind: "inspector";
       readonly now: number;
       readonly target: {
-        readonly type: "goal" | "session";
+        readonly type: "goal" | "agent";
         readonly id: string;
       };
     };
 
-export interface SessionView extends TrackedSession {
+export interface AgentView extends Agent {
   readonly goalTitle?: string;
   readonly attention?: AttentionItem;
 }
 
 export interface GoalView extends Goal {
-  readonly sessions: readonly SessionView[];
+  readonly agents: readonly AgentView[];
   readonly attentionCount: number;
   readonly staleCount: number;
 }
@@ -39,10 +61,10 @@ export interface CommandCentreProjection {
   readonly host: HostHealth | undefined;
   readonly attention: AttentionProjection;
   readonly goals: readonly GoalView[];
-  readonly unassigned: readonly SessionView[];
+  readonly unassigned: readonly AgentView[];
   readonly counts: {
     readonly goals: number;
-    readonly sessions: number;
+    readonly agents: number;
     readonly attention: number;
     readonly uncertainty: number;
     readonly unassigned: number;
@@ -50,7 +72,7 @@ export interface CommandCentreProjection {
   };
 }
 
-export interface MapSessionView extends SessionView {
+export interface MapAgentView extends AgentView {
   readonly mapPosition: MapPosition;
 }
 
@@ -58,7 +80,7 @@ export interface MapGoalView extends GoalView {
   readonly mapPosition: MapPosition;
   readonly radiusX: number;
   readonly radiusY: number;
-  readonly sessions: readonly MapSessionView[];
+  readonly agents: readonly MapAgentView[];
 }
 
 export interface UniverseMapProjection {
@@ -67,13 +89,92 @@ export interface UniverseMapProjection {
   readonly host: HostHealth | undefined;
   readonly attention: AttentionProjection;
   readonly goals: readonly MapGoalView[];
-  readonly unassigned: readonly MapSessionView[];
+  readonly unassigned: readonly MapAgentView[];
   readonly inboxPosition: MapPosition;
   readonly counts: CommandCentreProjection["counts"];
 }
 
+export interface CodeContextView {
+  readonly key: string;
+  readonly label: string;
+  readonly source: "repository" | "worktree" | "unknown";
+  readonly agents: readonly AgentView[];
+  readonly worktreeCount: number;
+  readonly attentionCount: number;
+  readonly staleCount: number;
+}
+
+export interface CodeContextProjection {
+  readonly kind: "code-contexts";
+  readonly generatedAt: number;
+  readonly host: HostHealth | undefined;
+  readonly attention: AttentionProjection;
+  readonly contexts: readonly CodeContextView[];
+  readonly counts: CommandCentreProjection["counts"] & {
+    readonly contexts: number;
+  };
+}
+
+export interface CodeContextMapAgentView extends AgentView {
+  readonly mapPosition: MapPosition;
+}
+
+export interface CodeContextMapView {
+  readonly key: string;
+  readonly label: string;
+  readonly source: CodeContextView["source"];
+  readonly agents: readonly CodeContextMapAgentView[];
+  readonly worktreeCount: number;
+  readonly attentionCount: number;
+  readonly staleCount: number;
+  readonly mapPosition: MapPosition;
+  readonly radiusX: number;
+  readonly radiusY: number;
+}
+
+export interface CodeContextMapProjection {
+  readonly kind: "code-context-map";
+  readonly generatedAt: number;
+  readonly host: HostHealth | undefined;
+  readonly attention: AttentionProjection;
+  readonly contexts: readonly CodeContextMapView[];
+  readonly counts: CodeContextProjection["counts"];
+}
+
+export type RelatedEvidenceSignal = "execution-container" | "worktree" | "repository";
+export type RelatedEvidenceStrength = "strong" | "supporting";
+
+export interface RelatedAgentEvidence {
+  readonly signal: RelatedEvidenceSignal;
+  readonly strength: RelatedEvidenceStrength;
+  readonly label: string;
+}
+
+export interface RelatedAgentCandidate {
+  readonly agent: AgentView;
+  readonly evidence: readonly RelatedAgentEvidence[];
+  readonly confidence: RelatedEvidenceStrength;
+  readonly adoptable: boolean;
+  readonly dismissed: boolean;
+  readonly dismissedAt?: number;
+}
+
+export interface RelatedAgentsProjection {
+  readonly kind: "related-agents";
+  readonly generatedAt: number;
+  readonly goal: GoalView | undefined;
+  readonly candidates: readonly RelatedAgentCandidate[];
+  readonly counts: {
+    readonly candidates: number;
+    readonly adoptable: number;
+    readonly strong: number;
+    readonly supporting: number;
+    readonly dismissed: number;
+  };
+}
+
 export interface SearchResult {
-  readonly type: "goal" | "session";
+  readonly type: "goal" | "agent";
   readonly id: string;
   readonly label: string;
   readonly context: string;
@@ -94,8 +195,8 @@ export type InspectorProjection =
       readonly lines: readonly string[];
     }
   | {
-      readonly kind: "session-inspector";
-      readonly session: SessionView;
+      readonly kind: "agent-inspector";
+      readonly agent: AgentView;
       readonly lines: readonly string[];
     }
   | {
@@ -106,6 +207,9 @@ export type InspectorProjection =
 export type Projection =
   | CommandCentreProjection
   | UniverseMapProjection
+  | CodeContextProjection
+  | CodeContextMapProjection
+  | RelatedAgentsProjection
   | SearchProjection
   | InspectorProjection;
 
@@ -113,8 +217,9 @@ export interface ProjectionModule {
   project(
     state: {
       readonly goals: readonly Goal[];
-      readonly sessions: readonly TrackedSession[];
+      readonly agents: readonly Agent[];
       readonly hosts: readonly HostHealth[];
+      readonly relatedAgentDismissals?: readonly RelatedAgentDismissal[];
     },
     query: ProjectionQuery,
   ): Projection;

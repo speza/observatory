@@ -6,7 +6,14 @@ import { openHerdrTerminal } from "./terminal.ts";
 import type { CommandRunner, TerminalCommandRunner, TerminalProcess } from "./runner.ts";
 import type { HostTerminalEvent } from "../types.ts";
 import { FixedClock } from "../../universe/test-support.ts";
-import { parseJsonValue } from "./protocol.ts";
+import {
+  isRecord,
+  nonEmptyRecord,
+  parseJsonValue,
+  stringValue,
+  type JsonRecord,
+} from "./protocol.ts";
+import { defineSessionHostContractTests } from "../session-host-contract.test-support.ts";
 
 const fixture = parseJsonValue(
   readFileSync(new URL("../../../fixtures/herdr/sanitized-snapshot.json", import.meta.url), "utf8"),
@@ -126,19 +133,22 @@ describe("Herdr adapter", () => {
     ]);
   });
 
-  test("parses recognized agents into sessions and ignores non-agent panes", () => {
+  test("parses recognized agents into agents and ignores non-agent panes", () => {
     const snapshot = parseHerdrSnapshot(fixture, 12_345);
     expect(snapshot.available).toBe(true);
-    expect(snapshot.sessions).toHaveLength(3);
+    expect(snapshot.agents).toHaveLength(3);
+    expect(snapshot.agents.find((agent) => agent.nativeId === "fixture-w2:p1")?.runtimeState).toBe(
+      "blocked",
+    );
+    expect(snapshot.agents.find((agent) => agent.nativeId === "fixture-w1:p1")?.provider).toBe(
+      "codex",
+    );
     expect(
-      snapshot.sessions.find((session) => session.nativeId === "fixture-w2:p1")?.runtimeState,
-    ).toBe("blocked");
-    expect(
-      snapshot.sessions.find((session) => session.nativeId === "fixture-w1:p1")?.provider,
-    ).toBe("codex");
-    expect(snapshot.sessions[0]?.hostLocator).toContain("paneId");
-    expect(snapshot.sessions[0]?.hostLocator).not.toContain("terminal output");
-    expect(snapshot.sessions.some((session) => session.nativeId === "fixture-w1:p2")).toBe(false);
+      snapshot.agents.find((agent) => agent.nativeId === "fixture-w1:p1")?.executionContainer,
+    ).toEqual({ id: "fixture-w1", label: "alpha" });
+    expect(snapshot.agents[0]?.hostLocator).toContain("paneId");
+    expect(snapshot.agents[0]?.hostLocator).not.toContain("terminal output");
+    expect(snapshot.agents.some((agent) => agent.nativeId === "fixture-w1:p2")).toBe(false);
   });
 
   test("removes Herdr's animated working marker from the display name", () => {
@@ -162,7 +172,7 @@ describe("Herdr adapter", () => {
       99,
     );
 
-    expect(snapshot.sessions[0]?.displayName).toBe("Model override");
+    expect(snapshot.agents[0]?.displayName).toBe("Model override");
   });
 
   test("skips malformed observations without throwing", () => {
@@ -188,7 +198,7 @@ describe("Herdr adapter", () => {
       99,
     );
     expect(snapshot.available).toBe(true);
-    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.agents).toHaveLength(1);
     expect(snapshot.diagnostics).toHaveLength(1);
   });
 
@@ -215,7 +225,7 @@ describe("Herdr adapter", () => {
       },
       99,
     );
-    expect(snapshot.sessions).toHaveLength(2);
+    expect(snapshot.agents).toHaveLength(2);
     expect(snapshot.diagnostics[0]).toContain("duplicate");
   });
 
@@ -228,17 +238,17 @@ describe("Herdr adapter", () => {
       100,
     );
     expect(empty.available).toBe(true);
-    expect(empty.sessions).toHaveLength(0);
+    expect(empty.agents).toHaveLength(0);
 
     const incomplete = parseHerdrSnapshot(
       { result: { snapshot: { panes: [], workspaces: [] } } },
       101,
     );
     expect(incomplete.available).toBe(false);
-    expect(incomplete.error).toContain("required session inventory");
+    expect(incomplete.error).toContain("required agent inventory");
   });
 
-  test("does not treat panes as sessions when the agent list is empty", () => {
+  test("does not treat panes as agents when the agent list is empty", () => {
     const snapshot = parseHerdrSnapshot(
       {
         result: {
@@ -259,7 +269,7 @@ describe("Herdr adapter", () => {
       },
       99,
     );
-    expect(snapshot.sessions).toHaveLength(0);
+    expect(snapshot.agents).toHaveLength(0);
     expect(snapshot.diagnostics).toHaveLength(0);
   });
 
@@ -281,16 +291,70 @@ describe("Herdr adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
-    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff"]);
+    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
+    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions[0]).toMatchObject({
+      kind: "shell",
+      label: "Beta implementation",
+      source: "observed",
+      target: { kind: "herdr-terminal-control", token: "fixture-w2:p2" },
+    });
     expect(access.mode).toBe("attach");
     expect(access.target?.kind).toBe("herdr-agent-attach");
     expect(access.target?.token).toBe("fixture-w2:p1");
     expect(await Effect.runPromise(adapter.activate(access))).toEqual({
       ok: true,
-      message: "Attached to the real Herdr session fixture-w2:p1.",
+      message: "Attached to the real Herdr agent fixture-w2:p1.",
     });
     expect(runner.calls.at(-1)).toEqual(["herdr", "agent", "attach", "fixture-w2:p1"]);
     expect(runner.options.at(-1)).toEqual({ interactive: true });
+  });
+
+  test("classifies a recognized sibling pane as an agent linked execution", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    const panes = Array.isArray(snapshot.panes) ? snapshot.panes.filter(isRecord) : [];
+    const agents = Array.isArray(snapshot.agents) ? snapshot.agents.filter(isRecord) : [];
+    const siblingPane = panes.find((pane) => stringValue(pane, "pane_id") === "fixture-w2:p2");
+    if (!siblingPane) throw new Error("Fixture sibling pane missing.");
+    const promotedFixture: JsonRecord = {
+      ...fixture,
+      result: {
+        ...result,
+        snapshot: {
+          ...snapshot,
+          agents: [
+            ...agents,
+            {
+              ...siblingPane,
+              agent: "codex",
+              display_agent: "codex",
+              agent_status: "working",
+              name: "Beta implementation agent",
+            },
+          ],
+        },
+      },
+    };
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(promotedFixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions[0]).toMatchObject({
+      kind: "agent",
+      label: "Beta implementation",
+    });
+    expect(access.linkedExecutions.slice(1).every((execution) => execution.kind === "shell")).toBe(
+      true,
+    );
   });
 
   test("launches through a Herdr workspace and agent command without leaking pane topology", async () => {
@@ -534,7 +598,7 @@ describe("Herdr adapter", () => {
     ).toHaveLength(2);
   });
 
-  test("does not claim access for unavailable or unknown sessions", async () => {
+  test("does not claim access for unavailable or unknown agents", async () => {
     const runner = new FakeRunner({
       exitCode: 1,
       stdout: "",
@@ -598,10 +662,11 @@ describe("Herdr adapter", () => {
         nativeId: "fixture-w2:p1",
       }),
     );
-    expect(access.terminalTarget).toEqual({
+    expect(access.terminalTarget).toMatchObject({
       kind: "herdr-terminal-control",
       token: "fixture-w2:p1",
     });
+    expect(access.terminalTarget?.fingerprint).toContain('"terminalId":"fixture-term-05"');
     const opened = await Effect.runPromise(adapter.openTerminal(access, { columns: 80, rows: 24 }));
     expect(opened.ok).toBe(true);
     expect(opened.terminal).toBeDefined();
@@ -672,6 +737,375 @@ describe("Herdr adapter", () => {
     expect(terminalRunner.process.writes).toHaveLength(5);
   });
 
+  test("opens an observed shell-only pane as a transient shell linked execution", async () => {
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("linked shell") } },
+      { kind: "closed", reason: "done" },
+    ]);
+    const adapter = new HerdrHostAdapter({
+      runner,
+      terminalRunner,
+      clock: new FixedClock(100),
+    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const linkedExecution = access.linkedExecutions[0];
+    expect(linkedExecution?.target).toMatchObject({
+      kind: "herdr-terminal-control",
+      token: "fixture-w2:p2",
+    });
+    expect(linkedExecution?.target?.fingerprint).toContain('"terminalId":"fixture-term-06"');
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
+    );
+    expect(opened.ok).toBe(true);
+    expect(terminalRunner.calls[0]).toEqual([
+      "herdr",
+      "terminal",
+      "session",
+      "control",
+      "fixture-w2:p2",
+      "--takeover",
+      "--cols",
+      "60",
+      "--rows",
+      "18",
+    ]);
+    await Effect.runPromise(opened.terminal!.release());
+  });
+
+  test("rejects a linked target that disappears before open", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    const staleFixture: JsonRecord = {
+      ...fixture,
+      result: {
+        ...result,
+        snapshot: {
+          ...snapshot,
+          panes: Array.isArray(snapshot.panes)
+            ? snapshot.panes.filter(
+                (pane) => stringValue(nonEmptyRecord(pane), "pane_id") !== "fixture-w2:p2",
+              )
+            : [],
+        },
+      },
+    };
+    const runner = new FakeRunner({ exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" }, [
+      { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+      { exitCode: 0, stdout: JSON.stringify(staleFixture), stderr: "" },
+    ]);
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("should not open") } },
+    ]);
+    const adapter = new HerdrHostAdapter({
+      runner,
+      terminalRunner,
+      clock: new FixedClock(100),
+    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(access.linkedExecutions[0]!, { columns: 60, rows: 18 }),
+    );
+    expect(opened).toMatchObject({ ok: false });
+    expect(opened.message).toContain("no longer available");
+    expect(terminalRunner.calls).toHaveLength(0);
+  });
+
+  test("rejects a linked target whose pane identity is reused", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    const reusedFixture: JsonRecord = {
+      ...fixture,
+      result: {
+        ...result,
+        snapshot: {
+          ...snapshot,
+          panes: Array.isArray(snapshot.panes)
+            ? snapshot.panes.map((pane) => {
+                const record = nonEmptyRecord(pane);
+                return stringValue(record, "pane_id") === "fixture-w2:p2"
+                  ? { ...record, terminal_id: "fixture-term-reused" }
+                  : pane;
+              })
+            : [],
+        },
+      },
+    };
+    const runner = new FakeRunner({ exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" }, [
+      { exitCode: 0, stdout: JSON.stringify(reusedFixture), stderr: "" },
+    ]);
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("should not open") } },
+    ]);
+    const adapter = new HerdrHostAdapter({ runner, terminalRunner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(access.linkedExecutions[0]!, { columns: 60, rows: 18 }),
+    );
+    expect(opened).toMatchObject({ ok: false });
+    expect(opened.message).toContain("no longer available");
+    expect(terminalRunner.calls).toHaveLength(0);
+  });
+
+  test("rejects a primary target that disappears before open", async () => {
+    const emptySnapshot = {
+      result: { snapshot: { panes: [], agents: [], workspaces: [] } },
+    };
+    const runner = new FakeRunner({ exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" }, [
+      { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+      { exitCode: 0, stdout: JSON.stringify(emptySnapshot), stderr: "" },
+    ]);
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("should not open") } },
+    ]);
+    const adapter = new HerdrHostAdapter({
+      runner,
+      terminalRunner,
+      clock: new FixedClock(100),
+    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const opened = await Effect.runPromise(adapter.openTerminal(access, { columns: 60, rows: 18 }));
+    expect(opened).toMatchObject({ ok: false });
+    expect(opened.message).toContain("no longer available");
+    expect(terminalRunner.calls).toHaveLength(0);
+  });
+
+  test("prepares a linked shell workspace when no matching shell pane exists", async () => {
+    const preparedSnapshot = {
+      result: {
+        snapshot: {
+          panes: [
+            {
+              pane_id: "prepared-agent:p1",
+              terminal_id: "prepared-term-01",
+              workspace_id: "prepared-workspace",
+              tab_id: "prepared-workspace:t1",
+              cwd: "/sandbox/prepared",
+              foreground_cwd: "/sandbox/prepared",
+            },
+          ],
+          agents: [
+            {
+              pane_id: "prepared-agent:p1",
+              agent: "codex",
+              name: "prepared-agent",
+              agent_status: "idle",
+            },
+          ],
+          workspaces: [
+            {
+              workspace_id: "prepared-workspace",
+              label: "prepared",
+              worktree: { checkout_path: "/sandbox/prepared" },
+            },
+          ],
+        },
+      },
+    };
+    const preparedWithShellSnapshot = {
+      ...preparedSnapshot,
+      result: {
+        ...preparedSnapshot.result,
+        snapshot: {
+          ...preparedSnapshot.result.snapshot,
+          panes: [
+            ...preparedSnapshot.result.snapshot.panes,
+            {
+              pane_id: "prepared-shell:p1",
+              terminal_id: "prepared-shell-term-01",
+              workspace_id: "prepared-shell-workspace",
+              tab_id: "prepared-shell-workspace:t1",
+              cwd: "/sandbox/prepared",
+              foreground_cwd: "/sandbox/prepared",
+              terminal_title_stripped: "AO linked terminal",
+            },
+          ],
+        },
+      },
+    };
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(preparedSnapshot),
+        stderr: "",
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(preparedSnapshot),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(preparedSnapshot),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: { root_pane: { pane_id: "prepared-shell:p1" } },
+          }),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(preparedWithShellSnapshot),
+          stderr: "",
+        },
+      ],
+    );
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("linked shell") } },
+      { kind: "closed", reason: "done" },
+    ]);
+    const adapter = new HerdrHostAdapter({
+      runner,
+      terminalRunner,
+      clock: new FixedClock(100),
+    });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "prepared-agent:p1" }),
+    );
+    const linkedExecution = access.linkedExecutions[0];
+    expect(linkedExecution).toMatchObject({
+      source: "prepared",
+      target: { kind: "herdr-prepared-shell", token: "/sandbox/prepared" },
+    });
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
+    );
+    expect(opened.ok).toBe(true);
+    expect(runner.calls[2]).toEqual([
+      "herdr",
+      "workspace",
+      "create",
+      "--cwd",
+      "/sandbox/prepared",
+      "--label",
+      "AO linked terminal",
+      "--no-focus",
+    ]);
+    expect(terminalRunner.calls[0]).toContain("prepared-shell:p1");
+    await Effect.runPromise(opened.terminal!.release());
+
+    runner.setResult({
+      exitCode: 0,
+      stdout: JSON.stringify(preparedWithShellSnapshot),
+      stderr: "",
+    });
+    const reopened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
+    );
+    expect(reopened.ok).toBe(true);
+    expect(
+      runner.calls.filter(
+        (call) => call[0] === "herdr" && call[1] === "workspace" && call[2] === "create",
+      ),
+    ).toHaveLength(1);
+    expect(terminalRunner.calls[1]).toContain("prepared-shell:p1");
+    await Effect.runPromise(reopened.terminal!.release());
+  });
+
+  test("fails closed when linked workspace creation leaves multiple candidate panes", async () => {
+    const preparedSnapshot = {
+      result: {
+        snapshot: {
+          panes: [
+            {
+              pane_id: "prepared-agent:p1",
+              terminal_id: "prepared-term-01",
+              workspace_id: "prepared-workspace",
+              tab_id: "prepared-workspace:t1",
+              cwd: "/sandbox/prepared",
+            },
+          ],
+          agents: [
+            {
+              pane_id: "prepared-agent:p1",
+              agent: "codex",
+              name: "prepared-agent",
+              agent_status: "idle",
+            },
+          ],
+          workspaces: [],
+        },
+      },
+    };
+    const ambiguousSnapshot = {
+      ...preparedSnapshot,
+      result: {
+        ...preparedSnapshot.result,
+        snapshot: {
+          ...preparedSnapshot.result.snapshot,
+          panes: [
+            ...preparedSnapshot.result.snapshot.panes,
+            {
+              pane_id: "candidate-shell:p1",
+              terminal_id: "candidate-term-01",
+              workspace_id: "candidate-workspace-01",
+              tab_id: "candidate-workspace-01:t1",
+              cwd: "/sandbox/prepared",
+            },
+            {
+              pane_id: "candidate-shell:p2",
+              terminal_id: "candidate-term-02",
+              workspace_id: "candidate-workspace-02",
+              tab_id: "candidate-workspace-02:t1",
+              cwd: "/sandbox/prepared",
+            },
+          ],
+        },
+      },
+    };
+    const runner = new FakeRunner(
+      { exitCode: 0, stdout: JSON.stringify(preparedSnapshot), stderr: "" },
+      [
+        { exitCode: 0, stdout: JSON.stringify(preparedSnapshot), stderr: "" },
+        { exitCode: 0, stdout: JSON.stringify(preparedSnapshot), stderr: "" },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ result: {} }),
+          stderr: "",
+        },
+        { exitCode: 0, stdout: JSON.stringify(ambiguousSnapshot), stderr: "" },
+      ],
+    );
+    const terminalRunner = new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("should not open") } },
+    ]);
+    const adapter = new HerdrHostAdapter({ runner, terminalRunner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "prepared-agent:p1" }),
+    );
+    const opened = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(access.linkedExecutions[0]!, { columns: 60, rows: 18 }),
+    );
+    expect(opened).toMatchObject({ ok: false });
+    expect(opened.message).toContain("could not identify its shell pane");
+    expect(terminalRunner.calls).toHaveLength(0);
+  });
+
   test("treats untagged terminal frame data as text", async () => {
     const terminalRunner = new FakeTerminalRunner(
       [{ kind: "frame", frame: { bytes: new TextEncoder().encode("test") } }],
@@ -701,3 +1135,19 @@ describe("Herdr adapter", () => {
     await Effect.runPromise(terminal.release());
   });
 });
+
+defineSessionHostContractTests("Herdr", () => ({
+  host: new HerdrHostAdapter({
+    runner: new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    }),
+    terminalRunner: new FakeTerminalRunner([
+      { kind: "frame", frame: { bytes: new TextEncoder().encode("contract") } },
+      { kind: "closed", reason: "done" },
+    ]),
+    clock: new FixedClock(60_000),
+  }),
+  agent: { hostKind: "herdr", nativeId: "fixture-w2:p1" },
+}));

@@ -12,6 +12,15 @@ Observatory renders hosted agent terminals inside the native TUI, but it does
 not own the PTY, process, pane scrollback or agent terminal state. Those remain
 owned by the configured `SessionHost`; Herdr is the required live V0/V1 host.
 
+The same host-owned terminal contract can power one transient linked execution
+surface for the selected Agent. A linked execution may be an existing shell
+observed in the host, a host-prepared shell in the Agent worktree, or a
+recognised sibling Agent. It is contextual
+UI, not a second AO agent or a new durable topology node. Diff and review
+tools are deliberately not native Observatory surfaces in the first
+implementation. The user can run `git diff`, `hunk`, `delta` or another review
+tool inside the linked terminal.
+
 Observatory uses two different host capabilities for interaction:
 
 - `terminal.input` sends text or bytes to the agent application. This is used
@@ -26,7 +35,7 @@ For Herdr, Observatory deliberately translates both pointer scrolling and
 PageUp/PageDown into the host's `page_key` scroll source. Herdr's `wheel` source
 can be routed to an application that has enabled mouse reporting; that is the
 right behaviour for a normal direct attach client, but not the desired default
-for Observatory's “browse the session history” gesture.
+for Observatory's “browse the agent history” gesture.
 
 ## The terminal model
 
@@ -68,14 +77,14 @@ that was never sent in the stream.
 | User action                          | Observatory sends                 | Owner of the operation      |
 | ------------------------------------ | --------------------------------- | --------------------------- |
 | Printable key, navigation key, paste | `terminal.input`                  | Agent application           |
-| Resize Observatory                   | `terminal.resize`                 | Host PTY/terminal session   |
+| Resize Observatory                   | `terminal.resize`                 | Host PTY/terminal agent     |
 | Trackpad wheel                       | `terminal.scroll` with `page_key` | Host viewport               |
 | PageUp/PageDown                      | `terminal.scroll` with `page_key` | Host viewport               |
 | Release embedded terminal            | `terminal.release`                | Host controller             |
 | Output or viewport update            | `terminal.frame` received         | Host → Observatory renderer |
 
 The scroll decision is intentional: a pointer wheel is treated as a request to
-browse the hosted session, not as an instruction that the agent must interpret.
+browse the hosted agent, not as an instruction that the agent must interpret.
 
 ## The failed implementation
 
@@ -98,6 +107,37 @@ This failed in several ways:
 
 The result was that the input event was visibly received but nothing moved.
 
+## Linked execution surface interaction
+
+Observatory has two presentation modes:
+
+- map mode keeps the spatial map visible beside a linked terminal; and
+- review mode keeps the primary agent terminal visible beside a linked terminal.
+
+The host may report N linked executions, but only one selected linked execution
+surface is open at a time in the first implementation. A picker makes every
+available link visible before opening the selected one. The focused surface owns
+ordinary key input, paste and scroll. `Tab` cycles focus;
+the focus ring and footer identify where input will go. An unfocused terminal
+continues receiving frames and remains visible for comparison. `Esc` closes the
+focused terminal, and terminal release is delegated to the host.
+
+The selected-agent action menu exposes the linked terminal, so the user does
+not need to return to Herdr to control or inspect a discovered linked terminal.
+Right-clicking another map target opens that menu as a transient context
+target and leaves the primary selection alone; choosing an operation promotes
+the target when the operation needs primary context.
+A shell-only Herdr pane is still never treated as an AO Agent until Herdr reports
+it in its authoritative agent inventory. A map portal is deferred until its
+placement and hit testing are mature.
+
+Host reconciliation continues while either terminal surface is open so a shell
+that becomes a Claude, Codex or Pi process can appear as a normal Agent without
+closing the review context. `Ctrl-Shift-R` requests an immediate snapshot;
+ordinary `R` remains terminal input. An open linked picker is revalidated and
+updated from the latest capability after reconciliation, and closes if its
+owner or all of its linked executions disappear.
+
 ## Alternatives considered
 
 ### Local Observatory scrollback
@@ -115,7 +155,7 @@ Cons:
 - cannot recover history the host did not stream;
 - difficult to make correct for alternate-screen applications;
 - requires a substantially more complete terminal emulator;
-- consumes memory for long-running sessions;
+- consumes memory for long-running agents;
 - can disagree with the host's viewport and scroll limits.
 
 This remains useful as a bounded rendering aid and possible future fallback, but
@@ -219,6 +259,12 @@ leaking and must be repaired before adding the host.
   visibly and safely rather than silently changing semantic Observatory state.
 - Hosts without host-owned scroll should report that capability as unsupported;
   the renderer must not guess by injecting provider-specific escape sequences.
+- A discovered linked shell can disappear or change ownership between snapshots;
+  opening it must revalidate its opaque terminal identity, return an honest host
+  error and must not manufacture a durable AO agent.
+- Observatory does not provide a native diff viewer yet. Diff and review tools
+  run in a linked shell until a concrete native workflow justifies a separate
+  surface.
 
 ## Verification expectations
 
@@ -227,7 +273,8 @@ Terminal interaction changes should include:
 1. generic host contract coverage for text, bytes, scroll, resize and release;
 2. adapter tests for the exact provider wire mapping;
 3. deterministic mock-host coverage for frame updates;
-4. a live, non-destructive host smoke proving that a scroll command produces a
+4. stale/reused target coverage proving no terminal-control command is spawned;
+5. a live, non-destructive host smoke proving that a scroll command produces a
    changed viewport frame; and
-5. `bun run format`, `bun run check`, `bun test` and `bun run dev:mock` renderer
+6. `bun run format`, `bun run check`, `bun test` and `bun run dev:mock` renderer
    dogfooding where the change affects the TUI.

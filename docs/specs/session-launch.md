@@ -1,4 +1,4 @@
-# Observatory session launch and workspace preparation
+# Observatory agent launch and workspace preparation
 
 Status: first launch slice implemented; follow-up UX and CLI work remains
 Date: 2026-08-23
@@ -6,7 +6,7 @@ Depends on: [Observatory technical architecture](../design/technical-architectur
 
 ## Why this exists
 
-Observatory currently discovers sessions that already exist. That is enough to
+Observatory currently discovers agents that already exist. That is enough to
 organise work, but it leaves the most common transition outside the product:
 
 ```text
@@ -14,29 +14,29 @@ I have a piece of work
   -> choose the project or directory
   -> decide whether to reuse the checkout or make a worktree
   -> choose Claude Code, Codex or Pi
-  -> start the session
+  -> start the agent
   -> put it in the right goal
 ```
 
 Today this is a chain of manual shell, Herdr and Observatory actions. It is
 slow for a human and gives an orchestrator a bad contract: it must create a
-host session, discover its opaque identity, then make a second call to attach
-that session to Observatory. The product should accept one launch intent and
+host agent, discover its opaque identity, then make a second call to attach
+that agent to Observatory. The product should accept one launch intent and
 own the coordination.
 
 The purpose of this slice is not to make Observatory a general process runner.
-It is to make starting a hosted agent session a first-class control-plane
+It is to make starting a hosted agent a first-class control-plane
 workflow while keeping project, Git and Herdr mechanics behind adapters.
 
 ## Design decision
 
-The canonical operation is a single `StartSession` intent:
+The canonical operation is a single `StartAgent` intent:
 
 ```text
 TUI / local CLI / agent skill
           |
           v
-StartSessionCoordinator
+StartAgentCoordinator
    |              |                 |
    v              v                 v
 Workspace     Universe          SessionHost
@@ -48,10 +48,10 @@ provider      commands          (Herdr first)
 
 The caller supplies one request. Observatory resolves or prepares the
 workspace, asks the selected `SessionHost` to launch the agent, reconciles the
-resulting host observation, and assigns the session to the requested goal.
+resulting host observation, and assigns the agent to the requested goal.
 
 The caller does not call Herdr directly in the normal path. Herdr remains the
-V0/V1 implementation behind `SessionHost`. A session started directly through
+V0/V1 implementation behind `SessionHost`. An agent started directly through
 vanilla Herdr is still discovered and remains usable, but it appears unassigned
 until a human or an explicit link operation assigns it.
 
@@ -59,7 +59,7 @@ until a human or an explicit link operation assigns it.
 
 ### Quick start
 
-`New session` opens a short wizard with safe, recent defaults:
+`New agent` opens a short wizard with safe, recent defaults:
 
 1. **Goal** — current goal, another existing goal, new goal, or inbox.
 2. **Location** — recent projects/directories first; browse configured roots
@@ -70,21 +70,21 @@ until a human or an explicit link operation assigns it.
    the host supplies the selectable options and user-facing labels so users do
    not need to remember provider command names. Other discovered providers may
    remain observable, but are not launch choices in this first slice.
-5. **Prompt** — optional initial instruction and optional session name.
+5. **Prompt** — optional initial instruction and optional agent name.
 
 The wizard should make the common path one or two selections rather than
 forcing a full configuration form. The first TUI slice is intentionally
 smaller: press `N`, keep the current directory or browse another directory,
 choose an existing checkout or a new worktree, then select the host-supported
 agent, optional name and prompt. The initial location choices come from the current
-directory, known session worktrees and the optional `AO_WORKSPACE_LOCATIONS`
+directory, known agent worktrees and the optional `AO_WORKSPACE_LOCATIONS`
 path-list environment variable. Recency ranking, branch/base/path controls and
 provider argument editing remain follow-up work on the same coordinator
 contract.
 
 The selected project is a location, not a new Observatory topology node. The
-resulting session carries repository, branch and worktree metadata; the map
-remains `Goal -> Session`.
+resulting agent carries repository, branch and worktree metadata; the map
+remains `Goal -> Agent`.
 
 ### Location picker
 
@@ -100,14 +100,14 @@ browser:
 The picker can later grow configured roots and favourites without changing the
 launch contract. A path is never accepted merely because it exists: the
 workspace provider reports whether it is a Git checkout, a plain directory,
-dirty, already used by another session, or unavailable.
+dirty, already used by another agent, or unavailable.
 
 ### Worktree choice
 
 The first version supports two explicit modes:
 
 - **Existing checkout:** launch in the selected directory. Warn when the
-  checkout is dirty or already has active sessions; do not silently create a
+  checkout is dirty or already has active agents; do not silently create a
   competing process in it.
 - **New worktree:** create a linked worktree from the selected repository,
   choose a branch/base/path, then launch in the new checkout.
@@ -128,19 +128,19 @@ Worktree creation is non-destructive by default:
 The public command shape is intentionally small and serializable:
 
 ```text
-StartSessionIntent {
+StartAgentIntent {
   requestId: string                 // caller-provided idempotency key
   goal: ExistingGoal | NewGoal | Inbox
   workspace: ExistingLocation | NewWorktree
   agent: { kind: string, name?: string, args?: string[] }
   prompt?: string
-  sessionName?: string
+  agentName?: string
   mode?: "manual" | "auto" | "hybrid"
 }
 ```
 
 The exact transport is deliberately separate from this interface. The first
-consumer can be a local JSON CLI (`observatory session start --json`) and the
+consumer can be a local JSON CLI (`observatory agent start --json`) and the
 TUI can call the same coordinator directly. A Unix-socket control transport is
 only justified once a second live client or concurrent agent process needs
 subscriptions; it must not become a second domain interface.
@@ -152,14 +152,14 @@ reconciliation, or failed.
 
 ## Module and seam design
 
-### `StartSessionCoordinator`
+### `StartAgentCoordinator`
 
 This is the deep module exposed to the TUI, CLI and agent skill. Its interface
 owns ordering, failure handling, reconciliation and goal assignment so callers
 do not repeat those steps.
 
 ```text
-start(intent) -> Effect<StartSessionResult, LaunchError>
+start(intent) -> Effect<StartAgentResult, LaunchError>
 ```
 
 It must:
@@ -168,9 +168,9 @@ It must:
 2. ask the workspace provider to resolve or prepare a working directory;
 3. ask the host to launch the requested agent in that directory;
 4. refresh/reconcile the host snapshot;
-5. locate the resulting accepted session without inventing a fake session;
+5. locate the resulting accepted agent without inventing a fake agent;
 6. assign it to the requested goal when one was supplied; and
-7. return a receipt containing the Observatory session id when available.
+7. return a receipt containing the Observatory agent id when available.
 
 The renderer never runs `git`, `herdr`, a shell command or a provider binary.
 
@@ -223,12 +223,12 @@ host receipt/native identity; Herdr workspace, tab and pane ids never enter
 Universe types or renderer interfaces.
 
 The mock adapter implements the same capability with deterministic synthetic
-sessions so the whole coordinator can be tested without Herdr.
+agents so the whole coordinator can be tested without Herdr.
 
 ### Universe ownership
 
-The host launch is not itself a trusted Observatory session record. The
-coordinator only assigns a session after reconciliation observes it. If the
+The host launch is not itself a trusted Observatory agent record. The
+coordinator only assigns an agent after reconciliation observes it. If the
 host launch succeeds but reconciliation is delayed, the result is `pending`
 and the UI shows a launch diagnostic; it does not create a phantom map node.
 
@@ -239,31 +239,31 @@ claim that a process exists when the host did not confirm it.
 
 ## Agent and orchestrator contract
 
-The agent-facing contract is Observatory's `StartSession` operation, not a
+The agent-facing contract is Observatory's `StartAgent` operation, not a
 Herdr recipe. A chief-of-staff agent can request:
 
 ```text
-start session
+start agent
   goal: existing "Observatory"
   project: recent "ao"
-  workspace: new worktree, branch "feat/session-launch"
+  workspace: new worktree, branch "feat/agent-launch"
   agent: claude
   prompt: "Implement the launch wizard"
 ```
 
-Observatory then performs the host-specific work and returns the session id,
+Observatory then performs the host-specific work and returns the agent id,
 goal id, workspace path and any warnings. This removes the double operation
 you identified: the orchestrator asks once; the Herdr adapter talks to Herdr
 internally.
 
 Direct Herdr remains a compatibility path, not the preferred agent contract:
 
-- vanilla sessions are discovered normally;
+- vanilla agents are discovered normally;
 - they can be assigned manually from the inbox; and
-- an optional future `session link` command can associate an externally-created
-  host session when a caller already owns its opaque identity.
+- an optional future `agent link` command can associate an externally-created
+  host agent when a caller already owns its opaque identity.
 
-The link command must not be required for sessions created through Observatory.
+The link command must not be required for agents created through Observatory.
 
 Agent launch policy is explicit:
 
@@ -276,7 +276,7 @@ other semantic lifecycle mutations retain their existing human-control policy.
 
 ## Native agent UI and attachments
 
-Starting a session through Observatory does not make Observatory a replacement
+Starting an agent through Observatory does not make Observatory a replacement
 for every provider TUI. The embedded surface is a host-owned PTY rendered by
 OpenTUI, not Claude Code, Codex, OpenCode or PI's native client. It can preserve
 normal terminal keys, text input, resize and ordinary terminal paste, but it
@@ -298,7 +298,7 @@ The V1 policy is therefore:
   genuinely require the provider's own UI or terminal emulator. Handoff is an
   exception path, not a second default interaction mode.
 
-The TUI exposes the embedded terminal with `t` or `Enter`. When a session
+The TUI exposes the embedded terminal with `t` or `Enter`. When an agent
 reports `native-handoff`, `o` temporarily suspends Observatory and invokes the
 host's opaque native target, then restores the Observatory selection on return.
 If the capability is absent, Observatory explains that the embedded terminal is
@@ -308,7 +308,7 @@ Provider plugins may later translate a local file reference or image into a
 provider-native interaction. That belongs behind a narrow provider capability
 port, not in the Universe or the generic terminal renderer. Until such a
 plugin exists, the inspector should say plainly that image upload is available
-only in the native client and preserve the session selection when the user
+only in the native client and preserve the agent selection when the user
 hands off.
 
 ## Failure and recovery
@@ -322,8 +322,8 @@ state:
 - worktree created, host launch failed: preserve it and offer cleanup;
 - host launch accepted, no matching snapshot yet: return `pending` and retry
   reconciliation;
-- host launch accepted, session disappears: retain only the host's normal stale
-  observation rules; do not invent a session;
+- host launch accepted, agent disappears: retain only the host's normal stale
+  observation rules; do not invent an agent;
 - duplicate request id: return the existing receipt rather than launching a
   second process when Observatory has enough evidence; and
 - unavailable host: preserve the Universe and report the launch as unavailable.
@@ -340,15 +340,15 @@ The first proof should be deliberately narrow:
 1. From the TUI, choose a recent project and launch Codex or Claude in an
    existing checkout.
 2. Repeat with a new Git worktree and a user-specified branch.
-3. Assign the launched session to the selected goal and select it on the map.
+3. Assign the launched agent to the selected goal and select it on the map.
 4. Open its embedded terminal with `Enter` and return to the map.
-5. Run the same flow through `observatory session start --json` or an agent
+5. Run the same flow through `observatory agent start --json` or an agent
    skill using one request.
-6. Verify the agent caller receives the Observatory session id without needing
+6. Verify the agent caller receives the Observatory agent id without needing
    a second Herdr registration call.
 7. Exercise invalid paths, dirty checkouts, branch collisions, host failure and
    delayed reconciliation through deterministic mock tests.
-8. Confirm direct vanilla Herdr sessions remain discoverable and manually
+8. Confirm direct vanilla Herdr agents remain discoverable and manually
    assignable.
 
 The slice is successful when starting work feels like a single Observatory

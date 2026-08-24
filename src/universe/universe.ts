@@ -1,17 +1,18 @@
-import type { HostSnapshot, HostSessionObservation } from "../hosts/types.ts";
+import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
 import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
 import {
   cloneUniverseState,
   emptyUniverseState,
   isCurrentAttentionState,
   type Clock,
+  type ExecutionContainerRef,
   type Goal,
   type GoalId,
   type HostHealth,
   type IdGenerator,
   type Priority,
-  type SessionId,
-  type TrackedSession,
+  type AgentId,
+  type Agent,
   type UniverseState,
   type UniverseStore,
 } from "./types.ts";
@@ -53,22 +54,32 @@ export type UniverseCommand =
     }
   | { readonly type: "ResetGoalMapPosition"; readonly goalId: GoalId }
   | {
-      readonly type: "AssignSession";
-      readonly sessionId: SessionId;
+      readonly type: "AssignAgent";
+      readonly agentId: AgentId;
       readonly goalId: GoalId;
     }
-  | { readonly type: "UnassignSession"; readonly sessionId: SessionId }
   | {
-      readonly type: "RenameSession";
-      readonly sessionId: SessionId;
+      readonly type: "AdoptRelatedAgents";
+      readonly goalId: GoalId;
+      readonly agentIds: readonly AgentId[];
+    }
+  | {
+      readonly type: "DismissRelatedAgents";
+      readonly goalId: GoalId;
+      readonly agentIds: readonly AgentId[];
+    }
+  | { readonly type: "UnassignAgent"; readonly agentId: AgentId }
+  | {
+      readonly type: "RenameAgent";
+      readonly agentId: AgentId;
       readonly displayName: string;
     }
   | {
-      readonly type: "SetSessionDescription";
-      readonly sessionId: SessionId;
+      readonly type: "SetAgentDescription";
+      readonly agentId: AgentId;
       readonly description?: string;
     }
-  | { readonly type: "ArchiveSession"; readonly sessionId: SessionId }
+  | { readonly type: "ArchiveAgent"; readonly agentId: AgentId }
   | { readonly type: "CompleteGoal"; readonly goalId: GoalId }
   | { readonly type: "ArchiveGoal"; readonly goalId: GoalId };
 
@@ -76,14 +87,15 @@ export interface CommandResult {
   readonly ok: boolean;
   readonly error?: string;
   readonly goalId?: GoalId;
-  readonly sessionId?: SessionId;
+  readonly agentId?: AgentId;
+  readonly affectedAgentIds?: readonly AgentId[];
 }
 
 export interface ReconciliationResult {
   readonly accepted: boolean;
-  readonly addedSessionIds: readonly SessionId[];
-  readonly updatedSessionIds: readonly SessionId[];
-  readonly staleSessionIds: readonly SessionId[];
+  readonly addedAgentIds: readonly AgentId[];
+  readonly updatedAgentIds: readonly AgentId[];
+  readonly staleAgentIds: readonly AgentId[];
   readonly diagnostics: readonly string[];
   readonly error?: string;
 }
@@ -95,18 +107,33 @@ const normalizeText = (value: string | undefined): string | undefined => {
 
 const copyOptional = (value: string | undefined): string | undefined => normalizeText(value);
 
+const copyExecutionContainer = (
+  value: ExecutionContainerRef | undefined,
+): ExecutionContainerRef | undefined => {
+  const id = normalizeText(value?.id);
+  if (!id) return undefined;
+  const label = normalizeText(value?.label);
+  return label ? { id, label } : { id };
+};
+
+const uniqueAgentIds = (agentIds: readonly AgentId[]): AgentId[] => [
+  ...new Set(agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
+];
+
+const dismissalKey = (goalId: GoalId, agentId: AgentId): string => `${goalId}\u0000${agentId}`;
+
 const findGoal = (state: UniverseState, goalId: GoalId): Goal | undefined =>
   state.goals.find((goal) => goal.id === goalId);
-const findSession = (state: UniverseState, sessionId: SessionId): TrackedSession | undefined =>
-  state.sessions.find((session) => session.id === sessionId);
+const findAgent = (state: UniverseState, agentId: AgentId): Agent | undefined =>
+  state.agents.find((agent) => agent.id === agentId);
 
 const goalLayoutOccupancy = (state: UniverseState, excludeGoalId?: GoalId): GoalLayoutOccupancy[] =>
   state.goals
     .filter((goal) => goal.id !== excludeGoalId)
     .map((goal) => ({
       position: goal.mapPosition ?? defaultGoalMapPosition(goal.id),
-      sessionCount: state.sessions.filter(
-        (session) => session.primaryGoalId === goal.id && session.archivedAt === undefined,
+      agentCount: state.agents.filter(
+        (agent) => agent.primaryGoalId === goal.id && agent.archivedAt === undefined,
       ).length,
     }));
 
@@ -114,22 +141,18 @@ const replaceGoal = (state: UniverseState, goal: Goal): void => {
   state.goals = state.goals.map((candidate) => (candidate.id === goal.id ? goal : candidate));
 };
 
-const replaceSession = (state: UniverseState, session: TrackedSession): void => {
-  state.sessions = state.sessions.map((candidate) =>
-    candidate.id === session.id ? session : candidate,
-  );
+const replaceAgent = (state: UniverseState, agent: Agent): void => {
+  state.agents = state.agents.map((candidate) => (candidate.id === agent.id ? agent : candidate));
 };
 
 const replaceHost = (state: UniverseState, host: HostHealth): void => {
   state.hosts = [...state.hosts.filter((candidate) => candidate.hostKind !== host.hostKind), host];
 };
 
-const isDuplicateObservation = (
-  sessions: readonly HostSessionObservation[],
-): string | undefined => {
+const isDuplicateObservation = (agents: readonly HostAgentObservation[]): string | undefined => {
   const seen = new Set<string>();
-  for (const session of sessions) {
-    const key = session.nativeId.trim();
+  for (const agent of agents) {
+    const key = agent.nativeId.trim();
     if (!key) return "Host observation has an empty native identifier.";
     if (seen.has(key)) return `Duplicate native identity from host: ${key}`;
     seen.add(key);
@@ -237,15 +260,15 @@ export class Universe {
       case "ResetGoalMapPosition": {
         const goal = findGoal(next, command.goalId);
         if (!goal) return { ok: false, error: "Goal not found." };
-        const sessionCount = next.sessions.filter(
-          (session) => session.primaryGoalId === goal.id && session.archivedAt === undefined,
+        const agentCount = next.agents.filter(
+          (agent) => agent.primaryGoalId === goal.id && agent.archivedAt === undefined,
         ).length;
         replaceGoal(next, {
           ...goal,
           mapPosition: initialGoalMapPosition(
             goal.id,
             goalLayoutOccupancy(next, goal.id),
-            sessionCount,
+            agentCount,
           ),
           mapPositionPinned: false,
           updatedAt: now,
@@ -253,62 +276,133 @@ export class Universe {
         result = { ok: true, goalId: goal.id };
         break;
       }
-      case "AssignSession": {
-        const session = findSession(next, command.sessionId);
+      case "AssignAgent": {
+        const agent = findAgent(next, command.agentId);
         const goal = findGoal(next, command.goalId);
-        if (!session) return { ok: false, error: "Session not found." };
+        if (!agent) return { ok: false, error: "Agent not found." };
         if (!goal) return { ok: false, error: "Goal not found." };
         if (goal.status === "archived")
           return {
             ok: false,
-            error: "Archived goals cannot receive sessions.",
+            error: "Archived goals cannot receive agents.",
           };
-        replaceSession(next, { ...session, primaryGoalId: goal.id });
-        result = { ok: true, sessionId: session.id, goalId: goal.id };
+        replaceAgent(next, { ...agent, primaryGoalId: goal.id });
+        next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
+          (dismissal) => dismissal.goalId !== goal.id || dismissal.agentId !== command.agentId,
+        );
+        result = { ok: true, agentId: agent.id, goalId: goal.id };
         break;
       }
-      case "UnassignSession": {
-        const session = findSession(next, command.sessionId);
-        if (!session) return { ok: false, error: "Session not found." };
-        replaceSession(next, { ...session, primaryGoalId: undefined });
-        result = { ok: true, sessionId: session.id };
+      case "AdoptRelatedAgents": {
+        const goal = findGoal(next, command.goalId);
+        if (!goal) return { ok: false, error: "Goal not found." };
+        if (goal.status === "archived")
+          return { ok: false, error: "Archived goals cannot receive agents." };
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0)
+          return { ok: false, error: "At least one related agent is required." };
+        const agents = agentIds.map((agentId) => findAgent(next, agentId));
+        const missingIndex = agents.findIndex((agent) => !agent);
+        if (missingIndex >= 0)
+          return {
+            ok: false,
+            error: `Agent ${agentIds[missingIndex] ?? ""} not found.`,
+          };
+        const archived = agents.find((agent) => agent?.archivedAt !== undefined);
+        if (archived) return { ok: false, error: "Archived agents cannot be adopted." };
+        const assignedElsewhere = agents.find(
+          (agent) => agent?.primaryGoalId && agent.primaryGoalId !== goal.id,
+        );
+        if (assignedElsewhere)
+          return {
+            ok: false,
+            error: `${assignedElsewhere.displayName} is already attached to another goal.`,
+          };
+        const selected = new Set(agentIds);
+        next.agents = next.agents.map((agent) =>
+          selected.has(agent.id) ? { ...agent, primaryGoalId: goal.id } : agent,
+        );
+        next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
+          (dismissal) => dismissal.goalId !== goal.id || !selected.has(dismissal.agentId),
+        );
+        result = { ok: true, goalId: goal.id, affectedAgentIds: agentIds };
         break;
       }
-      case "RenameSession": {
+      case "DismissRelatedAgents": {
+        const goal = findGoal(next, command.goalId);
+        if (!goal) return { ok: false, error: "Goal not found." };
+        if (goal.status === "archived")
+          return { ok: false, error: "Archived goals cannot be changed." };
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0)
+          return { ok: false, error: "At least one related agent is required." };
+        const missingIndex = agentIds.findIndex((agentId) => !findAgent(next, agentId));
+        if (missingIndex >= 0)
+          return {
+            ok: false,
+            error: `Agent ${agentIds[missingIndex] ?? ""} not found.`,
+          };
+        const archived = agentIds.some(
+          (agentId) => findAgent(next, agentId)?.archivedAt !== undefined,
+        );
+        if (archived) return { ok: false, error: "Archived agents cannot be dismissed." };
+        const existing = new Set(
+          next.relatedAgentDismissals.map((dismissal) =>
+            dismissalKey(dismissal.goalId, dismissal.agentId),
+          ),
+        );
+        const additions = agentIds.flatMap((agentId) => {
+          const key = dismissalKey(goal.id, agentId);
+          if (existing.has(key)) return [];
+          existing.add(key);
+          return [{ goalId: goal.id, agentId, dismissedAt: now }];
+        });
+        next.relatedAgentDismissals = [...next.relatedAgentDismissals, ...additions];
+        result = { ok: true, goalId: goal.id, affectedAgentIds: agentIds };
+        break;
+      }
+      case "UnassignAgent": {
+        const agent = findAgent(next, command.agentId);
+        if (!agent) return { ok: false, error: "Agent not found." };
+        replaceAgent(next, { ...agent, primaryGoalId: undefined });
+        result = { ok: true, agentId: agent.id };
+        break;
+      }
+      case "RenameAgent": {
         const displayName = normalizeText(command.displayName);
-        const session = findSession(next, command.sessionId);
-        if (!displayName) return { ok: false, error: "Session name is required." };
-        if (!session) return { ok: false, error: "Session not found." };
-        replaceSession(next, {
-          ...session,
+        const agent = findAgent(next, command.agentId);
+        if (!displayName) return { ok: false, error: "Agent name is required." };
+        if (!agent) return { ok: false, error: "Agent not found." };
+        replaceAgent(next, {
+          ...agent,
           displayName,
           displayNameSource: "human",
         });
-        result = { ok: true, sessionId: session.id };
+        result = { ok: true, agentId: agent.id };
         break;
       }
-      case "SetSessionDescription": {
-        const session = findSession(next, command.sessionId);
-        if (!session) return { ok: false, error: "Session not found." };
+      case "SetAgentDescription": {
+        const agent = findAgent(next, command.agentId);
+        if (!agent) return { ok: false, error: "Agent not found." };
         const description = normalizeText(command.description);
-        replaceSession(next, {
-          ...session,
+        replaceAgent(next, {
+          ...agent,
           description: description || undefined,
         });
-        result = { ok: true, sessionId: session.id };
+        result = { ok: true, agentId: agent.id };
         break;
       }
-      case "ArchiveSession": {
-        const session = findSession(next, command.sessionId);
-        if (!session) return { ok: false, error: "Session not found." };
-        if (session.archivedAt !== undefined) return { ok: true, sessionId: session.id };
-        if (session.hostHealth === "live")
+      case "ArchiveAgent": {
+        const agent = findAgent(next, command.agentId);
+        if (!agent) return { ok: false, error: "Agent not found." };
+        if (agent.archivedAt !== undefined) return { ok: true, agentId: agent.id };
+        if (agent.hostHealth === "live")
           return {
             ok: false,
-            error: "Only stale or unavailable sessions can be archived.",
+            error: "Only stale or unavailable agents can be archived.",
           };
-        replaceSession(next, { ...session, archivedAt: now });
-        result = { ok: true, sessionId: session.id };
+        replaceAgent(next, { ...agent, archivedAt: now });
+        result = { ok: true, agentId: agent.id };
         break;
       }
       case "CompleteGoal": {
@@ -355,13 +449,13 @@ export class Universe {
   }
 
   reconcile(snapshot: HostSnapshot): ReconciliationResult {
-    const duplicate = isDuplicateObservation(snapshot.sessions);
+    const duplicate = isDuplicateObservation(snapshot.agents);
     if (duplicate) {
       return {
         accepted: false,
-        addedSessionIds: [],
-        updatedSessionIds: [],
-        staleSessionIds: [],
+        addedAgentIds: [],
+        updatedAgentIds: [],
+        staleAgentIds: [],
         diagnostics: [duplicate],
         error: duplicate,
       };
@@ -369,9 +463,9 @@ export class Universe {
 
     const next = cloneUniverseState(this.state);
     const diagnostics = [...snapshot.diagnostics];
-    const addedSessionIds: SessionId[] = [];
-    const updatedSessionIds: SessionId[] = [];
-    const staleSessionIds: SessionId[] = [];
+    const addedAgentIds: AgentId[] = [];
+    const updatedAgentIds: AgentId[] = [];
+    const staleAgentIds: AgentId[] = [];
     const now = snapshot.observedAt;
     const previousHost = this.state.hosts.find(
       (candidate) => candidate.hostKind === snapshot.hostKind,
@@ -380,9 +474,9 @@ export class Universe {
       const error = `Out-of-order ${snapshot.hostKind} snapshot ignored: ${now} is older than ${previousHost.lastObservedAt}.`;
       return {
         accepted: false,
-        addedSessionIds: [],
-        updatedSessionIds: [],
-        staleSessionIds: [],
+        addedAgentIds: [],
+        updatedAgentIds: [],
+        staleAgentIds: [],
         diagnostics: [...diagnostics, error],
         error,
       };
@@ -400,39 +494,39 @@ export class Universe {
     replaceHost(next, hostStatus);
 
     if (!snapshot.available) {
-      next.sessions = next.sessions.map((session) => {
-        if (session.hostKind !== snapshot.hostKind || session.hostHealth === "unavailable")
-          return session;
-        staleSessionIds.push(session.id);
-        return { ...session, hostHealth: "unavailable" as const };
+      next.agents = next.agents.map((agent) => {
+        if (agent.hostKind !== snapshot.hostKind || agent.hostHealth === "unavailable")
+          return agent;
+        staleAgentIds.push(agent.id);
+        return { ...agent, hostHealth: "unavailable" as const };
       });
     } else {
-      const observedIds = new Set(snapshot.sessions.map((session) => session.nativeId.trim()));
-      next.sessions = next.sessions.map((session) => {
+      const observedIds = new Set(snapshot.agents.map((agent) => agent.nativeId.trim()));
+      next.agents = next.agents.map((agent) => {
         if (
-          session.hostKind !== snapshot.hostKind ||
-          observedIds.has(session.nativeId) ||
-          session.hostHealth === "stale"
+          agent.hostKind !== snapshot.hostKind ||
+          observedIds.has(agent.nativeId) ||
+          agent.hostHealth === "stale"
         )
-          return session;
-        if (!observedIds.has(session.nativeId)) {
-          staleSessionIds.push(session.id);
-          return { ...session, hostHealth: "stale" as const };
+          return agent;
+        if (!observedIds.has(agent.nativeId)) {
+          staleAgentIds.push(agent.id);
+          return { ...agent, hostHealth: "stale" as const };
         }
-        return session;
+        return agent;
       });
 
-      for (const observation of snapshot.sessions) {
-        const existing = next.sessions.find(
-          (session) =>
-            session.hostKind === snapshot.hostKind &&
-            session.nativeId.trim() === observation.nativeId.trim(),
+      for (const observation of snapshot.agents) {
+        const existing = next.agents.find(
+          (agent) =>
+            agent.hostKind === snapshot.hostKind &&
+            agent.nativeId.trim() === observation.nativeId.trim(),
         );
         if (!existing) {
-          const id = this.ids.next("session");
-          const session = this.sessionFromObservation(id, snapshot, observation);
-          next.sessions = [...next.sessions, session];
-          addedSessionIds.push(id);
+          const id = this.ids.next("agent");
+          const agent = this.agentFromObservation(id, snapshot, observation);
+          next.agents = [...next.agents, agent];
+          addedAgentIds.push(id);
           continue;
         }
         if (observation.observedAt < existing.lastObservedAt) {
@@ -465,9 +559,10 @@ export class Universe {
           branch: observation.branch,
           worktree: observation.worktree,
           provider: observation.provider,
+          executionContainer: copyExecutionContainer(observation.executionContainer),
         });
-        replaceSession(next, updated);
-        updatedSessionIds.push(existing.id);
+        replaceAgent(next, updated);
+        updatedAgentIds.push(existing.id);
       }
     }
 
@@ -476,9 +571,9 @@ export class Universe {
     } catch (error) {
       return {
         accepted: false,
-        addedSessionIds: [],
-        updatedSessionIds: [],
-        staleSessionIds: [],
+        addedAgentIds: [],
+        updatedAgentIds: [],
+        staleAgentIds: [],
         diagnostics,
         error: `Reconciliation rolled back: ${error instanceof Error ? error.message : String(error)}`,
       };
@@ -486,22 +581,22 @@ export class Universe {
     this.state = next;
     return {
       accepted: true,
-      addedSessionIds,
-      updatedSessionIds,
-      staleSessionIds,
+      addedAgentIds,
+      updatedAgentIds,
+      staleAgentIds,
       diagnostics,
     };
   }
 
-  private sessionFromObservation(
+  private agentFromObservation(
     id: string,
     snapshot: HostSnapshot,
-    observation: HostSessionObservation,
-  ): TrackedSession {
+    observation: HostAgentObservation,
+  ): Agent {
     const attentionSince = isCurrentAttentionState(observation.runtimeState)
       ? observation.observedAt
       : undefined;
-    const session = {
+    const agent = {
       id,
       hostKind: snapshot.hostKind,
       nativeId: observation.nativeId.trim(),
@@ -515,14 +610,15 @@ export class Universe {
       lastChangedAt: observation.observedAt,
       hostLocator: observation.hostLocator,
     };
-    Object.assign(session, {
+    Object.assign(agent, {
       attentionSince,
       repository: copyOptional(observation.repository),
       branch: copyOptional(observation.branch),
       worktree: copyOptional(observation.worktree),
       provider: copyOptional(observation.provider),
+      executionContainer: copyExecutionContainer(observation.executionContainer),
     });
-    return session;
+    return agent;
   }
 }
 
@@ -533,6 +629,6 @@ export const createEmptyUniverse = (
   projections: ProjectionModule,
 ): Universe => {
   const state = store.load();
-  if (state.goals.length === 0 && state.sessions.length === 0) store.save(emptyUniverseState());
+  if (state.goals.length === 0 && state.agents.length === 0) store.save(emptyUniverseState());
   return new Universe(store, clock, ids, projections);
 };

@@ -1,37 +1,41 @@
 import { evaluateAttention, formatAge, type AttentionItem } from "../attention/attention.ts";
-import {
-  priorityRank,
-  type Goal,
-  type HostHealth,
-  type TrackedSession,
-} from "../universe/types.ts";
+import { priorityRank, type Goal, type HostHealth, type Agent } from "../universe/types.ts";
 import {
   defaultGoalMapPosition,
+  initialGoalMapPosition,
   mapInboxAnchor,
-  sessionSatellitePositions,
-  unassignedSessionPositions,
+  agentSatellitePositions,
+  unassignedAgentPositions,
 } from "../spatial/positions.ts";
 import type {
   CommandCentreProjection,
+  CodeContextMapProjection,
+  CodeContextMapView,
+  CodeContextProjection,
+  CodeContextView,
+  CodeContextMapAgentView,
   GoalView,
   InspectorProjection,
   Projection,
   ProjectionModule,
+  RelatedAgentCandidate,
+  RelatedAgentEvidence,
+  RelatedAgentsProjection,
   SearchProjection,
   SearchResult,
-  SessionView,
+  AgentView,
   UniverseMapProjection,
 } from "./types.ts";
 
 const byAttention = (attention: readonly AttentionItem[]): Map<string, AttentionItem> => {
   const result = new Map<string, AttentionItem>();
   for (const item of attention) {
-    if (item.sessionId && !result.has(item.sessionId)) result.set(item.sessionId, item);
+    if (item.agentId && !result.has(item.agentId)) result.set(item.agentId, item);
   }
   return result;
 };
 
-const compareSessions = (left: SessionView, right: SessionView): number => {
+const compareAgents = (left: AgentView, right: AgentView): number => {
   if (Boolean(left.attention) !== Boolean(right.attention)) return left.attention ? -1 : 1;
   if (left.attention && right.attention && left.attention.startedAt !== right.attention.startedAt) {
     return left.attention.startedAt - right.attention.startedAt;
@@ -51,40 +55,37 @@ const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
 const projectCommandCentre = (
   state: {
     readonly goals: readonly Goal[];
-    readonly sessions: readonly TrackedSession[];
+    readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
   },
   now: number,
   includeArchived = false,
 ): CommandCentreProjection => {
-  const projectedSessions = state.sessions.filter(
-    (session) => includeArchived || session.archivedAt === undefined,
+  const projectedAgents = state.agents.filter(
+    (agent) => includeArchived || agent.archivedAt === undefined,
   );
-  const activeSessions = state.sessions.filter((session) => session.archivedAt === undefined);
+  const activeAgents = state.agents.filter((agent) => agent.archivedAt === undefined);
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
-  const attentionSessions = activeSessions.filter(
-    (session) =>
-      includeArchived || goalsById.get(session.primaryGoalId ?? "")?.status !== "archived",
+  const attentionAgents = activeAgents.filter(
+    (agent) => includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived",
   );
-  const attention = evaluateAttention(now, state.goals, attentionSessions, state.hosts);
-  const attentionBySession = byAttention(attention.items);
-  const views = projectedSessions.map((session): SessionView => ({
-    ...session,
-    goalTitle: session.primaryGoalId ? goalsById.get(session.primaryGoalId)?.title : undefined,
-    attention: attentionBySession.get(session.id),
+  const attention = evaluateAttention(now, state.goals, attentionAgents, state.hosts);
+  const attentionByAgent = byAttention(attention.items);
+  const views = projectedAgents.map((agent): AgentView => ({
+    ...agent,
+    goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
+    attention: attentionByAgent.get(agent.id),
   }));
 
   const goalViews = state.goals
     .filter((goal) => includeArchived || goal.status !== "archived")
     .map((goal): GoalView => {
-      const sessions = views
-        .filter((session) => session.primaryGoalId === goal.id)
-        .sort(compareSessions);
+      const agents = views.filter((agent) => agent.primaryGoalId === goal.id).sort(compareAgents);
       return {
         ...goal,
-        sessions,
-        attentionCount: sessions.filter((session) => session.attention?.requiresHumanInput).length,
-        staleCount: sessions.filter((session) => session.hostHealth !== "live").length,
+        agents,
+        attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
+        staleCount: agents.filter((agent) => agent.hostHealth !== "live").length,
       };
     })
     .sort((left, right) => {
@@ -96,10 +97,9 @@ const projectCommandCentre = (
       return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
     });
 
-  const unassigned = views.filter((session) => !session.primaryGoalId).sort(compareSessions);
-  const visibleSessions = views.filter(
-    (session) =>
-      includeArchived || goalsById.get(session.primaryGoalId ?? "")?.status !== "archived",
+  const unassigned = views.filter((agent) => !agent.primaryGoalId).sort(compareAgents);
+  const visibleAgents = views.filter(
+    (agent) => includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived",
   );
   return {
     kind: "command-centre",
@@ -110,11 +110,306 @@ const projectCommandCentre = (
     unassigned,
     counts: {
       goals: goalViews.length,
-      sessions: visibleSessions.length,
+      agents: visibleAgents.length,
       attention: attention.currentCount,
       uncertainty: attention.uncertaintyCount,
       unassigned: unassigned.length,
-      stale: visibleSessions.filter((session) => session.hostHealth !== "live").length,
+      stale: visibleAgents.filter((agent) => agent.hostHealth !== "live").length,
+    },
+  };
+};
+
+const normalizeContextValue = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim().replace(/\\/gu, "/").replace(/\/+$/u, "");
+  return normalized || undefined;
+};
+
+const contextLeaf = (value: string): string => value.split("/").at(-1) || value;
+
+const codeContextFor = (agent: AgentView): Pick<CodeContextView, "key" | "label" | "source"> => {
+  const repository = normalizeContextValue(agent.repository);
+  if (repository)
+    return {
+      key: `repository:${repository}`,
+      label: repository,
+      source: "repository",
+    };
+
+  const worktree = normalizeContextValue(agent.worktree);
+  if (worktree)
+    return {
+      key: `worktree:${worktree}`,
+      label: contextLeaf(worktree),
+      source: "worktree",
+    };
+
+  return {
+    key: "unknown",
+    label: "Unknown workspace",
+    source: "unknown",
+  };
+};
+
+const projectCodeContexts = (
+  state: {
+    readonly goals: readonly Goal[];
+    readonly agents: readonly Agent[];
+    readonly hosts: readonly HostHealth[];
+  },
+  now: number,
+  includeArchived = false,
+): CodeContextProjection => {
+  const commandCentre = projectCommandCentre(state, now, includeArchived);
+  const agents = [
+    ...commandCentre.goals.flatMap((goal) => goal.agents),
+    ...commandCentre.unassigned,
+  ];
+  const grouped = new Map<
+    string,
+    Pick<CodeContextView, "key" | "label" | "source"> & { readonly agents: AgentView[] }
+  >();
+
+  for (const agent of agents) {
+    const context = codeContextFor(agent);
+    const existing = grouped.get(context.key);
+    if (existing) {
+      existing.agents.push(agent);
+      continue;
+    }
+    grouped.set(context.key, { ...context, agents: [agent] });
+  }
+
+  const contexts = [...grouped.values()]
+    .map((context): CodeContextView => {
+      const sortedAgents = context.agents.sort(compareAgents);
+      return {
+        ...context,
+        agents: sortedAgents,
+        worktreeCount: new Set(
+          sortedAgents
+            .map((agent) => normalizeContextValue(agent.worktree))
+            .filter((worktree): worktree is string => worktree !== undefined),
+        ).size,
+        attentionCount: sortedAgents.filter((agent) => agent.attention?.requiresHumanInput).length,
+        staleCount: sortedAgents.filter((agent) => agent.hostHealth !== "live").length,
+      };
+    })
+    .sort((left, right) => {
+      if (left.attentionCount !== right.attentionCount)
+        return right.attentionCount - left.attentionCount;
+      if (left.staleCount !== right.staleCount) return right.staleCount - left.staleCount;
+      return left.label.localeCompare(right.label) || left.key.localeCompare(right.key);
+    });
+
+  return {
+    kind: "code-contexts",
+    generatedAt: now,
+    host: commandCentre.host,
+    attention: commandCentre.attention,
+    contexts,
+    counts: {
+      ...commandCentre.counts,
+      contexts: contexts.length,
+    },
+  };
+};
+
+const projectCodeContextMap = (
+  state: {
+    readonly goals: readonly Goal[];
+    readonly agents: readonly Agent[];
+    readonly hosts: readonly HostHealth[];
+  },
+  now: number,
+  includeArchived = false,
+): CodeContextMapProjection => {
+  const codeContexts = projectCodeContexts(state, now, includeArchived);
+  const occupied: {
+    readonly position: { readonly x: number; readonly y: number };
+    readonly agentCount: number;
+  }[] = [];
+  const positions = new Map<string, { readonly x: number; readonly y: number }>();
+
+  // Contexts are derived nodes, so their layout is recomputed from a stable
+  // key and deterministic ordering on every projection. No position is
+  // accepted into Universe state and no goal layout is affected.
+  for (const context of [...codeContexts.contexts].sort((left, right) =>
+    left.key.localeCompare(right.key),
+  )) {
+    const mapPosition = initialGoalMapPosition(
+      `code-context:${context.key}`,
+      occupied,
+      context.agents.length,
+    );
+    positions.set(context.key, mapPosition);
+    occupied.push({ position: mapPosition, agentCount: context.agents.length });
+  }
+
+  const contexts = codeContexts.contexts.map((context): CodeContextMapView => {
+    const mapPosition = positions.get(context.key) ?? { x: 0, y: 0 };
+    const satellitePositions = agentSatellitePositions(
+      mapPosition,
+      context.key,
+      context.agents.map((agent) => agent.id),
+    );
+    const radius = goalRadius(context.agents.length);
+    const agents = context.agents.map((agent): CodeContextMapAgentView => ({
+      ...agent,
+      mapPosition: satellitePositions.get(agent.id) ?? mapPosition,
+    }));
+    return {
+      ...context,
+      mapPosition,
+      radiusX: radius.x,
+      radiusY: radius.y,
+      agents,
+    };
+  });
+
+  return {
+    kind: "code-context-map",
+    generatedAt: now,
+    host: codeContexts.host,
+    attention: codeContexts.attention,
+    contexts,
+    counts: codeContexts.counts,
+  };
+};
+
+const opaqueContextValue = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  return normalized || undefined;
+};
+
+const relatedEvidenceRank = (strength: RelatedAgentEvidence["strength"]): number =>
+  strength === "strong" ? 0 : 1;
+
+const projectRelatedAgents = (
+  state: {
+    readonly goals: readonly Goal[];
+    readonly agents: readonly Agent[];
+    readonly hosts: readonly HostHealth[];
+    readonly relatedAgentDismissals?: readonly {
+      readonly goalId: string;
+      readonly agentId: string;
+      readonly dismissedAt: number;
+    }[];
+  },
+  now: number,
+  goalId: string,
+  includeDismissed = false,
+): RelatedAgentsProjection => {
+  const commandCentre = projectCommandCentre(state, now);
+  const goal = commandCentre.goals.find((candidate) => candidate.id === goalId);
+  if (!goal) {
+    return {
+      kind: "related-agents",
+      generatedAt: now,
+      goal: undefined,
+      candidates: [],
+      counts: { candidates: 0, adoptable: 0, strong: 0, supporting: 0, dismissed: 0 },
+    };
+  }
+
+  const targetAgents = goal.agents;
+  const dismissedAtByAgent = new Map(
+    (state.relatedAgentDismissals ?? [])
+      .filter((dismissal) => dismissal.goalId === goal.id)
+      .map((dismissal) => [dismissal.agentId, dismissal.dismissedAt]),
+  );
+  const otherAgents = [
+    ...commandCentre.goals
+      .filter((candidate) => candidate.id !== goal.id)
+      .flatMap((candidate) => candidate.agents),
+    ...commandCentre.unassigned,
+  ];
+  const candidates = otherAgents.flatMap((agent): RelatedAgentCandidate[] => {
+    const evidence: RelatedAgentEvidence[] = [];
+    const executionContainerId = opaqueContextValue(agent.executionContainer?.id);
+    const sharedExecutionContainer = executionContainerId
+      ? targetAgents.find(
+          (target) => opaqueContextValue(target.executionContainer?.id) === executionContainerId,
+        )
+      : undefined;
+    if (sharedExecutionContainer) {
+      const label =
+        agent.executionContainer?.label?.trim() ??
+        sharedExecutionContainer.executionContainer?.label?.trim();
+      evidence.push({
+        signal: "execution-container",
+        strength: "strong",
+        label: `same execution container${label ? ` · ${label}` : ""}`,
+      });
+    }
+
+    const worktree = normalizeContextValue(agent.worktree);
+    if (
+      worktree &&
+      targetAgents.some((target) => normalizeContextValue(target.worktree) === worktree)
+    ) {
+      evidence.push({
+        signal: "worktree",
+        strength: "strong",
+        label: `same worktree · ${contextLeaf(worktree)}`,
+      });
+    }
+
+    const repository = normalizeContextValue(agent.repository);
+    if (
+      repository &&
+      targetAgents.some((target) => normalizeContextValue(target.repository) === repository)
+    ) {
+      evidence.push({
+        signal: "repository",
+        strength: "supporting",
+        label: `same repository · ${repository}`,
+      });
+    }
+    if (evidence.length === 0) return [];
+
+    evidence.sort(
+      (left, right) => relatedEvidenceRank(left.strength) - relatedEvidenceRank(right.strength),
+    );
+    const dismissedAt = dismissedAtByAgent.get(agent.id);
+    if (dismissedAt !== undefined && !includeDismissed) return [];
+    const confidence = evidence.some((item) => item.strength === "strong")
+      ? "strong"
+      : "supporting";
+    const candidate: RelatedAgentCandidate = {
+      agent,
+      evidence,
+      confidence,
+      adoptable: agent.primaryGoalId === undefined,
+      dismissed: dismissedAt !== undefined,
+    };
+    if (dismissedAt !== undefined) Object.assign(candidate, { dismissedAt });
+    return [candidate];
+  });
+
+  candidates.sort((left, right) => {
+    if (left.dismissed !== right.dismissed) return left.dismissed ? 1 : -1;
+    if (left.adoptable !== right.adoptable) return left.adoptable ? -1 : 1;
+    if (left.confidence !== right.confidence)
+      return relatedEvidenceRank(left.confidence) - relatedEvidenceRank(right.confidence);
+    if (Boolean(left.agent.attention) !== Boolean(right.agent.attention))
+      return left.agent.attention ? -1 : 1;
+    return (
+      left.agent.displayName.localeCompare(right.agent.displayName) ||
+      left.agent.id.localeCompare(right.agent.id)
+    );
+  });
+
+  return {
+    kind: "related-agents",
+    generatedAt: now,
+    goal,
+    candidates,
+    counts: {
+      candidates: candidates.length,
+      adoptable: candidates.filter((candidate) => candidate.adoptable).length,
+      strong: candidates.filter((candidate) => candidate.confidence === "strong").length,
+      supporting: candidates.filter((candidate) => candidate.confidence === "supporting").length,
+      dismissed: candidates.filter((candidate) => candidate.dismissed).length,
     },
   };
 };
@@ -124,17 +419,17 @@ interface GoalRadius {
   readonly y: number;
 }
 
-const goalRadius = (sessionCount: number): GoalRadius => ({
-  // Size communicates durable scope/session load. Attention uses a separate
+const goalRadius = (agentCount: number): GoalRadius => ({
+  // Size communicates durable scope/agent load. Attention uses a separate
   // badge and outline so it cannot silently inflate a goal's apparent scope.
-  x: Math.min(14, 7 + Math.ceil(Math.sqrt(sessionCount + 1) * 1.8)),
-  y: Math.min(4, 2 + Math.ceil(Math.sqrt(sessionCount) / 2)),
+  x: Math.min(14, 7 + Math.ceil(Math.sqrt(agentCount + 1) * 1.8)),
+  y: Math.min(4, 2 + Math.ceil(Math.sqrt(agentCount) / 2)),
 });
 
 const projectUniverseMap = (
   state: {
     readonly goals: readonly Goal[];
-    readonly sessions: readonly TrackedSession[];
+    readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
   },
   now: number,
@@ -143,36 +438,36 @@ const projectUniverseMap = (
   const commandCentre = projectCommandCentre(state, now, includeArchived);
   const mapGoals = commandCentre.goals.map((goal) => {
     const mapPosition = goal.mapPosition ?? defaultGoalMapPosition(goal.id);
-    const satellitePositions = sessionSatellitePositions(
+    const satellitePositions = agentSatellitePositions(
       mapPosition,
       goal.id,
-      goal.sessions.map((session) => session.id),
+      goal.agents.map((agent) => agent.id),
     );
-    const radius = goalRadius(goal.sessions.length);
-    const sessions = goal.sessions.map((session) => ({
-      ...session,
-      mapPosition: satellitePositions.get(session.id) ?? mapPosition,
+    const radius = goalRadius(goal.agents.length);
+    const agents = goal.agents.map((agent) => ({
+      ...agent,
+      mapPosition: satellitePositions.get(agent.id) ?? mapPosition,
     }));
     return {
       ...goal,
       mapPosition,
       radiusX: radius.x,
       radiusY: radius.y,
-      sessions,
+      agents,
     };
   });
   const occupiedPositions = mapGoals.flatMap((goal) => [
     goal.mapPosition,
-    ...goal.sessions.map((session) => session.mapPosition),
+    ...goal.agents.map((agent) => agent.mapPosition),
   ]);
   const inboxPosition = mapInboxAnchor(occupiedPositions);
-  const unassignedPositions = unassignedSessionPositions(
+  const unassignedPositions = unassignedAgentPositions(
     inboxPosition,
-    commandCentre.unassigned.map((session) => session.id),
+    commandCentre.unassigned.map((agent) => agent.id),
   );
-  const mapUnassigned = commandCentre.unassigned.map((session) => ({
-    ...session,
-    mapPosition: unassignedPositions.get(session.id) ?? inboxPosition,
+  const mapUnassigned = commandCentre.unassigned.map((agent) => ({
+    ...agent,
+    mapPosition: unassignedPositions.get(agent.id) ?? inboxPosition,
   }));
   return {
     kind: "universe-map",
@@ -191,7 +486,7 @@ const searchable = (value: string | undefined): string => value?.toLocaleLowerCa
 const projectSearch = (
   state: {
     readonly goals: readonly Goal[];
-    readonly sessions: readonly TrackedSession[];
+    readonly agents: readonly Agent[];
   },
   query: string,
 ): SearchProjection => {
@@ -212,70 +507,68 @@ const projectSearch = (
       });
     }
   }
-  for (const session of state.sessions) {
+  for (const agent of state.agents) {
     const haystack = [
-      session.displayName,
-      session.description,
-      session.hostKind,
-      session.nativeId,
-      session.repository,
-      session.branch,
-      session.worktree,
-      session.provider,
-      session.runtimeState,
+      agent.displayName,
+      agent.description,
+      agent.hostKind,
+      agent.nativeId,
+      agent.repository,
+      agent.branch,
+      agent.worktree,
+      agent.provider,
+      agent.runtimeState,
     ]
       .map(searchable)
       .join(" ");
     if (haystack.includes(normalized)) {
       const result: SearchResult = {
-        type: "session",
-        id: session.id,
-        label: session.displayName,
-        context: session.primaryGoalId
-          ? `session · ${session.primaryGoalId}`
-          : "unassigned session",
-        status: session.archivedAt === undefined ? session.runtimeState : "archived",
+        type: "agent",
+        id: agent.id,
+        label: agent.displayName,
+        context: agent.primaryGoalId ? `agent · ${agent.primaryGoalId}` : "unassigned agent",
+        status: agent.archivedAt === undefined ? agent.runtimeState : "archived",
       };
-      if (session.primaryGoalId) Object.assign(result, { goalId: session.primaryGoalId });
+      if (agent.primaryGoalId) Object.assign(result, { goalId: agent.primaryGoalId });
       results.push(result);
     }
   }
   return { kind: "search", query, results };
 };
 
-const sessionView = (
-  session: TrackedSession,
+const agentView = (
+  agent: Agent,
   goals: readonly Goal[],
   attention: readonly AttentionItem[],
-): SessionView => ({
-  ...session,
-  goalTitle: goals.find((goal) => goal.id === session.primaryGoalId)?.title,
-  attention: attention.find((item) => item.sessionId === session.id),
+): AgentView => ({
+  ...agent,
+  goalTitle: goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
+  attention: attention.find((item) => item.agentId === agent.id),
 });
 
 const projectInspector = (
   state: {
     readonly goals: readonly Goal[];
-    readonly sessions: readonly TrackedSession[];
+    readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
   },
   now: number,
-  target: { readonly type: "goal" | "session"; readonly id: string },
+  target: { readonly type: "goal" | "agent"; readonly id: string },
 ): InspectorProjection => {
-  const activeSessions = state.sessions.filter((session) => session.archivedAt === undefined);
-  const attention = evaluateAttention(now, state.goals, activeSessions, state.hosts);
+  const activeAgents = state.agents.filter((agent) => agent.archivedAt === undefined);
+  const attention = evaluateAttention(now, state.goals, activeAgents, state.hosts);
   if (target.type === "goal") {
     const goal = state.goals.find((candidate) => candidate.id === target.id);
     if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
-    const sessions = activeSessions
-      .filter((session) => session.primaryGoalId === goal.id)
-      .map((session) => sessionView(session, state.goals, attention.items))
-      .sort(compareSessions);
+    const agents = activeAgents
+      .filter((agent) => agent.primaryGoalId === goal.id)
+      .map((agent) => agentView(agent, state.goals, attention.items))
+      .sort(compareAgents);
     const view: GoalView = {
       ...goal,
-      sessions,
-      attentionCount: sessions.filter((session) => session.attention?.requiresHumanInput).length,
-      staleCount: sessions.filter((session) => session.hostHealth !== "live").length,
+      agents,
+      attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
+      staleCount: agents.filter((agent) => agent.hostHealth !== "live").length,
     };
     return {
       kind: "goal-inspector",
@@ -283,32 +576,32 @@ const projectInspector = (
       lines: [
         `status  ${goal.status}`,
         `priority ${goal.priority}`,
-        `sessions ${sessions.length}`,
+        `agents ${agents.length}`,
         `attention ${view.attentionCount} current · ${view.staleCount} stale`,
         ...(goal.description ? [goal.description] : []),
       ],
     };
   }
 
-  const session = state.sessions.find((candidate) => candidate.id === target.id);
-  if (!session) return { kind: "empty-inspector", lines: ["Session no longer exists."] };
-  const view = sessionView(session, state.goals, attention.items);
+  const agent = state.agents.find((candidate) => candidate.id === target.id);
+  if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
+  const view = agentView(agent, state.goals, attention.items);
   const lines = [
-    `state   ${session.runtimeState} · ${session.hostHealth}`,
-    `source  ${session.runtimeStateSource}`,
-    `host    ${session.hostKind}`,
-    `native  ${session.nativeId}`,
-    `repo    ${session.repository ?? "unknown"}`,
-    `branch  ${session.branch ?? "unknown"}`,
-    `worktree ${session.worktree ?? "unknown"}`,
-    `provider ${session.provider ?? "unknown"}`,
+    `state   ${agent.runtimeState} · ${agent.hostHealth}`,
+    `source  ${agent.runtimeStateSource}`,
+    `host    ${agent.hostKind}`,
+    `native  ${agent.nativeId}`,
+    `repo    ${agent.repository ?? "unknown"}`,
+    `branch  ${agent.branch ?? "unknown"}`,
+    `worktree ${agent.worktree ?? "unknown"}`,
+    `provider ${agent.provider ?? "unknown"}`,
     `goal    ${view.goalTitle ?? "unassigned"}`,
     ...(view.attention
       ? [`why     ${view.attention.explanation}`, `waiting ${formatAge(view.attention.ageMs)}`]
       : []),
-    ...(session.description ? [session.description] : []),
+    ...(agent.description ? [agent.description] : []),
   ];
-  return { kind: "session-inspector", session: view, lines };
+  return { kind: "agent-inspector", agent: view, lines };
 };
 
 export const createProjectionModule = (): ProjectionModule => ({
@@ -318,6 +611,12 @@ export const createProjectionModule = (): ProjectionModule => ({
         return projectCommandCentre(state, query.now, query.includeArchived);
       case "universe-map":
         return projectUniverseMap(state, query.now, query.includeArchived);
+      case "code-contexts":
+        return projectCodeContexts(state, query.now, query.includeArchived);
+      case "code-context-map":
+        return projectCodeContextMap(state, query.now, query.includeArchived);
+      case "related-agents":
+        return projectRelatedAgents(state, query.now, query.goalId, query.includeDismissed);
       case "search":
         return projectSearch(state, query.query);
       case "inspector":
@@ -326,4 +625,12 @@ export const createProjectionModule = (): ProjectionModule => ({
   },
 });
 
-export { projectCommandCentre, projectInspector, projectSearch, projectUniverseMap };
+export {
+  projectCodeContexts,
+  projectCodeContextMap,
+  projectCommandCentre,
+  projectRelatedAgents,
+  projectInspector,
+  projectSearch,
+  projectUniverseMap,
+};

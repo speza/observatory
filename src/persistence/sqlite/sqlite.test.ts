@@ -7,7 +7,7 @@ import { makeUniverse, hostSnapshot } from "../../universe/test-support.ts";
 
 const observation = {
   nativeId: "pane-1",
-  displayName: "session",
+  displayName: "agent",
   runtimeState: "working" as const,
   runtimeStateSource: "fixture",
   observedAt: 1_000_000,
@@ -15,6 +15,7 @@ const observation = {
   branch: "main",
   worktree: "/tree",
   provider: "codex",
+  executionContainer: { id: "container-1", label: "Persisted context" },
   hostLocator: "opaque:pane-1",
 };
 
@@ -37,15 +38,27 @@ describe("SQLite persistence", () => {
       });
       setup.universe.reconcile(hostSnapshot([observation]));
       setup.universe.execute({
-        type: "AssignSession",
-        sessionId: "session-1",
+        type: "AssignAgent",
+        agentId: "agent-1",
         goalId: "goal-1",
+      });
+      setup.universe.execute({
+        type: "DismissRelatedAgents",
+        goalId: "goal-1",
+        agentIds: ["agent-1"],
       });
       const state = first.load();
       expect(state.goals[0]?.title).toBe("Persisted");
       expect(state.goals[0]?.mapPosition).toEqual({ x: 123, y: -45 });
       expect(state.goals[0]?.mapPositionPinned).toBe(true);
-      expect(state.sessions[0]?.primaryGoalId).toBe("goal-1");
+      expect(state.agents[0]?.primaryGoalId).toBe("goal-1");
+      expect(state.agents[0]?.executionContainer).toEqual({
+        id: "container-1",
+        label: "Persisted context",
+      });
+      expect(state.relatedAgentDismissals).toEqual([
+        { goalId: "goal-1", agentId: "agent-1", dismissedAt: 1_000_000 },
+      ]);
       first.close();
 
       const second = new SqliteUniverseStore(databasePath);
@@ -53,7 +66,7 @@ describe("SQLite persistence", () => {
         expect(second.load()).toEqual(state);
         const recovered = makeUniverse({ store: second }).universe;
         expect(recovered.reconcile(hostSnapshot([observation])).accepted).toBe(true);
-        expect(recovered.snapshot().sessions[0]?.primaryGoalId).toBe("goal-1");
+        expect(recovered.snapshot().agents[0]?.primaryGoalId).toBe("goal-1");
       } finally {
         second.close();
       }
@@ -68,28 +81,36 @@ describe("SQLite persistence", () => {
     const versions = store.db
       .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
-    expect(versions.map((row) => row.version)).toEqual([1, 2, 3, 4]);
-    const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(sessions)").all();
+    expect(versions.map((row) => row.version)).toEqual([1]);
+    const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(agents)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
     expect(columns.map((column) => column.name)).toContain("archived_at");
+    expect(columns.map((column) => column.name)).toContain("execution_container_id");
+    expect(columns.map((column) => column.name)).toContain("execution_container_label");
     const goalColumns = store.db.query<{ name: string }, []>("PRAGMA table_info(goals)").all();
     expect(goalColumns.map((column) => column.name)).toContain("map_x");
     expect(goalColumns.map((column) => column.name)).toContain("map_pinned");
+    const dismissalTables = store.db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'related_agent_dismissals'",
+      )
+      .all();
+    expect(dismissalTables).toHaveLength(1);
     store.close();
   });
 
-  test("persists the explicit archive marker for stale sessions", () => {
+  test("persists the explicit archive marker for stale agents", () => {
     const store = new SqliteUniverseStore(":memory:");
     const setup = makeUniverse({ store });
     setup.universe.reconcile(hostSnapshot([observation]));
     setup.clock.value = 1_001_000;
     setup.universe.reconcile(hostSnapshot([], setup.clock.value));
-    expect(setup.universe.execute({ type: "ArchiveSession", sessionId: "session-1" })).toEqual({
+    expect(setup.universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
       ok: true,
-      sessionId: "session-1",
+      agentId: "agent-1",
     });
-    expect(store.load().sessions[0]?.archivedAt).toBe(1_001_000);
+    expect(store.load().agents[0]?.archivedAt).toBe(1_001_000);
     store.close();
   });
 

@@ -8,11 +8,27 @@ export const RUNTIME_STATES = ["idle", "working", "waiting", "blocked", "done", 
 export type RuntimeState = (typeof RUNTIME_STATES)[number];
 
 export type GoalId = string;
-export type SessionId = string;
+export type AgentId = string;
 
 export interface MapPosition {
   readonly x: number;
   readonly y: number;
+}
+
+/**
+ * An opaque host-observed execution context shared by one or more agents.
+ * Observatory may compare refs for evidence, but it does not make the
+ * context a durable organisational node or interpret its identifier.
+ */
+export interface ExecutionContainerRef {
+  readonly id: string;
+  readonly label?: string;
+}
+
+export interface RelatedAgentDismissal {
+  readonly goalId: GoalId;
+  readonly agentId: AgentId;
+  readonly dismissedAt: number;
 }
 
 export interface Goal {
@@ -30,8 +46,8 @@ export interface Goal {
   readonly mapPositionPinned?: boolean;
 }
 
-export interface TrackedSession {
-  readonly id: SessionId;
+export interface Agent {
+  readonly id: AgentId;
   readonly hostKind: string;
   readonly nativeId: string;
   readonly displayName: string;
@@ -49,9 +65,11 @@ export interface TrackedSession {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
+  /** Optional observed execution context used only for related-agent evidence. */
+  readonly executionContainer?: ExecutionContainerRef;
   /** Opaque to the Universe module and only interpreted by the host adapter. */
   readonly hostLocator: string;
-  /** Human-controlled archive marker; archived sessions stay in history but leave active projections. */
+  /** Human-controlled archive marker; archived agents stay in history but leave active projections. */
   readonly archivedAt?: number;
 }
 
@@ -66,8 +84,9 @@ export interface HostHealth {
 export interface UniverseState {
   readonly version: 1;
   goals: Goal[];
-  sessions: TrackedSession[];
+  agents: Agent[];
   hosts: HostHealth[];
+  relatedAgentDismissals: RelatedAgentDismissal[];
 }
 
 export interface UniverseStore {
@@ -81,7 +100,7 @@ export interface Clock {
 }
 
 export interface IdGenerator {
-  next(kind: "goal" | "session"): string;
+  next(kind: "goal" | "agent"): string;
 }
 
 export const priorityRank = (priority: Priority): number => PRIORITIES.indexOf(priority);
@@ -92,8 +111,9 @@ export const isCurrentAttentionState = (state: RuntimeState): boolean =>
 export const emptyUniverseState = (): UniverseState => ({
   version: 1,
   goals: [],
-  sessions: [],
+  agents: [],
   hosts: [],
+  relatedAgentDismissals: [],
 });
 
 export const cloneUniverseState = (state: UniverseState): UniverseState => {
@@ -105,7 +125,10 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
   return {
     version: 1,
     goals,
-    sessions: state.sessions.map((session) => ({ ...session })),
+    agents: state.agents.map((agent) => ({ ...agent })),
     hosts: state.hosts.map((host) => ({ ...host })),
+    relatedAgentDismissals: (state.relatedAgentDismissals ?? []).map((dismissal) => ({
+      ...dismissal,
+    })),
   };
 };

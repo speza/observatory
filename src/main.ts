@@ -12,7 +12,7 @@ import { displayHostKind, type SessionHost } from "./hosts/types.ts";
 import { SqliteUniverseStore } from "./persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "./projection/projection.ts";
 import { createCommandCentreRenderer } from "./renderer/tui.ts";
-import { createStartSessionCoordinator } from "./session-launch/coordinator.ts";
+import { createStartAgentCoordinator } from "./session-launch/coordinator.ts";
 import { Universe } from "./universe/universe.ts";
 import { LocalWorkspaceProvider } from "./workspaces/local.ts";
 import type { Clock, IdGenerator } from "./universe/types.ts";
@@ -26,7 +26,7 @@ class SystemClock implements Clock {
 class RuntimeIds implements IdGenerator {
   private sequence = 0;
 
-  next(kind: "goal" | "session"): string {
+  next(kind: "goal" | "agent"): string {
     this.sequence += 1;
     return `${kind}-${Date.now().toString(36)}-${this.sequence.toString(36)}`;
   }
@@ -59,14 +59,14 @@ const program = Effect.scoped(
         return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
       if (!snapshot.available)
         return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
-      return `${hostLabel} refreshed · ${snapshot.sessions.length} sessions · ${result.addedSessionIds.length} new · ${result.staleSessionIds.length} stale`;
+      return `${hostLabel} refreshed · ${snapshot.agents.length} agents · ${result.addedAgentIds.length} new · ${result.staleAgentIds.length} stale`;
     });
 
     let initialMessage = yield* reconcile;
     if (useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
       const seeded = seedMockPortfolio(universe);
       if (seeded.createdGoals > 0)
-        initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedSessions} sessions`;
+        initialMessage += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedAgents} agents`;
     }
     const configuredWorkspaceLocations = (process.env.AO_WORKSPACE_LOCATIONS ?? "")
       .split(delimiter)
@@ -74,13 +74,13 @@ const program = Effect.scoped(
       .filter(Boolean);
     const discoveredWorkspaceLocations = universe
       .snapshot()
-      .sessions.filter((session) => session.archivedAt === undefined)
-      .map((session) => session.worktree)
+      .agents.filter((agent) => agent.archivedAt === undefined)
+      .map((agent) => agent.worktree)
       .filter((path): path is string => Boolean(path));
     const workspace = new LocalWorkspaceProvider({
       locations: [...configuredWorkspaceLocations, ...discoveredWorkspaceLocations],
     });
-    const startSession = createStartSessionCoordinator({
+    const startAgent = createStartAgentCoordinator({
       universe,
       host,
       workspace,
@@ -91,7 +91,7 @@ const program = Effect.scoped(
         createCommandCentreRenderer({
           universe,
           host,
-          startSession,
+          startAgent,
           workspace,
           clock,
           refresh: reconcile,

@@ -1,7 +1,7 @@
-import type { MapGoalView, MapSessionView, UniverseMapProjection } from "../projection/types.ts";
+import type { MapGoalView, MapAgentView, UniverseMapProjection } from "../projection/types.ts";
 
 export type NavigationSelection = {
-  readonly type: "goal" | "session";
+  readonly type: "goal" | "agent";
   readonly id: string;
 };
 
@@ -18,29 +18,29 @@ const compareMapPosition = (
   left.id.localeCompare(right.id);
 
 /**
- * Sort direct sessions in the same clockwise order a person sees around a
+ * Sort direct agents in the same clockwise order a person sees around a
  * goal: top, right, bottom, left. World y increases down the terminal, so a
  * screen-space angle is the useful coordinate here.
  */
-export const clockwiseSessions = (
-  goal: Pick<MapGoalView, "mapPosition" | "sessions">,
-): readonly MapSessionView[] => {
-  const ordered = [...goal.sessions];
+export const clockwiseAgents = (
+  goal: Pick<MapGoalView, "mapPosition" | "agents">,
+): readonly MapAgentView[] => {
+  const ordered = [...goal.agents];
   ordered.sort((left, right) => {
-    const angle = (session: MapSessionView): number => {
+    const angle = (agent: MapAgentView): number => {
       const radians =
         Math.atan2(
-          session.mapPosition.y - goal.mapPosition.y,
-          session.mapPosition.x - goal.mapPosition.x,
+          agent.mapPosition.y - goal.mapPosition.y,
+          agent.mapPosition.x - goal.mapPosition.x,
         ) +
         Math.PI / 2;
       return (radians + FULL_TURN) % FULL_TURN;
     };
     const angleDelta = angle(left) - angle(right);
     if (angleDelta !== 0) return angleDelta;
-    const distance = (session: MapSessionView): number => {
-      const x = session.mapPosition.x - goal.mapPosition.x;
-      const y = session.mapPosition.y - goal.mapPosition.y;
+    const distance = (agent: MapAgentView): number => {
+      const x = agent.mapPosition.x - goal.mapPosition.x;
+      const y = agent.mapPosition.y - goal.mapPosition.y;
       return x * x + y * y;
     };
     return distance(left) - distance(right) || left.id.localeCompare(right.id);
@@ -58,12 +58,10 @@ export const mapSelectionCandidates = (
     const goal = focusGoalId
       ? projection.goals.find((candidate) => candidate.id === focusGoalId)
       : undefined;
-    return goal
-      ? clockwiseSessions(goal).map((session) => ({ type: "session", id: session.id }))
-      : [];
+    return goal ? clockwiseAgents(goal).map((agent) => ({ type: "agent", id: agent.id })) : [];
   }
   if (lens === "inbox")
-    return projection.unassigned.map((session) => ({ type: "session", id: session.id }));
+    return projection.unassigned.map((agent) => ({ type: "agent", id: agent.id }));
   return [...projection.goals]
     .sort(compareMapPosition)
     .map((goal) => ({ type: "goal", id: goal.id }));

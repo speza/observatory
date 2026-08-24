@@ -1,23 +1,23 @@
-import type { SessionView } from "../projection/types.ts";
+import type { AgentView } from "../projection/types.ts";
 
 const searchable = (value: string | undefined): string => value?.toLocaleLowerCase() ?? "";
 
-/** Return inbox sessions matching the short query used by the assignment picker. */
-export const filterAssignableSessions = (
-  sessions: readonly SessionView[],
+/** Return inbox agents matching the short query used by the assignment picker. */
+export const filterAssignableAgents = (
+  agents: readonly AgentView[],
   query: string,
-): readonly SessionView[] => {
+): readonly AgentView[] => {
   const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return sessions;
-  return sessions.filter((session) =>
+  if (!normalized) return agents;
+  return agents.filter((agent) =>
     [
-      session.displayName,
-      session.description,
-      session.runtimeState,
-      session.provider,
-      session.repository,
-      session.branch,
-      session.worktree,
+      agent.displayName,
+      agent.description,
+      agent.runtimeState,
+      agent.provider,
+      agent.repository,
+      agent.branch,
+      agent.worktree,
     ]
       .map(searchable)
       .some((value) => value.includes(normalized)),

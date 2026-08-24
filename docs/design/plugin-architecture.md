@@ -8,7 +8,7 @@ Depends on: [Observatory technical architecture](technical-architecture.md)
 
 The Observatory control plane is a small trusted kernel. Every capability added
 around that kernel is a plugin, including first-party capabilities such as the
-Herdr session host. GitHub pull requests, Jira or Linear issues, agent-provider
+Herdr agent host. GitHub pull requests, Jira or Linear issues, agent-provider
 facts, extra render lenses, skills and hooks must not become special cases in
 the Universe or renderer.
 
@@ -21,17 +21,17 @@ a path to an isolated process later.
 
 The kernel owns:
 
-- trusted goals, sessions, typed relationships and lifecycle invariants;
+- trusted goals, agents, typed relationships and lifecycle invariants;
 - SQLite persistence and migrations;
 - provenance, uncertainty and human authority;
 - deterministic attention and projections; and
-- generic renderer and session-host capability contracts.
+- generic renderer and agent-host capability contracts.
 
 Plugins own translation and optional capability. A plugin may observe external
 systems, expose a capability, or propose semantic facts. It must not write
 SQLite, bypass Universe commands, or turn an unverified external fact into
 trusted state. The kernel can disable or lose a plugin without losing accepted
-goals, sessions or navigation.
+goals, agents or navigation.
 
 ```text
 external system
@@ -47,15 +47,15 @@ plugin adapter ── observations / proposals / capabilities ──► kernel p
 These are capability categories, not a promise to implement all of them in
 v1:
 
-- **Session host** — Herdr first; later tmux, Superlogical-style hosts or an
+- **Agent host** — Herdr first; later tmux, Superlogical-style hosts or an
   Observatory-owned host behind `SessionHost`.
 - **Workspace provider** — recent project locations, Git inspection and
-  worktree preparation for session launch. The first implementation is local
+  worktree preparation for agent launch. The first implementation is local
   Git; it is not a new map topology node.
 - **Provider facts** — optional metadata from Claude Code, Codex, OpenCode, Pi
   or agent hooks/skills.
 - **Related work** — GitHub pull requests, Jira issues, Linear tickets and
-  similar external references attached to a goal or session.
+  similar external references attached to a goal or agent.
 - **Projection/lens** — optional attention, relationship or detail views that
   consume core projections rather than querying SQLite directly.
 - **Automation** — agent commands, skills and hooks that submit normal kernel
@@ -83,7 +83,7 @@ The normalized related-work shape should be deliberately small, for example:
 ```text
 RelatedResource
   provider, kind, externalId, url, title, status
-  target (goal | session), observedAt, provenance
+  target (goal | agent), observedAt, provenance
 ```
 
 Provider-specific fields belong to the plugin or an explicitly namespaced

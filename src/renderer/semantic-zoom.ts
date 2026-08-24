@@ -1,20 +1,20 @@
-import type { RuntimeState, TrackedSession } from "../universe/types.ts";
+import type { RuntimeState, Agent } from "../universe/types.ts";
 
 export type SemanticZoomLevel = "overview" | "context" | "detail";
 
-export type SemanticZoomLens = "portfolio" | "attention" | "goal" | "inbox";
+export type SemanticZoomLens = "portfolio" | "attention" | "goal" | "inbox" | "contexts";
 
-/** Keep a completed session visibly reviewable for a short, deterministic window. */
+/** Keep a completed agent visibly reviewable for a short, deterministic window. */
 export const DONE_REVIEW_WINDOW_MS = 30 * 60 * 1000;
 
 export const isRecentlyDone = (
-  session: Pick<TrackedSession, "runtimeState" | "hostHealth" | "lastChangedAt">,
+  agent: Pick<Agent, "runtimeState" | "hostHealth" | "lastChangedAt">,
   now: number,
   windowMs = DONE_REVIEW_WINDOW_MS,
 ): boolean =>
-  session.hostHealth === "live" &&
-  session.runtimeState === "done" &&
-  Math.max(0, now - session.lastChangedAt) <= Math.max(0, windowMs);
+  agent.hostHealth === "live" &&
+  agent.runtimeState === "done" &&
+  Math.max(0, now - agent.lastChangedAt) <= Math.max(0, windowMs);
 
 /**
  * Scale node geometry with the camera without changing the durable world
@@ -57,8 +57,8 @@ export const semanticZoomLevel = (input: {
   return "overview";
 };
 
-export const sessionMarker = (
-  hostHealth: TrackedSession["hostHealth"],
+export const agentMarker = (
+  hostHealth: Agent["hostHealth"],
   runtimeState: RuntimeState,
   phase = 0,
 ): string => {
@@ -72,7 +72,7 @@ export const sessionMarker = (
   return "·";
 };
 
-export const sessionLabelBudget = (
+export const agentLabelBudget = (
   level: SemanticZoomLevel,
   terminalWidth: number,
   inbox: boolean,

@@ -6,8 +6,8 @@ import {
   nextSemanticZoom,
   perspectiveNodeScale,
   semanticZoomLevel,
-  sessionLabelBudget,
-  sessionMarker,
+  agentLabelBudget,
+  agentMarker,
 } from "./semantic-zoom.ts";
 
 describe("semantic zoom", () => {
@@ -59,11 +59,11 @@ describe("semantic zoom", () => {
   });
 
   test("allocates more label room as semantic detail increases", () => {
-    expect(sessionLabelBudget("overview", 80, false)).toBeLessThan(
-      sessionLabelBudget("context", 80, false),
+    expect(agentLabelBudget("overview", 80, false)).toBeLessThan(
+      agentLabelBudget("context", 80, false),
     );
-    expect(sessionLabelBudget("context", 80, false)).toBeLessThan(
-      sessionLabelBudget("detail", 80, false),
+    expect(agentLabelBudget("context", 80, false)).toBeLessThan(
+      agentLabelBudget("detail", 80, false),
     );
     expect(goalLabelBudget("detail", 140)).toBeGreaterThan(goalLabelBudget("overview", 140));
     expect(isAtLeast("detail", "context")).toBe(true);
@@ -77,17 +77,17 @@ describe("semantic zoom", () => {
   });
 
   test("distinguishes current attention from stale host state", () => {
-    expect(sessionMarker("live", "blocked")).toBe("!");
-    expect(sessionMarker("live", "waiting")).toBe("…");
-    expect(sessionMarker("stale", "blocked")).toBe("?");
-    expect(sessionMarker("live", "idle")).toBe("·");
-    expect(sessionMarker("live", "done")).toBe("✓");
-    expect(sessionMarker("live", "working", 0)).toBe("◐");
-    expect(sessionMarker("live", "working", 0.6)).toBe("◓");
-    expect(sessionMarker("live", "unknown")).toBe("?");
+    expect(agentMarker("live", "blocked")).toBe("!");
+    expect(agentMarker("live", "waiting")).toBe("…");
+    expect(agentMarker("stale", "blocked")).toBe("?");
+    expect(agentMarker("live", "idle")).toBe("·");
+    expect(agentMarker("live", "done")).toBe("✓");
+    expect(agentMarker("live", "working", 0)).toBe("◐");
+    expect(agentMarker("live", "working", 0.6)).toBe("◓");
+    expect(agentMarker("live", "unknown")).toBe("?");
   });
 
-  test("keeps a completed session in the review window", () => {
+  test("keeps a completed agent in the review window", () => {
     expect(
       isRecentlyDone({ hostHealth: "live", runtimeState: "done", lastChangedAt: 90 }, 100),
     ).toBe(true);

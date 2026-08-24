@@ -14,7 +14,7 @@ the real native CLI, without building a universal fake chat client or committing
 to an Observatory-owned multiplexer too early?
 
 The current V0 answer is a host-owned Herdr terminal surface inside
-Observatory. `t`, `Enter` and a session double-click open the same embedded
+Observatory. `t`, `Enter` and an agent double-click open the same embedded
 terminal and return to the preserved map. Foreground attachment remains a
 capability seam for future hosts, but is not the primary interaction. The
 embedded route proves the narrow first interaction surface; it does not claim
@@ -31,7 +31,7 @@ of who owns persistent agent processes.
   into a generic chat transcript.
 - The host owns the process and PTY whenever a durable host exists. Observatory
   renders and routes input through an explicit capability.
-- Unsupported capabilities remain visible and honest. A session may support
+- Unsupported capabilities remain visible and honest. An agent may support
   observation, native terminal access, structured messaging or none of these.
 - Prototype code is disposable, in-memory and isolated from the Universe,
   SQLite schema and production host interfaces.
@@ -82,7 +82,7 @@ placeholder, and a clear key to return to the map.
 
 - process survival after Observatory exits;
 - reconnecting from a second client;
-- session discovery or Herdr integration;
+- agent discovery or Herdr integration;
 - full scrollback, copy/paste, mouse protocols or multiple terminal panes;
 - semantic transcript parsing; or
 - a production terminal-emulator dependency.
@@ -98,13 +98,13 @@ use read-only previews rather than emulate a terminal in the map client.
 #### Purpose
 
 Prove that Herdr can provide the durable process lifecycle while Observatory
-renders and controls a selected real session in a terminal panel.
+renders and controls a selected real agent in a terminal panel.
 
 #### Shape
 
 ```text
 Herdr server-owned agent terminal
-          ↕ terminal session control stream
+          ↕ terminal agent control stream
 Observatory Herdr adapter
           ↕ terminal frames, input, resize, release
 OpenTUI terminal panel + map
@@ -119,7 +119,7 @@ reference](https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/c
 The control lifecycle is:
 
 ```text
-select session
+select agent
   -> request terminal capability
   -> open a controller with the current panel dimensions
   -> render frames and forward input
@@ -132,15 +132,15 @@ select session
 - an existing Herdr agent can be rendered without opening the full Herdr UI;
 - the real CLI remains native, including streaming output and prompts;
 - input, interrupt and resize reach the server-owned terminal;
-- only the selected session receives input;
+- only the selected agent receives input;
 - releasing Observatory does not stop the Herdr agent;
-- reconnecting after a panel close restores a usable session; and
+- reconnecting after a panel close restores a usable agent; and
 - host loss or controller ownership conflicts are reported without corrupting
   the map or claiming success.
 
 #### Explicitly not proved
 
-- support for arbitrary non-Herdr sessions;
+- support for arbitrary non-Herdr agents;
 - a new AO daemon;
 - a generic provider messaging API;
 - durable transcript ingestion; or
@@ -148,10 +148,10 @@ select session
 
 #### Verdict
 
-Pass means Herdr can remain the V0 session runtime while Observatory adds a
+Pass means Herdr can remain the V0 agent runtime while Observatory adds a
 native terminal lens. That pass is now implemented behind `SessionHost` and
 exercised through the mock adapter and a live map → terminal → release → map
-smoke. Foreground attach remains an adapter capability for unsupported sessions and the
+smoke. Foreground attach remains an adapter capability for unsupported agents and the
 reference path for provider-native features not covered by the embedded lens.
 
 ## Evidence log — 2026-08-22
@@ -182,10 +182,10 @@ process ownership.
 
 The same panel model connected to Herdr's observe and control streams. A live
 Herdr agent rendered its real ANSI frame inside the panel, including its native
-prompt and status output. The control session was opened with takeover,
+prompt and status output. The control agent was opened with takeover,
 released with `terminal.release`, and the Herdr agent remained alive and idle
 after Observatory returned to the map. The read-only observe path also
-rendered the same live session without taking control.
+rendered the same live agent without taking control.
 
 The adapter wiring covers input, resize, release, frame decoding, host errors
 and controller conflicts. A single arrow key was sent through the live control
@@ -211,16 +211,16 @@ promoting Herdr protocol details into the Universe. Herdr and the deterministic
 mock host now expose the same optional host-owned terminal capability. The TUI
 opens it with `t`, renders frames through the small cell-native `TerminalScreen`
 model, routes text/control sequences and resize, and releases with Ctrl-Q or
-Esc. The selected session, lens and inspector remain intact when the map
+Esc. The selected agent, lens and inspector remain intact when the map
 returns. The mock path proves input echo, resize and release deterministically;
-the live path refreshed a real Herdr snapshot, opened a real selected session,
+the live path refreshed a real Herdr snapshot, opened a real selected agent,
 rendered its stream, released it, and returned to the list lens without
 mutating the agent task.
 
 ### Product verdict so far
 
 The first production slice is a Herdr-backed terminal lens entered from a
-selected Goal → Session node and exited back to the preserved universe. It
+selected Goal → Agent node and exited back to the preserved universe. It
 keeps the provider CLI authoritative, gives terminal-focused users a useful
 interaction path, and avoids making Observatory responsible for durable PTYs.
 POC A remains valuable as evidence and a disposable renderer experiment, but
@@ -245,7 +245,7 @@ the required lifecycle or control, evaluate a small AO runtime daemon:
 ```text
 ao server
   ├── owns PTYs and child processes
-  ├── persists session descriptors and reconnect metadata
+  ├── persists agent descriptors and reconnect metadata
   └── serves TUI, web and agent clients over a local socket
 ```
 
@@ -261,7 +261,7 @@ it merely to make POC A work.
 | Who owns the process? | AO prototype            | Herdr server                      | AO daemon                        |
 | Native CLI fidelity   | Test directly           | Test through Herdr stream         | Test directly                    |
 | Survives AO exit?     | No                      | Yes, through Herdr                | Yes, through daemon              |
-| Existing sessions?    | No                      | Yes, Herdr sessions               | Only AO-managed unless imported  |
+| Existing agents?      | No                      | Yes, Herdr agents                 | Only AO-managed unless imported  |
 | New infrastructure    | PTY + terminal emulator | Herdr adapter + terminal emulator | PTY, daemon and lifecycle system |
 | Product status        | Disposable evidence     | Implemented V0 capability         | Deferred option                  |
 
@@ -270,7 +270,7 @@ it merely to make POC A work.
 1. Run POC A with a shell, then one real agent CLI. This isolates terminal
    emulation and OpenTUI input from host protocol questions.
 2. Reuse the same terminal-panel model for POC B and connect it to a real
-   Herdr session through the observe/control stream.
+   Herdr agent through the observe/control stream.
 3. Keep the production `t` lens deliberately narrow and dogfood it against the
    map: map → terminal → map, with selection and attention state preserved.
 4. Compare it with the direct `Enter` terminal path on real work before adding
@@ -281,7 +281,7 @@ it merely to make POC A work.
 ## Success criteria for the product decision
 
 The embedded surface is worth keeping only if a user can return to a selected
-session, understand its current native CLI state, intervene without losing
+agent, understand its current native CLI state, intervene without losing
 context, and return to the universe faster than opening the host separately.
 Technical fidelity alone is insufficient; the map must remain useful while the
 terminal surface is open.

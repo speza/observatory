@@ -1,33 +1,33 @@
 # Goal-centred agent orchestration map
 
-Status: corrected V0 product direction; floating-card iteration  
-Date: 2026-08-22  
+Status: corrected V0 product direction; linked execution surfaces implemented
+Date: 2026-08-24
 Product: Observatory — an agent observatory
 
 Technical design: [Observatory technical architecture](technical-architecture.md)
 
 ## Summary
 
-People who run many AI agents do not primarily have a session-management
+People who run many AI agents do not primarily have an agent-management
 problem. They have an attention, orientation and accountability problem.
 
 Current tools provide increasingly capable ways to start, persist, resume and
-inspect agent sessions. Their primary overview remains a list or tree of
-sessions grouped by project and annotated with process state. That representation
+inspect agents. Their primary overview remains a list or tree of
+agents grouped by project and annotated with process state. That representation
 works for a handful of agents. At greater scale, the operator must maintain a
-separate mental model of why every session exists, how the work relates, what is
+separate mental model of why every agent exists, how the work relates, what is
 blocked, what can be trusted, and where their judgment is needed.
 
 This project explores a provider-independent, goal-centred control plane. Its
 first proof surface is a stable, portable native spatial map—rendered as a
-cell-based universe of goal bodies and session satellites—over the real
-Goal → Session topology. Flat attention and grouped-list views remain supporting
+cell-based universe of goal bodies and agent satellites—over the real
+Goal → Agent topology. Flat attention and grouped-list views remain supporting
 lenses for precise execution; they are not the core product proof.
 
 The visual treatment is not the product by itself. It succeeds only if spatial
-memory and goal/session geography make supervising agent work materially easier
+memory and goal/agent geography make supervising agent work materially easier
 than a well-designed list. The first live iteration must test that hypothesis
-against real Herdr sessions rather than treating a flat list as sufficient
+against real Herdr agents rather than treating a flat list as sufficient
 evidence.
 
 ## Why this should exist
@@ -38,25 +38,25 @@ Coding agents can work for long periods, operate concurrently and spawn other
 agents. Multiplexers such as Herdr solve terminal persistence and switching.
 Desktop products such as Codex and Claude Code improve parallel execution,
 worktree isolation, diff review and resumption. Multi-provider dashboards add a
-common place to see working, waiting and completed sessions.
+common place to see working, waiting and completed agents.
 
 These products make it easier to run more agents. They do not proportionally
 increase the operator's capacity to understand and direct the resulting body of
 work. More concurrency therefore produces an overloaded mental ledger.
 
-### The session is the wrong primary unit
+### A flat agent list is the wrong primary view
 
-A session is an execution container. It is not necessarily the thing the user
-cares about.
+An Agent is a durable worker record and an execution identity, but it is not
+enough context for supervision on its own.
 
 A durable goal may involve several repositories, worktrees and agents. A
-chief-of-staff agent may delegate work to child sessions. Several agents may
-research, implement and review the same worktree. Sessions may stop, compact,
+chief-of-staff agent may delegate work to child agents. Several agents may
+research, implement and review the same worktree. Agents may stop, compact,
 resume or be replaced while the intended outcome remains unchanged.
 
-Organising the world around sessions forces the user to reconstruct the durable
-work from transient implementation details. The interface should instead centre
-goals and outcomes, then show the sessions contributing to them.
+Organising the overview as a flat list of agents forces the user to reconstruct
+the durable work from transient implementation details. The interface should
+centre goals and outcomes, then show the Agents contributing to them.
 
 ### Process state is not work state
 
@@ -86,7 +86,7 @@ The central product question is:
 
 ## Problem statement
 
-When an experienced agent user operates many active and idle sessions across
+When an experienced agent user operates many active and idle agents across
 multiple projects and providers, they cannot quickly form and retain an accurate
 picture of:
 
@@ -98,7 +98,7 @@ picture of:
 6. what requires human judgment now; and
 7. whether reported completion is supported by trustworthy artifacts.
 
-Existing flat session lists expose individual runtime state but externalise this
+Existing flat agent lists expose individual runtime state but externalise this
 larger model into the user's memory. This limits useful concurrency, creates
 notification fatigue, makes dormant work easy to lose, and encourages shallow
 acceptance of agent-reported completion.
@@ -109,7 +109,7 @@ The initial user is a technical operator who:
 
 - regularly runs multiple coding-agent CLIs;
 - uses git worktrees to isolate parallel work;
-- keeps sessions alive for hours, days or longer;
+- keeps agents alive for hours, days or longer;
 - mixes providers such as Claude Code, Codex, OpenCode or Pi;
 - sometimes uses a central agent to plan and delegate to child agents; and
 - remains responsible for steering, reviewing and integrating the outcome.
@@ -122,7 +122,7 @@ permissions product.
 ### Orient
 
 When I return after focusing elsewhere, help me reconstruct what changed and the
-current shape of the work in minutes rather than reopening sessions one by one.
+current shape of the work in minutes rather than reopening agents one by one.
 
 ### Triage
 
@@ -157,19 +157,19 @@ delegation and dependency visible while supporting spatial memory.
 
 The proposed visual language is:
 
-| Concept                | Possible representation                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| Goal or outcome        | Star system, planet or large region                               |
-| Agent session          | Moving orb, spacecraft or compact child row                       |
-| Chief-of-staff role    | Session with visible delegation relationships                     |
-| Child agent            | Satellite linked to its parent                                    |
-| Delegation             | Outbound path from parent to child                                |
-| Result handoff         | Return path carrying an artifact                                  |
-| Dependency             | Directed connection between outcomes                              |
-| Pull request or merge  | Integration path back to the base branch                          |
-| Conflict or overlap    | Intersecting or warning-marked paths                              |
-| Human attention        | Salient pulse or halo                                             |
-| Repository or worktree | Session inspector metadata or optional lens, never a default node |
+| Concept                | Possible representation                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| Goal or outcome        | Star system, planet or large region                             |
+| Agent                  | Moving orb, spacecraft or compact child row                     |
+| Chief-of-staff role    | Agent with visible delegation relationships                     |
+| Child agent            | Satellite linked to its parent                                  |
+| Delegation             | Outbound path from parent to child                              |
+| Result handoff         | Return path carrying an artifact                                |
+| Dependency             | Directed connection between outcomes                            |
+| Pull request or merge  | Integration path back to the base branch                        |
+| Conflict or overlap    | Intersecting or warning-marked paths                            |
+| Human attention        | Salient pulse or halo                                           |
+| Repository or worktree | Agent inspector metadata or optional lens, never a default node |
 
 This metaphor remains provisional. It must earn its place through usability
 testing.
@@ -184,7 +184,7 @@ Goals, delegated tasks, dependencies, decisions and intended outcomes.
 
 ### Agent topology
 
-Agent roles, sessions, parent-child delegation, inherited instructions,
+Agent roles, parent-child delegation, inherited instructions,
 authority, progress, results and accountability.
 
 ### Git topology
@@ -203,7 +203,7 @@ Git.
 ```text
 Goal
 ├── Dependencies and decisions
-└── Agent role or session
+└── Agent role or agent
     ├── Parent / children
     ├── Delegated task and authority
     ├── Context lineage
@@ -221,33 +221,63 @@ must distinguish those provenance levels.
 ### Goals are the primary object
 
 Goals are the largest and most durable objects in the universe. They can span
-multiple repositories, worktrees, providers and sessions. A goal can be as light
+multiple repositories, worktrees, providers and agents. A goal can be as light
 as a title and optional description; priority, success criteria, constraints and
 decisions are progressive additions rather than required project-management
 ceremony.
 
-Sessions are assigned directly to goals and can query that shared context. This
+Agents are assigned directly to goals and can query that shared context. This
 gives independently running agents common intent without making AO responsible
 for storing or replaying their transcripts.
 
 V1 deliberately has no durable organisational layer between a goal and its
-sessions. Delegation, dependency, review and Git relationships organise the
-sessions without requiring another container. If real goals become too crowded,
+agents. Delegation, dependency, review and Git relationships organise the
+agents without requiring another container. If real goals become too crowded,
 a later version may add nested goals, workstreams or derived clusters based on
 observed need. That shape is not chosen yet.
 
-The interface may present a live tracked session as an agent. The durable
-record remains the session because its process can stop, resume or be replaced
-while its history and contribution to the goal remain relevant.
+The durable record remains the Agent because its host execution can stop,
+resume or be replaced while its history and contribution to the Goal remain
+relevant. Supporting shells and sibling-agent executions are host context, not
+additional durable records.
+
+### Zero-configuration code-context experiment
+
+Manual goals are useful for durable intent but should not be a prerequisite for
+getting an understandable first view. Observatory now has an experimental
+supporting lens that groups discovered agents by their observed repository,
+falling back to the observed worktree or an explicitly labelled unknown
+context. The grouping is a projection, not an accepted organisational object;
+it does not infer a goal or create a new map topology.
+
+The experiment treats an agent's primary repository and worktree as one code
+context for presentation. In the map/universe view, each observed context is a
+derived body with its agents arranged as satellites; in the list view, the
+same grouping is shown as a supporting hierarchy. The agent remains the
+selectable object and keeps its branch/worktree facts alongside its host
+identity. A repository may contain several agents in distinct worktrees,
+while one agent can later report additional repository involvement if that
+evidence becomes available. The current implementation deliberately does not
+persist a separate worktree entity or infer a multi-repository goal.
+
+The related-agent lens adds a human-controlled bridge from those observations
+back to an existing goal. An optional host-provided execution-container
+reference is compared opaquely across agents; matching worktrees are strong
+evidence and matching repositories are supporting evidence. These signals
+produce candidates, not accepted relationships. From a selected goal in the
+map or list, a human can batch-adopt unassigned candidates into the Goal ->
+Agent assignment or dismiss them for that goal. Agents already assigned to
+another goal remain visible as context but are not adoptable, and missing or
+stale signals never become semantic truth.
 
 ### AO is a semantic control plane
 
 AO owns metadata and relationships, not agent execution or transcript storage.
-It records native session identifiers and locators so agents and users can use
-the provider's own session history when deeper context is required.
+It records native agent identifiers and locators so agents and users can use
+the provider's own agent history when deeper context is required.
 
 The control plane exposes an API and CLI so humans and agents can create goals,
-assign sessions, record delegation, request attention and update progress. The
+assign agents, record delegation, request attention and update progress. The
 TUI and any later web or desktop clients are projections of this shared state.
 
 Optional external context is plugin-contributed. GitHub pull requests, Jira or
@@ -258,7 +288,7 @@ for the boundary and failure rules.
 
 Agent-supplied semantics are progressively enhanced:
 
-1. vanilla sessions expose whatever can be discovered safely from their process,
+1. vanilla agents expose whatever can be discovered safely from their process,
    provider, repository, worktree and native metadata;
 2. optional skills, hooks and integrations report richer goals, delegation,
    blockers, handoffs and context pressure; and
@@ -281,27 +311,28 @@ whether an agent may continue executing.
 - Agent-completed goals remain visible and greyed until a human archives them.
 - Archiving hides history from the active universe; it does not delete it.
 
-## Session hosting
+## Agent hosting
 
-Herdr is a deliberate V0/V1 requirement for live session execution, but it is
-not Observatory's architectural centre. Session execution is provided through
+Herdr is a deliberate V0/V1 requirement for live agent execution, but it is
+not Observatory's architectural centre. Agent execution is provided through
 one pluggable host boundary so Herdr can later be replaced or joined by tmux,
 a Superlogical-style host, or an Observatory-owned multiplexer without
 rewriting the semantic control plane.
 
 ```text
 AO semantic control plane
-├── Herdr session host — first live implementation
-├── tmux session host — later
-├── native session discovery
+├── Herdr agent host — first live implementation
+├── tmux agent host — later
+├── native agent discovery
 └── AO-native multiplexer — possible future implementation
 ```
 
-A session host is responsible for discovering, launching, attaching to,
-observing and stopping terminal sessions. AO is responsible for their meaning,
-relationships and presentation. Terminal frontends such as Ghostty, Kitty and
-WezTerm are a separate integration layer. Herdr's workspaces, tabs and panes
-are host metadata, not AO topology.
+An agent host is responsible for discovering, launching, attaching to and
+observing terminal agents, while retaining ownership of their process and
+terminal lifecycle. AO is responsible for their meaning, relationships and
+presentation. Terminal frontends such as Ghostty, Kitty and WezTerm are a
+separate integration layer. Herdr's workspaces, tabs and panes are host
+metadata, not AO topology.
 
 This is an explicit dependency-inversion policy:
 
@@ -317,13 +348,24 @@ The mock host proves that the control plane and renderer can run without a
 live Herdr instance. A second production host will be treated as an adapter
 contract test, not as a reason to broaden the domain model.
 
-New implementation sessions should use a fresh Git worktree by default. Research
-sessions may require none, and reviewers may attach read-only to an existing
+New implementation agents should use a fresh Git worktree by default. Research
+agents may require none, and reviewers may attach read-only to an existing
 worktree. AO should warn before two write-capable agents share a checkout.
+
+### Linked executions
+
+When an Agent is selected, its host may expose N transient linked executions:
+shells for local applications, tests, watchers and preferred diff tools, plus
+recognised sibling Agents in the same host context. Observatory offers these in
+the Agent inspector and opens the selected one beside the map or Agent
+terminal. The map does not render them as nodes, and shell-only panes are not
+reconciled into the durable Agent inventory. If a person starts a supported
+Agent in a linked shell, the next authoritative host snapshot can reconcile it
+as a normal Agent using its existing native identity.
 
 ## Interaction model
 
-The universe is the navigation and attention surface. The hosted agent session
+The universe is the navigation and attention surface. The hosted agent
 remains the authoritative conversation surface. AO should make lightweight
 interventions possible without forcing the user to attach, but it should not
 reimplement every provider's terminal or conversation interface.
@@ -332,10 +374,10 @@ Interaction follows a deliberate ladder:
 
 ```text
 orient in universe
-  -> select a session
+  -> select an agent
   -> inspect its state and latest meaningful activity
   -> respond inline when the intervention is simple
-  -> attach to the real session when full context is needed
+  -> attach to the real agent when full context is needed
   -> return to the preserved universe position
 ```
 
@@ -346,25 +388,25 @@ major integration risks visible without exposing every low-level edge.
 
 ### Goal view
 
-Reveal contributing sessions, dependencies, delegated branches, worktrees,
+Reveal contributing agents, dependencies, delegated branches, worktrees,
 artifacts, decisions, outstanding verification and convergence points for one
 goal.
 
-### Session view
+### Agent view
 
 Provide the real hosted terminal or provider-native conversation, plus access to
 the plan, diff, context usage and controls. AO may frame or launch this view, but
-the native session remains authoritative. Leaving it returns the user to the
-same local navigation context: selected goal and session, filters and search,
+the native agent remains authoritative. Leaving it returns the user to the
+same local navigation context: selected goal and agent, filters and search,
 plus position, zoom and active lens on surfaces that provide them.
 
 ### Selection and floating inspector card
 
-Selecting a goal or session does not immediately leave the universe. It opens a
+Selecting a goal or agent does not immediately leave the universe. It opens a
 transient floating card anchored near the selected item. The card contains the
 smallest useful decision context:
 
-- the reason the session needs attention;
+- the reason the agent needs attention;
 - the pending question, approval or requested judgment where known;
 - the latest meaningful activity rather than arbitrary terminal noise;
 - the goal;
@@ -392,7 +434,7 @@ sending and must not provide broadcast input in v1.
 
 Capability degrades progressively:
 
-1. every tracked session can expose AO metadata and an attachment route where
+1. every tracked agent can expose AO metadata and an attachment route where
    the host provides one;
 2. hosts may expose recent terminal output and text input;
 3. hosts may optionally expose a full embedded-terminal stream;
@@ -405,13 +447,13 @@ being simulated unreliably.
 
 ### Attach and return
 
-Attaching enters the existing hosted session. Depending on host capability this
+Attaching enters the existing hosted agent. Depending on host capability this
 may focus an existing pane, open an adjacent split, suspend AO and attach in the
 foreground, or open an embedded terminal in a host-backed client. The V0 TUI
 uses `t` for the Herdr-backed embedded route and `Enter` for foreground attach;
 the later local web client can consume the same host capability. Embedded access
 transports a host-owned PTY stream; it does not make AO responsible for the
-session lifecycle or require every host to support the same mechanism.
+agent lifecycle or require every host to support the same mechanism.
 
 On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
@@ -421,10 +463,10 @@ Candidate input semantics are:
 
 ```text
 single click on a goal           enter its goal-only satellite view
-single click on a session        select and inspect
+single click on an agent        select and inspect
 drag a goal body                 move its durable anchor; satellites follow
-drag empty map or a session      pan the viewport
-enter / double click            attach to the real session
+drag empty map or an agent      pan the viewport
+enter / double click            attach to the real agent
 escape / host return binding    return to the preserved universe
 ```
 
@@ -446,14 +488,14 @@ visible without competing with an item that needs action.
 
 ### V0 attention-first navigation and semantic zoom
 
-The map's primary success criterion is the time from a session needing human
-attention to the user attaching to the correct hosted session. It is not full
+The map's primary success criterion is the time from an agent needing human
+attention to the user attaching to the correct hosted agent. It is not full
 text legibility for every node at one scale. The map is the radar and navigation
 surface; focused views, the inspector and the list lens are the detail surfaces.
 
 Attention is both a projection and a navigation affordance:
 
-- a current attention session gets an unmistakable steady marker and its owning
+- a current attention agent gets an unmistakable steady marker and its owning
   goal aggregates `!N`;
 - stale or uncertain state is separate and aggregates `?N`;
 - the reason and age remain available in the attention queue, focused view and
@@ -464,10 +506,10 @@ Attention is both a projection and a navigation affordance:
   accepted spatial position.
 
 The rapid-triage path is `g` to cycle through the exact attention ordering,
-selecting the session and focusing its owning goal or inbox context, followed by
+selecting the agent and focusing its owning goal or inbox context, followed by
 `Enter` to attach. `f` remains available to focus or reset the selected goal or
 inbox context manually. The selected target, map lens, viewport and search state
-are restored after returning from the hosted session as far as the host allows.
+are restored after returning from the hosted agent as far as the host allows.
 
 Semantic zoom is separate from geometric zoom. Geometric zoom changes camera
 scale; semantic zoom changes label and metadata density without moving nodes. V0
@@ -489,7 +531,7 @@ keep their labels so the map remains navigable without letting fixed-width
 cards overlap.
 
 The attention lens dims healthy work while retaining the spatial positions of
-promoted sessions and their owning goals. Search focuses a result in the same
+promoted agents and their owning goals. Search focuses a result in the same
 spatial context. On narrow terminals, focus/detail is the fallback rather than
 compressing the whole universe until labels become unusable.
 
@@ -526,29 +568,29 @@ the goal level and be reachable directly from that warning.
 
 Candidate default encodings are:
 
-- goal size indicates durable scope and the number or weight of its sessions;
+- goal size indicates durable scope and the number or weight of its agents;
 - orbiting or child nodes expose active agents, with active and total counts;
 - a steady outer ring communicates human-set priority;
 - pulsing animation may communicate required attention;
 - brightness or fading communicates recency;
-- a session ring communicates context pressure; and
-- idle and completed sessions remain dim until a human archives them.
+- an agent ring communicates context pressure; and
+- idle and completed agents remain dim until a human archives them.
 
 For V0, attention must also have a steady, high-contrast cell marker and an
 explainable reason and age. Animation is optional and must never be the only
-attention encoding. Live `working` sessions may use a restrained rotating
+attention encoding. Live `working` agents may use a restrained rotating
 half-moon marker and border pulse to distinguish active execution from a live
-but idle session; runtime state remains available as text in detail/list views.
+but idle agent; runtime state remains available as text in detail/list views.
 
 New nodes receive the nearest deterministic free logical position. The placement
 scan considers the current goal body and direct-satellite footprint, prefers a
 compact horizontal portfolio, and expands its search when occupied space leaves
 no suitable slot. Existing accepted nodes do not reflow when another goal or
-session appears. Manual movement pins the goal anchor and its satellites remain
+agent appears. Manual movement pins the goal anchor and its satellites remain
 relative to it. Formatting is an explicit, undoable operation that can preserve
 pinned positions; continuous auto-format is not the default assumption.
 
-Type-to-find search should work from anywhere over goal and session
+Type-to-find search should work from anywhere over goal and agent
 names and descriptions, including archived items. Selecting a result focuses it
 inside its owning goal and the current view. Transcript search remains
 provider-native initially.
@@ -561,13 +603,13 @@ It should be a restrained, keyboard-first operational universe using portable
 cells, typography, colour and limited semantic motion. It should not imitate a
 graphical canvas through terminal-specific image protocols or a custom ANSI
 raster engine. Its primary view is a stable portfolio of goal bodies with direct
-session satellites; focused goal views expose one body's satellites. Attention,
+agent satellites; focused goal views expose one body's satellites. Attention,
 inbox, inspector and grouped-list views are supporting lenses, and
-infrastructure details remain session metadata.
+infrastructure details remain agent metadata.
 
-Unassigned sessions remain discoverable without becoming map topology: the
+Unassigned agents remain discoverable without becoming map topology: the
 portfolio hides their cards and shows an `INBOX !N · v list` warning instead.
-The list is a supporting lens over direct Goal → Session state, not a durable
+The list is a supporting lens over direct Goal → Agent state, not a durable
 map body. Stale or unavailable host state is called out in the header and
 remains actionable through the list and attention lenses. Attention and
 focused inbox lenses expose the compact, attention-first list, while a
@@ -576,7 +618,7 @@ satellites continue to use
 identity-derived collision-aware perimeter slots; this is deterministic slot
 allocation, not a force-directed graph layout or continuous auto-formatting.
 
-Stale or unavailable sessions remain in those supporting lenses until a human
+Stale or unavailable agents remain in those supporting lenses until a human
 selects one and confirms `x` to archive it. Archiving removes it from active
 map/list projections while retaining its identity, assignment and host history;
 a later host refresh may update the archived record but must not silently bring
@@ -586,24 +628,24 @@ Goal placement is a separate free-space operation: new goals are placed against
 the current occupied footprints, while accepted goal anchors remain stable.
 Dragging a goal persists its world-space anchor and moves the direct satellite
 orbit with it. Clicking a goal or using focus descends to a goal-only map that
-contains that body and all of its direct sessions. Selecting an unassigned
-session and using focus enters the supporting inbox list lens. Creating a goal
+contains that body and all of its direct agents. Selecting an unassigned
+agent and using focus enters the supporting inbox list lens. Creating a goal
 selects it automatically; `a` from a selected goal opens the inbox assignment
-picker, while `a` from a selected session opens the goal picker.
+picker, while `a` from a selected agent opens the goal picker.
 
 Map keyboard navigation follows the visible hierarchy rather than flattening
 it: `j`/`k` cycles goal bodies in the portfolio, and a focused goal changes the
-sequence to its direct sessions in clockwise perimeter order. The focused inbox
-does the same for unassigned sessions; the supporting grouped list retains flat
+sequence to its direct agents in clockwise perimeter order. The focused inbox
+does the same for unassigned agents; the supporting grouped list retains flat
 row navigation.
 
 The experience should remain fully keyboard operable. Selecting an item should
-open its floating inspector card; `Enter` on a session should open its real
-terminal. Returning should preserve the selected goal and session, expansion
+open its floating inspector card; `Enter` on an agent should open its real
+terminal. Returning should preserve the selected goal and agent, expansion
 state, filters and search.
 
 Herdr is the initial substrate because it already manages persistent
-multi-provider sessions and exposes workspaces, panes, agents, worktrees,
+multi-provider agents and exposes workspaces, panes, agents, worktrees,
 snapshots, events and input through a local API.
 
 A later local web client may own higher-fidelity observatory rendering: real
@@ -638,20 +680,20 @@ not merely if users enjoy looking at it.
 
 ### Primary outcomes
 
-For users managing at least 20 mixed active and idle sessions, compared with a
-strong grouped session list:
+For users managing at least 20 mixed active and idle agents, compared with a
+strong grouped agent list:
 
 - Returning users can accurately explain the state of their active goals in
   under two minutes.
 - Users identify every agent requiring immediate human input without opening
-  sessions individually.
-- Users identify important cross-session dependencies, unconsumed results and
+  agents individually.
+- Users identify important cross-agent dependencies, unconsumed results and
   worktree conflicts with fewer misses.
 - Users can move from overview to the correct terminal, diff or artifact in
   under ten seconds.
-- From an attention signal, users can reach the correct live session through the
+- From an attention signal, users can reach the correct live agent through the
   attention jump and attach path without scanning the whole map.
-- Users can answer straightforward blocked sessions from the attention queue
+- Users can answer straightforward blocked agents from the attention queue
   without attaching to each terminal individually.
 - Users can distinguish runtime completion from verified, integration-ready
   completion.
@@ -661,7 +703,7 @@ strong grouped session list:
 ### Behavioural signals
 
 - The user chooses the map for orientation and catch-up without being prompted.
-- The user relies less on external notes or memory to track session purpose.
+- The user relies less on external notes or memory to track agent purpose.
 - The user can supervise more concurrent work without increasing missed
   interventions or accepting more defective outcomes.
 - Stable locations become meaningful enough that the user refers to where work
@@ -690,26 +732,26 @@ earns it.
 The first live spatial iteration is a real walking slice rather than another
 synthetic renderer. It should:
 
-- discover existing Herdr sessions into an unassigned inbox;
+- discover existing Herdr agents into an unassigned inbox;
 - permit manual creation, naming and reprioritisation of goals;
-- assign sessions directly to goals;
+- assign agents directly to goals;
 - render a free-space-aware portfolio map with stable goal bodies and direct
-  session satellites;
+  agent satellites;
 - allow a human to move and persist a goal anchor while its satellites follow;
 - provide a goal-only focused map containing exactly that goal and its direct
-  sessions;
+  agents;
 - focus a goal on narrow terminals while retaining the same map semantics;
-- keep repositories, worktrees and runtime details on sessions and in the
+- keep repositories, worktrees and runtime details on agents and in the
   inspector rather than rendering them as nodes;
 - surface a basic explainable attention queue;
-- search goal and session metadata;
-- jump to the relevant Herdr session and return without losing local state; and
+- search goal and agent metadata;
+- jump to the relevant Herdr agent and return without losing local state; and
 - persist accepted organisation and goal positions across restart.
 
 Quick messages, agent-authored structure, provider transcript parsing and the
 web observatory follow only after this slice demonstrates value with real work.
 
-On first use the accepted universe is empty. Discovered sessions appear in an
+On first use the accepted universe is empty. Discovered agents appear in an
 unassigned inbox until the user imports or assigns them. Accepted goals,
 relationships and assignments persist across restarts.
 
@@ -727,11 +769,11 @@ Also record whether the user chooses the map for orientation, whether stable
 locations become meaningful, and whether a focused goal view makes direct
 satellites faster to understand than opening the sidebar.
 
-Measure completion time, errors, sessions opened, unnecessary interventions and
+Measure completion time, errors, agents opened, unnecessary interventions and
 confidence.
 
 Run the live prototype for one week with at least 15 real recognized agent
-sessions. A strong
+agents. A strong
 failure signal is that the user still opens Herdr's sidebar first to understand
 what exists, what matters or what needs attention. Other pivot signals are that
 known work is slower to find, goal maintenance feels administrative, ordering
@@ -760,7 +802,7 @@ history browser.
 
 ## Product principles
 
-1. **Goals over sessions.** Durable intent owns the geography.
+1. **Goals over agents.** Durable intent owns the geography.
 2. **Attention over activity.** Busy is not necessarily important.
 3. **Evidence over self-report.** Completion requires inspectable artifacts.
 4. **Stable space over clever layout.** Spatial memory depends on persistence.
@@ -777,10 +819,10 @@ history browser.
 - Which relationships can be discovered reliably across agent providers?
 - How should a central agent declare delegation, authority and expected return?
 - How can behavioural drift be detected without asking another model to
-  continuously judge every session?
+  continuously judge every agent?
 - Which context, token and cost metrics are consistently available?
 - When should completed work leave the active universe, and how is it retrieved?
-- Can the terminal command centre remain fast and legible at 100+ sessions?
+- Can the terminal command centre remain fast and legible at 100+ agents?
 - Does spatial memory still help when the underlying work changes rapidly?
 - What information must remain local, particularly agent transcripts and
   repository contents?

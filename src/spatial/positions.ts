@@ -29,7 +29,7 @@ const GOAL_GAP_Y = 12;
 
 export interface GoalLayoutOccupancy {
   readonly position: MapPosition;
-  readonly sessionCount: number;
+  readonly agentCount: number;
 }
 
 const hash = (value: string): number => {
@@ -126,15 +126,15 @@ export const defaultGoalMapPosition = (goalId: string): MapPosition => {
  * Estimate the durable footprint of a goal and its direct satellites. This is
  * intentionally a logical-space estimate: the renderer remains responsible
  * for terminal-cell sizing, while new goal placement can avoid the current
- * session load without moving accepted goals.
+ * agent load without moving accepted goals.
  */
 export interface GoalLayoutFootprint {
   readonly halfWidth: number;
   readonly halfHeight: number;
 }
 
-export const goalLayoutFootprint = (sessionCount: number): GoalLayoutFootprint => {
-  const count = Number.isFinite(sessionCount) ? Math.max(0, Math.floor(sessionCount)) : 0;
+export const goalLayoutFootprint = (agentCount: number): GoalLayoutFootprint => {
+  const count = Number.isFinite(agentCount) ? Math.max(0, Math.floor(agentCount)) : 0;
   let ring = 0;
   while (count > 4 * ring * (ring + 1)) ring += 1;
   return {
@@ -171,8 +171,8 @@ const goalCandidates = (goalId: string): readonly MapPosition[] => {
 };
 
 const goalsOverlap = (left: GoalLayoutOccupancy, right: GoalLayoutOccupancy): boolean => {
-  const leftFootprint = goalLayoutFootprint(left.sessionCount);
-  const rightFootprint = goalLayoutFootprint(right.sessionCount);
+  const leftFootprint = goalLayoutFootprint(left.agentCount);
+  const rightFootprint = goalLayoutFootprint(right.agentCount);
   return (
     Math.abs(left.position.x - right.position.x) <
       leftFootprint.halfWidth + rightFootprint.halfWidth + GOAL_GAP_X &&
@@ -184,17 +184,17 @@ const goalsOverlap = (left: GoalLayoutOccupancy, right: GoalLayoutOccupancy): bo
 /**
  * Place a new goal in the nearest deterministic free grid position. Existing
  * accepted positions are inputs, never outputs to be reflowed. The footprint
- * includes the goal's current direct-session load, so a heavily populated goal
+ * includes the goal's current direct-agent load, so a heavily populated goal
  * claims more space and later goals route around it.
  */
 export const initialGoalMapPosition = (
   goalId: string,
   occupied: readonly GoalLayoutOccupancy[],
-  sessionCount = 0,
+  agentCount = 0,
 ): MapPosition => {
   const candidateOccupancy: GoalLayoutOccupancy = {
     position: { x: 0, y: 0 },
-    sessionCount,
+    agentCount,
   };
   for (const candidate of goalCandidates(goalId)) {
     const next = { ...candidateOccupancy, position: candidate };
@@ -207,23 +207,23 @@ export const initialGoalMapPosition = (
 /**
  * Derive stable local satellite positions without adding another topology.
  * Slot assignment is identity-derived and collision-aware, so adding a new
- * session does not make the existing satellites collapse onto one another.
+ * agent does not make the existing satellites collapse onto one another.
  */
-export const sessionSatellitePositions = (
+export const agentSatellitePositions = (
   goal: MapPosition,
   goalId: string,
-  sessionIds: readonly string[],
+  agentIds: readonly string[],
 ): Map<string, MapPosition> =>
-  stableSlotPositions(goal, sessionIds, SATELLITE_OFFSETS, `satellite:${goalId}`, 8);
+  stableSlotPositions(goal, agentIds, SATELLITE_OFFSETS, `satellite:${goalId}`, 8);
 
-/** Keep the original single-session helper for callers and unit fixtures. */
-export const sessionSatellitePosition = (
+/** Keep the original single-agent helper for callers and unit fixtures. */
+export const agentSatellitePosition = (
   goal: MapPosition,
   goalId: string,
-  sessionId: string,
-  _sessionIndex: number,
-  _sessionCount: number,
-): MapPosition => sessionSatellitePositions(goal, goalId, [sessionId]).get(sessionId) ?? goal;
+  agentId: string,
+  _agentIndex: number,
+  _agentCount: number,
+): MapPosition => agentSatellitePositions(goal, goalId, [agentId]).get(agentId) ?? goal;
 
 /**
  * Place the unassigned inbox to the left of the occupied universe. The caller
@@ -239,16 +239,16 @@ export const mapInboxAnchor = (goals: readonly MapPosition[]): MapPosition => {
   return { x: minimumX - 144, y: averageY };
 };
 
-/** Place unassigned sessions in a stable, collision-free neutral orbit. */
-export const unassignedSessionPositions = (
+/** Place unassigned agents in a stable, collision-free neutral orbit. */
+export const unassignedAgentPositions = (
   anchor: MapPosition,
-  sessionIds: readonly string[],
+  agentIds: readonly string[],
 ): Map<string, MapPosition> =>
-  stableSlotPositions(anchor, sessionIds, INBOX_OFFSETS, "unassigned", 12);
+  stableSlotPositions(anchor, agentIds, INBOX_OFFSETS, "unassigned", 12);
 
-/** Keep the original single-session helper for callers and unit fixtures. */
-export const unassignedSessionPosition = (anchor: MapPosition, sessionId: string): MapPosition =>
-  unassignedSessionPositions(anchor, [sessionId]).get(sessionId) ?? anchor;
+/** Keep the original single-agent helper for callers and unit fixtures. */
+export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): MapPosition =>
+  unassignedAgentPositions(anchor, [agentId]).get(agentId) ?? anchor;
 
 export const isMapPosition = (value: MapPosition): boolean =>
   Number.isFinite(value.x) &&
