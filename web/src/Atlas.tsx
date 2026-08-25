@@ -101,6 +101,33 @@ const wrappedLines = (
 const linesFor = (title: string): readonly string[] => wrappedLines(title, 25, 3);
 const agentLinesFor = (name: string): readonly string[] => wrappedLines(name, 17, 2);
 
+interface LabelRect {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+const labelRectFor = (
+  point: { readonly x: number; readonly y: number },
+  lines: readonly string[],
+  state: string,
+  labelOnLeft: boolean,
+): LabelRect => {
+  const longestLine = Math.max(0, ...lines.map((line) => line.length));
+  const width = Math.max(46, longestLine * 7.35, state.length * 6.4);
+  const left = labelOnLeft ? point.x - 17 - width : point.x + 17;
+  const top = point.y - (lines.length > 1 ? 21 : 15);
+  const height = lines.length * 12 + 16;
+  return { left, right: left + width, top, bottom: top + height };
+};
+
+const labelsOverlap = (left: LabelRect, right: LabelRect, gap = 8): boolean =>
+  left.left < right.right + gap &&
+  left.right + gap > right.left &&
+  left.top < right.bottom + gap &&
+  left.bottom + gap > right.top;
+
 const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
 
@@ -120,14 +147,11 @@ const selectionBelongsToFocus = (
   );
 };
 
-const allPoints = (projection: UniverseMapProjection): readonly { x: number; y: number }[] => [
-  ...projection.goals.flatMap((goal) => [
+const allPoints = (projection: UniverseMapProjection): readonly { x: number; y: number }[] =>
+  projection.goals.flatMap((goal) => [
     goal.mapPosition,
     ...goal.agents.map((agent) => agent.mapPosition),
-  ]),
-  ...projection.unassigned.map((agent) => agent.mapPosition),
-  projection.inboxPosition,
-];
+  ]);
 
 const goalRadius = (goal: MapGoalView): number =>
   Math.min(82, 52 + Math.sqrt(goal.agents.length) * 8);
@@ -229,25 +253,6 @@ const goalAgentPoints = (
     ),
   );
 
-const inboxAgentPoints = (
-  projection: UniverseMapProjection,
-  centre: { readonly x: number; readonly y: number },
-): readonly OrbitPlacement[] =>
-  projection.unassigned.map((agent) =>
-    orbitPlacement({
-      id: agent.id,
-      point: agent.mapPosition,
-      anchor: projection.inboxPosition,
-      centre,
-      radiusX: 92,
-      radiusY: 58,
-      ringUnitX: 72,
-      ringUnitY: 32,
-      bandStepX: 34,
-      bandStepY: 26,
-    }),
-  );
-
 export const Atlas = ({
   projection,
   selection,
@@ -330,10 +335,7 @@ export const Atlas = ({
         return goalAgentPoints(goal, centre)[agentIndex];
       }
     }
-    const agentIndex = projection.unassigned.findIndex((candidate) => candidate.id === target.id);
-    if (agentIndex < 0) return undefined;
-    const centre = screenPoint(projection.inboxPosition);
-    return inboxAgentPoints(projection, centre)[agentIndex];
+    return undefined;
   };
 
   const focusPoint = (
@@ -521,27 +523,51 @@ export const Atlas = ({
             const focusedAgent =
               selection?.type === "agent" && goal.agents.some((agent) => agent.id === selection.id);
             const focused = selected || focusedAgent;
-            // Keep the portfolio quiet, but make a genuinely focused goal useful:
-            // once the camera is in its detail state, every agent name is available.
-            const labelBudget = focused && camera.zoom >= 1.05 ? goal.agents.length : 2;
-            const visibleLabelIds = new Set(
-              goal.agents
-                .map((agent, index) => ({
+            // Focused systems reveal more context, but never at the cost of a wall of
+            // colliding names. Required labels (the selected agent and review items)
+            // win first; ordinary labels are admitted only when their estimated text
+            // boxes do not intersect an already visible label.
+            const labelCandidates = goal.agents
+              .map((agent, index) => {
+                const point = agentPoints[index];
+                if (!point) return undefined;
+                const nearLeftEdge = point.x < reservedLeft + 150;
+                const nearRightEdge = point.x > size.width - reservedRight - 150;
+                const labelOnLeft = nearRightEdge || (!nearLeftEdge && point.x < centre.x);
+                const state = stateLabel(agent);
+                const lines = agentLinesFor(agent.displayName);
+                return {
                   agent,
-                  index,
                   attention: agent.attention?.requiresHumanInput === true,
+                  index,
+                  labelOnLeft,
+                  rect: labelRectFor(point, lines, state, labelOnLeft),
                   selected: selection?.type === "agent" && selection.id === agent.id,
-                }))
-                .filter((candidate) => candidate.attention || candidate.selected || focused)
-                .sort(
-                  (left, right) =>
-                    Number(right.selected) - Number(left.selected) ||
-                    Number(right.attention) - Number(left.attention) ||
-                    left.index - right.index,
-                )
-                .slice(0, labelBudget)
-                .map((candidate) => candidate.agent.id),
-            );
+                };
+              })
+              .filter(
+                (candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined,
+              )
+              .filter((candidate) => candidate.attention || candidate.selected || focused)
+              .sort(
+                (left, right) =>
+                  Number(right.selected) - Number(left.selected) ||
+                  Number(right.attention) - Number(left.attention) ||
+                  left.index - right.index,
+              );
+            const visibleLabelIds = new Set<string>();
+            const visibleLabelRects: LabelRect[] = [];
+            for (const candidate of labelCandidates) {
+              const required = candidate.selected || candidate.attention;
+              if (
+                !required &&
+                visibleLabelRects.some((rect) => labelsOverlap(rect, candidate.rect))
+              ) {
+                continue;
+              }
+              visibleLabelIds.add(candidate.agent.id);
+              visibleLabelRects.push(candidate.rect);
+            }
             return (
               <g
                 className={`goal ${goal.status !== "active" ? `goal--${goal.status}` : ""} ${hasWorkingAgent ? "goal--working" : ""} ${goal.attentionCount > 0 ? "goal--attention" : ""} ${hasUncertainAgent ? "goal--uncertain" : ""} ${spotlightActive && focusedGoal ? "goal--spotlight-focus" : ""} ${spotlightActive && !focusedGoal ? "goal--spotlight-dimmed" : ""}`}
@@ -687,6 +713,9 @@ export const Atlas = ({
                         style={{ animationDelay: `${-(hash(agent.id) % 4200)}ms` }}
                       >
                         {attention ? <circle className="agent__attention-wave" r="20" /> : null}
+                        {state === "working" && !attention ? (
+                          <circle className="agent__working-wave" r="17" />
+                        ) : null}
                         <circle
                           className="agent__field"
                           fill={palette.mark}
@@ -729,95 +758,6 @@ export const Atlas = ({
               </g>
             );
           })}
-          {projection.unassigned.length > 0
-            ? (() => {
-                const centre = screenPoint(projection.inboxPosition);
-                const points = inboxAgentPoints(projection, centre);
-                const orbitBands = [
-                  ...new Map(points.map((point) => [point.band, point])).values(),
-                ];
-                const inboxFocused =
-                  focusedSelection?.type === "agent" &&
-                  projection.unassigned.some((agent) => agent.id === focusedSelection.id);
-                return (
-                  <g
-                    className={`inbox-sector ${focusedSelection && !inboxFocused ? "inbox-sector--spotlight-dimmed" : ""}`}
-                  >
-                    {orbitBands.map((orbit) => (
-                      <ellipse
-                        className="inbox-sector__orbit"
-                        cx={centre.x}
-                        cy={centre.y}
-                        key={orbit.band}
-                        rx={orbit.radiusX}
-                        ry={orbit.radiusY}
-                      />
-                    ))}
-                    <g
-                      className="inbox-sector__body"
-                      transform={`translate(${centre.x} ${centre.y})`}
-                    >
-                      <rect height="70" rx="2" width="116" x="-58" y="-35" />
-                      <text className="inbox-sector__kind" y="-7">
-                        UNASSIGNED
-                      </text>
-                      <text className="inbox-sector__count" y="18">
-                        {String(projection.unassigned.length).padStart(2, "0")}
-                      </text>
-                    </g>
-                    {projection.unassigned.map((agent, agentIndex) => {
-                      const point = points[agentIndex];
-                      if (!point) return null;
-                      const selected = selection?.type === "agent" && selection.id === agent.id;
-                      const uncertain = agent.hostHealth !== "live";
-                      const attention = agent.attention?.requiresHumanInput === true;
-                      return (
-                        <g
-                          className={`agent agent--unassigned ${uncertain ? "agent--uncertain" : ""} ${selected ? "is-selected" : ""}`}
-                          data-agent-id={agent.id}
-                          key={agent.id}
-                          onClick={() => {
-                            const next = { type: "agent" as const, id: agent.id };
-                            onSelect(next);
-                            if (!inboxFocused) focusPoint(point, next);
-                          }}
-                          onDoubleClick={(event) => {
-                            event.stopPropagation();
-                            onSelect({ type: "agent", id: agent.id });
-                            focusPoint(point, { type: "agent", id: agent.id });
-                          }}
-                          onFocus={() => onSelect({ type: "agent", id: agent.id })}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              onSelect({ type: "agent", id: agent.id });
-                            }
-                          }}
-                          aria-label={`${agent.displayName}, ${stateLabel(agent)}`}
-                          role="button"
-                          tabIndex={0}
-                          transform={`translate(${point.x} ${point.y})`}
-                        >
-                          <g className="agent__presence">
-                            <circle className="agent__field" r="15" />
-                            <circle className="agent__mark" r="9" />
-                            <circle className="agent__core" r="3.3" />
-                            {selected || attention ? (
-                              <text className="agent__label" textAnchor="start" x="17" y="-2">
-                                <tspan className="agent__name">{agent.displayName}</tspan>
-                                <tspan dy="12" x="17">
-                                  {stateLabel(agent).toUpperCase()}
-                                </tspan>
-                              </text>
-                            ) : null}
-                          </g>
-                        </g>
-                      );
-                    })}
-                  </g>
-                );
-              })()
-            : null}
         </g>
       </svg>
       <div className="zoom-control" aria-label="Map zoom controls">

@@ -299,8 +299,10 @@ clicks clear the selection. Double-click remains an explicit marker-focus
 action. `j`/`k` or the arrow keys move selection; `Enter` focuses a goal or
 opens an Agent terminal; `Space`/`f` focuses; `+`/`-`/`0` zoom; `h`/`l` and
 PageUp/PageDown pan; `a` opens attention, `g` jumps to the next signal, `v`
-switches Atlas/Ledger, `n` opens New goal, `i` toggles the inspector, `t`
-opens the selected terminal, and `Esc` closes the topmost surface. Press `?`
+switches Atlas/Ledger, `b` opens the actionable unassigned Inbox, `n` opens
+New goal, `i` toggles the inspector, `t` opens the selected terminal, and
+`Esc` closes the topmost surface. Catch-up entries return to Atlas and focus
+their affected Goal or Agent. Press `?`
 or use the masthead button for the in-app guide.
 
 Design documents:

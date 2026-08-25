@@ -78,12 +78,13 @@ describe("production web Atlas", () => {
     const assignedAgents = renderedAgents(markup);
 
     expect(goals).toHaveLength(12);
-    expect(markup.match(/data-agent-id=/gu)).toHaveLength(75);
-    expect(markup).toContain("UNASSIGNED");
+    expect(markup.match(/data-agent-id=/gu)).toHaveLength(71);
+    expect(markup).not.toContain("UNASSIGNED");
     expect(markup).toContain("atlas atlas--motion");
     expect(markup).toContain("goal--working");
     expect(markup).toContain("agent--working");
     expect(markup).toContain("agent__attention-wave");
+    expect(markup).toContain("agent__working-wave");
     expect(markup).not.toContain("goal__halo");
     expect(markup).not.toContain("goal__quiet-field");
     expect(markup).not.toContain("goal__contour");
@@ -136,6 +137,6 @@ describe("production web Atlas", () => {
         onSelect: () => undefined,
       }),
     );
-    expect(staleMarkup.match(/agent--uncertain/gu)).toHaveLength(4);
+    expect(staleMarkup).not.toContain("agent--uncertain");
   });
 });

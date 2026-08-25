@@ -32,7 +32,8 @@ another writable Observatory process.
 - a readable minimum world scale: constrained viewports expose a pannable
   window onto the larger map instead of compressing all goals into collisions;
 - explicit current attention versus stale or unavailable host observations;
-- visible unassigned sector for real first-run Herdr state; and
+- an actionable left-side Inbox lens for real first-run Herdr state (unassigned
+  observations stay out of the accepted Goal -> Agent spatial topology); and
 - responsive logical world placement with consistently legible SVG bodies and
   external goal titles;
 - goal creation, title and description editing, and human priority controls;
@@ -122,8 +123,9 @@ general audit log or transcript store.
 - Decorative planetary material remains clipped to each goal body, while
   labels and attention marks remain intentionally external. Planet surfaces
   are flat mineral colour without gradient or glow effects.
-- Every assigned and unassigned agent marker is derived from the same ellipse
-  geometry used to draw its visible orbit line.
+- Every assigned agent marker is derived from the same ellipse geometry used to
+  draw its visible orbit line. Unassigned observations are rendered by the
+  supporting Inbox list rather than as a semantic map node.
 - Agent focus uses that same rendered orbit position, so keyboard and explicit
   double-click camera moves center the visible marker rather than its raw map
   anchor. A single click inside an already focused goal is selection-only.

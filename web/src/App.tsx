@@ -76,11 +76,19 @@ const AttentionQueue = ({
       {items.length === 0 ? <p className="queue-empty">No signals in this group.</p> : null}
       {items.map((item) => {
         const label = labelForAttention(item, agents);
+        const target: Selection | undefined = item.agentId
+          ? { type: "agent", id: item.agentId }
+          : item.goalId
+            ? { type: "goal", id: item.goalId }
+            : undefined;
         return (
           <button
             className="queue-item"
+            disabled={!target}
             key={item.id}
-            onClick={() => onSelect({ type: item.agentId ? "agent" : "goal", id: item.targetId })}
+            onClick={() => {
+              if (target) onSelect(target);
+            }}
             type="button"
           >
             <i aria-hidden="true" />
@@ -110,6 +118,128 @@ const AttentionQueue = ({
         {section("Uncertain", uncertain)}
       </div>
       <footer>Observed facts only · no inferred acceptance</footer>
+    </aside>
+  );
+};
+
+interface InboxPanelProps {
+  readonly projection: CommandCentreProjection;
+  readonly pending: boolean;
+  readonly onAssign: (agentIds: readonly string[], goalId: string) => Promise<boolean>;
+  readonly onClose: () => void;
+  readonly onSelect: (selection: Selection) => void;
+}
+
+const InboxPanel = ({
+  projection,
+  pending,
+  onAssign,
+  onClose,
+  onSelect,
+}: InboxPanelProps): React.JSX.Element => {
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
+  const [goalId, setGoalId] = useState(
+    projection.goals.find((goal) => goal.status === "active")?.id ?? "",
+  );
+  const activeGoals = useMemo(
+    () => projection.goals.filter((goal) => goal.status === "active"),
+    [projection.goals],
+  );
+  const allSelected =
+    projection.unassigned.length > 0 &&
+    projection.unassigned.every((agent) => selectedIds.includes(agent.id));
+
+  useEffect(() => {
+    const available = new Set(projection.unassigned.map((agent) => agent.id));
+    setSelectedIds((current) => {
+      const next = current.filter((id) => available.has(id));
+      return next.length === current.length ? current : next;
+    });
+    if (goalId && !activeGoals.some((goal) => goal.id === goalId)) {
+      setGoalId(activeGoals[0]?.id ?? "");
+    }
+  }, [activeGoals, goalId, projection.unassigned]);
+
+  const toggleAgent = (agentId: string): void => {
+    setSelectedIds((current) =>
+      current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId],
+    );
+  };
+
+  const toggleAll = (): void => {
+    setSelectedIds(allSelected ? [] : projection.unassigned.map((agent) => agent.id));
+  };
+
+  return (
+    <aside aria-label="Unassigned inbox" className="inbox-panel">
+      <header>
+        <div>
+          <p className="overline">INBOX / UNASSIGNED</p>
+          <h2>Work awaiting a home</h2>
+        </div>
+        <button aria-label="Close inbox" onClick={onClose} type="button">
+          ×
+        </button>
+      </header>
+      <div className="inbox-panel__toolbar">
+        <button onClick={toggleAll} type="button">
+          {allSelected ? "Clear selection" : "Select all"}
+        </button>
+        <span>{selectedIds.length} selected</span>
+      </div>
+      <div className="inbox-panel__body">
+        {projection.unassigned.length === 0 ? (
+          <p className="inbox-panel__empty">No observed agents are waiting for organisation.</p>
+        ) : (
+          projection.unassigned.map((agent) => (
+            <div className="inbox-panel__item" key={agent.id}>
+              <input
+                aria-label={`Select ${agent.displayName}`}
+                checked={selectedIds.includes(agent.id)}
+                onChange={() => toggleAgent(agent.id)}
+                type="checkbox"
+              />
+              <button
+                className="inbox-panel__agent"
+                onClick={() => onSelect({ type: "agent", id: agent.id })}
+                type="button"
+              >
+                <strong>{agent.displayName}</strong>
+                <small>{agent.goalTitle ?? "Unassigned observation"}</small>
+                <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <footer className="inbox-panel__assign">
+        <label>
+          <span>Assign selected to</span>
+          <select
+            disabled={activeGoals.length === 0 || pending}
+            onChange={(event) => setGoalId(event.target.value)}
+            value={goalId}
+          >
+            <option value="">Choose a goal</option>
+            {activeGoals.map((goal) => (
+              <option key={goal.id} value={goal.id}>
+                {goal.priority} · {goal.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          disabled={pending || selectedIds.length === 0 || !goalId}
+          onClick={() => {
+            void onAssign(selectedIds, goalId).then((succeeded) => {
+              if (succeeded) setSelectedIds([]);
+            });
+          }}
+          type="button"
+        >
+          {pending ? "Assigning…" : `Assign ${selectedIds.length || "selected"}`}
+        </button>
+      </footer>
     </aside>
   );
 };
@@ -752,8 +882,8 @@ const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Element => (
         <dd>Focus the current selection</dd>
       </div>
       <div>
-        <dt>a / v / n</dt>
-        <dd>Attention queue, Atlas/Ledger, new goal</dd>
+        <dt>a / b / v / n</dt>
+        <dd>Attention queue, inbox, Atlas/Ledger, new goal</dd>
       </div>
       <div>
         <dt>i / ? / Esc</dt>
@@ -778,6 +908,7 @@ export const App = (): React.JSX.Element => {
     () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
   const [queueOpen, setQueueOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [catchUpOpen, setCatchUpOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -854,8 +985,21 @@ export const App = (): React.JSX.Element => {
     setSelection(next);
     setInspectorOpen(true);
     setQueueOpen(false);
+    setInboxOpen(false);
     setCatchUpOpen(false);
   };
+
+  const selectAndFocus = (next: Selection): void => {
+    setView("atlas");
+    select(next);
+    issueCamera("focus", next);
+  };
+
+  const assignInboxAgents = async (agentIds: readonly string[], goalId: string): Promise<boolean> =>
+    agentIds.reduce<Promise<boolean>>(async (previous, agentId) => {
+      if (!(await previous)) return false;
+      return (await runCommand({ type: "AssignAgent", agentId, goalId })) !== undefined;
+    }, Promise.resolve(true));
 
   const allSelections = useMemo<readonly Selection[]>(() => {
     if (!data) return [];
@@ -936,6 +1080,10 @@ export const App = (): React.JSX.Element => {
           setQueueOpen(false);
           return;
         }
+        if (inboxOpen) {
+          setInboxOpen(false);
+          return;
+        }
         if (inspectorOpen) {
           setInspectorOpen(false);
           return;
@@ -987,6 +1135,13 @@ export const App = (): React.JSX.Element => {
       } else if (key === "a") {
         event.preventDefault();
         setQueueOpen((value) => !value);
+        setInboxOpen(false);
+        setCatchUpOpen(false);
+        setInspectorOpen(false);
+      } else if (key === "b") {
+        event.preventDefault();
+        setInboxOpen((value) => !value);
+        setQueueOpen(false);
         setCatchUpOpen(false);
         setInspectorOpen(false);
       } else if (key === "v") {
@@ -1020,6 +1175,7 @@ export const App = (): React.JSX.Element => {
     allSelections,
     catchUpOpen,
     data,
+    inboxOpen,
     inspectorOpen,
     newGoalOpen,
     queueOpen,
@@ -1119,12 +1275,28 @@ export const App = (): React.JSX.Element => {
             aria-expanded={queueOpen}
             onClick={() => {
               setQueueOpen((value) => !value);
+              setInboxOpen(false);
+              setCatchUpOpen(false);
               setInspectorOpen(false);
             }}
             type="button"
           >
             <strong>{String(data.commandCentre.counts.attention).padStart(2, "0")}</strong>
             <span>Attention</span>
+          </button>
+          <button
+            aria-expanded={inboxOpen}
+            onClick={() => {
+              setInboxOpen((value) => !value);
+              setQueueOpen(false);
+              setCatchUpOpen(false);
+              setInspectorOpen(false);
+              setView("atlas");
+            }}
+            type="button"
+          >
+            <strong>{String(data.commandCentre.counts.unassigned).padStart(2, "0")}</strong>
+            <span>Inbox</span>
           </button>
         </div>
         {portfolio.error ? (
@@ -1135,6 +1307,8 @@ export const App = (): React.JSX.Element => {
           className={`catch-up-trigger ${data.catchUp.pending ? "is-pending" : ""}`}
           onClick={() => {
             setCatchUpOpen((value) => !value);
+            setQueueOpen(false);
+            setInboxOpen(false);
             setInspectorOpen(false);
           }}
           type="button"
@@ -1153,7 +1327,7 @@ export const App = (): React.JSX.Element => {
               setInspectorOpen(false);
             }}
             projection={data.map}
-            reservedLeft={queueOpen ? 390 : 0}
+            reservedLeft={queueOpen || inboxOpen ? 390 : 0}
             reservedRight={0}
             selection={selection}
             theme={theme}
@@ -1165,7 +1339,21 @@ export const App = (): React.JSX.Element => {
         {queueOpen ? (
           <AttentionQueue
             onClose={() => setQueueOpen(false)}
-            onSelect={select}
+            onSelect={selectAndFocus}
+            projection={data.commandCentre}
+          />
+        ) : null}
+        {inboxOpen ? (
+          <InboxPanel
+            onAssign={assignInboxAgents}
+            onClose={() => setInboxOpen(false)}
+            onSelect={(next) => {
+              setSelection(next);
+              setInspectorOpen(true);
+              setQueueOpen(false);
+              setCatchUpOpen(false);
+            }}
+            pending={commandPending}
             projection={data.commandCentre}
           />
         ) : null}
@@ -1176,13 +1364,18 @@ export const App = (): React.JSX.Element => {
               if (response) setCatchUpOpen(false);
             }}
             onClose={() => setCatchUpOpen(false)}
-            onSelect={select}
+            onSelect={selectAndFocus}
             pending={commandPending}
             projection={data.catchUp}
           />
         ) : null}
         {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
-        {selection && inspectorOpen && !terminalAgent && !catchUpOpen && !queueOpen ? (
+        {selection &&
+        inspectorOpen &&
+        !terminalAgent &&
+        !catchUpOpen &&
+        !queueOpen &&
+        !inboxOpen ? (
           <Inspector
             commandCentre={data.commandCentre}
             commandError={commandError}
