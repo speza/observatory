@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+# Dependency installation belongs in setup. Resume only confirms the restored
+# workspace can run Bun commands without network access.
+command -v bun >/dev/null
+test -d node_modules
