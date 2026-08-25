@@ -13,6 +13,8 @@ import {
   type Priority,
   type AgentId,
   type Agent,
+  type UniverseChange,
+  type UniverseChangeOutcome,
   type UniverseState,
   type UniverseStore,
 } from "./types.ts";
@@ -81,7 +83,8 @@ export type UniverseCommand =
     }
   | { readonly type: "ArchiveAgent"; readonly agentId: AgentId }
   | { readonly type: "CompleteGoal"; readonly goalId: GoalId }
-  | { readonly type: "ArchiveGoal"; readonly goalId: GoalId };
+  | { readonly type: "ArchiveGoal"; readonly goalId: GoalId }
+  | { readonly type: "AcknowledgeCatchUp" };
 
 export interface CommandResult {
   readonly ok: boolean;
@@ -89,6 +92,7 @@ export interface CommandResult {
   readonly goalId?: GoalId;
   readonly agentId?: AgentId;
   readonly affectedAgentIds?: readonly AgentId[];
+  readonly checkpointSequence?: number;
 }
 
 export interface ReconciliationResult {
@@ -147,6 +151,147 @@ const replaceAgent = (state: UniverseState, agent: Agent): void => {
 
 const replaceHost = (state: UniverseState, host: HostHealth): void => {
   state.hosts = [...state.hosts.filter((candidate) => candidate.hostKind !== host.hostKind), host];
+};
+
+const change = (
+  sequence: number,
+  occurredAt: number,
+  outcome: UniverseChangeOutcome,
+  targetType: UniverseChange["targetType"],
+  targetId: string,
+  summary: string,
+  goalId?: GoalId,
+): UniverseChange => {
+  const item: UniverseChange = {
+    sequence,
+    occurredAt,
+    outcome,
+    targetType,
+    targetId,
+    summary,
+  };
+  if (goalId) Object.assign(item, { goalId });
+  return item;
+};
+
+const samePosition = (left: Goal["mapPosition"], right: Goal["mapPosition"]): boolean =>
+  left?.x === right?.x && left?.y === right?.y;
+
+const deriveChanges = (
+  previous: UniverseState,
+  next: UniverseState,
+  occurredAt: number,
+): UniverseChange[] => {
+  let sequence = previous.changes.at(-1)?.sequence ?? 0;
+  const changes: UniverseChange[] = [];
+  const append = (
+    outcome: UniverseChangeOutcome,
+    targetType: UniverseChange["targetType"],
+    targetId: string,
+    summary: string,
+    goalId?: GoalId,
+  ): void => {
+    sequence += 1;
+    changes.push(change(sequence, occurredAt, outcome, targetType, targetId, summary, goalId));
+  };
+
+  const previousGoals = new Map(previous.goals.map((goal) => [goal.id, goal]));
+  for (const goal of next.goals) {
+    const before = previousGoals.get(goal.id);
+    if (!before) {
+      append("new", "goal", goal.id, `New goal · ${goal.title}`, goal.id);
+      continue;
+    }
+    if (before.status !== goal.status) {
+      const verb = goal.status === "completed" ? "Completed" : "Archived";
+      append("finished", "goal", goal.id, `${verb} goal · ${goal.title}`, goal.id);
+      continue;
+    }
+    if (before.title !== goal.title) {
+      append("changed", "goal", goal.id, `Renamed goal · ${before.title} → ${goal.title}`, goal.id);
+      continue;
+    }
+    if (before.priority !== goal.priority) {
+      append(
+        "changed",
+        "goal",
+        goal.id,
+        `Priority changed · ${goal.title} · ${before.priority} → ${goal.priority}`,
+        goal.id,
+      );
+      continue;
+    }
+    if (
+      before.description !== goal.description ||
+      !samePosition(before.mapPosition, goal.mapPosition) ||
+      before.mapPositionPinned !== goal.mapPositionPinned
+    )
+      append("changed", "goal", goal.id, `Updated goal · ${goal.title}`, goal.id);
+  }
+
+  const nextGoals = new Map(next.goals.map((goal) => [goal.id, goal]));
+  const previousAgents = new Map(previous.agents.map((agent) => [agent.id, agent]));
+  for (const agent of next.agents) {
+    const before = previousAgents.get(agent.id);
+    const goalId = agent.primaryGoalId ?? before?.primaryGoalId;
+    if (!before) {
+      append("new", "agent", agent.id, `New agent observed · ${agent.displayName}`, goalId);
+      continue;
+    }
+    if (before.archivedAt === undefined && agent.archivedAt !== undefined) {
+      append("finished", "agent", agent.id, `Archived agent · ${agent.displayName}`, goalId);
+      continue;
+    }
+    if (before.primaryGoalId !== agent.primaryGoalId) {
+      const destination = agent.primaryGoalId
+        ? (nextGoals.get(agent.primaryGoalId)?.title ?? "another goal")
+        : "unassigned inbox";
+      append(
+        "changed",
+        "agent",
+        agent.id,
+        `Assignment changed · ${agent.displayName} → ${destination}`,
+        goalId,
+      );
+      continue;
+    }
+    if (before.hostHealth !== agent.hostHealth) {
+      const recovered = agent.hostHealth === "live";
+      append(
+        recovered ? "changed" : "stale",
+        "agent",
+        agent.id,
+        recovered
+          ? `Agent returned live · ${agent.displayName}`
+          : `Host observation ${agent.hostHealth} · ${agent.displayName}`,
+        goalId,
+      );
+      continue;
+    }
+    if (before.runtimeState !== agent.runtimeState) {
+      const outcome: UniverseChangeOutcome =
+        agent.runtimeState === "blocked" || agent.runtimeState === "waiting"
+          ? "attention"
+          : agent.runtimeState === "done"
+            ? "finished"
+            : "changed";
+      append(
+        outcome,
+        "agent",
+        agent.id,
+        `Agent state · ${agent.displayName} · ${before.runtimeState} → ${agent.runtimeState}`,
+        goalId,
+      );
+      continue;
+    }
+    if (before.displayName !== agent.displayName || before.description !== agent.description)
+      append("changed", "agent", agent.id, `Updated agent · ${agent.displayName}`, goalId);
+  }
+  return changes;
+};
+
+const appendChanges = (previous: UniverseState, next: UniverseState, now: number): void => {
+  next.changes = [...previous.changes, ...deriveChanges(previous, next, now)];
 };
 
 const isDuplicateObservation = (agents: readonly HostAgentObservation[]): string | undefined => {
@@ -434,7 +579,15 @@ export class Universe {
         result = { ok: true, goalId: goal.id };
         break;
       }
+      case "AcknowledgeCatchUp": {
+        const checkpointSequence = next.changes.at(-1)?.sequence ?? 0;
+        next.operatorCheckpoint = { lastSequence: checkpointSequence, acknowledgedAt: now };
+        result = { ok: true, checkpointSequence };
+        break;
+      }
     }
+
+    if (command.type !== "AcknowledgeCatchUp") appendChanges(this.state, next, now);
 
     try {
       this.store.save(next);
@@ -566,6 +719,7 @@ export class Universe {
       }
     }
 
+    appendChanges(this.state, next, now);
     try {
       this.store.save(next);
     } catch (error) {

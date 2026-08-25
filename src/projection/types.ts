@@ -3,8 +3,10 @@ import type {
   Goal,
   HostHealth,
   MapPosition,
+  OperatorCheckpoint,
   RelatedAgentDismissal,
   Agent,
+  UniverseChange,
 } from "../universe/types.ts";
 
 export type ProjectionQuery =
@@ -35,6 +37,7 @@ export type ProjectionQuery =
       readonly includeDismissed?: boolean;
     }
   | { readonly kind: "search"; readonly now: number; readonly query: string }
+  | { readonly kind: "catch-up"; readonly now: number }
   | {
       readonly kind: "inspector";
       readonly now: number;
@@ -188,6 +191,23 @@ export interface SearchProjection {
   readonly results: readonly SearchResult[];
 }
 
+export interface CatchUpGroup {
+  readonly outcome: UniverseChange["outcome"];
+  readonly label: string;
+  readonly items: readonly UniverseChange[];
+}
+
+export interface CatchUpProjection {
+  readonly kind: "catch-up";
+  readonly generatedAt: number;
+  readonly sinceAt?: number;
+  readonly throughSequence: number;
+  readonly transitionCount: number;
+  readonly pending: boolean;
+  readonly groups: readonly CatchUpGroup[];
+  readonly counts: Record<UniverseChange["outcome"], number>;
+}
+
 export type InspectorProjection =
   | {
       readonly kind: "goal-inspector";
@@ -211,6 +231,7 @@ export type Projection =
   | CodeContextMapProjection
   | RelatedAgentsProjection
   | SearchProjection
+  | CatchUpProjection
   | InspectorProjection;
 
 export interface ProjectionModule {
@@ -220,6 +241,8 @@ export interface ProjectionModule {
       readonly agents: readonly Agent[];
       readonly hosts: readonly HostHealth[];
       readonly relatedAgentDismissals?: readonly RelatedAgentDismissal[];
+      readonly changes: readonly UniverseChange[];
+      readonly operatorCheckpoint?: OperatorCheckpoint;
     },
     query: ProjectionQuery,
   ): Projection;

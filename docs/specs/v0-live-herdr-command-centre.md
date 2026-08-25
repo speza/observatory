@@ -17,6 +17,11 @@ agents around goals, attention and stable spatial memory is materially
 better than Herdr's flat agent sidebar. The portable native spatial universe
 is the primary V0 surface; flat attention/grouped views are supporting lenses.
 
+The slice is successful only if it reduces the operator's catch-up problem: the
+user can understand what the active work is doing, see what changed while they
+were away, identify the result that matters, find where judgment is needed, and
+make a more trustworthy completion decision.
+
 The slice begins with existing recognized Herdr agents and ends with
 the user attached to the correct real agent. It persists accepted AO metadata
 across restarts. It is not another renderer prototype.

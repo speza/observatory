@@ -1,5 +1,12 @@
 import { evaluateAttention, formatAge, type AttentionItem } from "../attention/attention.ts";
-import { priorityRank, type Goal, type HostHealth, type Agent } from "../universe/types.ts";
+import {
+  priorityRank,
+  type Goal,
+  type HostHealth,
+  type Agent,
+  type UniverseChange,
+  type OperatorCheckpoint,
+} from "../universe/types.ts";
 import {
   defaultGoalMapPosition,
   initialGoalMapPosition,
@@ -22,6 +29,7 @@ import type {
   RelatedAgentEvidence,
   RelatedAgentsProjection,
   SearchProjection,
+  CatchUpProjection,
   SearchResult,
   AgentView,
   UniverseMapProjection,
@@ -536,6 +544,62 @@ const projectSearch = (
   return { kind: "search", query, results };
 };
 
+const catchUpLabels = {
+  attention: "Needs judgment",
+  finished: "Finished",
+  new: "New",
+  changed: "Changed",
+  stale: "Uncertain",
+} satisfies Record<UniverseChange["outcome"], string>;
+
+const catchUpOrder: readonly UniverseChange["outcome"][] = [
+  "attention",
+  "finished",
+  "new",
+  "changed",
+  "stale",
+];
+
+const projectCatchUp = (
+  state: {
+    readonly changes: readonly UniverseChange[];
+    readonly operatorCheckpoint?: OperatorCheckpoint;
+  },
+  now: number,
+): CatchUpProjection => {
+  const lastSequence = state.operatorCheckpoint?.lastSequence ?? 0;
+  const unread = state.changes.filter((item) => item.sequence > lastSequence);
+  const latestByTarget = new Map<string, UniverseChange>();
+  for (const item of unread) latestByTarget.set(`${item.targetType}:${item.targetId}`, item);
+  const summaries = [...latestByTarget.values()];
+  const counts: CatchUpProjection["counts"] = {
+    new: 0,
+    changed: 0,
+    attention: 0,
+    finished: 0,
+    stale: 0,
+  };
+  for (const item of summaries) counts[item.outcome] += 1;
+  const groups = catchUpOrder.flatMap((outcome) => {
+    const items = summaries
+      .filter((item) => item.outcome === outcome)
+      .sort((left, right) => right.occurredAt - left.occurredAt || right.sequence - left.sequence);
+    return items.length > 0 ? [{ outcome, label: catchUpLabels[outcome], items }] : [];
+  });
+  const projection: CatchUpProjection = {
+    kind: "catch-up",
+    generatedAt: now,
+    throughSequence: state.changes.at(-1)?.sequence ?? 0,
+    transitionCount: unread.length,
+    pending: unread.length > 0,
+    groups,
+    counts,
+  };
+  if (state.operatorCheckpoint)
+    Object.assign(projection, { sinceAt: state.operatorCheckpoint.acknowledgedAt });
+  return projection;
+};
+
 const agentView = (
   agent: Agent,
   goals: readonly Goal[],
@@ -619,6 +683,8 @@ export const createProjectionModule = (): ProjectionModule => ({
         return projectRelatedAgents(state, query.now, query.goalId, query.includeDismissed);
       case "search":
         return projectSearch(state, query.query);
+      case "catch-up":
+        return projectCatchUp(state, query.now);
       case "inspector":
         return projectInspector(state, query.now, query.target);
     }
@@ -632,5 +698,6 @@ export {
   projectRelatedAgents,
   projectInspector,
   projectSearch,
+  projectCatchUp,
   projectUniverseMap,
 };

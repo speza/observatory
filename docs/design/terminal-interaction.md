@@ -241,6 +241,13 @@ Responsibilities are split as follows:
 - `renderer/terminal-screen.ts` interprets ANSI bytes into cells and styles.
 - `SessionHost` owns process lifetime, PTY ownership, resize and release.
 
+The local web renderer uses the same ownership boundary. Its loopback gateway
+opens a generic `SessionHost` terminal, streams frames as server-sent events and
+maps browser input, resize and close to the existing session capabilities.
+xterm.js interprets terminal bytes in the browser; it does not own the PTY or
+persist scrollback. The terminal floats above the Atlas, so opening or closing
+it does not mutate selection, viewport or inspector state.
+
 A future tmux, Superlogical-style host, or Observatory-owned multiplexer must
 implement the same capability without changing the Universe, persistence,
 projection or renderer interfaces. If that is not possible, the host seam is

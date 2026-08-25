@@ -3,6 +3,13 @@
 An agent observatory: a goal-centred spatial universe for supervising many AI
 agent executions across providers, repositories and git worktrees.
 
+Observatory exists for the gap between increasingly autonomous agent execution
+and human supervision. It should help answer five questions at a glance: what
+the work is doing, what changed while you were away, which result matters,
+where your judgment is needed, and whether reported completion can be trusted.
+The map is useful only if it makes those answers easier than reconstructing them
+from a flat agent list.
+
 ## V0 live Herdr universe
 
 The project-root implementation is a Bun/TypeScript OpenTUI spatial universe
@@ -251,12 +258,50 @@ bun run test:herdr
 bun run test:all
 ```
 
-V0 deliberately has no daemon, web UI, provider transcript parsing, quick
+V0 deliberately has no daemon, provider transcript parsing, quick
 message/approval actions, worktree nodes, relationship graph beyond direct
 Goal → Agent containment, or Kitty/Sixel/image/raster rendering. Native diff
 rendering is also deferred: use a linked shell to run the person's preferred
-diff/review tool. The later web UI may provide higher visual fidelity; the
-portable native spatial universe is the primary V0 proof surface.
+diff/review tool.
+
+## Local web Observatory
+
+The first maintained web walking slice renders the real Universe projections
+with React and native SVG/CSS. It binds to loopback, keeps SQLite and
+host-specific protocols out of the browser, and submits a deliberately narrow
+set of human commands through the same Universe used by the native client.
+
+The Atlas inspector can create and edit goals, set priority, assign or unassign
+agents, complete goals, and explicitly archive completed goals or stale agents.
+Archive actions require confirmation and remain subject to Universe invariants.
+The Catch up lens groups accepted semantic changes since the last explicit
+operator checkpoint. An Agent inspector can also open its host-owned terminal
+in a floating xterm.js surface; closing it releases the host session without
+changing map selection or durable state.
+
+```sh
+# clean-room 12-goal / 75-agent scale fixture
+bun run web:mock
+
+# current Herdr-backed Universe
+bun run web
+```
+
+Open `http://127.0.0.1:4310`. For live frontend iteration, run
+`bun run dev:web:api` and `bun run dev:web` in separate terminals. The mock
+host provides deterministic catch-up and terminal evidence without private
+session content. Do not run the web and terminal clients concurrently against the same
+database; the in-process walking slice is not a multi-client daemon.
+
+Browser controls mirror the useful native navigation: clicking a goal focuses
+it, while clicking a session enters its parent goal and selects it; empty-field
+clicks clear the selection. Double-click remains an explicit marker-focus
+action. `j`/`k` or the arrow keys move selection; `Enter` focuses a goal or
+opens an Agent terminal; `Space`/`f` focuses; `+`/`-`/`0` zoom; `h`/`l` and
+PageUp/PageDown pan; `a` opens attention, `g` jumps to the next signal, `v`
+switches Atlas/Ledger, `n` opens New goal, `i` toggles the inspector, `t`
+opens the selected terminal, and `Esc` closes the topmost surface. Press `?`
+or use the masthead button for the in-app guide.
 
 Design documents:
 
@@ -268,3 +313,4 @@ Design documents:
 Implementation specifications:
 
 - [V0 live Herdr universe/map](docs/specs/v0-live-herdr-command-centre.md)
+- [Local web Observatory walking slice](docs/specs/local-web-observatory-walking-slice.md)

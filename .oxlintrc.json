@@ -18,7 +18,12 @@
     "typeAware": true,
     "reportUnusedDisableDirectives": "error"
   },
-  "ignorePatterns": ["tools/oxlint/anti-slop/**", "prototypes/**", "src/prototypes/**"],
+  "ignorePatterns": [
+    "tools/oxlint/anti-slop/**",
+    "prototypes/**",
+    "src/prototypes/**",
+    "web/dist/**"
+  ],
   "jsPlugins": [
     {
       "name": "anti-slop",

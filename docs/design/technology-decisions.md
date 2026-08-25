@@ -20,7 +20,7 @@ Formatting                Oxfmt
 Type checking             tsgo or tsc --noEmit
 Testing                   bun test
 Terminal renderer         OpenTUI, portable spatial cells
-Web renderer              Browser Canvas/WebGL, deferred until after live TUI proof
+Web renderer              React with native SVG/CSS, local and maintained
 Live agent host         Herdr (required for V0/V1 live mode)
 Local transport           Schema-validated JSON over a Unix socket
 ```
@@ -165,15 +165,20 @@ affect application architecture.
 
 ## Presentation strategy
 
-The rendering spikes resolved the v0 presentation decision:
+The rendering spikes and the 2026-08-24 web art-direction study resolved the
+presentation decisions:
 
 - the native terminal client is a restrained, keyboard-first spatial universe;
 - OpenTUI is accepted for that portable cell-based map and its supporting
   lenses;
 - high-fidelity terminal graphics, Kitty/Sixel modes and custom ANSI raster
   rendering are out of v0 scope; and
-- a later local browser client may provide higher-fidelity canvas observatory
-  rendering.
+- the maintained local browser client uses React with native SVG and CSS for
+  crisp text, accessible interaction and browser-native zoom/pointer behaviour;
+  and
+- PixiJS is rejected for this surface because its rasterised text and scene
+  scaling lost clarity during direct pan/zoom comparison without earning needed
+  rendering complexity.
 
 The terminal and web clients consume the same semantic projections and expose
 the same authorised actions. They do not need to reproduce identical geometry
@@ -181,10 +186,11 @@ or visual effects. The terminal optimises attention, comprehension, search and
 fast attachment. The web client may optimise spatial overview, animation,
 pointer interaction and richer relationship exploration.
 
-The browser renderer remains deferred as a fidelity expansion until the live
-native spatial slice proves the goal, attention and spatial-memory model with
-real agents. It will be an ordinary local web
-client served by AO, not an Electron application.
+The browser renderer is now an accepted production walking slice. It is an
+ordinary local web client served by AO, not an Electron application. The
+validated Mineral Ledger art direction is rewritten against production
+projections; the disposable prototype is evidence, not a source tree to
+promote.
 
 ## Terminal renderer: OpenTUI
 
@@ -317,9 +323,12 @@ Reasons:
 - filesystem permissions for single-user access; and
 - independence from renderer and adapter runtimes.
 
-The v0 in-process walking slice does not implement this transport. A later
-browser client can use a loopback HTTP/WebSocket adapter translating the same
-command, query and subscription interface.
+The first web walking slice uses a smaller read-only loopback HTTP adapter in
+the web composition root. It returns serialized production projections and
+polls them on the existing reconciliation cadence. It does not implement the
+future command socket, subscriptions, WebSockets or terminal frames. This keeps
+the browser from becoming a second domain interface while avoiding a daemon
+before concurrent clients require one.
 
 External input must be validated at runtime. TypeScript compile-time types do
 not validate socket messages, adapter payloads, database migrations or agent
@@ -335,20 +344,18 @@ src/
 ├── universe/
 ├── attention/
 ├── projection/
-├── layout/
-├── search/
-├── control/
+├── spatial/
+├── renderer/            # OpenTUI client
+├── runtime/             # shared composition
+├── web/                 # loopback adapter and web composition root
 ├── persistence/
 │   └── sqlite/
 ├── hosts/
 │   └── herdr/
-├── providers/
-├── git/
-└── cli/
+└── session-launch/
 
-clients/
-├── tui/
-└── web/                 # deferred
+web/
+└── src/                 # React, native SVG and CSS browser client
 
 fixtures/
 └── herdr/

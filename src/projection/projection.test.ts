@@ -4,7 +4,7 @@ import { makeUniverse, hostSnapshot } from "../universe/test-support.ts";
 const observation = (
   nativeId: string,
   displayName: string,
-  runtimeState: "idle" | "working" | "blocked" = "idle",
+  runtimeState: "idle" | "working" | "blocked" | "done" = "idle",
   repository = "repo",
   worktree = "/sandbox/tree",
   executionContainer?: { readonly id: string; readonly label?: string },
@@ -350,5 +350,27 @@ describe("projections", () => {
     const stale = projection.unassigned.find((agent) => agent.displayName === "stale agent");
     expect(stale?.hostHealth).toBe("stale");
     expect(stale?.attention?.reason).toBe("host-stale");
+  });
+
+  test("groups only post-checkpoint changes into a deterministic catch-up projection", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Catch-up goal" });
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "working")]));
+    universe.execute({ type: "AcknowledgeCatchUp" });
+
+    clock.value += 1_000;
+    universe.execute({ type: "SetGoalPriority", goalId: "goal-1", priority: "P0" });
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "done")], clock.now()));
+    const projection = universe.project({ kind: "catch-up", now: clock.now() });
+    if (projection.kind !== "catch-up") throw new Error("wrong projection");
+
+    expect(projection.pending).toBe(true);
+    expect(projection.transitionCount).toBe(2);
+    expect(projection.groups.map((group) => group.outcome)).toEqual(["finished", "changed"]);
+    expect(projection.counts.finished).toBe(1);
+    expect(projection.counts.changed).toBe(1);
+    expect(projection.groups.flatMap((group) => group.items).map((item) => item.sequence)).toEqual([
+      4, 3,
+    ]);
   });
 });

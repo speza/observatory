@@ -117,6 +117,36 @@ describe("Mock host adapter", () => {
     });
   });
 
+  test("provides the production web scale fixture through the real projection path", async () => {
+    const clock = new FixedClock(35_000);
+    const { universe } = makeUniverse({ clock });
+    const scenario = createMockScenario("portfolio");
+    const adapter = new MockHostAdapter({ clock, scenario });
+    const snapshot = await Effect.runPromise(adapter.snapshot());
+    expect(snapshot.agents).toHaveLength(75);
+    expect(universe.reconcile(snapshot).accepted).toBe(true);
+
+    expect(seedMockPortfolio(universe)).toEqual({
+      createdGoals: 12,
+      assignedAgents: 71,
+    });
+    const projection = universe.project({ kind: "universe-map", now: clock.now() });
+    expect(projection.kind).toBe("universe-map");
+    if (projection.kind !== "universe-map") throw new Error("Expected the universe map.");
+    expect(projection.counts).toMatchObject({ goals: 12, agents: 75, unassigned: 4 });
+    expect(
+      new Set(projection.goals.map((goal) => `${goal.mapPosition.x}:${goal.mapPosition.y}`)).size,
+    ).toBe(12);
+
+    clock.value += scenario.tickMs;
+    expect(universe.reconcile(await Effect.runPromise(adapter.snapshot())).accepted).toBe(true);
+    const staleProjection = universe.project({ kind: "universe-map", now: clock.now() });
+    expect(staleProjection.kind).toBe("universe-map");
+    if (staleProjection.kind !== "universe-map") throw new Error("Expected the universe map.");
+    expect(staleProjection.counts.stale).toBe(4);
+    expect(staleProjection.counts.unassigned).toBe(4);
+  });
+
   test("provides a deterministic embedded terminal stream", async () => {
     const clock = new FixedClock(40_000);
     const adapter = new MockHostAdapter({ clock });

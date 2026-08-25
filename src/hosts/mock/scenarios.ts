@@ -50,7 +50,7 @@ const agent = (
   hostLocator: `mock-agent:${nativeId}`,
 });
 
-const catalog: readonly MockAgentObservation[] = [
+const baseCatalog: readonly MockAgentObservation[] = [
   agent("mock-p01", "API contract mapping", "working"),
   agent("mock-p02", "Attention queue ordering"),
   agent("mock-p03", "Agent host fixture", "blocked"),
@@ -75,6 +75,102 @@ const catalog: readonly MockAgentObservation[] = [
   agent("mock-p22", "Late attention signal"),
   agent("mock-p23", "Unassigned burst", "waiting"),
   agent("mock-p24", "Recovery verification", "working"),
+];
+
+const portfolioNames = [
+  "Atlas",
+  "Lumen",
+  "Kepler",
+  "Umbra",
+  "Relay",
+  "Scribe",
+  "Meridian",
+  "Forge",
+  "Quill",
+  "Rook",
+  "Ember",
+  "Delta",
+  "Sentinel",
+  "Mosaic",
+  "Axiom",
+  "Thread",
+  "Pantry",
+  "Saffron",
+  "Tally",
+  "Radar",
+  "Prism",
+  "Beacon",
+  "Spark",
+  "Kiln",
+  "Verdict",
+  "Harbor",
+  "Drift",
+  "Echo",
+  "Wander",
+  "Pioneer",
+  "Northstar",
+  "Grove",
+  "Thimble",
+  "Facet",
+  "Bastion",
+  "Accord",
+  "Sentry",
+  "Measure",
+  "Query",
+  "Testbed",
+  "Bridge",
+  "Archive",
+  "Waymark",
+  "Rivet",
+  "Platen",
+  "Chisel",
+  "Compass",
+  "Current",
+  "Margin",
+  "Anvil",
+  "Receipt",
+  "Docket",
+  "Cairn",
+  "Flint",
+  "Ledger",
+  "Survey",
+  "Folio",
+  "Vellum",
+  "Cinder",
+  "Lattice",
+  "Anchor",
+  "Juniper",
+  "Morrow",
+  "Pact",
+  "Trace",
+  "Loom",
+  "Hearth",
+  "Signal",
+  "Contour",
+  "Field",
+  "Watch",
+  "Heron",
+  "Mica",
+  "Reed",
+  "Vale",
+] as const;
+
+const portfolioState = (index: number): RuntimeState => {
+  if (index % 19 === 0) return "blocked";
+  if (index % 11 === 0) return "waiting";
+  if (index % 7 === 0) return "done";
+  if (index % 3 === 0) return "idle";
+  return "working";
+};
+
+const portfolioCatalog: readonly MockAgentObservation[] = portfolioNames.map((name, index) => {
+  const number = index + 1;
+  return agent(`mock-p${String(number).padStart(2, "0")}`, name, portfolioState(number));
+});
+
+const catalog: readonly MockAgentObservation[] = [
+  ...baseCatalog,
+  ...portfolioCatalog.slice(baseCatalog.length),
 ];
 
 const byId = new Map(catalog.map((item) => [item.nativeId, item]));
@@ -145,7 +241,21 @@ const createOrbitScenario = (): MockScenario => ({
   ],
 });
 
+const createPortfolioScenario = (): MockScenario => ({
+  name: "portfolio",
+  description: "A stable 12-goal scale fixture with 75 observed agents and truthful host loss.",
+  tickMs: 8_000,
+  frames: [
+    frame("full portfolio", allAgents),
+    frame("four observations become stale", allAgents.slice(0, 71), {
+      "mock-p19": "blocked",
+      "mock-p22": "waiting",
+    }),
+  ],
+});
+
 export const createMockScenario = (name = "orbit"): MockScenario => {
   if (name === "orbit") return createOrbitScenario();
-  throw new Error(`Unknown mock scenario ${name}; available scenarios: orbit.`);
+  if (name === "portfolio") return createPortfolioScenario();
+  throw new Error(`Unknown mock scenario ${name}; available scenarios: orbit, portfolio.`);
 };

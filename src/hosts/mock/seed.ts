@@ -5,6 +5,15 @@ export interface MockSeedResult {
   readonly assignedAgents: number;
 }
 
+interface MockGoalSeed {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly priority: "P0" | "P1" | "P2";
+  readonly nativeIds: readonly string[];
+  readonly position?: { readonly x: number; readonly y: number };
+}
+
 const goals = [
   {
     id: "mock-goal-map",
@@ -29,11 +38,122 @@ const goals = [
   },
 ] as const;
 
+const scaleGoals = [
+  {
+    id: "mock-goal-observatory",
+    title: "Understand Concurrent Agent Work",
+    description:
+      "Make concurrent agent work understandable without holding its shape in your head.",
+    priority: "P0" as const,
+    position: { x: -345, y: -180 },
+    range: [1, 10],
+  },
+  {
+    id: "mock-goal-career",
+    title: "Find the Right AI-First Product Role",
+    description: "Find strong AI product opportunities without creating noise.",
+    priority: "P2" as const,
+    position: { x: -110, y: -215 },
+    range: [11, 15],
+  },
+  {
+    id: "mock-goal-direction",
+    title: "Validate a New Product Direction",
+    description: "Turn promising technical ideas into small, decisive product experiments.",
+    priority: "P2" as const,
+    position: { x: 135, y: -165 },
+    range: [16, 21],
+  },
+  {
+    id: "mock-goal-extensions",
+    title: "Establish Safe Extension Boundaries",
+    description: "Let useful extensions participate without bypassing policy or audit.",
+    priority: "P1" as const,
+    position: { x: 375, y: -205 },
+    range: [22, 26],
+  },
+  {
+    id: "mock-goal-release",
+    title: "Prepare the September Product Release",
+    description: "Bring the release through evidence, communication and production verification.",
+    priority: "P0" as const,
+    position: { x: -370, y: 20 },
+    range: [27, 31],
+  },
+  {
+    id: "mock-goal-frontier",
+    title: "Ship a Truthful Frontier Alpha",
+    description: "Build a truthful and legible AI company simulation.",
+    priority: "P1" as const,
+    position: { x: -120, y: -15 },
+    range: [32, 39],
+  },
+  {
+    id: "mock-goal-control",
+    title: "Keep Humans in Control of Agent Execution",
+    description: "Keep the human in control while agents gain useful execution power.",
+    priority: "P2" as const,
+    position: { x: 130, y: 30 },
+    range: [40, 46],
+  },
+  {
+    id: "mock-goal-food",
+    title: "Automate Weekly Family Food Planning",
+    description: "Remove the weekly planning burden from feeding a busy family well.",
+    priority: "P1" as const,
+    position: { x: 390, y: -5 },
+    range: [47, 51],
+  },
+  {
+    id: "mock-goal-harness",
+    title: "Prove the Agent Harness Is Dependable",
+    description: "Measure the simple tool loop before adding coordination machinery.",
+    priority: "P1" as const,
+    position: { x: -330, y: 220 },
+    range: [52, 56],
+  },
+  {
+    id: "mock-goal-tooling",
+    title: "Map the Next Generation of AI Tooling",
+    description: "Turn a noisy technology landscape into a small set of grounded decisions.",
+    priority: "P2" as const,
+    position: { x: -75, y: 180 },
+    range: [57, 61],
+  },
+  {
+    id: "mock-goal-review",
+    title: "Close the Architecture Review Findings",
+    description: "Carry accepted findings into the durable architecture and implementation.",
+    priority: "P2" as const,
+    position: { x: 175, y: 230 },
+    range: [62, 66],
+  },
+  {
+    id: "mock-goal-renderers",
+    title: "Retire the Rejected Renderer Experiments",
+    description: "Preserve the verdict while removing abandoned implementations from active work.",
+    priority: "P2" as const,
+    position: { x: 410, y: 190 },
+    range: [67, 71],
+  },
+] as const;
+
+const nativeIdsForRange = (range: readonly [number, number]): readonly string[] =>
+  Array.from(
+    { length: range[1] - range[0] + 1 },
+    (_, index) => `mock-p${String(range[0] + index).padStart(2, "0")}`,
+  );
+
 export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
   if (universe.snapshot().goals.length > 0) return { createdGoals: 0, assignedAgents: 0 };
 
+  const scaleFixture = universe.snapshot().agents.length >= 70;
+  const selectedGoals: readonly MockGoalSeed[] = scaleFixture
+    ? scaleGoals.map((goal) => ({ ...goal, nativeIds: nativeIdsForRange(goal.range) }))
+    : goals;
+
   let createdGoals = 0;
-  for (const goal of goals) {
+  for (const goal of selectedGoals) {
     const result = universe.execute({
       type: "CreateGoal",
       id: goal.id,
@@ -42,6 +162,14 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
       priority: goal.priority,
     });
     if (!result.ok) throw new Error(result.error ?? "Could not seed mock goal.");
+    if (goal.position) {
+      const positioned = universe.execute({
+        type: "SetGoalMapPosition",
+        goalId: goal.id,
+        position: goal.position,
+      });
+      if (!positioned.ok) throw new Error(positioned.error ?? "Could not position mock goal.");
+    }
     createdGoals += 1;
   }
 
@@ -49,7 +177,7 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
     universe.snapshot().agents.map((agent) => [agent.nativeId, agent.id]),
   );
   let assignedAgents = 0;
-  for (const goal of goals) {
+  for (const goal of selectedGoals) {
     for (const nativeId of goal.nativeIds) {
       const agentId = agentsByNativeId.get(nativeId);
       if (!agentId) continue;

@@ -344,4 +344,35 @@ describe("Universe", () => {
     expect(universe.execute({ type: "CreateGoal", title: "Must not appear" }).ok).toBe(false);
     expect(universe.snapshot().goals).toHaveLength(0);
   });
+
+  test("records deterministic semantic changes and acknowledges a durable catch-up cursor", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Catch up", priority: "P2" });
+    universe.reconcile(hostSnapshot([observation("pane-1", "worker", "working")]));
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+
+    expect(universe.snapshot().changes.map((item) => item.summary)).toEqual([
+      "New goal · Catch up",
+      "New agent observed · worker",
+      "Assignment changed · worker → Catch up",
+    ]);
+    expect(universe.execute({ type: "AcknowledgeCatchUp" })).toEqual({
+      ok: true,
+      checkpointSequence: 3,
+    });
+    expect(universe.snapshot().operatorCheckpoint).toEqual({
+      lastSequence: 3,
+      acknowledgedAt: clock.now(),
+    });
+
+    clock.value += 1_000;
+    universe.reconcile(
+      hostSnapshot([observation("pane-1", "worker", "blocked", clock.now())], clock.now()),
+    );
+    expect(universe.snapshot().changes.at(-1)).toMatchObject({
+      sequence: 4,
+      outcome: "attention",
+      summary: "Agent state · worker · working → blocked",
+    });
+  });
 });

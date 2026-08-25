@@ -7,6 +7,7 @@ import {
   type Agent,
   type UniverseState,
   type UniverseStore,
+  type UniverseChange,
 } from "../../universe/types.ts";
 
 interface GoalRow {
@@ -63,6 +64,21 @@ interface HostRow {
   diagnostic_count: number;
 }
 
+interface UniverseChangeRow {
+  sequence: number;
+  occurred_at: number;
+  outcome: string;
+  target_type: string;
+  target_id: string;
+  goal_id: string | null;
+  summary: string;
+}
+
+interface OperatorCheckpointRow {
+  last_sequence: number;
+  acknowledged_at: number;
+}
+
 const asPriority = (value: string): Goal["priority"] =>
   value === "P0" || value === "P1" || value === "P2" || value === "P3" ? value : "P2";
 const asGoalStatus = (value: string): Goal["status"] =>
@@ -80,6 +96,16 @@ const asHealth = (value: string): Agent["hostHealth"] =>
   value === "live" || value === "stale" || value === "unavailable" ? value : "stale";
 const asSource = (value: string): Agent["displayNameSource"] =>
   value === "human" ? "human" : "host";
+const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
+  value === "new" ||
+  value === "changed" ||
+  value === "attention" ||
+  value === "finished" ||
+  value === "stale"
+    ? value
+    : "changed";
+const asChangeTarget = (value: string): UniverseChange["targetType"] =>
+  value === "goal" ? "goal" : "agent";
 
 export class SqliteUniverseStore implements UniverseStore {
   readonly db: Database;
@@ -175,13 +201,43 @@ export class SqliteUniverseStore implements UniverseStore {
         agentId: row.agent_id,
         dismissedAt: row.dismissed_at,
       }));
-    return { version: 1, goals, agents, hosts, relatedAgentDismissals };
+    const changes = this.db
+      .query<UniverseChangeRow, []>("SELECT * FROM universe_changes ORDER BY sequence")
+      .all()
+      .map((row) => {
+        const item: UniverseChange = {
+          sequence: row.sequence,
+          occurredAt: row.occurred_at,
+          outcome: asChangeOutcome(row.outcome),
+          targetType: asChangeTarget(row.target_type),
+          targetId: row.target_id,
+          summary: row.summary,
+        };
+        if (row.goal_id) Object.assign(item, { goalId: row.goal_id });
+        return item;
+      });
+    const checkpoint = this.db
+      .query<OperatorCheckpointRow, []>(
+        "SELECT last_sequence, acknowledged_at FROM operator_checkpoint WHERE singleton = 1",
+      )
+      .get();
+    return {
+      version: 1,
+      goals,
+      agents,
+      hosts,
+      relatedAgentDismissals,
+      changes,
+      operatorCheckpoint: checkpoint
+        ? { lastSequence: checkpoint.last_sequence, acknowledgedAt: checkpoint.acknowledged_at }
+        : undefined,
+    };
   }
 
   save(state: UniverseState): void {
     const write = this.db.transaction(() => {
       this.db.exec(
-        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM hosts;",
+        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM hosts; DELETE FROM universe_changes; DELETE FROM operator_checkpoint;",
       );
       const goal = this.db.prepare(
         "INSERT INTO goals (id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -247,6 +303,25 @@ export class SqliteUniverseStore implements UniverseStore {
       );
       for (const row of state.relatedAgentDismissals ?? [])
         dismissal.run(row.goalId, row.agentId, row.dismissedAt);
+      const change = this.db.prepare(
+        "INSERT INTO universe_changes (sequence, occurred_at, outcome, target_type, target_id, goal_id, summary) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      for (const row of state.changes)
+        change.run(
+          row.sequence,
+          row.occurredAt,
+          row.outcome,
+          row.targetType,
+          row.targetId,
+          row.goalId ?? null,
+          row.summary,
+        );
+      if (state.operatorCheckpoint)
+        this.db
+          .prepare(
+            "INSERT INTO operator_checkpoint (singleton, last_sequence, acknowledged_at) VALUES (1, ?, ?)",
+          )
+          .run(state.operatorCheckpoint.lastSequence, state.operatorCheckpoint.acknowledgedAt);
     });
     write();
   }
@@ -318,6 +393,22 @@ export class SqliteUniverseStore implements UniverseStore {
       );
       INSERT OR IGNORE INTO schema_migrations (version, applied_at)
         VALUES (1, unixepoch() * 1000);
+      CREATE TABLE IF NOT EXISTS universe_changes (
+        sequence INTEGER PRIMARY KEY,
+        occurred_at INTEGER NOT NULL,
+        outcome TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        goal_id TEXT,
+        summary TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS operator_checkpoint (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        last_sequence INTEGER NOT NULL,
+        acknowledged_at INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (2, unixepoch() * 1000);
     `);
   }
 }

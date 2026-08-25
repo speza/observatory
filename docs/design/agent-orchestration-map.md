@@ -1,7 +1,7 @@
 # Goal-centred agent orchestration map
 
-Status: corrected V0 product direction; linked execution surfaces implemented
-Date: 2026-08-24
+Status: V1 model and linked execution implemented; production web atlas walking slice in progress
+Date: 2026-08-25
 Product: Observatory — an agent observatory
 
 Technical design: [Observatory technical architecture](technical-architecture.md)
@@ -29,6 +29,18 @@ memory and goal/agent geography make supervising agent work materially easier
 than a well-designed list. The first live iteration must test that hypothesis
 against real Herdr agents rather than treating a flat list as sufficient
 evidence.
+
+The product exists to answer the questions that become difficult when agent
+execution is concurrent and long-lived:
+
+1. What is all this work actually doing?
+2. What changed while I was away?
+3. Which result matters?
+4. Where is my judgment needed?
+5. Can I trust what says it is finished?
+
+These are the product-purpose tests for Observatory. A map that shows agents
+without making those answers easier is a visualisation, not an observatory.
 
 ## Why this should exist
 
@@ -83,6 +95,10 @@ The central product question is:
 
 > Can an operator understand, steer and verify a large body of concurrent agent
 > work without keeping its structure in their head?
+
+The practical version is whether the operator can answer the five questions
+above after returning to the system, without reopening every agent or relying
+on memory of the previous session.
 
 ## Problem statement
 
@@ -278,7 +294,8 @@ the provider's own agent history when deeper context is required.
 
 The control plane exposes an API and CLI so humans and agents can create goals,
 assign agents, record delegation, request attention and update progress. The
-TUI and any later web or desktop clients are projections of this shared state.
+The TUI and local web client are projections of this shared state. Any later
+desktop client must follow the same boundary.
 
 Optional external context is plugin-contributed. GitHub pull requests, Jira or
 Linear tickets and provider-specific facts should appear as provenance-bearing
@@ -451,9 +468,10 @@ Attaching enters the existing hosted agent. Depending on host capability this
 may focus an existing pane, open an adjacent split, suspend AO and attach in the
 foreground, or open an embedded terminal in a host-backed client. The V0 TUI
 uses `t` for the Herdr-backed embedded route and `Enter` for foreground attach;
-the later local web client can consume the same host capability. Embedded access
-transports a host-owned PTY stream; it does not make AO responsible for the
-agent lifecycle or require every host to support the same mechanism.
+a future terminal-enabled web slice can consume the same host capability after
+an authenticated streaming transport exists. Embedded access transports a
+host-owned PTY stream; it does not make AO responsible for the agent lifecycle
+or require every host to support the same mechanism.
 
 On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
@@ -648,12 +666,23 @@ Herdr is the initial substrate because it already manages persistent
 multi-provider agents and exposes workspaces, panes, agents, worktrees,
 snapshots, events and input through a local API.
 
-A later local web client may own higher-fidelity observatory rendering: real
-canvas composition, richer smooth zoom and pointer interaction. It
-may be launched from the AO daemon and render an available host-owned terminal
-stream with xterm.js. This is not an Electron or installed desktop-application
-commitment. The two clients share meaning and actions, not identical visual
-geometry.
+The local web client now owns the higher-fidelity observatory rendering:
+responsive native SVG composition, crisp labels, smooth zoom and pointer
+interaction. Its production walking slice is in-process over the same
+universe-map, command-centre, catch-up and inspector projections as the native
+client, with a narrow Universe command gateway. This is not an Electron or
+installed desktop-application commitment.
+The two clients share meaning, truthful uncertainty and projection contracts,
+not identical visual geometry.
+
+The Atlas remains the primary orientation surface. The attention queue is the
+supporting action lens and the Ledger is the same-data precision/list baseline.
+Neither replaces the spatial hypothesis. Catch-up and terminal work surfaces
+now use production boundaries rather than renderer fixtures: catch-up comes
+from a durable core checkpoint and deterministic semantic-change projection,
+while the floating browser terminal consumes the generic host-owned terminal
+capability through a guarded loopback stream. Neither surface invents browser
+state that the Universe or SessionHost does not own.
 
 ## Attention model
 
@@ -725,9 +754,9 @@ strong grouped agent list:
 The disposable OpenTUI, visual-fidelity and ANSI half-block experiments closed
 the rendering choice for this iteration. Native OpenTUI cells are sufficient
 for a useful first spatial universe; the ANSI raster direction remains rejected.
-The native client owns the first product proof, while a later local web client
-may provide higher visual fidelity after the spatial information architecture
-earns it.
+The native client proved the first product boundary. The maintained local web
+client now provides higher visual fidelity after the spatial information
+architecture and native SVG/CSS direction earned implementation.
 
 The first live spatial iteration is a real walking slice rather than another
 synthetic renderer. It should:
@@ -748,8 +777,9 @@ synthetic renderer. It should:
 - jump to the relevant Herdr agent and return without losing local state; and
 - persist accepted organisation and goal positions across restart.
 
-Quick messages, agent-authored structure, provider transcript parsing and the
-web observatory follow only after this slice demonstrates value with real work.
+Quick messages, agent-authored structure and provider transcript parsing remain
+later. The web observatory follows the accepted native/core boundary and must
+now demonstrate value with real work.
 
 On first use the accepted universe is empty. Discovered agents appear in an
 unassigned inbox until the user imports or assigns them. Accepted goals,

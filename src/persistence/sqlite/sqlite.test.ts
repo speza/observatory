@@ -81,7 +81,7 @@ describe("SQLite persistence", () => {
     const versions = store.db
       .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
-    expect(versions.map((row) => row.version)).toEqual([1]);
+    expect(versions.map((row) => row.version)).toEqual([1, 2]);
     const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(agents)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
@@ -97,7 +97,34 @@ describe("SQLite persistence", () => {
       )
       .all();
     expect(dismissalTables).toHaveLength(1);
+    expect(
+      store.db
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('universe_changes', 'operator_checkpoint') ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name),
+    ).toEqual(["operator_checkpoint", "universe_changes"]);
     store.close();
+  });
+
+  test("persists semantic changes and the operator checkpoint across restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-catch-up-sqlite-"));
+    const databasePath = join(directory, "universe.sqlite");
+    try {
+      const first = new SqliteUniverseStore(databasePath);
+      const setup = makeUniverse({ store: first });
+      setup.universe.execute({ type: "CreateGoal", title: "Persist catch-up" });
+      setup.universe.execute({ type: "AcknowledgeCatchUp" });
+      first.close();
+
+      const second = new SqliteUniverseStore(databasePath);
+      expect(second.load().changes).toHaveLength(1);
+      expect(second.load().operatorCheckpoint?.lastSequence).toBe(1);
+      second.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("persists the explicit archive marker for stale agents", () => {

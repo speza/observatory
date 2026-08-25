@@ -31,6 +31,23 @@ export interface RelatedAgentDismissal {
   readonly dismissedAt: number;
 }
 
+export type UniverseChangeOutcome = "new" | "changed" | "attention" | "finished" | "stale";
+
+export interface UniverseChange {
+  readonly sequence: number;
+  readonly occurredAt: number;
+  readonly outcome: UniverseChangeOutcome;
+  readonly targetType: "goal" | "agent";
+  readonly targetId: string;
+  readonly goalId?: GoalId;
+  readonly summary: string;
+}
+
+export interface OperatorCheckpoint {
+  readonly lastSequence: number;
+  readonly acknowledgedAt: number;
+}
+
 export interface Goal {
   readonly id: GoalId;
   readonly title: string;
@@ -87,6 +104,8 @@ export interface UniverseState {
   agents: Agent[];
   hosts: HostHealth[];
   relatedAgentDismissals: RelatedAgentDismissal[];
+  changes: UniverseChange[];
+  operatorCheckpoint?: OperatorCheckpoint;
 }
 
 export interface UniverseStore {
@@ -114,6 +133,7 @@ export const emptyUniverseState = (): UniverseState => ({
   agents: [],
   hosts: [],
   relatedAgentDismissals: [],
+  changes: [],
 });
 
 export const cloneUniverseState = (state: UniverseState): UniverseState => {
@@ -130,5 +150,7 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
     relatedAgentDismissals: (state.relatedAgentDismissals ?? []).map((dismissal) => ({
       ...dismissal,
     })),
+    changes: (state.changes ?? []).map((change) => ({ ...change })),
+    operatorCheckpoint: state.operatorCheckpoint ? { ...state.operatorCheckpoint } : undefined,
   };
 };

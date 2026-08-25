@@ -1,0 +1,188 @@
+import type {
+  CommandCentreProjection,
+  CatchUpProjection,
+  Projection,
+  UniverseMapProjection,
+} from "../projection/types.ts";
+import type { SessionHost } from "../hosts/types.ts";
+import type { Universe } from "../universe/universe.ts";
+import type { Clock } from "../universe/types.ts";
+import { WebCommandError, WebCommandGateway } from "./commands.ts";
+import type {
+  WebCommandResponse,
+  WebTerminalActionResponse,
+  WebTerminalOpenResponse,
+} from "./protocol.ts";
+import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
+
+export interface PortfolioResponse {
+  readonly map: UniverseMapProjection;
+  readonly commandCentre: CommandCentreProjection;
+  readonly catchUp: CatchUpProjection;
+}
+
+interface ErrorResponse {
+  readonly error: string;
+}
+
+type WebResponse =
+  | PortfolioResponse
+  | Projection
+  | WebCommandResponse
+  | WebTerminalOpenResponse
+  | WebTerminalActionResponse
+  | ErrorResponse;
+
+const json = (body: WebResponse, status = 200): Response =>
+  Response.json(body, {
+    status,
+    headers: {
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
+
+const targetType = (value: string | null): "goal" | "agent" | undefined => {
+  if (value === "goal" || value === "agent") return value;
+  return undefined;
+};
+
+export class ObservatoryWebApi {
+  private readonly commands: WebCommandGateway;
+  private readonly terminals: WebTerminalGateway | undefined;
+
+  constructor(
+    private readonly universe: Universe,
+    private readonly clock: Clock,
+    private readonly allowedOrigin = "http://127.0.0.1:4310",
+    host?: SessionHost,
+  ) {
+    this.commands = new WebCommandGateway(universe);
+    this.terminals = host ? new WebTerminalGateway(universe, host) : undefined;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const now = this.clock.now();
+
+    if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url.pathname);
+
+    if (url.pathname === "/api/commands") {
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      if (
+        request.headers.get("origin") !== this.allowedOrigin ||
+        request.headers.get("x-ao-command") !== "1"
+      )
+        return json({ error: "Command origin rejected." }, 403);
+      if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
+        return json({ error: "Commands require application/json." }, 415);
+      try {
+        const result = this.commands.execute(await request.text());
+        if (!result.ok) return json({ error: result.error ?? "Command rejected." }, 409);
+        const portfolio = this.portfolio(this.clock.now());
+        if (portfolio instanceof Response) return portfolio;
+        return json({ result, portfolio } satisfies WebCommandResponse);
+      } catch (error) {
+        if (error instanceof WebCommandError) return json({ error: error.message }, error.status);
+        return json({ error: "Command could not be read." }, 400);
+      }
+    }
+
+    if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+
+    if (url.pathname === "/api/portfolio") {
+      const portfolio = this.portfolio(now);
+      return portfolio instanceof Response ? portfolio : json(portfolio);
+    }
+
+    if (url.pathname === "/api/inspector") {
+      const type = targetType(url.searchParams.get("type"));
+      const id = url.searchParams.get("id")?.trim();
+      if (!type || !id) return json({ error: "A valid target type and id are required." }, 400);
+      const projection = this.universe.project({
+        kind: "inspector",
+        now,
+        target: { type, id },
+      });
+      return json(projection);
+    }
+
+    return json({ error: "Not found." }, 404);
+  }
+
+  async close(): Promise<void> {
+    await this.terminals?.closeAll();
+  }
+
+  private portfolio(now: number): PortfolioResponse | Response {
+    const map = this.universe.project({ kind: "universe-map", now });
+    const commandCentre = this.universe.project({ kind: "command-centre", now });
+    const catchUp = this.universe.project({ kind: "catch-up", now });
+    if (
+      map.kind !== "universe-map" ||
+      commandCentre.kind !== "command-centre" ||
+      catchUp.kind !== "catch-up"
+    )
+      return json({ error: "Projection contract mismatch." }, 500);
+    return { map, commandCentre, catchUp };
+  }
+
+  private async terminal(request: Request, pathname: string): Promise<Response> {
+    if (!this.terminals) return json({ error: "Terminal transport is unavailable." }, 501);
+    const match = /^\/api\/terminal\/([^/]+)\/(events|input|resize|release)$/u.exec(pathname);
+    if (pathname === "/api/terminal/open") {
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const rejected = this.rejectMutation(request);
+      if (rejected) return rejected;
+      try {
+        return json(await this.terminals.open(await request.text()));
+      } catch (error) {
+        return error instanceof WebTerminalError
+          ? this.terminalError(error)
+          : json({ error: "Terminal transport failed." }, 500);
+      }
+    }
+    if (!match) return json({ error: "Not found." }, 404);
+    const [, sessionId, action] = match;
+    if (!sessionId || !action) return json({ error: "Not found." }, 404);
+    if (action === "events") {
+      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      try {
+        return this.terminals.events(sessionId);
+      } catch (error) {
+        return error instanceof WebTerminalError
+          ? this.terminalError(error)
+          : json({ error: "Terminal transport failed." }, 500);
+      }
+    }
+    if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+    const rejected = this.rejectMutation(request);
+    if (rejected) return rejected;
+    try {
+      if (action === "input")
+        return json(await this.terminals.input(sessionId, await request.text()));
+      if (action === "resize")
+        return json(await this.terminals.resize(sessionId, await request.text()));
+      return json(await this.terminals.release(sessionId));
+    } catch (error) {
+      return error instanceof WebTerminalError
+        ? this.terminalError(error)
+        : json({ error: "Terminal transport failed." }, 500);
+    }
+  }
+
+  private rejectMutation(request: Request): Response | undefined {
+    if (
+      request.headers.get("origin") !== this.allowedOrigin ||
+      request.headers.get("x-ao-command") !== "1"
+    )
+      return json({ error: "Command origin rejected." }, 403);
+    if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
+      return json({ error: "Commands require application/json." }, 415);
+    return undefined;
+  }
+
+  private terminalError(error: WebTerminalError): Response {
+    return json({ error: error.message }, error.status);
+  }
+}

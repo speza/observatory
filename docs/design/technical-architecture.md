@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
-Status: implemented V0 boundary; linked execution surfaces added, future extensions remain proposed
-Date: 2026-08-24
+Status: implemented V1 control plane; first production local web walking slice in progress
+Date: 2026-08-25
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
@@ -10,9 +10,17 @@ Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
 ## Purpose
 
-This document defines the initial technical shape of Observatory: a local semantic
-control plane with a portable native spatial universe and a later higher-fidelity
-web interface over agents hosted by other tools.
+This document defines the technical shape of Observatory: a local semantic
+control plane with portable native and high-fidelity local web projections over
+agents hosted by other tools.
+
+The architecture serves one operator loop: understand what the concurrent work
+is doing, catch up on what changed, identify the result that matters, find where
+human judgment is needed, and decide whether reported completion is trustworthy.
+Every module should contribute evidence to that loop or stay out of the trusted
+model. AO is therefore responsible for durable intent, accountability,
+attention, relationships and verification context; agent runtimes remain
+responsible for their own internal planning and task execution graphs.
 
 The implementation language and initial toolchain are selected separately in
 the technology decision record. Disposable renderer experiments established the
@@ -94,12 +102,19 @@ Control-plane projections
          ├── native spatial universe client
          ├── attention/list/inspector supporting lenses
          ├── deterministic test fixtures
-         └── later local web observatory
+         └── local web Atlas / Ledger client
 ```
 
 The control plane is the only module allowed to author trusted AO state.
 Adapters report observations and execute host-specific operations. Renderers
 query projections and submit commands; they do not read the store directly.
+
+Runtime orchestration is deliberately outside this model. A provider or agent
+runtime may decompose a goal, spawn workers, retry steps and route tools through
+its own execution graph. AO may receive summaries, proposals and evidence from
+that graph, but it does not make the graph its durable topology. Only work that
+has independent ownership, lifecycle, result or human-attention value should
+become a first-class Observatory relationship or Agent.
 
 ## Module design
 
@@ -458,9 +473,11 @@ Rules:
 - layout mutations are undoable; and
 - renderers scale and clip logical coordinates to their viewport.
 
-The later web observatory should compare at least one graph layout with simple
-manual placement. Selecting a production layout engine before that test is
-premature.
+The production web Atlas retains the accepted logical goal anchors and derived
+satellite positions from the projection. Its responsive viewport scales the
+distance between those anchors while keeping the rendered bodies and labels
+legible. The current evidence does not justify a client-side graph layout
+engine or a second set of browser-owned positions.
 
 ### Search module
 
@@ -625,6 +642,16 @@ Store responsibilities:
 - mutation provenance; and
 - schema migration.
 
+The implemented catch-up slice persists accepted semantic changes with a
+monotonic sequence and one durable operator checkpoint. The projection groups
+post-checkpoint records into new, changed, attention, finished and stale
+outcomes. The operator lens coalesces those records to the latest outcome per
+affected Goal or Agent while retaining the underlying transition count.
+Reading or polling does not advance the cursor; only the explicit
+`AcknowledgeCatchUp` Universe command does. This bounded semantic vocabulary is
+for operator resumption and is not a transcript, event-sourcing model or
+general audit log.
+
 Transcripts, terminal scrollback and repository contents remain outside the AO
 store. Large provider payloads should not be copied into generic metadata.
 
@@ -643,23 +670,35 @@ when a second live client or concurrent agent process needs subscriptions,
 carry the same versioned commands and events over a user-owned Unix domain
 socket on macOS/Linux (and a named-pipe adapter later if needed).
 
-An HTTP/WebSocket loopback adapter may be added for the web prototype or later
-web client. It should translate the same command/query interface rather than
-becoming a second domain interface.
+The first production web slice uses an in-process loopback HTTP adapter. The
+`web` composition root owns one `Universe`, reconciles one selected
+`SessionHost`, serves the static browser client, and exposes JSON for the
+existing universe-map, command-centre, catch-up and inspector projections. A narrow web
+command gateway accepts only goal editing, assignment, completion and archive
+commands and delegates their invariants and persistence to `Universe`. It is
+not CRUD and does not expose the full internal command union. It binds to
+`127.0.0.1`; mutations require an exact loopback Origin, JSON content type and
+an explicit intent header. The browser polls because host refresh is already
+snapshot based. There is no browser-to-SQLite access, Herdr protocol, second
+semantic model, event bus or daemon in this slice.
 
-A possible local web client would be an ordinary browser surface launched by a
-command such as `ao web`, not an Electron application. The daemon would serve
-the static client over loopback and carry control events and any supported
-embedded-terminal stream over authenticated local WebSockets. The browser can
-render that stream with [xterm.js](https://github.com/xtermjs/xterm.js/); it
-does not own or create the PTY. xterm.js should reproduce normal ANSI and
-true-colour terminal applications closely, while fonts, palette and
-terminal-specific graphics may differ from Ghostty, Kitty or another native
-terminal. This is a recorded later option, not a change to the native terminal
-client as the current implementation priority.
+The same process exposes a narrow hosted-terminal gateway. The browser asks to
+open an accepted Agent; the server re-resolves it through the generic
+`SessionHost` access capability and retains only a transient session handle.
+Server-sent events carry bounded replay plus live terminal frames. Separate
+same-origin JSON requests carry input, resize and release. Random session IDs
+act as process-local capabilities, and shutdown releases every open host
+session. SSE comment keepalives prevent a quiet terminal from tripping the
+loopback server's idle timeout. This adds no browser PTY, terminal persistence, concrete Herdr type,
+WebSocket or remotely authenticated service.
 
-The v0 live slice does not need a daemon. Introduce one only when a second live
-client or agent process needs concurrent access.
+This is an ordinary browser surface launched by `bun run web` or
+`bun run web:mock`, not an Electron application. Projection polling is an
+intentional walking-slice transport, not the final multi-client protocol. Add a
+versioned local command/subscription transport when the web renderer must run
+concurrently with another live client. The hosted terminal uses SSE plus narrow
+POST actions because its data flow does not yet require a general WebSocket
+transport. The browser never owns or creates a PTY.
 
 ## Renderer contract
 
@@ -957,8 +996,8 @@ The v0 live Herdr slice should demonstrate:
 - OpenTUI proved viable for a portable native spatial universe client.
 - Spatial, enhanced-graphics and ANSI-raster experiments did not justify a
   custom graphical terminal renderer.
-- Native TUI owns the first spatial product proof; a later web observatory may
-  provide higher visual fidelity over the same semantic model.
+- Native TUI proved the first spatial boundary; the maintained web Observatory
+  now provides higher visual fidelity over the same semantic model.
 
 ### Phase 1 — live Herdr walking slice
 
@@ -994,11 +1033,19 @@ The v0 live Herdr slice should demonstrate:
 
 ### Phase 4 — local web observatory
 
-- Build the high-fidelity spatial canvas over the accepted control-plane
-  projections.
-- Add embedded xterm.js agents only where the host exposes an interactive
-  terminal capability.
-- Keep the browser client local; do not require Electron.
+- Build a maintained React client with native SVG and CSS over the accepted
+  universe-map, command-centre and inspector projections.
+- Preserve atlas, attention queue and ledger as projections of the same state;
+  keep selection, viewport, zoom, theme and active lens browser-local.
+- Evolve the proven read-only slice with a narrow same-origin command gateway;
+  all mutation still goes through `Universe`, and the browser never receives
+  persistence or host capabilities.
+- Use the core-owned durable checkpoint and deterministic catch-up projection;
+  do not infer history from browser polling.
+- Render only a transient host-owned terminal through the loopback capability
+  gateway; do not create a browser PTY or expose concrete host protocol.
+- Keep the browser client local; do not require Electron or introduce a daemon
+  solely for this slice.
 
 ### Phase 5 — broader hosting
 
