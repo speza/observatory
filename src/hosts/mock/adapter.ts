@@ -134,6 +134,7 @@ export class MockHostAdapter implements SessionHost {
   private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
   private readonly launched = new Map<string, HostAgentObservation>();
   private launchSequence = 0;
+  private linkedTerminalSequence = 0;
 
   constructor(options: {
     readonly clock: Clock;
@@ -211,6 +212,16 @@ export class MockHostAdapter implements SessionHost {
               available: true,
               source: "observed",
               explanation: "Deterministic sibling agent surface in the same host context.",
+            },
+            {
+              kind: "shell",
+              label: "New terminal",
+              owner: { kind: "mock-agent", token: agent.nativeId },
+              workingDirectory: agent.worktree,
+              target: { kind: "mock-prepared-shell", token: agent.worktree },
+              available: true,
+              source: "prepared",
+              explanation: `Create a new mock terminal in ${agent.worktree}.`,
             },
           ]);
         }
@@ -370,6 +381,30 @@ export class MockHostAdapter implements SessionHost {
           ok: false,
           message: linkedExecution.explanation,
         } satisfies HostTerminalOpenResult;
+      if (linkedExecution.source === "prepared") {
+        const ownerToken = parseTarget(linkedExecution.owner);
+        if (
+          linkedExecution.target.kind !== "mock-prepared-shell" ||
+          !ownerToken ||
+          !this.liveTargets.has(ownerToken) ||
+          linkedExecution.target.token !== linkedExecution.workingDirectory
+        )
+          return {
+            ok: false,
+            message: "The mock new-terminal capability is invalid or no longer available.",
+          } satisfies HostTerminalOpenResult;
+        if (dimensions.columns < 1 || dimensions.rows < 1)
+          return {
+            ok: false,
+            message: "Terminal dimensions must be positive.",
+          } satisfies HostTerminalOpenResult;
+        const sequence = ++this.linkedTerminalSequence;
+        return {
+          ok: true,
+          message: `Opened mock companion terminal ${sequence} in ${linkedExecution.workingDirectory}.`,
+          terminal: new MockTerminalSession(`New terminal ${sequence}`, dimensions),
+        } satisfies HostTerminalOpenResult;
+      }
       const token = parseLinkedExecutionTarget(linkedExecution.target);
       if (!token)
         return {

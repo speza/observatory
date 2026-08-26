@@ -32,7 +32,7 @@ The clients use deliberately bounded terminal compositions:
 - the native renderer keeps one primary surface and one selected linked
   execution surface at a time; and
 - the web renderer keeps a primary `Main` tab plus any number of selected
-  companion tabs reported by the host.
+  observed or newly created companion tabs.
 
 The web tabs are a browser presentation of host-owned terminal sessions, not a
 new multiplexer. Each tab has an independent host controller, while the map,
@@ -84,11 +84,11 @@ a fresh host snapshot and rejects a missing, changed or reused terminal identity
 
 Herdr reports sibling panes in the same host context and working directory.
 Recognised sibling agents are returned with `kind: agent`; shell-only panes are
-returned with `kind: shell`. If no matching shell is observed but a trustworthy
-working directory exists, Herdr may return one `prepared` shell capability.
-Opening a prepared capability creates a new Herdr tab in the existing Agent's
-workspace. It never creates a second Herdr workspace, Observatory Agent or
-Observatory Space.
+returned with `kind: shell`. When a trustworthy working directory exists,
+Herdr also returns one `prepared` shell capability labelled `New terminal`.
+Every invocation creates a fresh Herdr tab in the existing Agent's workspace,
+even when other matching shells already exist. It never creates a second Herdr
+workspace, Observatory Agent or Observatory Space.
 
 The mock host reports multiple deterministic shells and a sibling-agent link so
 the picker and both linked-execution kinds are testable without Herdr.
@@ -123,7 +123,8 @@ There is no duplicate durable shell object and no automatic Goal assignment.
 4. Use the explicit focus-cycle action or click a surface to switch input.
 
 In the web client, the primary terminal is the `Main` tab. The companion
-picker can add several available links as tabs; `Ctrl/Cmd+Tab` and
+picker can add several available links as tabs and provides a repeatable
+`New terminal` action; `Ctrl/Cmd+Tab` and
 `Ctrl/Cmd+1…9` switch tabs. Opening a companion does not change the selected
 Agent or move the map camera.
 
@@ -182,8 +183,8 @@ The implementation is acceptable when:
 6. Focus ownership is explicit and ordinary input cannot reach the wrong
    surface.
 7. The selected shell starts in the host-provided trustworthy worktree.
-8. A prepared Herdr shell is created as a tab in the parent Agent workspace,
-   not as a new workspace or durable Agent.
+8. Each invocation of a prepared Herdr shell creates a fresh tab in the parent
+   Agent workspace, not a new workspace or durable Agent.
 9. A user can run a preferred diff/review tool in the shell.
 10. Shell-only panes are never reconciled as durable Agents.
 11. A later host snapshot can recognise a promoted shell as a normal Agent using

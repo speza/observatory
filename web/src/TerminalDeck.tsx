@@ -349,10 +349,13 @@ export const TerminalDeck = ({
 
   const addLink = (link: WebTerminalLink): void => {
     if (!link.available) return;
+    const tabId = link.source === "prepared" ? crypto.randomUUID() : link.id;
     setTabs((current) =>
-      current.some((tab) => tab.id === link.id) ? current : [...current, { id: link.id, link }],
+      link.source === "observed" && current.some((tab) => tab.id === link.id)
+        ? current
+        : [...current, { id: tabId, link }],
     );
-    setActiveTabId(link.id);
+    setActiveTabId(tabId);
     setPickerOpen(false);
   };
 
@@ -481,7 +484,8 @@ export const TerminalDeck = ({
               </p>
             ) : null}
             {links.map((link) => {
-              const open = tabs.some((tab) => tab.id === link.id);
+              const open =
+                link.source === "observed" && tabs.some((tab) => tab.link?.id === link.id);
               return (
                 <button
                   className="terminal-deck__picker-item"
@@ -497,7 +501,15 @@ export const TerminalDeck = ({
                       {link.kind === "agent" ? "Sibling agent" : "Shell"} · {link.source}
                     </small>
                   </span>
-                  <em>{open ? "OPEN" : link.available ? "OPEN" : "UNAVAILABLE"}</em>
+                  <em>
+                    {open
+                      ? "OPEN"
+                      : link.available
+                        ? link.source === "prepared"
+                          ? "CREATE"
+                          : "OPEN"
+                        : "UNAVAILABLE"}
+                  </em>
                 </button>
               );
             })}

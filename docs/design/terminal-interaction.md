@@ -277,8 +277,10 @@ leaking and must be repaired before adding the host.
 - A discovered linked shell can disappear or change ownership between snapshots;
   opening it must revalidate its opaque terminal identity, return an honest host
   error and must not manufacture a durable AO agent.
-- A prepared Herdr companion is created as a tab in the parent Agent workspace;
-  it must not create a new workspace merely to provide a contextual terminal.
+- A prepared Herdr companion is a repeatable creation action. Each invocation
+  creates a fresh tab in the parent Agent workspace; it must not reuse an
+  observed shell or create a new workspace merely to provide a contextual
+  terminal.
 - Observatory does not provide a native diff viewer yet. Diff and review tools
   run in a linked shell until a concrete native workflow justifies a separate
   surface.

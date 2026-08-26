@@ -437,7 +437,7 @@ describe("ObservatoryWebApi", () => {
     const firstLink = linksBody.links.find((link) => link.available);
     expect(linksResponse.status).toBe(200);
     expect(linksBody.kind).toBe("terminal-links");
-    expect(linksBody.links).toHaveLength(3);
+    expect(linksBody.links).toHaveLength(4);
     expect(firstLink).toBeDefined();
     expect(firstLink).not.toHaveProperty("target");
     const refreshedLinksResponse = await api.fetch(
@@ -496,6 +496,31 @@ describe("ObservatoryWebApi", () => {
     expect(linkedOpened.status).toBe(200);
     const linkedBody: WebTerminalOpenResponse = await linkedOpened.json();
     expect((await mutation(`/api/terminal/${linkedBody.sessionId}/release`, {})).status).toBe(200);
+
+    const newTerminal = linksBody.links.find((link) => link.source === "prepared");
+    expect(newTerminal?.label).toBe("New terminal");
+    const firstNew = await mutation("/api/terminal/open", {
+      agentId: agent.id,
+      dimensions: { columns: 80, rows: 24 },
+      linkId: newTerminal!.id,
+    });
+    const secondNew = await mutation("/api/terminal/open", {
+      agentId: agent.id,
+      dimensions: { columns: 80, rows: 24 },
+      linkId: newTerminal!.id,
+    });
+    expect(firstNew.status).toBe(200);
+    expect(secondNew.status).toBe(200);
+    const firstNewBody: WebTerminalOpenResponse = await firstNew.json();
+    const secondNewBody: WebTerminalOpenResponse = await secondNew.json();
+    expect(firstNewBody.message).toContain("terminal 1");
+    expect(secondNewBody.message).toContain("terminal 2");
+    expect((await mutation(`/api/terminal/${firstNewBody.sessionId}/release`, {})).status).toBe(
+      200,
+    );
+    expect((await mutation(`/api/terminal/${secondNewBody.sessionId}/release`, {})).status).toBe(
+      200,
+    );
     await api.close();
   });
 

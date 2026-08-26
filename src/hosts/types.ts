@@ -106,6 +106,7 @@ export interface LinkedExecution {
   /** Opaque to Observatory; only the selected host adapter may interpret it. */
   readonly target?: OpaqueAccessTarget;
   readonly available: boolean;
+  /** `observed` attaches to a host surface; `prepared` creates a fresh surface on every open. */
   readonly source: "observed" | "prepared";
   readonly explanation: string;
 }
@@ -121,7 +122,7 @@ export interface AgentAccess {
   readonly target?: OpaqueAccessTarget;
   /** Optional host-owned terminal capability for this agent. */
   readonly terminalTarget?: OpaqueAccessTarget;
-  /** Existing or host-prepared linked executions, never durable AO agents. */
+  /** Existing surfaces and repeatable host-owned creation actions, never durable AO agents. */
   readonly linkedExecutions: readonly LinkedExecution[];
   readonly explanation: string;
 }

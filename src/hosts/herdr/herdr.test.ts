@@ -292,7 +292,7 @@ describe("Herdr adapter", () => {
     );
     expect(access.supported).toBe(true);
     expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
-    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions).toHaveLength(4);
     expect(access.linkedExecutions[0]).toMatchObject({
       kind: "shell",
       label: "Beta implementation",
@@ -347,7 +347,7 @@ describe("Herdr adapter", () => {
     const access = await Effect.runPromise(
       adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
     );
-    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions).toHaveLength(4);
     expect(access.linkedExecutions[0]).toMatchObject({
       kind: "agent",
       label: "Beta implementation",
@@ -889,7 +889,7 @@ describe("Herdr adapter", () => {
     expect(terminalRunner.calls).toHaveLength(0);
   });
 
-  test("prepares a linked shell tab in the agent workspace when no matching shell pane exists", async () => {
+  test("creates a fresh linked terminal tab in the agent workspace on every request", async () => {
     const preparedSnapshot = {
       result: {
         snapshot: {
@@ -942,6 +942,27 @@ describe("Herdr adapter", () => {
         },
       },
     };
+    const preparedWithTwoShellsSnapshot = {
+      ...preparedWithShellSnapshot,
+      result: {
+        ...preparedWithShellSnapshot.result,
+        snapshot: {
+          ...preparedWithShellSnapshot.result.snapshot,
+          panes: [
+            ...preparedWithShellSnapshot.result.snapshot.panes,
+            {
+              pane_id: "prepared-shell:p2",
+              terminal_id: "prepared-shell-term-02",
+              workspace_id: "prepared-workspace",
+              tab_id: "prepared-workspace:t3",
+              cwd: "/sandbox/prepared",
+              foreground_cwd: "/sandbox/prepared",
+              terminal_title_stripped: "AO linked terminal",
+            },
+          ],
+        },
+      },
+    };
     const runner = new FakeRunner(
       {
         exitCode: 0,
@@ -971,6 +992,23 @@ describe("Herdr adapter", () => {
           stdout: JSON.stringify(preparedWithShellSnapshot),
           stderr: "",
         },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(preparedWithShellSnapshot),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: { root_pane: { pane_id: "prepared-shell:p2" } },
+          }),
+          stderr: "",
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify(preparedWithTwoShellsSnapshot),
+          stderr: "",
+        },
       ],
     );
     const terminalRunner = new FakeTerminalRunner([
@@ -986,7 +1024,9 @@ describe("Herdr adapter", () => {
     const access = await Effect.runPromise(
       adapter.access({ hostKind: "herdr", nativeId: "prepared-agent:p1" }),
     );
-    const linkedExecution = access.linkedExecutions[0];
+    const linkedExecution = access.linkedExecutions.find(
+      (execution) => execution.source === "prepared",
+    );
     expect(linkedExecution).toMatchObject({
       source: "prepared",
       target: { kind: "herdr-prepared-shell", token: "/sandbox/prepared" },
@@ -1010,11 +1050,6 @@ describe("Herdr adapter", () => {
     expect(terminalRunner.calls[0]).toContain("prepared-shell:p1");
     await Effect.runPromise(opened.terminal!.release());
 
-    runner.setResult({
-      exitCode: 0,
-      stdout: JSON.stringify(preparedWithShellSnapshot),
-      stderr: "",
-    });
     const reopened = await Effect.runPromise(
       adapter.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
     );
@@ -1023,8 +1058,8 @@ describe("Herdr adapter", () => {
       runner.calls.filter(
         (call) => call[0] === "herdr" && call[1] === "tab" && call[2] === "create",
       ),
-    ).toHaveLength(1);
-    expect(terminalRunner.calls[1]).toContain("prepared-shell:p1");
+    ).toHaveLength(2);
+    expect(terminalRunner.calls[1]).toContain("prepared-shell:p2");
     await Effect.runPromise(reopened.terminal!.release());
   });
 

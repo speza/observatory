@@ -64,16 +64,18 @@ describe("Mock host adapter", () => {
     );
     expect(access.supported).toBe(true);
     expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
-    expect(access.linkedExecutions).toHaveLength(3);
+    expect(access.linkedExecutions).toHaveLength(4);
     expect(access.linkedExecutions.map((execution) => execution.kind)).toEqual([
       "shell",
       "shell",
       "agent",
+      "shell",
     ]);
     expect(access.linkedExecutions.map((execution) => execution.label)).toEqual([
       "Mock linked shell",
       "Mock test watcher",
       "Mock sibling agent",
+      "New terminal",
     ]);
     expect(access.target).toEqual({
       kind: "mock-agent",
@@ -188,6 +190,29 @@ describe("Mock host adapter", () => {
       _tag: "Some",
     });
     await Effect.runPromise(opened.terminal!.release());
+  });
+
+  test("creates a fresh prepared companion terminal on every open", async () => {
+    const clock = new FixedClock(46_000);
+    const adapter = new MockHostAdapter({ clock });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    const createTerminal = access.linkedExecutions.find(
+      (execution) => execution.source === "prepared",
+    );
+    expect(createTerminal).toBeDefined();
+    const first = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(createTerminal!, { columns: 60, rows: 18 }),
+    );
+    const second = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(createTerminal!, { columns: 60, rows: 18 }),
+    );
+    expect(first.message).toContain("terminal 1");
+    expect(second.message).toContain("terminal 2");
+    await Effect.runPromise(first.terminal!.release());
+    await Effect.runPromise(second.terminal!.release());
   });
 
   test("launches a synthetic agent that appears on the next snapshot", async () => {

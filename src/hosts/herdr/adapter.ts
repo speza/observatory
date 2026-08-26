@@ -240,16 +240,6 @@ const openLinkedExecutionTerminalTarget = (target: OpaqueAccessTarget): string |
 const preparedShellWorkingDirectory = (target: OpaqueAccessTarget): string | undefined =>
   target.kind === "herdr-prepared-shell" ? target.token : undefined;
 
-type PreparedShellTarget = {
-  readonly ownerToken: string;
-  readonly workingDirectory: string;
-  readonly target: string;
-  readonly fingerprint: string;
-};
-
-const preparedShellKey = (ownerToken: string, workingDirectory: string): string =>
-  `${ownerToken}\u0000${normalizedPath(workingDirectory)}`;
-
 const paneWorkingDirectoriesFor = (payload: JsonValue | undefined): Map<string, string> => {
   const snapshot = unwrapSnapshot(payload);
   const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
@@ -412,23 +402,22 @@ const linkedExecutionsFor = (
         (linkedExecution): linkedExecution is LinkedExecution => linkedExecution !== undefined,
       );
 
-    if (observed.length > 0) {
-      linkedExecutions.set(agent.nativeId, observed);
-      continue;
-    }
     if (workingDirectory) {
       linkedExecutions.set(agent.nativeId, [
+        ...observed,
         {
           kind: "shell",
-          label: "Linked shell",
+          label: "New terminal",
           owner: herdrTarget("herdr-agent-attach", agent.nativeId, ownerFingerprint),
           workingDirectory,
           target: { kind: "herdr-prepared-shell", token: workingDirectory },
           available: true,
           source: "prepared",
-          explanation: `Herdr will prepare a linked terminal tab in ${workingDirectory}.`,
+          explanation: `Create a new Herdr terminal tab in ${workingDirectory}.`,
         },
       ]);
+    } else if (observed.length > 0) {
+      linkedExecutions.set(agent.nativeId, observed);
     }
   }
   return linkedExecutions;
@@ -530,7 +519,6 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly livePaneWorkspaces = new Map<string, string>();
   private readonly liveTerminalFingerprints = new Map<string, string>();
   private readonly liveAgentFingerprints = new Map<string, string>();
-  private readonly preparedShellTargets = new Map<string, PreparedShellTarget>();
 
   constructor(options: {
     readonly runner?: CommandRunner;
@@ -703,7 +691,6 @@ export class HerdrHostAdapter implements SessionHost {
     try {
       result = await this.runner.run(["herdr", "api", "snapshot"]);
     } catch (error) {
-      this.preparedShellTargets.clear();
       return {
         hostKind: "herdr",
         available: false,
@@ -714,7 +701,6 @@ export class HerdrHostAdapter implements SessionHost {
       };
     }
     if (result.exitCode !== 0) {
-      this.preparedShellTargets.clear();
       return {
         hostKind: "herdr",
         available: false,
@@ -726,24 +712,13 @@ export class HerdrHostAdapter implements SessionHost {
     }
     const parsedPayload = parseJsonValue(result.stdout);
     const snapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
-    if (!snapshot.available) {
-      this.preparedShellTargets.clear();
-      return snapshot;
-    }
+    if (!snapshot.available) return snapshot;
     for (const [paneId, workingDirectory] of paneWorkingDirectoriesFor(parsedPayload))
       this.livePaneWorkingDirectories.set(paneId, workingDirectory);
     for (const [paneId, workspaceId] of paneWorkspaceIdsFor(parsedPayload))
       this.livePaneWorkspaces.set(paneId, workspaceId);
     for (const [paneId, fingerprint] of paneFingerprintsFor(parsedPayload))
       this.liveTerminalFingerprints.set(paneId, fingerprint);
-    for (const [key, prepared] of this.preparedShellTargets) {
-      if (
-        this.livePaneWorkingDirectories.get(prepared.target) !==
-          normalizedPath(prepared.workingDirectory) ||
-        this.liveTerminalFingerprints.get(prepared.target) !== prepared.fingerprint
-      )
-        this.preparedShellTargets.delete(key);
-    }
     const linkedExecutions = linkedExecutionsFor(parsedPayload, snapshot.agents);
     this.liveTargets.clear();
     const nativeIds = new Set<string>();
@@ -828,19 +803,6 @@ export class HerdrHostAdapter implements SessionHost {
           normalizedPath(execution.workingDirectory ?? "")
       );
     });
-  }
-
-  private currentShellFor(
-    ownerToken: string,
-    workingDirectory: string,
-  ): LinkedExecution | undefined {
-    const wanted = normalizedPath(workingDirectory);
-    return (this.liveLinkedExecutions.get(ownerToken) ?? []).find(
-      (candidate) =>
-        candidate.kind === "shell" &&
-        candidate.source === "observed" &&
-        normalizedPath(candidate.workingDirectory ?? "") === wanted,
-    );
   }
 
   activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
@@ -972,41 +934,15 @@ export class HerdrHostAdapter implements SessionHost {
             message: "The linked execution's parent Agent is no longer available.",
           } satisfies HostTerminalOpenResult;
 
-        const currentExecution = this.currentLinkedExecution(linkedExecution);
         const workingDirectory = preparedShellWorkingDirectory(linkedExecution.target);
+        const currentExecution = workingDirectory
+          ? undefined
+          : this.currentLinkedExecution(linkedExecution);
         let target = currentExecution?.target
           ? openLinkedExecutionTerminalTarget(currentExecution.target)
           : undefined;
         let targetFingerprint = currentExecution?.target?.fingerprint;
-        let prepared = false;
-        if (!target && workingDirectory) {
-          const observedShell = this.currentShellFor(ownerToken, workingDirectory);
-          if (observedShell?.target) {
-            target = openLinkedExecutionTerminalTarget(observedShell.target);
-            targetFingerprint = observedShell.target.fingerprint;
-          }
-        }
-        if (!target && workingDirectory) {
-          const key = preparedShellKey(ownerToken, workingDirectory);
-          const cached = this.preparedShellTargets.get(key);
-          if (cached) {
-            if (
-              this.livePaneWorkingDirectories.get(cached.target) !==
-                normalizedPath(cached.workingDirectory) ||
-              this.liveTerminalFingerprints.get(cached.target) !== cached.fingerprint
-            ) {
-              this.preparedShellTargets.delete(key);
-              return {
-                ok: false,
-                message: "The prepared linked shell is no longer available; refresh and retry.",
-              } satisfies HostTerminalOpenResult;
-            }
-            target = cached.target;
-            targetFingerprint = cached.fingerprint;
-            prepared = true;
-          }
-        }
-        if (!target && workingDirectory) {
+        if (workingDirectory) {
           // A prepared companion is a contextual Herdr tab, not a new AO
           // workspace. Keep the parent workspace identity inside this adapter.
           const ownerWorkspaceId = this.livePaneWorkspaces.get(ownerToken);
@@ -1062,13 +998,6 @@ export class HerdrHostAdapter implements SessionHost {
               ok: false,
               message: "Herdr created a linked terminal tab but could not identify its shell pane.",
             } satisfies HostTerminalOpenResult;
-          this.preparedShellTargets.set(preparedShellKey(ownerToken, workingDirectory), {
-            ownerToken,
-            workingDirectory,
-            target,
-            fingerprint: targetFingerprint,
-          });
-          prepared = true;
         }
         if (!target || !targetFingerprint)
           return {
@@ -1080,7 +1009,7 @@ export class HerdrHostAdapter implements SessionHost {
         return {
           ok: true,
           terminal: openHerdrTerminal(this.terminalRunner, target, dimensions, options),
-          message: prepared
+          message: workingDirectory
             ? `Opened a Herdr linked terminal tab in ${workingDirectory}.`
             : `Opened the existing Herdr linked terminal ${target}.`,
         } satisfies HostTerminalOpenResult;
