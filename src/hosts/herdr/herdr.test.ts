@@ -889,7 +889,7 @@ describe("Herdr adapter", () => {
     expect(terminalRunner.calls).toHaveLength(0);
   });
 
-  test("prepares a linked shell workspace when no matching shell pane exists", async () => {
+  test("prepares a linked shell tab in the agent workspace when no matching shell pane exists", async () => {
     const preparedSnapshot = {
       result: {
         snapshot: {
@@ -932,8 +932,8 @@ describe("Herdr adapter", () => {
             {
               pane_id: "prepared-shell:p1",
               terminal_id: "prepared-shell-term-01",
-              workspace_id: "prepared-shell-workspace",
-              tab_id: "prepared-shell-workspace:t1",
+              workspace_id: "prepared-workspace",
+              tab_id: "prepared-workspace:t2",
               cwd: "/sandbox/prepared",
               foreground_cwd: "/sandbox/prepared",
               terminal_title_stripped: "AO linked terminal",
@@ -997,8 +997,10 @@ describe("Herdr adapter", () => {
     expect(opened.ok).toBe(true);
     expect(runner.calls[2]).toEqual([
       "herdr",
-      "workspace",
+      "tab",
       "create",
+      "--workspace",
+      "prepared-workspace",
       "--cwd",
       "/sandbox/prepared",
       "--label",
@@ -1019,14 +1021,14 @@ describe("Herdr adapter", () => {
     expect(reopened.ok).toBe(true);
     expect(
       runner.calls.filter(
-        (call) => call[0] === "herdr" && call[1] === "workspace" && call[2] === "create",
+        (call) => call[0] === "herdr" && call[1] === "tab" && call[2] === "create",
       ),
     ).toHaveLength(1);
     expect(terminalRunner.calls[1]).toContain("prepared-shell:p1");
     await Effect.runPromise(reopened.terminal!.release());
   });
 
-  test("fails closed when linked workspace creation leaves multiple candidate panes", async () => {
+  test("fails closed when linked terminal tab creation leaves multiple candidate panes", async () => {
     const preparedSnapshot = {
       result: {
         snapshot: {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { AttentionItem } from "../../src/attention/attention.ts";
 import type {
   AgentView,
@@ -11,8 +11,15 @@ import type { Priority } from "../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
 import { executeCommand, fetchInspector } from "./api.ts";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
+import { NewAgentDialog } from "./NewAgentDialog.tsx";
+import { TerminalDeck } from "./TerminalDeck.tsx";
 import { usePortfolio } from "./usePortfolio.ts";
-import { WebTerminalSurface } from "./WebTerminalSurface.tsx";
+
+const WorkingTreeDiff = lazy(() =>
+  import("./WorkingTreeDiff.tsx").then(({ WorkingTreeDiff: component }) => ({
+    default: component,
+  })),
+);
 
 type Theme = "light" | "dark";
 type View = "atlas" | "ledger";
@@ -307,6 +314,7 @@ interface InspectorProps {
   readonly onCommand: (command: WebCommand) => Promise<WebCommandResponse | undefined>;
   readonly onClose: () => void;
   readonly onOpenTerminal: (agent: AgentView) => void;
+  readonly onReviewChanges: (agent: AgentView) => void;
 }
 
 const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
@@ -319,6 +327,7 @@ const Inspector = ({
   onCommand,
   onClose,
   onOpenTerminal,
+  onReviewChanges,
 }: InspectorProps): React.JSX.Element => {
   const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
@@ -447,6 +456,9 @@ const Inspector = ({
             <button onClick={() => onOpenTerminal(projection.agent)} type="button">
               Open terminal
             </button>
+            <button onClick={() => onReviewChanges(projection.agent)} type="button">
+              Review workspace changes
+            </button>
             <label>
               <span>Assigned goal</span>
               <select
@@ -523,6 +535,45 @@ const Inspector = ({
     </aside>
   );
 };
+
+interface WorkspaceReviewProps {
+  readonly agent: AgentView;
+  readonly theme: Theme;
+  readonly onClose: () => void;
+}
+
+const WorkspaceReview = ({ agent, theme, onClose }: WorkspaceReviewProps): React.JSX.Element => (
+  <div
+    className="workspace-review-backdrop"
+    onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}
+    role="presentation"
+  >
+    <section
+      aria-label={`Workspace review for ${agent.displayName}`}
+      aria-modal="true"
+      className="workspace-review"
+      onMouseDown={(event) => event.stopPropagation()}
+      role="dialog"
+    >
+      <div className="workspace-review__terminal">
+        <TerminalDeck agent={agent} embedded key={agent.id} onClose={onClose} theme={theme} />
+      </div>
+      <div className="workspace-review__diff">
+        <Suspense
+          fallback={
+            <div className="workspace-review__loading" role="status">
+              Preparing workspace diff…
+            </div>
+          }
+        >
+          <WorkingTreeDiff agent={agent} embedded onClose={onClose} theme={theme} />
+        </Suspense>
+      </div>
+    </section>
+  </div>
+);
 
 interface NewGoalDialogProps {
   readonly pending: boolean;
@@ -711,12 +762,16 @@ const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Element => (
         <dd>Focus the current selection</dd>
       </div>
       <div>
-        <dt>a / b / v / n</dt>
-        <dd>Attention queue, inbox, Atlas/Ledger, new goal</dd>
+        <dt>a / b / v / n / N</dt>
+        <dd>Attention, inbox, view, new goal, new agent</dd>
       </div>
       <div>
         <dt>i / ? / Esc</dt>
         <dd>Inspector, shortcuts, close or clear</dd>
+      </div>
+      <div>
+        <dt>⌘/Ctrl+Tab / 1–9</dt>
+        <dd>Switch terminal tabs when a terminal deck is open</dd>
       </div>
     </dl>
   </aside>
@@ -745,11 +800,14 @@ export const App = (): React.JSX.Element => {
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
+  const [diffAgent, setDiffAgent] = useState<AgentView>();
   const [inspector, setInspector] = useState<InspectorProjection>();
   const [inspectorRevision, setInspectorRevision] = useState(0);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<string>();
+  const [launchNotice, setLaunchNotice] = useState<string>();
 
   useEffect(() => {
     if (!selection) {
@@ -867,6 +925,11 @@ export const App = (): React.JSX.Element => {
     setCatchUpOpen(false);
   };
 
+  const openWorkspaceReview = (agent: AgentView): void => {
+    setDiffAgent(agent);
+    setTerminalAgent(undefined);
+  };
+
   const jumpToAttention = (): void => {
     if (!data) return;
     const items = data.commandCentre.attention.items;
@@ -897,8 +960,16 @@ export const App = (): React.JSX.Element => {
           setCommandError(undefined);
           return;
         }
+        if (newAgentOpen) {
+          setNewAgentOpen(false);
+          return;
+        }
         if (terminalAgent) {
           setTerminalAgent(undefined);
+          return;
+        }
+        if (diffAgent) {
+          setDiffAgent(undefined);
           return;
         }
         if (catchUpOpen) {
@@ -920,6 +991,19 @@ export const App = (): React.JSX.Element => {
         setSelection(undefined);
         return;
       }
+      // Modal and terminal surfaces own keyboard input. Keep map shortcuts from
+      // mutating the background while a button, dialog, or terminal is focused.
+      if (
+        diffAgent ||
+        newAgentOpen ||
+        newGoalOpen ||
+        terminalAgent ||
+        shortcutsOpen ||
+        catchUpOpen ||
+        queueOpen ||
+        inboxOpen
+      )
+        return;
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
 
       const key = event.key;
@@ -981,6 +1065,9 @@ export const App = (): React.JSX.Element => {
         event.preventDefault();
         setCommandError(undefined);
         setNewGoalOpen(true);
+      } else if (key === "N") {
+        event.preventDefault();
+        setNewAgentOpen(true);
       } else if (key === "i") {
         event.preventDefault();
         if (selection) setInspectorOpen((value) => !value);
@@ -1004,9 +1091,11 @@ export const App = (): React.JSX.Element => {
     allSelections,
     catchUpOpen,
     data,
+    diffAgent,
     inboxOpen,
     inspectorOpen,
     newGoalOpen,
+    newAgentOpen,
     queueOpen,
     selection,
     selectedAgent,
@@ -1061,6 +1150,9 @@ export const App = (): React.JSX.Element => {
           </button>
           <button onClick={() => setNewGoalOpen(true)} type="button">
             New goal
+          </button>
+          <button onClick={() => setNewAgentOpen(true)} type="button">
+            New agent
           </button>
           <button
             onClick={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
@@ -1130,6 +1222,15 @@ export const App = (): React.JSX.Element => {
         </div>
         {portfolio.error ? (
           <div className="refresh-error">{portfolio.error} · showing last trusted projection</div>
+        ) : null}
+        {launchNotice ? (
+          <button
+            className="launch-notice"
+            onClick={() => setLaunchNotice(undefined)}
+            type="button"
+          >
+            {launchNotice} <span aria-hidden="true">×</span>
+          </button>
         ) : null}
         <button
           aria-expanded={catchUpOpen}
@@ -1213,30 +1314,7 @@ export const App = (): React.JSX.Element => {
             onCommand={runCommand}
             projection={inspector}
             onOpenTerminal={setTerminalAgent}
-          />
-        ) : null}
-        {terminalAgent ? (
-          <WebTerminalSurface
-            agent={terminalAgent}
-            onClose={() => setTerminalAgent(undefined)}
-            theme={theme}
-          />
-        ) : null}
-        {newGoalOpen ? (
-          <NewGoalDialog
-            error={commandError}
-            onCancel={() => {
-              setCommandError(undefined);
-              setNewGoalOpen(false);
-            }}
-            onCreate={async (command) => {
-              const response = await runCommand(command);
-              const goalId = response?.result.goalId;
-              if (!goalId) return;
-              setNewGoalOpen(false);
-              setSelection({ type: "goal", id: goalId });
-            }}
-            pending={commandPending}
+            onReviewChanges={openWorkspaceReview}
           />
         ) : null}
         <button
@@ -1248,6 +1326,55 @@ export const App = (): React.JSX.Element => {
           Motion {motion ? "on" : "off"}
         </button>
       </section>
+      {diffAgent ? (
+        <WorkspaceReview agent={diffAgent} onClose={() => setDiffAgent(undefined)} theme={theme} />
+      ) : null}
+      {terminalAgent ? (
+        <TerminalDeck
+          agent={terminalAgent}
+          key={terminalAgent.id}
+          onClose={() => setTerminalAgent(undefined)}
+          theme={theme}
+        />
+      ) : null}
+      {newGoalOpen ? (
+        <NewGoalDialog
+          error={commandError}
+          onCancel={() => {
+            setCommandError(undefined);
+            setNewGoalOpen(false);
+          }}
+          onCreate={async (command) => {
+            const response = await runCommand(command);
+            const goalId = response?.result.goalId;
+            if (!goalId) return;
+            setNewGoalOpen(false);
+            setSelection({ type: "goal", id: goalId });
+          }}
+          pending={commandPending}
+        />
+      ) : null}
+      {newAgentOpen ? (
+        <NewAgentDialog
+          defaultGoalId={selection?.type === "goal" ? selection.id : selectedAgent?.primaryGoalId}
+          onCancel={() => setNewAgentOpen(false)}
+          onStarted={(response) => {
+            portfolio.accept(response.portfolio);
+            const notice = response.result.warnings?.length
+              ? `${response.result.message} ${response.result.warnings.join(" ")}`
+              : response.result.message;
+            setLaunchNotice(notice);
+            setNewAgentOpen(false);
+            if (response.result.agentId) {
+              setSelection({ type: "agent", id: response.result.agentId });
+              setInspectorOpen(true);
+              setInspectorRevision((value) => value + 1);
+            } else if (response.result.goalId) {
+              setSelection({ type: "goal", id: response.result.goalId });
+            }
+          }}
+        />
+      ) : null}
     </main>
   );
 };

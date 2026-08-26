@@ -4,6 +4,7 @@ import type {
   HostTerminalEvent,
   HostedTerminalSession,
   TerminalDimensions,
+  TerminalOpenOptions,
   HostTerminalInput,
 } from "../types.ts";
 import { hostError, type HostError } from "../errors.ts";
@@ -269,19 +270,12 @@ export const openHerdrTerminal = (
   runner: TerminalCommandRunner,
   target: string,
   dimensions: TerminalDimensions,
+  options?: TerminalOpenOptions,
 ): HostedTerminalSession => {
-  const process = runner.spawnTerminal([
-    "herdr",
-    "terminal",
-    "session",
-    "control",
-    target,
-    "--takeover",
-    "--cols",
-    String(dimensions.columns),
-    "--rows",
-    String(dimensions.rows),
-  ]);
+  const command = ["herdr", "terminal", "session", "control", target, "--takeover"];
+  if (options?.resizeMode !== "preserve")
+    command.push("--cols", String(dimensions.columns), "--rows", String(dimensions.rows));
+  const process = runner.spawnTerminal(command);
   return new HerdrTerminalSession(process, target);
 };
 

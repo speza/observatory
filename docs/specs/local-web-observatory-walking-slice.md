@@ -37,6 +37,8 @@ another writable Observatory process.
 - responsive logical world placement with consistently legible SVG bodies and
   external goal titles;
 - goal creation, title and description editing, and human priority controls;
+- agent launch into Inbox or an active goal, using host-provided agent choices
+  and workspace-provider directory, checkout and worktree preparation;
 - agent assignment and unassignment through the selected agent inspector; and
 - explicit goal completion plus confirmed archive for completed goals and
   stale or unavailable agents;
@@ -70,6 +72,9 @@ The loopback API exposes only:
 - `POST /api/commands` — a browser-specific allow-list that maps goal and
   assignment actions onto existing `Universe` commands and returns the fresh
   portfolio with the accepted command result;
+- `GET /api/launch/options|browse` and `POST /api/launch/start` — bounded
+  workspace/host choices and one shared-coordinator launch intent, without
+  browser access to Git, Herdr or mutable Universe internals;
 - `POST /api/terminal/open` — resolves an active Agent through the generic
   `SessionHost` capability and opens a host-owned terminal;
 - `GET /api/terminal/:session/events` — streams bounded replay plus live
@@ -153,9 +158,10 @@ general audit log or transcript store.
   inspector, new-goal modal, catch-up lens and a live mock xterm.js frame. The
   terminal and catch-up overlays temporarily hide, but do not clear, the
   inspector so no stacked borders or world displacement leak through.
-- Agent labels are decluttered by a deterministic attention/selection budget;
-  stale or idle markers remain selectable without rendering every long label at
-  once.
+- Portfolio agent labels are decluttered by a deterministic attention/selection
+  budget. A focused goal shows every direct agent name in collision-free side
+  columns with leader lines; stale or idle markers remain selectable in either
+  mode.
 - Web terminal wheel and PageUp/PageDown requests use the existing host-owned
   scroll input contract.
 - Final human feel sign-off should still exercise physical pan/zoom and the
@@ -163,6 +169,9 @@ general audit log or transcript store.
 - API contract tests prove same-origin command rejection, schema validation,
   the browser command allow-list, refreshed projection responses and domain
   rejection without browser access to mutable internals.
+- Launch API tests prove host/workspace choice discovery, same-origin request
+  validation, reconciliation, goal assignment and refreshed portfolio output
+  through the deterministic mock host.
 - Persistence and projection tests prove catch-up survives restart, filters at
   the acknowledged sequence and remains deterministic.
 - Terminal API tests prove host-owned frame streaming, text input, resize,

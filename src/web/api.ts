@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type {
   CommandCentreProjection,
   CatchUpProjection,
@@ -7,9 +8,17 @@ import type {
 import type { SessionHost } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { Clock } from "../universe/types.ts";
+import type { WorkspaceDiffReader, WorkspaceProvider } from "../workspaces/types.ts";
+import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import { WebCommandError, WebCommandGateway } from "./commands.ts";
+import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
 import type {
   WebCommandResponse,
+  WebLaunchOptionsResponse,
+  WebStartAgentResponse,
+  WebWorkspaceBrowserResponse,
+  WebTerminalLinksResponse,
+  WebWorkingTreeDiffResponse,
   WebTerminalActionResponse,
   WebTerminalOpenResponse,
 } from "./protocol.ts";
@@ -29,7 +38,12 @@ type WebResponse =
   | PortfolioResponse
   | Projection
   | WebCommandResponse
+  | WebLaunchOptionsResponse
+  | WebStartAgentResponse
+  | WebWorkspaceBrowserResponse
+  | WebWorkingTreeDiffResponse
   | WebTerminalOpenResponse
+  | WebTerminalLinksResponse
   | WebTerminalActionResponse
   | ErrorResponse;
 
@@ -50,22 +64,34 @@ const targetType = (value: string | null): "goal" | "agent" | undefined => {
 export class ObservatoryWebApi {
   private readonly commands: WebCommandGateway;
   private readonly terminals: WebTerminalGateway | undefined;
+  private readonly launch: WebLaunchGateway | undefined;
 
   constructor(
     private readonly universe: Universe,
     private readonly clock: Clock,
     private readonly allowedOrigin = "http://127.0.0.1:4310",
     host?: SessionHost,
+    private readonly diffReader?: WorkspaceDiffReader,
+    launch?: {
+      readonly coordinator: StartAgentCoordinator;
+      readonly workspace: WorkspaceProvider;
+    },
   ) {
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host) : undefined;
+    this.launch =
+      host && launch
+        ? new WebLaunchGateway(universe, host, launch.workspace, launch.coordinator)
+        : undefined;
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const now = this.clock.now();
 
-    if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url.pathname);
+    if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url);
+
+    if (url.pathname.startsWith("/api/launch/")) return this.agentLaunch(request, url);
 
     if (url.pathname === "/api/commands") {
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -107,6 +133,49 @@ export class ObservatoryWebApi {
       return json(projection);
     }
 
+    if (url.pathname === "/api/diff") {
+      const agentId = url.searchParams.get("agentId")?.trim();
+      if (!agentId) return json({ error: "An agent id is required." }, 400);
+      const snapshot = this.universe.snapshot();
+      const agent = snapshot.agents.find((candidate) => candidate.id === agentId);
+      if (!agent) return json({ error: "Agent not found." }, 404);
+      if (!this.diffReader)
+        return json({ error: "Workspace diff inspection is unavailable." }, 501);
+      if (!agent.worktree) {
+        return json({
+          kind: "working-tree-diff",
+          agentId: agent.id,
+          agentName: agent.displayName,
+          goalTitle: snapshot.goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
+          status: "unavailable",
+          worktree: "",
+          repository: agent.repository,
+          branch: agent.branch,
+          files: [],
+          additions: 0,
+          deletions: 0,
+          truncated: false,
+          generatedAt: now,
+          message: "This agent has not reported a workspace path.",
+        } satisfies WebWorkingTreeDiffResponse);
+      }
+      try {
+        const diff = await Effect.runPromise(
+          this.diffReader.inspectWorkingTree(agent.worktree, now),
+        );
+        return json({
+          ...diff,
+          agentId: agent.id,
+          agentName: agent.displayName,
+          goalTitle: snapshot.goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
+          repository: agent.repository ?? diff.repository,
+          branch: agent.branch ?? diff.branch,
+        } satisfies WebWorkingTreeDiffResponse);
+      } catch {
+        return json({ error: "Workspace diff inspection failed." }, 503);
+      }
+    }
+
     return json({ error: "Not found." }, 404);
   }
 
@@ -127,10 +196,22 @@ export class ObservatoryWebApi {
     return { map, commandCentre, catchUp };
   }
 
-  private async terminal(request: Request, pathname: string): Promise<Response> {
+  private async terminal(request: Request, url: URL): Promise<Response> {
     if (!this.terminals) return json({ error: "Terminal transport is unavailable." }, 501);
-    const match = /^\/api\/terminal\/([^/]+)\/(events|input|resize|release)$/u.exec(pathname);
-    if (pathname === "/api/terminal/open") {
+    if (url.pathname === "/api/terminal/links") {
+      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      const agentId = url.searchParams.get("agentId")?.trim();
+      if (!agentId) return json({ error: "An agent id is required." }, 400);
+      try {
+        return json(await this.terminals.linkedExecutions(agentId));
+      } catch (error) {
+        return error instanceof WebTerminalError
+          ? this.terminalError(error)
+          : json({ error: "Terminal transport failed." }, 500);
+      }
+    }
+    const match = /^\/api\/terminal\/([^/]+)\/(events|input|resize|release)$/u.exec(url.pathname);
+    if (url.pathname === "/api/terminal/open") {
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       const rejected = this.rejectMutation(request);
       if (rejected) return rejected;
@@ -168,6 +249,36 @@ export class ObservatoryWebApi {
       return error instanceof WebTerminalError
         ? this.terminalError(error)
         : json({ error: "Terminal transport failed." }, 500);
+    }
+  }
+
+  private async agentLaunch(request: Request, url: URL): Promise<Response> {
+    if (!this.launch) return json({ error: "Agent launch is unavailable." }, 501);
+    try {
+      if (url.pathname === "/api/launch/options") {
+        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+        return json(await this.launch.options());
+      }
+      if (url.pathname === "/api/launch/browse") {
+        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+        const path = url.searchParams.get("path")?.trim();
+        if (!path) return json({ error: "A workspace path is required." }, 400);
+        return json(await this.launch.browse(path));
+      }
+      if (url.pathname === "/api/launch/start") {
+        if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+        const rejected = this.rejectMutation(request);
+        if (rejected) return rejected;
+        const result = await this.launch.start(await request.text());
+        const portfolio = this.portfolio(this.clock.now());
+        if (portfolio instanceof Response) return portfolio;
+        return json({ result, portfolio } satisfies WebStartAgentResponse);
+      }
+      return json({ error: "Not found." }, 404);
+    } catch (error) {
+      return error instanceof WebLaunchError
+        ? json({ error: error.message }, error.status)
+        : json({ error: "Agent launch failed." }, 500);
     }
   }
 

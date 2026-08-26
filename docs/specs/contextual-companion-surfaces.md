@@ -1,7 +1,7 @@
 # Contextual linked execution surfaces
 
-Status: accepted and implemented for the native renderer
-Date: 2026-08-24
+Status: accepted and implemented for the native renderer and web terminal deck
+Date: 2026-08-26
 Related: [Agent and linked execution model](agent-execution-model.md),
 [Embedded terminal interaction](../design/terminal-interaction.md),
 [Observatory technical architecture](../design/technical-architecture.md)
@@ -27,14 +27,16 @@ reveals `Open linked terminal` in its inspector/menu and through the keyboard
 shortcut. If the host reports multiple available linked executions, Observatory
 opens a picker showing each shell or sibling Agent by label.
 
-The renderer deliberately keeps the composition small:
+The clients use deliberately bounded terminal compositions:
 
-- one primary surface: the map or the selected Agent terminal; and
-- one selected linked execution surface beside it.
+- the native renderer keeps one primary surface and one selected linked
+  execution surface at a time; and
+- the web renderer keeps a primary `Main` tab plus any number of selected
+  companion tabs reported by the host.
 
-This allows simultaneous review without pretending to be a general-purpose
-multiplexer. The picker supports N linked shells and sibling agents even though
-only one is visible as the secondary surface at a time.
+The web tabs are a browser presentation of host-owned terminal sessions, not a
+new multiplexer. Each tab has an independent host controller, while the map,
+Agent selection and inspector remain stable when tabs are opened or switched.
 
 ```text
 map + selected linked shell
@@ -42,8 +44,10 @@ map + selected linked shell
 Agent terminal + selected linked shell/agent
 ```
 
-Only the focused surface receives ordinary keyboard input. All visible
-surfaces continue to receive output updates.
+Only the focused surface receives ordinary keyboard input. All open web tabs
+continue to receive output updates, including inactive tabs, so switching back
+does not lose terminal state. Closing a tab releases Observatory's controller;
+it does not claim that a user-owned process stopped.
 
 ## Host contract
 
@@ -82,6 +86,9 @@ Herdr reports sibling panes in the same host context and working directory.
 Recognised sibling agents are returned with `kind: agent`; shell-only panes are
 returned with `kind: shell`. If no matching shell is observed but a trustworthy
 working directory exists, Herdr may return one `prepared` shell capability.
+Opening a prepared capability creates a new Herdr tab in the existing Agent's
+workspace. It never creates a second Herdr workspace, Observatory Agent or
+Observatory Space.
 
 The mock host reports multiple deterministic shells and a sibling-agent link so
 the picker and both linked-execution kinds are testable without Herdr.
@@ -115,6 +122,11 @@ There is no duplicate durable shell object and no automatic Goal assignment.
 3. Choose a shell or sibling Agent when the picker appears.
 4. Use the explicit focus-cycle action or click a surface to switch input.
 
+In the web client, the primary terminal is the `Main` tab. The companion
+picker can add several available links as tabs; `Ctrl/Cmd+Tab` and
+`Ctrl/Cmd+1…9` switch tabs. Opening a companion does not change the selected
+Agent or move the map camera.
+
 The linked picker is a modal root surface above terminal panels, so its frame
 and rows remain visible and clickable when opened from review mode. While any
 modal or picker is open, keyboard and paste input belongs to that modal rather
@@ -144,11 +156,14 @@ and keeps the map selection authoritative.
 
 The first version does not persist linked-execution surfaces across an
 Observatory restart. Durable Agent identity and human assignment do persist.
+The browser tab list is also transient; it is rebuilt from the host's current
+capabilities when the terminal deck opens.
 
 ## Non-goals
 
 - A durable linked-execution table or map node.
-- An arbitrary nested split tree or user-authored pane layout.
+- An arbitrary nested split tree or user-authored pane layout. Browser tabs are
+  a bounded set of contextual surfaces, not an AO-owned multiplexer.
 - A daemon, AO-owned multiplexer, or AO-owned process lifecycle.
 - Transcript ingestion or provider-specific conversation rendering.
 - Native diff/review UI.
@@ -167,10 +182,12 @@ The implementation is acceptable when:
 6. Focus ownership is explicit and ordinary input cannot reach the wrong
    surface.
 7. The selected shell starts in the host-provided trustworthy worktree.
-8. A user can run a preferred diff/review tool in the shell.
-9. Shell-only panes are never reconciled as durable Agents.
-10. A later host snapshot can recognise a promoted shell as a normal Agent using
+8. A prepared Herdr shell is created as a tab in the parent Agent workspace,
+   not as a new workspace or durable Agent.
+9. A user can run a preferred diff/review tool in the shell.
+10. Shell-only panes are never reconciled as durable Agents.
+11. A later host snapshot can recognise a promoted shell as a normal Agent using
     its existing native identity.
-11. Mock and sanitised Herdr fixtures prove N links, shell links, sibling-agent
+12. Mock and sanitised Herdr fixtures prove N links, shell links, sibling-agent
     links, prepared links, open/resize/input/release, fresh target identity
     validation, and stale-target errors.

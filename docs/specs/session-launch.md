@@ -1,6 +1,6 @@
 # Observatory agent launch and workspace preparation
 
-Status: first launch slice implemented; follow-up UX and CLI work remains
+Status: TUI and local web launch slices implemented; CLI work remains
 Date: 2026-08-23
 Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md)
 
@@ -63,8 +63,8 @@ until a human or an explicit link operation assigns it.
 
 1. **Goal** — current goal, another existing goal, new goal, or inbox.
 2. **Location** — recent projects/directories first; browse configured roots
-   and choose a directory. An explicit path-entry escape hatch may be offered
-   later, but it is not the default interaction.
+   and choose a directory. The local web client also provides an explicit,
+   validated path-entry escape hatch, but it is not the default interaction.
 3. **Workspace** — existing checkout or new worktree.
 4. **Agent** — one of the initial launch options: Claude Code, Codex or Pi;
    the host supplies the selectable options and user-facing labels so users do
@@ -73,8 +73,8 @@ until a human or an explicit link operation assigns it.
 5. **Prompt** — optional initial instruction and optional agent name.
 
 The wizard should make the common path one or two selections rather than
-forcing a full configuration form. The first TUI slice is intentionally
-smaller: press `N`, keep the current directory or browse another directory,
+forcing a full configuration form. The first TUI and local web slices are intentionally
+smaller: open `New agent` (or press `N`), keep the current directory or browse another directory,
 choose an existing checkout or a new worktree, then select the host-supported
 agent, optional name and prompt. The initial location choices come from the current
 directory, known agent worktrees and the optional `AO_WORKSPACE_LOCATIONS`
@@ -350,6 +350,12 @@ The first proof should be deliberately narrow:
    delayed reconciliation through deterministic mock tests.
 8. Confirm direct vanilla Herdr agents remain discoverable and manually
    assignable.
+
+The maintained local web client now covers steps 1–4 through a loopback launch
+gateway. It lists choices from `WorkspaceProvider` and `SessionHost`, accepts a
+bounded `StartAgent` request, delegates the full operation to
+`StartAgentCoordinator`, and returns the refreshed portfolio. The browser does
+not run Git or host commands and never receives Herdr-native identifiers.
 
 The slice is successful when starting work feels like a single Observatory
 decision while the underlying host and workspace mechanics remain replaceable.

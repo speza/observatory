@@ -13,6 +13,7 @@ import type {
   AgentAccess,
   SessionHost,
   TerminalDimensions,
+  TerminalOpenOptions,
   HostTerminalInput,
   HostTerminalOpenResult,
   LinkedExecution,
@@ -327,6 +328,7 @@ export class MockHostAdapter implements SessionHost {
   openTerminal(
     access: AgentAccess,
     dimensions: TerminalDimensions,
+    _options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.sync(() => {
       if (!access.supported || !access.terminalTarget)
@@ -360,6 +362,7 @@ export class MockHostAdapter implements SessionHost {
   openLinkedExecutionTerminal(
     linkedExecution: LinkedExecution,
     dimensions: TerminalDimensions,
+    _options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.sync(() => {
       if (!linkedExecution.available || !linkedExecution.target)

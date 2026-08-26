@@ -1,10 +1,11 @@
 # Goal-centred agent orchestration map
 
-Status: V1 model and linked execution implemented; production web atlas walking slice in progress
+Status: V1 model, linked execution and local web atlas walking slice implemented; roadmap in review
 Date: 2026-08-25
 Product: Observatory — an agent observatory
 
 Technical design: [Observatory technical architecture](technical-architecture.md)
+Feature roadmap: [Feature ownership and delivery](../specs/observatory-feature-roadmap.md)
 
 ## Summary
 
@@ -674,6 +675,11 @@ client, with a narrow Universe command gateway. This is not an Electron or
 installed desktop-application commitment.
 The two clients share meaning, truthful uncertainty and projection contracts,
 not identical visual geometry.
+
+The current direction is to keep both clients through V1: the TUI remains the
+keyboard-first operational and host-edge fallback, while the web client is the
+primary high-fidelity orientation surface. Their feature ownership, parity
+gaps and delivery order are maintained in the [feature roadmap](../specs/observatory-feature-roadmap.md).
 
 The Atlas remains the primary orientation surface. The attention queue is the
 supporting action lens and the Ledger is the same-data precision/list baseline.

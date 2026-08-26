@@ -1,12 +1,14 @@
 # Observatory technical architecture
 
-Status: implemented V1 control plane; first production local web walking slice in progress
-Date: 2026-08-25
+Status: implemented V1 control plane and local web walking slice; feature roadmap in review
+Date: 2026-08-26
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
 
 Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
+
+Feature ownership and delivery: [Observatory feature roadmap](../specs/observatory-feature-roadmap.md)
 
 ## Purpose
 
@@ -47,8 +49,21 @@ agent and defines the boundary future agent hosts must implement.
 The [agent and linked execution model](../specs/agent-execution-model.md) and
 [contextual linked execution surface](../specs/contextual-companion-surfaces.md)
 decision extend the same boundary to transient shells and sibling-agent
-surfaces beside the selected Agent. Native diff/review presentation is
-deferred; users can run those tools inside a linked shell.
+surfaces beside the selected Agent. The local web client now adds a bounded,
+read-only working-tree diff review through the separate workspace capability;
+interactive/native diff tooling remains outside the `SessionHost` interface,
+and the TUI can still use a linked shell for provider-specific review workflows.
+
+## Client split
+
+The current product direction keeps both the native TUI and the local web
+client through V1. The TUI is the keyboard-first operational fallback and the
+most direct host-edge client; the web client is the higher-fidelity orientation
+surface for the Mineral Atlas, pointer interaction and responsive explanation.
+They consume the same CORE commands and projections, but do not duplicate
+geometry or renderer-specific interaction. The feature roadmap is the
+authoritative list of which capabilities are CORE, TUI and WEB, and which
+client gaps are intentional or scheduled.
 
 ## Architectural objective
 
@@ -214,9 +229,10 @@ listLaunchOptions()                             -> Effect<HostLaunchOption[], Ho
 launch(HostLaunchRequest)                       -> Effect<HostLaunchResult, HostError>
 access({ hostKind, nativeId })                  -> Effect<AgentAccess, HostError>
 activate(AgentAccess)                           -> Effect<HostActionResult, HostError>
-openTerminal(AgentAccess, TerminalDimensions)  -> Effect<HostTerminalOpenResult, HostError>
+openTerminal(AgentAccess, TerminalDimensions, TerminalOpenOptions?)
+                                                -> Effect<HostTerminalOpenResult, HostError>
 openLinkedExecutionTerminal(LinkedExecution,
-                             TerminalDimensions)
+                             TerminalDimensions, TerminalOpenOptions?)
                                                 -> Effect<HostTerminalOpenResult, HostError>
 ```
 
@@ -249,17 +265,23 @@ Hosts that cannot provide a capability return an explicit unsupported result.
 This keeps the module deep and avoids copying Herdr or tmux mechanics into
 every caller.
 
+Opening a terminal accepts an optional `TerminalOpenOptions.resizeMode`. The
+default `fit` mode sizes the host PTY to the client viewport, as the native TUI
+and the web workspace-review split do. The `preserve` mode remains available
+for a future read-mostly browser surface that must not impose its viewport on
+the host terminal.
+
 The implemented shape is deliberately small:
 
 ```text
-openTerminal(AgentAccess, TerminalDimensions)
+openTerminal(AgentAccess, TerminalDimensions, TerminalOpenOptions?)
   -> Effect<HostTerminalOpenResult, HostError>
        events: Stream<frame | closed, HostError>
        send(text | bytes): Effect<HostActionResult, HostError>
        resize(columns, rows): Effect<HostActionResult, HostError>
        release(): Effect<HostActionResult, HostError>
 
-openLinkedExecutionTerminal(LinkedExecution, TerminalDimensions)
+openLinkedExecutionTerminal(LinkedExecution, TerminalDimensions, TerminalOpenOptions?)
   -> Effect<HostTerminalOpenResult, HostError>
 ```
 
@@ -271,17 +293,20 @@ missing, stale or reused.
 The Herdr adapter translates both terminal capabilities into its controller
 stream; the mock adapter exercises the same contract. Herdr may discover
 shell-only panes by matching an Agent's opaque host context and working
-directory, or prepare a linked shell when no existing one is available. It also
+directory, or prepare a linked shell tab in the existing Agent workspace when
+no existing one is available. It also
 classifies recognised sibling agents as linked executions. The adapter returns
 only opaque targets and human-readable explanations: Herdr workspaces, tabs,
 panes and split layouts never become Observatory nodes.
 
-The renderer owns terminal-cell interpretation and the two transient surface
-slots. It can show a map beside a linked execution, or an Agent terminal beside
-one, and cycles focus explicitly between them. Modal pickers are rendered in a
-root overlay above terminal surfaces so selection remains visible and
-interactive. The host remains responsible for
-process ownership, resize and release. Releasing a linked execution releases
+The renderer owns terminal-cell interpretation and the transient terminal
+surfaces. The native renderer keeps two slots (primary plus one selected linked
+execution); the web renderer keeps a primary terminal and multiple selected
+linked executions as tabs. It can show a map beside a linked execution, or an
+Agent terminal beside one, and cycles focus explicitly between them. Modal
+pickers are rendered in a root overlay above terminal surfaces so selection
+remains visible and interactive. The host remains responsible for process
+ownership, resize and release. Releasing a linked execution releases
 Observatory's controller; it must not silently terminate an existing user-owned
 shell process. Native diff/review presentation is intentionally outside this
 interface: the linked shell is the flexible surface for those workflows.
@@ -298,8 +323,22 @@ The first launch slice is implemented and specified in
 [session-launch.md](../specs/session-launch.md). It keeps `SessionHost` as the
 only host seam and uses a typed launch capability; project recency, Git
 inspection and worktree preparation remain a separate workspace-provider
-capability at the control-plane edge. A richer location picker and JSON command
-surface are follow-up clients of the same coordinator.
+capability at the control-plane edge. The local web client now consumes that
+same coordinator through a narrow loopback launch gateway with workspace and
+host-provided choices; a JSON CLI remains a follow-up client.
+
+The web workspace review uses that edge capability without adding Git state to
+the Universe. The API accepts an observed Agent id, resolves its trusted
+worktree metadata server-side, and returns a bounded `WorkspaceDiffSnapshot`.
+The browser never submits a filesystem path, writes the checkout, or persists
+diff contents. A local provider compares the working tree with `HEAD`, includes
+safe untracked files, caps file/output size, and reports unavailable or
+non-Git workspaces as explicit states. The web renderer owns only transient
+file selection and unified/split presentation. The current review shell places
+that read-only diff beside the selected Agent's host-owned terminal deck; both
+are still transient views over the same Agent and neither creates a second
+workspace or repository model. Companion tabs use server-issued opaque link
+handles and are revalidated through `SessionHost` before opening.
 
 ### Provider-facts module
 
@@ -682,6 +721,14 @@ an explicit intent header. The browser polls because host refresh is already
 snapshot based. There is no browser-to-SQLite access, Herdr protocol, second
 semantic model, event bus or daemon in this slice.
 
+A separate bounded launch gateway exposes host launch options, workspace
+choices and directory browsing, then accepts one `StartAgent` intent. It calls
+the shared `StartAgentCoordinator`, which owns workspace preparation, host
+launch, reconciliation and goal assignment. The browser never receives a
+concrete host adapter, invokes Git or manufactures an Agent before host
+observation. Launch mutations use the same exact-origin and explicit-intent
+boundary as Universe commands.
+
 The same process exposes a narrow hosted-terminal gateway. The browser asks to
 open an accepted Agent; the server re-resolves it through the generic
 `SessionHost` access capability and retains only a transient session handle.
@@ -689,8 +736,11 @@ Server-sent events carry bounded replay plus live terminal frames. Separate
 same-origin JSON requests carry input, resize and release. Random session IDs
 act as process-local capabilities, and shutdown releases every open host
 session. SSE comment keepalives prevent a quiet terminal from tripping the
-loopback server's idle timeout. This adds no browser PTY, terminal persistence, concrete Herdr type,
-WebSocket or remotely authenticated service.
+loopback server's idle timeout. Workspace review opens the terminal beside the
+read-only working-tree diff with `resizeMode: fit`, matching the fullscreen
+terminal's wrapping and cell geometry in the half-width pane. This adds no
+browser PTY, terminal persistence, concrete Herdr type, WebSocket or remotely
+authenticated service.
 
 This is an ordinary browser surface launched by `bun run web` or
 `bun run web:mock`, not an Electron application. Projection polling is an

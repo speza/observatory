@@ -57,3 +57,56 @@ export interface WorkspaceProvider {
   readonly browse?: (path: string) => Effect.Effect<WorkspaceBrowser, WorkspaceError>;
   prepare(selection: WorkspaceSelection): Effect.Effect<PreparedWorkspace, WorkspaceError>;
 }
+
+/** A bounded, read-only view of one agent workspace's current Git changes. */
+export type WorkspaceDiffFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "untracked";
+
+export interface WorkspaceDiffFileContent {
+  readonly fileName: string;
+  readonly fileLang?: string;
+  readonly content: string;
+}
+
+export interface WorkspaceDiffFile {
+  readonly path: string;
+  readonly oldPath?: string;
+  readonly status: WorkspaceDiffFileStatus;
+  readonly additions: number;
+  readonly deletions: number;
+  readonly binary: boolean;
+  readonly oldFile?: WorkspaceDiffFileContent;
+  readonly newFile?: WorkspaceDiffFileContent;
+  /** Raw unified hunks, in the format accepted by the web diff renderer. */
+  readonly hunks: readonly string[];
+}
+
+export type WorkspaceDiffStatus = "clean" | "changed" | "not-git" | "unavailable";
+
+export interface WorkspaceDiffSnapshot {
+  readonly kind: "working-tree-diff";
+  readonly status: WorkspaceDiffStatus;
+  readonly worktree: string;
+  readonly repository?: string;
+  readonly branch?: string;
+  readonly head?: string;
+  readonly files: readonly WorkspaceDiffFile[];
+  readonly additions: number;
+  readonly deletions: number;
+  readonly truncated: boolean;
+  readonly generatedAt: number;
+  readonly message?: string;
+}
+
+/** Capability port for read-only workspace evidence; implementations live at the edge. */
+export interface WorkspaceDiffReader {
+  inspectWorkingTree(
+    path: string,
+    now: number,
+  ): Effect.Effect<WorkspaceDiffSnapshot, WorkspaceError>;
+}

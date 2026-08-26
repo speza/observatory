@@ -2,8 +2,10 @@
 
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
-import { extname, join, normalize } from "node:path";
+import { delimiter, extname, join, normalize } from "node:path";
 import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runtime/runtime.ts";
+import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
+import { LocalWorkspaceProvider } from "../workspaces/local.ts";
 import { ObservatoryWebApi } from "./api.ts";
 
 const contentTypes = {
@@ -46,11 +48,31 @@ const program = Effect.scoped(
     const runtime = createObservatoryRuntime();
     const initialMessage = yield* initializeObservatoryRuntime(runtime);
     const port = Number(process.env.AO_WEB_PORT ?? 4310);
+    const configuredWorkspaceLocations = (process.env.AO_WORKSPACE_LOCATIONS ?? "")
+      .split(delimiter)
+      .map((location) => location.trim())
+      .filter(Boolean);
+    const discoveredWorkspaceLocations = runtime.universe
+      .snapshot()
+      .agents.filter((agent) => agent.archivedAt === undefined)
+      .map((agent) => agent.worktree)
+      .filter((path): path is string => Boolean(path));
+    const workspace = new LocalWorkspaceProvider({
+      locations: [...configuredWorkspaceLocations, ...discoveredWorkspaceLocations],
+    });
+    const startAgent = createStartAgentCoordinator({
+      universe: runtime.universe,
+      host: runtime.host,
+      workspace,
+      refresh: runtime.reconcile,
+    });
     const api = new ObservatoryWebApi(
       runtime.universe,
       runtime.clock,
       `http://127.0.0.1:${port}`,
       runtime.host,
+      workspace,
+      { coordinator: startAgent, workspace },
     );
     const refreshMs = Number(process.env.AO_WEB_REFRESH_MS ?? 2_000);
     const server = Bun.serve({

@@ -271,13 +271,28 @@ with React and native SVG/CSS. It binds to loopback, keeps SQLite and
 host-specific protocols out of the browser, and submits a deliberately narrow
 set of human commands through the same Universe used by the native client.
 
+The TUI and web client are both maintained through V1. The TUI remains the
+keyboard-first operational fallback; the web client is the higher-fidelity
+orientation surface. They share CORE meaning and commands without requiring
+identical presentation. See the [feature roadmap and surface ownership](docs/specs/observatory-feature-roadmap.md)
+for the current split and planned parity work.
+
 The Atlas inspector can create and edit goals, set priority, assign or unassign
 agents, complete goals, and explicitly archive completed goals or stale agents.
 Archive actions require confirmation and remain subject to Universe invariants.
+`New agent` starts a hosted session through the shared launch coordinator: choose
+an active goal or Inbox, an existing checkout or new worktree, a host-supported
+agent, and an optional name and prompt. The browser can browse directories but
+never invokes Git, Herdr or an agent binary directly.
 The Catch up lens groups accepted semantic changes since the last explicit
 operator checkpoint. An Agent inspector can also open its host-owned terminal
 in a floating xterm.js surface; closing it releases the host session without
 changing map selection or durable state.
+The same inspector can open a read-only workspace review for an observed Agent:
+the browser requests the Agent id, while the server resolves its trusted
+worktree and returns a bounded Git diff. Changed files can be browsed in a
+unified or split view; large, binary, unavailable and non-Git workspaces remain
+explicit rather than being guessed.
 
 ```sh
 # clean-room 12-goal / 75-agent scale fixture
@@ -300,7 +315,7 @@ action. `j`/`k` or the arrow keys move selection; `Enter` focuses a goal or
 opens an Agent terminal; `Space`/`f` focuses; `+`/`-`/`0` zoom; `h`/`l` and
 PageUp/PageDown pan; `a` opens attention, `g` jumps to the next signal, `v`
 switches Atlas/Ledger, `b` opens the actionable unassigned Inbox, `n` opens
-New goal, `i` toggles the inspector, `t` opens the selected terminal, and
+New goal, `N` opens New agent, `i` toggles the inspector, `t` opens the selected terminal, and
 `Esc` closes the topmost surface. Catch-up entries return to Atlas and focus
 their affected Goal or Agent. Press `?`
 or use the masthead button for the in-app guide.
@@ -316,3 +331,4 @@ Implementation specifications:
 
 - [V0 live Herdr universe/map](docs/specs/v0-live-herdr-command-centre.md)
 - [Local web Observatory walking slice](docs/specs/local-web-observatory-walking-slice.md)
+- [Feature roadmap and surface ownership](docs/specs/observatory-feature-roadmap.md)

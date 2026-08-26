@@ -1,20 +1,30 @@
 import { Effect, Schema, Stream } from "effect";
 import {
   hasAgentCapability,
+  type AgentAccess,
+  type HostTerminalOpenResult,
   type HostedTerminalSession,
+  type LinkedExecution,
+  type TerminalDimensions,
   type SessionHost,
+  type TerminalOpenOptions,
 } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
+import type { Agent } from "../universe/types.ts";
 import type {
   WebTerminalActionResponse,
   WebTerminalEvent,
+  WebTerminalLink,
+  WebTerminalLinksResponse,
   WebTerminalOpenResponse,
   WebTerminalScrollRequest,
 } from "./protocol.ts";
 
 const MAX_TERMINAL_BODY_BYTES = 65_536;
 const MAX_REPLAY_EVENTS = 128;
+const MAX_LINK_HANDLES = 256;
 const SessionId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
+const LinkId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
 const Dimensions = Schema.Struct({
   columns: Schema.Number.pipe(Schema.int(), Schema.between(20, 320)),
   rows: Schema.Number.pipe(Schema.int(), Schema.between(5, 120)),
@@ -22,6 +32,8 @@ const Dimensions = Schema.Struct({
 const OpenRequest = Schema.Struct({
   agentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
   dimensions: Dimensions,
+  resizeMode: Schema.optional(Schema.Literal("fit", "preserve")),
+  linkId: Schema.optional(LinkId),
 });
 const TextInputRequest = Schema.Struct({
   value: Schema.String.pipe(Schema.maxLength(32_768)),
@@ -39,6 +51,13 @@ interface ActiveTerminal {
   readonly replay: WebTerminalEvent[];
   readonly listeners: Set<(event: WebTerminalEvent) => void>;
   closed: boolean;
+}
+
+interface LinkHandle {
+  readonly agentId: string;
+  readonly hostKind: string;
+  readonly nativeId: string;
+  readonly execution: LinkedExecution;
 }
 
 export class WebTerminalError extends Error {
@@ -67,27 +86,84 @@ const noOperation = (): void => undefined;
 
 export class WebTerminalGateway {
   private readonly sessions = new Map<string, ActiveTerminal>();
+  private readonly linkHandles = new Map<string, LinkHandle>();
 
   constructor(
     private readonly universe: Universe,
     private readonly host: SessionHost,
   ) {}
 
+  async linkedExecutions(agentId: string): Promise<WebTerminalLinksResponse> {
+    const agent = this.activeAgent(agentId);
+    let access;
+    try {
+      access = await Effect.runPromise(
+        this.host.access({ hostKind: agent.hostKind, nativeId: agent.nativeId }),
+      );
+    } catch {
+      throw new WebTerminalError("The host could not inspect linked terminals.", 502);
+    }
+
+    const previousHandles = [...this.linkHandles.entries()].filter(
+      ([, handle]) => handle.agentId === agent.id,
+    );
+    const retainedHandleIds = new Set<string>();
+    const links = access.linkedExecutions.map((execution) => {
+      const existing = previousHandles.find(([, handle]) =>
+        linkedExecutionMatches(handle.execution, execution),
+      );
+      const id = existing?.[0] ?? crypto.randomUUID();
+      if (execution.available && execution.target) {
+        retainedHandleIds.add(id);
+        this.rememberLinkHandle(id, {
+          agentId: agent.id,
+          hostKind: agent.hostKind,
+          nativeId: agent.nativeId,
+          execution,
+        });
+      }
+      return {
+        id,
+        kind: execution.kind,
+        label: boundedText(execution.label, "Linked terminal"),
+        source: execution.source,
+        available: execution.available && execution.target !== undefined,
+        explanation: boundedText(execution.explanation, "Linked terminal unavailable."),
+      } satisfies WebTerminalLink;
+    });
+    for (const [id] of previousHandles) {
+      if (!retainedHandleIds.has(id)) this.linkHandles.delete(id);
+    }
+
+    if (!access.supported)
+      return {
+        kind: "terminal-links",
+        agentId: agent.id,
+        agentName: agent.displayName,
+        links,
+        message: access.explanation,
+      } satisfies WebTerminalLinksResponse;
+    return {
+      kind: "terminal-links",
+      agentId: agent.id,
+      agentName: agent.displayName,
+      links,
+    } satisfies WebTerminalLinksResponse;
+  }
+
   async open(body: string): Promise<WebTerminalOpenResponse> {
     const request = decode(OpenRequest, body);
-    const agent = this.universe
-      .snapshot()
-      .agents.find(
-        (candidate) => candidate.id === request.agentId && candidate.archivedAt === undefined,
-      );
-    if (!agent) throw new WebTerminalError("Active agent not found.", 404);
+    const agent = this.activeAgent(request.agentId);
     try {
       const access = await Effect.runPromise(
         this.host.access({ hostKind: agent.hostKind, nativeId: agent.nativeId }),
       );
-      if (!hasAgentCapability(access, "embedded-terminal") || !access.terminalTarget)
-        throw new WebTerminalError(access.explanation, 409);
-      const opened = await Effect.runPromise(this.host.openTerminal(access, request.dimensions));
+      const options: TerminalOpenOptions | undefined = request.resizeMode
+        ? { resizeMode: request.resizeMode }
+        : undefined;
+      const opened = request.linkId
+        ? await this.openLinkedTerminal(request.linkId, agent, access, request.dimensions, options)
+        : await this.openPrimaryTerminal(access, request.dimensions, options);
       if (!opened.ok || !opened.terminal) throw new WebTerminalError(opened.message, 409);
       const sessionId = crypto.randomUUID();
       const active: ActiveTerminal = {
@@ -171,9 +247,62 @@ export class WebTerminalGateway {
   async closeAll(): Promise<void> {
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    this.linkHandles.clear();
     await Promise.allSettled(
       sessions.map((active) => Effect.runPromise(active.terminal.release())),
     );
+  }
+
+  private activeAgent(agentId: string) {
+    const agent = this.universe
+      .snapshot()
+      .agents.find((candidate) => candidate.id === agentId && candidate.archivedAt === undefined);
+    if (!agent) throw new WebTerminalError("Active agent not found.", 404);
+    return agent;
+  }
+
+  private async openPrimaryTerminal(
+    access: AgentAccess,
+    dimensions: TerminalDimensions,
+    options: TerminalOpenOptions | undefined,
+  ): Promise<HostTerminalOpenResult> {
+    if (!hasAgentCapability(access, "embedded-terminal") || !access.terminalTarget)
+      throw new WebTerminalError(access.explanation, 409);
+    return Effect.runPromise(this.host.openTerminal(access, dimensions, options));
+  }
+
+  private async openLinkedTerminal(
+    linkId: string,
+    agent: Agent,
+    access: AgentAccess,
+    dimensions: TerminalDimensions,
+    options: TerminalOpenOptions | undefined,
+  ): Promise<HostTerminalOpenResult> {
+    const handle = this.linkHandles.get(linkId);
+    if (!handle || handle.agentId !== agent.id)
+      throw new WebTerminalError("The linked terminal handle is no longer available.", 409);
+    if (handle.hostKind !== agent.hostKind || handle.nativeId !== agent.nativeId)
+      throw new WebTerminalError("The linked terminal belongs to a different Agent identity.", 409);
+    if (!hasAgentCapability(access, "linked-terminal"))
+      throw new WebTerminalError(access.explanation, 409);
+    const current = access.linkedExecutions.find((candidate) =>
+      linkedExecutionMatches(candidate, handle.execution),
+    );
+    if (!current || !current.available || !current.target)
+      throw new WebTerminalError(
+        "The linked terminal is no longer available; refresh and retry.",
+        409,
+      );
+    return Effect.runPromise(this.host.openLinkedExecutionTerminal(current, dimensions, options));
+  }
+
+  private rememberLinkHandle(id: string, handle: LinkHandle): void {
+    this.linkHandles.set(id, handle);
+    while (this.linkHandles.size > MAX_LINK_HANDLES) {
+      const oldest = this.linkHandles.keys().next().value;
+      if (!oldest) return;
+      this.linkHandles.delete(oldest);
+    }
   }
 
   private async action(
@@ -246,3 +375,29 @@ export class WebTerminalGateway {
     return active;
   }
 }
+
+const boundedText = (value: string, fallback: string): string => {
+  const text = value.trim().slice(0, 240);
+  return text || fallback;
+};
+
+const opaqueTargetMatches = (
+  left:
+    | { readonly kind: string; readonly token: string; readonly fingerprint?: string }
+    | undefined,
+  right:
+    | { readonly kind: string; readonly token: string; readonly fingerprint?: string }
+    | undefined,
+): boolean =>
+  left !== undefined &&
+  right !== undefined &&
+  left.kind === right.kind &&
+  left.token === right.token &&
+  left.fingerprint === right.fingerprint;
+
+const linkedExecutionMatches = (left: LinkedExecution, right: LinkedExecution): boolean =>
+  left.kind === right.kind &&
+  left.source === right.source &&
+  left.workingDirectory === right.workingDirectory &&
+  opaqueTargetMatches(left.owner, right.owner) &&
+  opaqueTargetMatches(left.target, right.target);

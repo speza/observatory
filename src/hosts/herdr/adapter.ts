@@ -13,6 +13,7 @@ import type {
   AgentAccess,
   SessionHost,
   TerminalDimensions,
+  TerminalOpenOptions,
   HostTerminalOpenResult,
 } from "../types.ts";
 import { hostError, type HostError } from "../errors.ts";
@@ -262,6 +263,26 @@ const paneWorkingDirectoriesFor = (payload: JsonValue | undefined): Map<string, 
   return result;
 };
 
+const paneWorkspaceIdsFor = (payload: JsonValue | undefined): Map<string, string> => {
+  const snapshot = unwrapSnapshot(payload);
+  const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
+  const result = new Map<string, string>();
+  for (const item of panes) {
+    const pane = nonEmptyRecord(item);
+    const paneId = stringValue(pane, "pane_id");
+    const workspaceId = stringValue(pane, "workspace_id");
+    if (paneId && workspaceId) result.set(paneId, workspaceId);
+  }
+  const agents = snapshot && Array.isArray(snapshot.agents) ? snapshot.agents : [];
+  for (const item of agents) {
+    const agent = nonEmptyRecord(item);
+    const paneId = stringValue(agent, "pane_id");
+    const workspaceId = stringValue(agent, "workspace_id");
+    if (paneId && workspaceId && !result.has(paneId)) result.set(paneId, workspaceId);
+  }
+  return result;
+};
+
 const paneFingerprintsFor = (payload: JsonValue | undefined): Map<string, string> => {
   const snapshot = unwrapSnapshot(payload);
   const panes = snapshot && Array.isArray(snapshot.panes) ? snapshot.panes : [];
@@ -279,6 +300,7 @@ const newPaneFor = (
   payload: JsonValue | undefined,
   beforePaneIds: ReadonlySet<string>,
   workingDirectory: string,
+  workspaceId?: string,
 ): string | undefined => {
   const wanted = normalizedPath(workingDirectory);
   const snapshot = unwrapSnapshot(payload);
@@ -292,19 +314,25 @@ const newPaneFor = (
     .map(nonEmptyRecord)
     .map((pane) => ({
       paneId: stringValue(pane, "pane_id"),
+      workspaceId: stringValue(pane, "workspace_id"),
       workingDirectory: paneWorkingDirectory(pane),
     }))
-    .filter((pane): pane is { paneId: string; workingDirectory: string } => {
-      const paneId = pane.paneId;
-      const candidateWorkingDirectory = pane.workingDirectory;
-      return (
-        paneId !== undefined &&
-        candidateWorkingDirectory !== undefined &&
-        !beforePaneIds.has(paneId) &&
-        !agentPaneIds.has(paneId) &&
-        normalizedPath(candidateWorkingDirectory) === wanted
-      );
-    });
+    .filter(
+      (
+        pane,
+      ): pane is { paneId: string; workspaceId: string | undefined; workingDirectory: string } => {
+        const paneId = pane.paneId;
+        const candidateWorkingDirectory = pane.workingDirectory;
+        return (
+          paneId !== undefined &&
+          candidateWorkingDirectory !== undefined &&
+          (workspaceId === undefined || pane.workspaceId === workspaceId) &&
+          !beforePaneIds.has(paneId) &&
+          !agentPaneIds.has(paneId) &&
+          normalizedPath(candidateWorkingDirectory) === wanted
+        );
+      },
+    );
   return candidates.length === 1 ? candidates[0]?.paneId : undefined;
 };
 
@@ -398,7 +426,7 @@ const linkedExecutionsFor = (
           target: { kind: "herdr-prepared-shell", token: workingDirectory },
           available: true,
           source: "prepared",
-          explanation: `Herdr will prepare a linked shell in ${workingDirectory}.`,
+          explanation: `Herdr will prepare a linked terminal tab in ${workingDirectory}.`,
         },
       ]);
     }
@@ -499,6 +527,7 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
   private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
   private readonly livePaneWorkingDirectories = new Map<string, string>();
+  private readonly livePaneWorkspaces = new Map<string, string>();
   private readonly liveTerminalFingerprints = new Map<string, string>();
   private readonly liveAgentFingerprints = new Map<string, string>();
   private readonly preparedShellTargets = new Map<string, PreparedShellTarget>();
@@ -667,6 +696,7 @@ export class HerdrHostAdapter implements SessionHost {
     this.liveTargets.clear();
     this.liveLinkedExecutions.clear();
     this.livePaneWorkingDirectories.clear();
+    this.livePaneWorkspaces.clear();
     this.liveTerminalFingerprints.clear();
     this.liveAgentFingerprints.clear();
     let result;
@@ -702,6 +732,8 @@ export class HerdrHostAdapter implements SessionHost {
     }
     for (const [paneId, workingDirectory] of paneWorkingDirectoriesFor(parsedPayload))
       this.livePaneWorkingDirectories.set(paneId, workingDirectory);
+    for (const [paneId, workspaceId] of paneWorkspaceIdsFor(parsedPayload))
+      this.livePaneWorkspaces.set(paneId, workspaceId);
     for (const [paneId, fingerprint] of paneFingerprintsFor(parsedPayload))
       this.liveTerminalFingerprints.set(paneId, fingerprint);
     for (const [key, prepared] of this.preparedShellTargets) {
@@ -849,6 +881,7 @@ export class HerdrHostAdapter implements SessionHost {
   openTerminal(
     access: AgentAccess,
     dimensions: TerminalDimensions,
+    options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.tryPromise({
       try: async () => {
@@ -882,7 +915,7 @@ export class HerdrHostAdapter implements SessionHost {
         try {
           return {
             ok: true,
-            terminal: openHerdrTerminal(this.terminalRunner, token, dimensions),
+            terminal: openHerdrTerminal(this.terminalRunner, token, dimensions, options),
             message: `Opened an embedded Herdr terminal for ${token}.`,
           } satisfies HostTerminalOpenResult;
         } catch (error) {
@@ -900,6 +933,7 @@ export class HerdrHostAdapter implements SessionHost {
   openLinkedExecutionTerminal(
     linkedExecution: LinkedExecution,
     dimensions: TerminalDimensions,
+    options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.tryPromise({
       try: async () => {
@@ -973,11 +1007,21 @@ export class HerdrHostAdapter implements SessionHost {
           }
         }
         if (!target && workingDirectory) {
+          // A prepared companion is a contextual Herdr tab, not a new AO
+          // workspace. Keep the parent workspace identity inside this adapter.
+          const ownerWorkspaceId = this.livePaneWorkspaces.get(ownerToken);
+          if (!ownerWorkspaceId)
+            return {
+              ok: false,
+              message: "Herdr could not identify the Agent workspace for a linked terminal tab.",
+            } satisfies HostTerminalOpenResult;
           const beforePaneIds = new Set(this.livePaneWorkingDirectories.keys());
           const created = await this.runner.run([
             "herdr",
-            "workspace",
+            "tab",
             "create",
+            "--workspace",
+            ownerWorkspaceId,
             "--cwd",
             workingDirectory,
             "--label",
@@ -989,7 +1033,7 @@ export class HerdrHostAdapter implements SessionHost {
               ok: false,
               message: commandFailureMessage(
                 created,
-                "Herdr could not prepare a linked shell workspace.",
+                "Herdr could not prepare a linked terminal tab.",
               ),
             } satisfies HostTerminalOpenResult;
           target = createdRootPaneId(parseJsonValue(created.stdout));
@@ -997,21 +1041,26 @@ export class HerdrHostAdapter implements SessionHost {
           if (afterCreate.exitCode === 0) {
             const afterPayload = parseJsonValue(afterCreate.stdout);
             const afterFingerprints = paneFingerprintsFor(afterPayload);
+            const afterWorkspaces = paneWorkspaceIdsFor(afterPayload);
             if (target) {
               const afterCwd = paneWorkingDirectoriesFor(afterPayload).get(target);
               targetFingerprint = afterFingerprints.get(target);
-              if (afterCwd !== normalizedPath(workingDirectory) || targetFingerprint === undefined)
+              if (
+                afterCwd !== normalizedPath(workingDirectory) ||
+                afterWorkspaces.get(target) !== ownerWorkspaceId ||
+                targetFingerprint === undefined
+              )
                 target = undefined;
             }
             if (!target) {
-              target = newPaneFor(afterPayload, beforePaneIds, workingDirectory);
+              target = newPaneFor(afterPayload, beforePaneIds, workingDirectory, ownerWorkspaceId);
               targetFingerprint = target ? afterFingerprints.get(target) : undefined;
             }
           }
           if (!target || !targetFingerprint)
             return {
               ok: false,
-              message: "Herdr created a linked workspace but could not identify its shell pane.",
+              message: "Herdr created a linked terminal tab but could not identify its shell pane.",
             } satisfies HostTerminalOpenResult;
           this.preparedShellTargets.set(preparedShellKey(ownerToken, workingDirectory), {
             ownerToken,
@@ -1030,9 +1079,9 @@ export class HerdrHostAdapter implements SessionHost {
           } satisfies HostTerminalOpenResult;
         return {
           ok: true,
-          terminal: openHerdrTerminal(this.terminalRunner, target, dimensions),
+          terminal: openHerdrTerminal(this.terminalRunner, target, dimensions, options),
           message: prepared
-            ? `Opened a Herdr linked terminal in ${workingDirectory}.`
+            ? `Opened a Herdr linked terminal tab in ${workingDirectory}.`
             : `Opened the existing Herdr linked terminal ${target}.`,
         } satisfies HostTerminalOpenResult;
       },

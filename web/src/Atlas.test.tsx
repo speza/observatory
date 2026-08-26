@@ -7,7 +7,7 @@ import { createMockScenario } from "../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
 import { FixedClock, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
-import { Atlas } from "./Atlas.tsx";
+import { Atlas, focusedLabelOffsets } from "./Atlas.tsx";
 
 interface RenderedGoal {
   readonly id: string;
@@ -57,6 +57,33 @@ const renderedAgents = (markup: string): readonly RenderedAgent[] =>
   );
 
 describe("production web Atlas", () => {
+  test("places every focused agent label in collision-free side columns", () => {
+    const candidates = [
+      { id: "left-a", labelOnLeft: true, rect: { left: 0, right: 90, top: 10, bottom: 42 } },
+      { id: "left-b", labelOnLeft: true, rect: { left: 2, right: 92, top: 20, bottom: 52 } },
+      { id: "left-c", labelOnLeft: true, rect: { left: 4, right: 94, top: 30, bottom: 62 } },
+      { id: "right-a", labelOnLeft: false, rect: { left: 200, right: 290, top: 14, bottom: 46 } },
+      { id: "right-b", labelOnLeft: false, rect: { left: 202, right: 292, top: 24, bottom: 56 } },
+    ] as const;
+    const offsets = focusedLabelOffsets(candidates);
+
+    expect(offsets.size).toBe(candidates.length);
+    for (const labelOnLeft of [true, false]) {
+      const column = candidates
+        .filter((candidate) => candidate.labelOnLeft === labelOnLeft)
+        .map((candidate) => ({
+          top: candidate.rect.top + (offsets.get(candidate.id) ?? 0),
+          bottom: candidate.rect.bottom + (offsets.get(candidate.id) ?? 0),
+        }))
+        .sort((left, right) => left.top - right.top);
+      for (let index = 1; index < column.length; index += 1) {
+        expect((column[index]?.top ?? 0) - (column[index - 1]?.bottom ?? 0)).toBeGreaterThanOrEqual(
+          8,
+        );
+      }
+    }
+  });
+
   test("renders a separated 12-goal and 75-agent world with truthful uncertainty", async () => {
     const clock = new FixedClock(50_000);
     const scenario = createMockScenario("portfolio");

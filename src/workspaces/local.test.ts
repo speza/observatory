@@ -1,18 +1,56 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { LocalWorkspaceProvider, type WorkspaceCommandRunner } from "./local.ts";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  LocalWorkspaceProvider,
+  type WorkspaceCommandOptions,
+  type WorkspaceCommandResult,
+  type WorkspaceCommandRunner,
+} from "./local.ts";
 
 class FakeGitRunner implements WorkspaceCommandRunner {
-  readonly calls: { readonly argv: readonly string[]; readonly cwd?: string }[] = [];
+  readonly calls: {
+    readonly argv: readonly string[];
+    readonly cwd?: string;
+    readonly options?: WorkspaceCommandOptions;
+  }[] = [];
 
-  async run(argv: readonly string[], cwd?: string) {
-    this.calls.push({ argv, cwd });
-    if (argv[0] === "git" && argv[1] === "rev-parse")
+  constructor(
+    private readonly overrides: {
+      readonly diff?: WorkspaceCommandResult;
+      readonly show?: WorkspaceCommandResult;
+      readonly untracked?: WorkspaceCommandResult;
+    } = {},
+  ) {}
+
+  async run(
+    argv: readonly string[],
+    cwd?: string,
+    options?: WorkspaceCommandOptions,
+  ): Promise<WorkspaceCommandResult> {
+    this.calls.push(options ? { argv, cwd, options } : { argv, cwd });
+    if (argv[0] === "git" && argv[1] === "rev-parse") {
+      if (argv[2] === "HEAD") return { exitCode: 0, stdout: "0123456789abcdef\n", stderr: "" };
       return { exitCode: 0, stdout: `${cwd}\n`, stderr: "" };
+    }
     if (argv[0] === "git" && argv[1] === "branch")
       return { exitCode: 0, stdout: "main\n", stderr: "" };
     if (argv[0] === "git" && argv[1] === "status")
       return { exitCode: 0, stdout: " M dirty.ts\n", stderr: "" };
+    if (argv[0] === "git" && argv[1] === "diff")
+      return (
+        this.overrides.diff ?? {
+          exitCode: 0,
+          stdout:
+            "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new",
+          stderr: "",
+        }
+      );
+    if (argv[0] === "git" && argv[1] === "show")
+      return this.overrides.show ?? { exitCode: 0, stdout: "old\n", stderr: "" };
+    if (argv[0] === "git" && argv[1] === "ls-files")
+      return this.overrides.untracked ?? { exitCode: 0, stdout: "", stderr: "" };
     return { exitCode: 0, stdout: "", stderr: "" };
   }
 }
@@ -48,5 +86,87 @@ describe("local workspace provider", () => {
       argv: ["git", "worktree", "add", "-b", "feat/launch-test", path, "HEAD"],
       cwd: process.cwd(),
     });
+  });
+
+  test("returns a bounded, read-only working-tree diff", async () => {
+    const runner = new FakeGitRunner();
+    const provider = new LocalWorkspaceProvider({ cwd: process.cwd(), runner });
+    const diff = await Effect.runPromise(provider.inspectWorkingTree(process.cwd(), 1234));
+
+    expect(diff.status).toBe("changed");
+    expect(diff.branch).toBe("main");
+    expect(diff.head).toBe("0123456789abcdef");
+    expect(diff.files[0]).toMatchObject({
+      path: "README.md",
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      binary: false,
+      oldFile: { content: "old\n" },
+    });
+    expect(diff.files[0]?.hunks[0]).toContain("--- a/README.md");
+    expect(diff.files[0]?.hunks[0]).toContain("@@ -1 +1 @@");
+    expect(runner.calls.some(({ argv }) => argv.includes("--no-ext-diff"))).toBe(true);
+    expect(
+      runner.calls.find(({ argv }) => argv[1] === "diff")?.options?.maxStdoutBytes,
+    ).toBeGreaterThan(0);
+    expect(
+      runner.calls.find(({ argv }) => argv[1] === "show")?.options?.maxStdoutBytes,
+    ).toBeGreaterThan(0);
+    expect(
+      runner.calls.find(({ argv }) => argv[1] === "ls-files")?.options?.maxStdoutBytes,
+    ).toBeGreaterThan(0);
+  });
+
+  test("preserves repository-relative untracked paths with a/ or b/ prefixes", async () => {
+    const root = await mkdtemp(join("/private/tmp", "ao-workspace-untracked-"));
+    try {
+      await mkdir(join(root, "a"), { recursive: true });
+      await writeFile(join(root, "a", "foo.ts"), "hello\n");
+      const runner = new FakeGitRunner({
+        diff: { exitCode: 0, stdout: "", stderr: "" },
+        untracked: { exitCode: 0, stdout: "a/foo.ts\u0000", stderr: "" },
+      });
+      const provider = new LocalWorkspaceProvider({ cwd: root, runner });
+
+      const diff = await Effect.runPromise(provider.inspectWorkingTree(root, 1234));
+
+      expect(diff.status).toBe("changed");
+      expect(diff.files[0]).toMatchObject({ path: "a/foo.ts", status: "untracked" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports a Git diff failure as unavailable instead of clean", async () => {
+    const runner = new FakeGitRunner({
+      diff: { exitCode: 128, stdout: "", stderr: "fatal: bad revision 'HEAD'\n" },
+    });
+    const provider = new LocalWorkspaceProvider({ cwd: process.cwd(), runner });
+
+    const diff = await Effect.runPromise(provider.inspectWorkingTree(process.cwd(), 1234));
+
+    expect(diff.status).toBe("unavailable");
+    expect(diff.files).toHaveLength(0);
+    expect(diff.message).toContain("bad revision");
+  });
+
+  test("marks unsafe or omitted untracked paths as an incomplete inspection", async () => {
+    const runner = new FakeGitRunner({
+      diff: { exitCode: 0, stdout: "", stderr: "" },
+      untracked: {
+        exitCode: 0,
+        stdout: "../outside.ts\u0000partial",
+        stderr: "",
+        stdoutTruncated: true,
+      },
+    });
+    const provider = new LocalWorkspaceProvider({ cwd: process.cwd(), runner });
+
+    const diff = await Effect.runPromise(provider.inspectWorkingTree(process.cwd(), 1234));
+
+    expect(diff.status).toBe("unavailable");
+    expect(diff.truncated).toBe(true);
+    expect(diff.message).toContain("incomplete");
   });
 });

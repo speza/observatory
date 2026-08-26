@@ -108,6 +108,12 @@ interface LabelRect {
   readonly bottom: number;
 }
 
+interface FocusedLabelCandidate {
+  readonly id: string;
+  readonly labelOnLeft: boolean;
+  readonly rect: LabelRect;
+}
+
 const labelRectFor = (
   point: { readonly x: number; readonly y: number },
   lines: readonly string[],
@@ -127,6 +133,48 @@ const labelsOverlap = (left: LabelRect, right: LabelRect, gap = 8): boolean =>
   left.right + gap > right.left &&
   left.top < right.bottom + gap &&
   left.bottom + gap > right.top;
+
+export const focusedLabelOffsets = (
+  candidates: readonly FocusedLabelCandidate[],
+  gap = 8,
+): ReadonlyMap<string, number> => {
+  const offsets = new Map<string, number>();
+  for (const labelOnLeft of [true, false]) {
+    const column = candidates
+      .filter((candidate) => candidate.labelOnLeft === labelOnLeft)
+      .sort((left, right) => left.rect.top - right.rect.top || left.id.localeCompare(right.id));
+    if (column.length === 0) continue;
+
+    const placedTops: number[] = [];
+    let nextTop = Number.NEGATIVE_INFINITY;
+    for (const candidate of column) {
+      const top = Math.max(candidate.rect.top, nextTop);
+      placedTops.push(top);
+      nextTop = top + candidate.rect.bottom - candidate.rect.top + gap;
+    }
+
+    const preferredCentre =
+      column.reduce((sum, candidate) => sum + (candidate.rect.top + candidate.rect.bottom) / 2, 0) /
+      column.length;
+    const placedCentre =
+      column.reduce(
+        (sum, candidate, index) =>
+          sum +
+          (placedTops[index] ?? candidate.rect.top) +
+          (candidate.rect.bottom - candidate.rect.top) / 2,
+        0,
+      ) / column.length;
+    const centreCorrection = preferredCentre - placedCentre;
+
+    for (const [index, candidate] of column.entries()) {
+      offsets.set(
+        candidate.id,
+        (placedTops[index] ?? candidate.rect.top) + centreCorrection - candidate.rect.top,
+      );
+    }
+  }
+  return offsets;
+};
 
 const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
@@ -523,10 +571,6 @@ export const Atlas = ({
             const focusedAgent =
               selection?.type === "agent" && goal.agents.some((agent) => agent.id === selection.id);
             const focused = selected || focusedAgent;
-            // Focused systems reveal more context, but never at the cost of a wall of
-            // colliding names. Required labels (the selected agent and review items)
-            // win first; ordinary labels are admitted only when their estimated text
-            // boxes do not intersect an already visible label.
             const labelCandidates = goal.agents
               .map((agent, index) => {
                 const point = agentPoints[index];
@@ -548,16 +592,31 @@ export const Atlas = ({
               .filter(
                 (candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined,
               )
-              .filter((candidate) => candidate.attention || candidate.selected || focused)
+              .filter(
+                (candidate) => candidate.attention || candidate.selected || focused || focusedGoal,
+              )
               .sort(
                 (left, right) =>
                   Number(right.selected) - Number(left.selected) ||
                   Number(right.attention) - Number(left.attention) ||
                   left.index - right.index,
               );
+            const focusedOffsets = focusedGoal
+              ? focusedLabelOffsets(
+                  labelCandidates.map((candidate) => ({
+                    id: candidate.agent.id,
+                    labelOnLeft: candidate.labelOnLeft,
+                    rect: candidate.rect,
+                  })),
+                )
+              : new Map<string, number>();
             const visibleLabelIds = new Set<string>();
             const visibleLabelRects: LabelRect[] = [];
             for (const candidate of labelCandidates) {
+              if (focusedGoal) {
+                visibleLabelIds.add(candidate.agent.id);
+                continue;
+              }
               const required = candidate.selected || candidate.attention;
               if (
                 !required &&
@@ -675,6 +734,7 @@ export const Atlas = ({
                   const state = stateLabel(agent);
                   const labelX = labelOnLeft ? -17 : 17;
                   const nameLines = agentLinesFor(agent.displayName);
+                  const labelOffsetY = focusedOffsets.get(agent.id) ?? 0;
                   return (
                     <g
                       className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
@@ -729,12 +789,18 @@ export const Atlas = ({
                             <text y="3">!</text>
                           </g>
                         ) : null}
+                        {showLabel && focusedGoal && Math.abs(labelOffsetY) > 0.5 ? (
+                          <path
+                            className="agent__label-leader"
+                            d={`M ${labelOnLeft ? -10 : 10} 0 L ${labelX * 0.72} ${labelOffsetY} L ${labelX} ${labelOffsetY}`}
+                          />
+                        ) : null}
                         {showLabel ? (
                           <text
                             className="agent__label"
                             textAnchor={labelOnLeft ? "end" : "start"}
                             x={labelX}
-                            y={nameLines.length > 1 ? -8 : -2}
+                            y={(nameLines.length > 1 ? -8 : -2) + labelOffsetY}
                           >
                             {nameLines.map((line, lineIndex) => (
                               <tspan

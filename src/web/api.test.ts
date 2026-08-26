@@ -1,14 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
+import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
+import type {
+  PreparedWorkspace,
+  WorkspaceDiffReader,
+  WorkspaceProvider,
+  WorkspaceSelection,
+} from "../workspaces/types.ts";
 import { ObservatoryWebApi, type PortfolioResponse } from "./api.ts";
-import type { WebCommand, WebCommandResponse, WebTerminalOpenResponse } from "./protocol.ts";
+import type {
+  WebCommand,
+  WebCommandResponse,
+  WebLaunchOptionsResponse,
+  WebStartAgentResponse,
+  WebTerminalLinksResponse,
+  WebTerminalOpenResponse,
+  WebWorkingTreeDiffResponse,
+} from "./protocol.ts";
 
 type TerminalTestBody =
   | {
       readonly agentId: string;
       readonly dimensions: { readonly columns: number; readonly rows: number };
+      readonly linkId?: string;
+      readonly resizeMode?: "fit" | "preserve";
     }
   | { readonly value: string }
   | {
@@ -21,6 +38,130 @@ type TerminalTestBody =
   | { readonly release?: never };
 
 describe("ObservatoryWebApi", () => {
+  test("lists launch choices and starts an observed agent through the shared coordinator", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const goal = fixture.universe.execute({ type: "CreateGoal", title: "Web launch proof" });
+    if (!goal.goalId) throw new Error("Expected a created goal.");
+    const workspace: WorkspaceProvider = {
+      listChoices: () =>
+        Effect.succeed([
+          {
+            path: "/synthetic/project",
+            label: "project",
+            kind: "workspace",
+            repository: "project",
+            branch: "main",
+            available: true,
+          },
+        ]),
+      browse: (path) =>
+        Effect.succeed({
+          path,
+          parentPath: "/synthetic",
+          entries: [],
+        }),
+      prepare: (_selection: WorkspaceSelection) =>
+        Effect.succeed({
+          path: "/synthetic/project",
+          repository: "project",
+          branch: "main",
+          worktree: false,
+          warnings: [],
+        } satisfies PreparedWorkspace),
+    };
+    const refresh = Effect.gen(function* () {
+      const snapshot = yield* host.snapshot();
+      const result = fixture.universe.reconcile(snapshot);
+      return result.accepted ? "refreshed" : "rejected";
+    });
+    const coordinator = createStartAgentCoordinator({
+      universe: fixture.universe,
+      host,
+      workspace,
+      refresh,
+    });
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      host,
+      undefined,
+      { coordinator, workspace },
+    );
+
+    const optionsResponse = await api.fetch(new Request("http://localhost/api/launch/options"));
+    const options: WebLaunchOptionsResponse = await optionsResponse.json();
+    expect(optionsResponse.status).toBe(200);
+    expect(options.goals[0]?.id).toBe(goal.goalId);
+    expect(options.locations[0]?.path).toBe("/synthetic/project");
+    expect(options.agents.some((agent) => agent.kind === "codex")).toBe(true);
+
+    const browserResponse = await api.fetch(
+      new Request("http://localhost/api/launch/browse?path=/synthetic/project"),
+    );
+    expect(browserResponse.status).toBe(200);
+    expect((await browserResponse.json()).path).toBe("/synthetic/project");
+
+    const startedResponse = await api.fetch(
+      new Request("http://localhost/api/launch/start", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          requestId: "web-launch-test",
+          goalId: goal.goalId,
+          workspace: { kind: "existing", path: "/synthetic/project" },
+          agentKind: "codex",
+          agentName: "Web agent",
+          prompt: "Prove the web launch path.",
+        }),
+      }),
+    );
+    const started: WebStartAgentResponse = await startedResponse.json();
+    expect(startedResponse.status).toBe(200);
+    expect(started.result.status).toBe("started");
+    expect(started.result.agentId).toBeDefined();
+    expect(
+      fixture.universe.snapshot().agents.find((agent) => agent.id === started.result.agentId)
+        ?.primaryGoalId,
+    ).toBe(goal.goalId);
+    expect(
+      started.portfolio.commandCentre.goals
+        .find((candidate) => candidate.id === goal.goalId)
+        ?.agents.some((agent) => agent.id === started.result.agentId),
+    ).toBe(true);
+
+    const foreign = await api.fetch(
+      new Request("http://localhost/api/launch/start", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://example.com",
+          "x-ao-command": "1",
+        },
+        body: "{}",
+      }),
+    );
+    const malformed = await api.fetch(
+      new Request("http://localhost/api/launch/start", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: "{}",
+      }),
+    );
+    expect(foreign.status).toBe(403);
+    expect(malformed.status).toBe(400);
+  });
+
   test("serves the map and command-centre projections from one Universe", async () => {
     const fixture = makeUniverse();
     fixture.universe.reconcile(
@@ -81,6 +222,72 @@ describe("ObservatoryWebApi", () => {
     expect(inspector.status).toBe(200);
     expect((await inspector.json()).kind).toBe("goal-inspector");
     expect(write.status).toBe(405);
+  });
+
+  test("serves a diff by trusted agent id without accepting a browser path", async () => {
+    const fixture = makeUniverse();
+    fixture.universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "native-a",
+          displayName: "Atlas",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:native-a",
+          worktree: "/observed/worktree",
+          observedAt: fixture.clock.now(),
+        },
+      ]),
+    );
+    const agent = fixture.universe.snapshot().agents[0];
+    if (!agent) throw new Error("Expected reconciled agent.");
+    const reader: WorkspaceDiffReader = {
+      inspectWorkingTree: (path, now) =>
+        Effect.succeed({
+          kind: "working-tree-diff",
+          status: "changed",
+          worktree: path,
+          repository: "observatory",
+          branch: "main",
+          files: [
+            {
+              path: "src/main.ts",
+              status: "modified",
+              additions: 2,
+              deletions: 1,
+              binary: false,
+              oldFile: { fileName: "src/main.ts", fileLang: "typescript", content: "old\n" },
+              newFile: { fileName: "src/main.ts", fileLang: "typescript", content: "new\n" },
+              hunks: ["--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new"],
+            },
+          ],
+          additions: 2,
+          deletions: 1,
+          truncated: false,
+          generatedAt: now,
+        }),
+    };
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      undefined,
+      reader,
+    );
+
+    const response = await api.fetch(
+      new Request(
+        `http://localhost/api/diff?agentId=${encodeURIComponent(agent.id)}&path=/etc/passwd`,
+      ),
+    );
+    const body: WebWorkingTreeDiffResponse = await response.json();
+    const missing = await api.fetch(new Request("http://localhost/api/diff"));
+
+    expect(response.status).toBe(200);
+    expect(body.agentId).toBe(agent.id);
+    expect(body.worktree).toBe("/observed/worktree");
+    expect(body.files[0]?.path).toBe("src/main.ts");
+    expect(missing.status).toBe(400);
   });
 
   test("requires same-origin JSON with an explicit command header", async () => {
@@ -223,6 +430,25 @@ describe("ObservatoryWebApi", () => {
         }),
       );
 
+    const linksResponse = await api.fetch(
+      new Request(`http://localhost/api/terminal/links?agentId=${encodeURIComponent(agent.id)}`),
+    );
+    const linksBody: WebTerminalLinksResponse = await linksResponse.json();
+    const firstLink = linksBody.links.find((link) => link.available);
+    expect(linksResponse.status).toBe(200);
+    expect(linksBody.kind).toBe("terminal-links");
+    expect(linksBody.links).toHaveLength(3);
+    expect(firstLink).toBeDefined();
+    expect(firstLink).not.toHaveProperty("target");
+    const refreshedLinksResponse = await api.fetch(
+      new Request(`http://localhost/api/terminal/links?agentId=${encodeURIComponent(agent.id)}`),
+    );
+    const refreshedLinksBody: WebTerminalLinksResponse = await refreshedLinksResponse.json();
+    expect(refreshedLinksResponse.status).toBe(200);
+    expect(refreshedLinksBody.links.find((link) => link.label === firstLink?.label)?.id).toBe(
+      firstLink?.id,
+    );
+
     const opened = await mutation("/api/terminal/open", {
       agentId: agent.id,
       dimensions: { columns: 80, rows: 24 },
@@ -261,6 +487,15 @@ describe("ObservatoryWebApi", () => {
       ).status,
     ).toBe(200);
     expect((await mutation(`/api/terminal/${sessionId}/release`, {})).status).toBe(200);
+
+    const linkedOpened = await mutation("/api/terminal/open", {
+      agentId: agent.id,
+      dimensions: { columns: 80, rows: 24 },
+      linkId: firstLink!.id,
+    });
+    expect(linkedOpened.status).toBe(200);
+    const linkedBody: WebTerminalOpenResponse = await linkedOpened.json();
+    expect((await mutation(`/api/terminal/${linkedBody.sessionId}/release`, {})).status).toBe(200);
     await api.close();
   });
 

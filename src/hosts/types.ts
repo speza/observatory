@@ -46,6 +46,16 @@ export interface TerminalDimensions {
   readonly rows: number;
 }
 
+/**
+ * Describes how a client wants the host-owned PTY sized when opening it.
+ * `fit` preserves the existing renderer behaviour; `preserve` lets a
+ * secondary client observe/control a terminal without imposing its viewport
+ * dimensions on the host session.
+ */
+export interface TerminalOpenOptions {
+  readonly resizeMode?: "fit" | "preserve";
+}
+
 export interface HostTerminalFrame {
   readonly bytes: Uint8Array;
   readonly columns?: number;
@@ -159,9 +169,11 @@ export interface SessionHost {
   openTerminal(
     access: AgentAccess,
     dimensions: TerminalDimensions,
+    options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError>;
   openLinkedExecutionTerminal(
     execution: LinkedExecution,
     dimensions: TerminalDimensions,
+    options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError>;
 }

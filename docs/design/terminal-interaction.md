@@ -12,14 +12,15 @@ Observatory renders hosted agent terminals inside the native TUI, but it does
 not own the PTY, process, pane scrollback or agent terminal state. Those remain
 owned by the configured `SessionHost`; Herdr is the required live V0/V1 host.
 
-The same host-owned terminal contract can power one transient linked execution
-surface for the selected Agent. A linked execution may be an existing shell
+The same host-owned terminal contract can power transient linked execution
+surfaces for the selected Agent. A linked execution may be an existing shell
 observed in the host, a host-prepared shell in the Agent worktree, or a
-recognised sibling Agent. It is contextual
-UI, not a second AO agent or a new durable topology node. Diff and review
-tools are deliberately not native Observatory surfaces in the first
-implementation. The user can run `git diff`, `hunk`, `delta` or another review
-tool inside the linked terminal.
+recognised sibling Agent. It is contextual UI, not a second AO agent or a new
+durable topology node. The native renderer shows one selected linked surface at
+a time; the web renderer can keep the primary terminal and multiple companion
+terminals as tabs. Diff and review tools are deliberately not native
+Observatory surfaces in the first implementation. The user can run `git diff`,
+`hunk`, `delta` or another review tool inside a linked terminal.
 
 Observatory uses two different host capabilities for interaction:
 
@@ -114,13 +115,15 @@ Observatory has two presentation modes:
 - map mode keeps the spatial map visible beside a linked terminal; and
 - review mode keeps the primary agent terminal visible beside a linked terminal.
 
-The host may report N linked executions, but only one selected linked execution
-surface is open at a time in the first implementation. A picker makes every
-available link visible before opening the selected one. The focused surface owns
-ordinary key input, paste and scroll. `Tab` cycles focus;
-the focus ring and footer identify where input will go. An unfocused terminal
-continues receiving frames and remains visible for comparison. `Esc` closes the
-focused terminal, and terminal release is delegated to the host.
+The host may report N linked executions. In the native renderer, only one
+selected linked execution surface is open at a time. A picker makes every
+available link visible before opening the selected one. In the web renderer,
+the picker adds links as tabs beside a `Main` tab; inactive tabs stay mounted
+and continue receiving frames, while only the active tab receives ordinary
+keyboard input, paste and scroll. `Ctrl/Cmd+Tab` cycles web tabs and
+`Ctrl/Cmd+1…9` selects a tab. `Tab` remains the native focus-cycle action.
+The focus ring and footer identify where input will go. `Esc` closes the focused
+surface, and terminal release is delegated to the host.
 
 The selected-agent action menu exposes the linked terminal, so the user does
 not need to return to Herdr to control or inspect a discovered linked terminal.
@@ -243,10 +246,15 @@ Responsibilities are split as follows:
 
 The local web renderer uses the same ownership boundary. Its loopback gateway
 opens a generic `SessionHost` terminal, streams frames as server-sent events and
-maps browser input, resize and close to the existing session capabilities.
-xterm.js interprets terminal bytes in the browser; it does not own the PTY or
-persist scrollback. The terminal floats above the Atlas, so opening or closing
-it does not mutate selection, viewport or inspector state.
+maps browser input, resize and close to the existing session capabilities. It
+also exposes browser-safe, server-issued handles for the host's linked
+executions; the gateway revalidates each handle against the current Agent
+access capability before opening a tab. xterm.js interprets terminal bytes in
+the browser; it does not own the PTY or persist scrollback. The standalone web
+terminal, companion tabs and split workspace review use `resizeMode: fit`, so
+the host PTY follows the visible terminal viewport and line wrapping remains
+faithful at either size. Opening or closing a tab does not mutate map selection,
+viewport or inspector state.
 
 A future tmux, Superlogical-style host, or Observatory-owned multiplexer must
 implement the same capability without changing the Universe, persistence,
@@ -269,6 +277,8 @@ leaking and must be repaired before adding the host.
 - A discovered linked shell can disappear or change ownership between snapshots;
   opening it must revalidate its opaque terminal identity, return an honest host
   error and must not manufacture a durable AO agent.
+- A prepared Herdr companion is created as a tab in the parent Agent workspace;
+  it must not create a new workspace merely to provide a contextual terminal.
 - Observatory does not provide a native diff viewer yet. Diff and review tools
   run in a linked shell until a concrete native workflow justifies a separate
   surface.
