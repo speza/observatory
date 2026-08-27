@@ -20,10 +20,10 @@ separate mental model of why every agent exists, how the work relates, what is
 blocked, what can be trusted, and where their judgment is needed.
 
 This project explores a provider-independent, goal-centred control plane. Its
-first proof surface is a stable, portable native spatial map—rendered as a
-cell-based universe of goal bodies and agent satellites—over the real
-Goal → Agent topology. Flat attention and grouped-list views remain supporting
-lenses for precise execution; they are not the core product proof.
+primary proof surface is a stable graphical Atlas of goal bodies and agent
+satellites over the real Goal → Agent topology. Flat attention and grouped-list
+views remain supporting lenses for precise execution; they are not the core
+product proof.
 
 The visual treatment is not the product by itself. It succeeds only if spatial
 memory and goal/agent geography make supervising agent work materially easier
@@ -295,8 +295,8 @@ the provider's own agent history when deeper context is required.
 
 The control plane exposes an API and CLI so humans and agents can create goals,
 assign agents, record delegation, request attention and update progress. The
-The TUI and local web client are projections of this shared state. Any later
-desktop client must follow the same boundary.
+local web GUI is a projection of this shared state. Any later structured client
+must follow the same boundary and must not read persistence directly.
 
 Optional external context is plugin-contributed. GitHub pull requests, Jira or
 Linear tickets and provider-specific facts should appear as provenance-bearing
@@ -375,8 +375,8 @@ worktree. AO should warn before two write-capable agents share a checkout.
 When an Agent is selected, its host may expose N transient linked executions:
 shells for local applications, tests, watchers and preferred diff tools, plus
 recognised sibling Agents in the same host context. Observatory offers these in
-the Agent inspector and opens the selected one beside the map or Agent
-terminal. The map does not render them as nodes, and shell-only panes are not
+the Agent inspector and opens selected entries as companion terminal tabs. The
+map does not render them as nodes, and shell-only panes are not
 reconciled into the durable Agent inventory. If a person starts a supported
 Agent in a linked shell, the next authoritative host snapshot can reconcile it
 as a normal Agent using its existing native identity.
@@ -467,12 +467,11 @@ being simulated unreliably.
 
 Attaching enters the existing hosted agent. Depending on host capability this
 may focus an existing pane, open an adjacent split, suspend AO and attach in the
-foreground, or open an embedded terminal in a host-backed client. The V0 TUI
-uses `t` for the Herdr-backed embedded route and `Enter` for foreground attach;
-a future terminal-enabled web slice can consume the same host capability after
-an authenticated streaming transport exists. Embedded access transports a
-host-owned PTY stream; it does not make AO responsible for the agent lifecycle
-or require every host to support the same mechanism.
+foreground, or open an embedded terminal in a host-backed client. The maintained
+web GUI uses the generic Herdr-backed terminal stream through its guarded
+loopback gateway. Embedded access transports a host-owned PTY stream; it does
+not make AO responsible for the agent lifecycle or require every host to
+support the same mechanism.
 
 On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
@@ -499,14 +498,14 @@ Candidate input semantics are:
 ```text
 single click on a goal           enter its goal-only satellite view
 single click on an agent        select and inspect
-drag a goal body                 move its durable anchor; satellites follow
-drag empty map or an agent      pan the viewport
+drag empty map                   pan the viewport
 enter / double click            attach to the real agent
 escape / host return binding    return to the preserved universe
 ```
 
-The exact keys remain configurable. Mouse gestures must have keyboard
-equivalents.
+Persisted goal movement remains the next position-editing slice rather than a
+current browser gesture. The exact keys remain configurable. Mouse gestures
+must have keyboard equivalents.
 
 ### Attention queue
 
@@ -560,14 +559,13 @@ has three presentation tiers:
   status markers in overview, with context/detail restoring short or wrapped
   labels, while the inspector exposes complete execution metadata.
 
-At low geometric zoom, overview cards collapse to glyphs and priority markers
-because terminal cells cannot scale text. Selected and attention-bearing nodes
-keep their labels so the map remains navigable without letting fixed-width
-cards overlap.
+At low geometric zoom, overview cards collapse to glyphs and priority markers.
+Selected and attention-bearing nodes keep their labels so the map remains
+navigable without letting fixed-size detail overwhelm the viewport.
 
 The attention lens dims healthy work while retaining the spatial positions of
 promoted agents and their owning goals. Search focuses a result in the same
-spatial context. On narrow terminals, focus/detail is the fallback rather than
+spatial context. On narrow viewports, focus/detail is the fallback rather than
 compressing the whole universe until labels become unusable.
 
 ### Catch-up mode
@@ -630,26 +628,20 @@ names and descriptions, including archived items. Selecting a result focuses it
 inside its owning goal and the current view. Transcript search remains
 provider-native initially.
 
-## Terminal experience
+## GUI experience
 
-The terminal is a first-class spatial surface, not a reduced fallback.
-
-It should be a restrained, keyboard-first operational universe using portable
-cells, typography, colour and limited semantic motion. It should not imitate a
-graphical canvas through terminal-specific image protocols or a custom ANSI
-raster engine. Its primary view is a stable portfolio of goal bodies with direct
-agent satellites; focused goal views expose one body's satellites. Attention,
-inbox, inspector and grouped-list views are supporting lenses, and
-infrastructure details remain agent metadata.
+The local GUI is a restrained, keyboard-accessible operational universe using
+native SVG, HTML, typography, colour and limited semantic motion. Its primary
+view is a stable portfolio of goal bodies with direct agent satellites; focused
+goal views expose one body's satellites. Attention, Inbox, inspector and Ledger
+views are supporting lenses, and infrastructure details remain agent metadata.
 
 Unassigned agents remain discoverable without becoming map topology: the
-portfolio hides their cards and shows an `INBOX !N · v list` warning instead.
+portfolio hides their cards and exposes the Inbox count and lens instead.
 The list is a supporting lens over direct Goal → Agent state, not a durable
 map body. Stale or unavailable host state is called out in the header and
 remains actionable through the list and attention lenses. Attention and
-focused inbox lenses expose the compact, attention-first list, while a
-selected goal's `a` action opens its type-to-filter assignment picker. Goal
-satellites continue to use
+focused inbox lenses expose the compact, attention-first list. Goal satellites continue to use
 identity-derived collision-aware perimeter slots; this is deterministic slot
 allocation, not a force-directed graph layout or continuous auto-formatting.
 
@@ -661,23 +653,20 @@ it back.
 
 Goal placement is a separate free-space operation: new goals are placed against
 the current occupied footprints, while accepted goal anchors remain stable.
-Dragging a goal persists its world-space anchor and moves the direct satellite
-orbit with it. Clicking a goal or using focus descends to a goal-only map that
-contains that body and all of its direct agents. Selecting an unassigned
-agent and using focus enters the supporting inbox list lens. Creating a goal
-selects it automatically; `a` from a selected goal opens the inbox assignment
-picker, while `a` from a selected agent opens the goal picker.
+The Universe already accepts durable moved anchors, but browser position
+editing remains outstanding. Clicking a goal or using focus descends to a
+goal-only map that contains that body and all of its direct agents. Selecting
+an unassigned agent keeps the supporting Inbox context. Creating a goal selects
+it automatically; assignment remains an explicit inspector action.
 
 Map keyboard navigation follows the visible hierarchy rather than flattening
-it: `j`/`k` cycles goal bodies in the portfolio, and a focused goal changes the
-sequence to its direct agents in clockwise perimeter order. The focused inbox
-does the same for unassigned agents; the supporting grouped list retains flat
-row navigation.
+it: `j`/`k` or arrow keys move through selectable Goals and Agents, while the
+supporting Ledger and queue surfaces retain ordered row navigation.
 
 The experience should remain fully keyboard operable. Selecting an item should
 open its floating inspector card; `Enter` on an agent should open its real
-terminal. Returning should preserve the selected goal and agent, expansion
-state, filters and search.
+host-owned terminal in the browser. Returning should preserve the selected goal
+and agent, camera, filters and search.
 
 Herdr is the initial substrate because it already manages persistent
 multi-provider agents and exposes workspaces, panes, agents, worktrees,
@@ -686,16 +675,11 @@ snapshots, events and input through a local API.
 The local web client now owns the higher-fidelity observatory rendering:
 responsive native SVG composition, crisp labels, smooth zoom and pointer
 interaction. Its production walking slice is in-process over the same
-universe-map, command-centre, catch-up and inspector projections as the native
-client, with a narrow Universe command gateway. This is not an Electron or
-installed desktop-application commitment.
-The two clients share meaning, truthful uncertainty and projection contracts,
-not identical visual geometry.
-
-The current direction is to keep both clients through V1: the TUI remains the
-keyboard-first operational and host-edge fallback, while the web client is the
-primary high-fidelity orientation surface. Their feature ownership, parity
-gaps and delivery order are maintained in the [feature roadmap](../specs/observatory-feature-roadmap.md).
+universe-map, command-centre, catch-up and inspector projections, with a narrow
+Universe command gateway. It is the sole maintained product client, not an
+Electron or installed desktop-application commitment. Herdr remains the native
+terminal fallback rather than Observatory maintaining a second UI. Delivery
+order is maintained in the [feature roadmap](../specs/observatory-feature-roadmap.md).
 
 The Atlas remains the primary orientation surface. The attention queue is the
 supporting action lens and the Ledger is the same-data precision/list baseline.
@@ -774,11 +758,10 @@ strong grouped agent list:
 ## Rendering discovery outcome
 
 The disposable OpenTUI, visual-fidelity and ANSI half-block experiments closed
-the rendering choice for this iteration. Native OpenTUI cells are sufficient
-for a useful first spatial universe; the ANSI raster direction remains rejected.
-The native client proved the first product boundary. The maintained local web
-client now provides higher visual fidelity after the spatial information
-architecture and native SVG/CSS direction earned implementation.
+the initial rendering investigation. Native cells were sufficient to prove the
+spatial boundary, while the ANSI raster direction remained rejected. The native
+client was retired on 2026-08-27; the local React/SVG GUI is now the sole
+maintained product renderer.
 
 The first live spatial iteration is a real walking slice rather than another
 synthetic renderer. It should:
@@ -791,7 +774,7 @@ synthetic renderer. It should:
 - allow a human to move and persist a goal anchor while its satellites follow;
 - provide a goal-only focused map containing exactly that goal and its direct
   agents;
-- focus a goal on narrow terminals while retaining the same map semantics;
+- focus a goal on narrow viewports while retaining the same map semantics;
 - keep repositories, worktrees and runtime details on agents and in the
   inspector rather than rendering them as nodes;
 - surface a basic explainable attention queue;
@@ -800,7 +783,7 @@ synthetic renderer. It should:
 - persist accepted organisation and goal positions across restart.
 
 Quick messages, agent-authored structure and provider transcript parsing remain
-later. The web observatory follows the accepted native/core boundary and must
+later. The web observatory follows the accepted semantic-core boundary and must
 now demonstrate value with real work.
 
 On first use the accepted universe is empty. Discovered agents appear in an

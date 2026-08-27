@@ -1,502 +1,218 @@
 # Observatory technology decisions
 
-Status: accepted for v0 implementation  
-Date: 2026-08-22
+Status: accepted for the web-only V1 product
+
+Updated: 2026-08-27
+
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision
 
-AO v1 will use TypeScript on Bun for the control plane, command-line client,
-adapters and initial renderers.
+Observatory uses one maintained application client: a local React GUI served by
+the Bun control-plane process.
 
 ```text
 Language                  TypeScript
 Runtime/package manager   Bun
 Async runtime             Effect + @effect/platform-bun
 Persistence               SQLite via bun:sqlite
-Linting                   Oxlint
-Lint policy               Vendored Anti-Slop Oxlint plugins
+Linting                   Oxlint + vendored Anti-Slop plugins
 Formatting                Oxfmt
-Type checking             tsgo or tsc --noEmit
+Type checking             tsc --noEmit
 Testing                   bun test
-Terminal renderer         OpenTUI, portable spatial cells
-Web renderer              React with native SVG/CSS, local and maintained
-Live agent host         Herdr (required for V0/V1 live mode)
-Local transport           Schema-validated JSON over a Unix socket
+Browser renderer          React with native SVG/CSS
+Browser terminal          xterm.js over host-owned streams
+Build/dev server          Vite
+Live agent host           Herdr (required for V0/V1 live mode)
+Current local transport   Loopback HTTP + SSE
 ```
 
-This is a v1 product-development decision, not a commitment to implement a
-future native terminal multiplexer in TypeScript.
+The former OpenTUI client was retired on 2026-08-27. Its experiments remain
+useful historical evidence, but OpenTUI is no longer an application dependency
+or technology direction. A future CLI may launch the server, report status or
+submit structured commands; it must not become a second interactive client.
 
-## Why this stack fits AO
+This is a product-development decision, not a commitment to implement a native
+multiplexer, daemon or desktop shell in TypeScript.
 
-AO's initial implementation is primarily:
+## Why this stack fits Observatory
 
-- a durable metadata and relationship model;
-- deterministic graph projections and attention rules;
+The main implementation work is:
+
+- a durable semantic and relationship model;
+- deterministic projections, attention and spatial rules;
 - local SQLite persistence;
-- JSON communication with Herdr and agent integrations;
-- a live Herdr walking slice; and
-- a portable terminal command centre.
-
-It does not own pseudo-terminal process lifetime, persistence or remote
-attachment. Those responsibilities remain behind the `SessionHost` seam. The
-implemented Herdr lens renders a host-owned terminal stream with a small
-cell-native VT model; a disposable Bun PTY experiment remains evidence for
-renderer feasibility, not a production runtime decision. The staged scope and
-verdicts are recorded in
-[Native terminal surface POCs](../specs/terminal-surface-pocs.md).
-
-TypeScript therefore optimises the work carrying the most product uncertainty.
-The same domain types and fixtures can support the terminal client, later local
-web client, control plane and CLI. This shortens the loop between changing the
-information model and seeing whether AO improves real supervision.
-
-## Runtime: Bun
-
-Bun is both the application runtime and package manager.
+- translation of host facts and capabilities;
+- a high-density graphical supervision surface; and
+- fast experimentation with evidence, review and interaction workflows.
 
-Reasons:
-
-- native TypeScript execution;
-- built-in SQLite support;
-- built-in test runner;
-- fast startup and feedback loops;
-- straightforward subprocess and filesystem integration;
-- standalone executable compilation; and
-- direct compatibility with OpenTUI's primary TypeScript setup.
+TypeScript keeps the semantic contracts, HTTP protocol and React client close
+while those product questions remain uncertain. Bun supplies TypeScript
+execution, SQLite, tests and a compact server runtime. React, SVG and CSS offer
+crisp text, accessible controls, pointer interaction, responsive composition
+and browser-native iteration without a canvas scene graph or desktop wrapper.
 
-Relevant documentation:
+Observatory does not own pseudo-terminal process lifetime, pane scrollback or
+agent execution. Those responsibilities remain behind `SessionHost`; xterm.js
+interprets the host's terminal bytes but does not become the PTY owner.
 
-- [Bun SQLite](https://bun.sh/docs/runtime/sqlite)
-- [Bun SQL](https://bun.sh/docs/runtime/sql)
-- [Bun standalone executables](https://bun.sh/docs/bundler/executables)
+## Runtime and module boundaries
 
-Bun does not define AO's module interfaces. The Universe module must remain
-ordinary TypeScript with injected persistence, clock and identifier
-implementations. Bun-specific imports belong in adapters and executable entry
-points.
-
-### Effect runtime boundary
-
-Effect is adopted now for the asynchronous application edge rather than
-introduced as a second domain model. `SessionHost` operations are typed Effects
-with a small `HostError`, and host-owned terminal output is an Effect Stream.
-This gives Observatory structured cancellation and resource finalization around
-Herdr/mock agents, while the TUI remains an imperative OpenTUI boundary that
-executes those Effects. `BunRuntime.runMain` owns the executable lifecycle.
-
-The pure `universe/`, `attention/`, `spatial/`, `projection/` and persistence
-record shapes do not import Effect. Effect values do not cross into SQLite or
-durable semantic state. A future host adapter can therefore reuse the same
-semantic model without adopting Herdr or changing the renderer contract.
-
-### SQLite usage
-
-Use `bun:sqlite` directly rather than introducing an ORM in v1.
-
-The control plane owns a single write path, making SQLite's synchronous interface
-appropriate and simple. Transactions protect domain commands. WAL mode may be
-enabled when separate long-lived readers appear, but should not compensate for
-renderers bypassing the control plane.
-
-Database rows are an implementation detail of the persistence adapter. Domain
-records and projections must not become generated database models.
-
-## Toolchain: Oxc
-
-Oxc is the default JavaScript and TypeScript toolchain around the Bun runtime.
-It is not AO's runtime.
-
-Use:
-
-- Oxlint for linting;
-- Oxlint's `oxlint-tsgolint` integration for selected type-aware rules;
-- Oxfmt for formatting; and
-- Oxc's shared tooling indirectly where adopted by the build ecosystem.
-
-Do not initially use:
-
-- the Oxc parser directly;
-- the Oxc transformer directly;
-- the Oxc resolver directly;
-- the Oxc minifier directly; or
-- the experimental TypeScript runner.
-
-Bun already executes the application, and the web toolchain already owns
-browser transformation and bundling. Directly composing Oxc internals would add
-tooling work without validating AO.
-
-Oxfmt is currently described as beta. AO is greenfield, so formatter migration
-compatibility is not a concern, but the version must be pinned and upgrades must
-be deliberate.
-
-The committed lint policy treats correctness and suspicious findings as errors,
-keeps performance findings visible as warnings, and enables a small set of
-import and TypeScript rules including floating and misused promise detection.
-Whole-category style, pedantic, restriction and nursery rules stay disabled:
-Oxfmt owns presentation, while lint output should remain about likely defects.
-The formatter runs over every supported maintained repository file and committed
-configuration. Disposable prototype trees are intentionally excluded from the
-production lint/format gate. Agents run `bun run format` before handoff and
-`bun run check` before commit or handoff.
-
-Anti-Slop is vendored at `tools/oxlint/anti-slop/` and loaded as a local Oxlint
-plugin, with its Effect-specific rule set enabled because the application uses
-Effect. The plugin is intentionally ignored as vendored source. Maintained
-production code must satisfy the rules; a finding is fixed at its boundary
-rather than hidden with a broad disable.
-
-Relevant documentation:
-
-- [Oxc](https://oxc.rs/)
-- [Oxlint](https://oxc.rs/docs/guide/usage/linter.html)
-- [Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html)
-
-### Type checking remains separate
-
-Type-aware lint rules do not replace a complete type check. CI and the local
-quality command run the dedicated TypeScript checker separately; Oxlint's
-experimental `typeCheck` mode remains disabled.
-
-The initial choice between `tsgo` and `tsc --noEmit` should be based on
-compatibility with the selected TypeScript configuration. This decision does not
-affect application architecture.
-
-## Presentation strategy
-
-The rendering spikes and the 2026-08-24 web art-direction study resolved the
-presentation decisions:
-
-- the native terminal client is a restrained, keyboard-first spatial universe;
-- OpenTUI is accepted for that portable cell-based map and its supporting
-  lenses;
-- high-fidelity terminal graphics, Kitty/Sixel modes and custom ANSI raster
-  rendering are out of v0 scope; and
-- the maintained local browser client uses React with native SVG and CSS for
-  crisp text, accessible interaction and browser-native zoom/pointer behaviour;
-  and
-- PixiJS is rejected for this surface because its rasterised text and scene
-  scaling lost clarity during direct pan/zoom comparison without earning needed
-  rendering complexity.
-
-The terminal and web clients consume the same semantic projections and expose
-the same authorised actions. They do not need to reproduce identical geometry
-or visual effects. The terminal optimises attention, comprehension, search and
-fast attachment. The web client may optimise spatial overview, animation,
-pointer interaction and richer relationship exploration.
-
-The browser renderer is now an accepted production walking slice. It is an
-ordinary local web client served by AO, not an Electron application. The
-validated Mineral Ledger art direction is rewritten against production
-projections; the disposable prototype is evidence, not a source tree to
-promote.
-
-## Terminal renderer: OpenTUI
-
-OpenTUI is accepted for the v0 terminal client. Its native core is written in
-Zig and exposed to TypeScript; it supports the input, resize, alternate-screen,
-colour and portable cell rendering needed for the command centre.
-
-Relevant documentation:
-
-- [OpenTUI getting started](https://opentui.com/docs/getting-started/)
-- [OpenTUI renderer](https://opentui.com/docs/core-concepts/renderer/)
-- [OpenTUI framebuffer](https://opentui.com/docs/components/frame-buffer/)
-- [OpenTUI repository](https://github.com/anomalyco/opentui)
-
-Use the imperative `@opentui/core` interface. React and Solid reconcilers add
-another programming model without providing leverage for this client.
-
-Use OpenTUI's built-in renderables for conventional interaction surfaces rather
-than rebuilding them on the framebuffer: `BoxRenderable` and `TextRenderable`
-for modal chrome, `SelectRenderable` for discrete choices, `InputRenderable`
-and `TextareaRenderable` for editable fields, and `ScrollBoxRenderable` for
-long supporting lists. Observatory's framebuffer remains responsible for the
-universe map, stars, connectors and other product-specific cell composition.
-This boundary keeps the map expressive while making selection, cursor and
-scroll behaviour consistent with OpenTUI and reusable across launch, assignment
-and future command surfaces.
-
-OpenTUI is intentionally isolated inside the terminal-renderer module. Its
-constructs, layout model and event types must not appear in Universe, Attention,
-Layout, Projection or host-adapter module interfaces. AO owns the semantic
-projection and logical layout; OpenTUI only turns them into terminal output and
-input events.
-
-### POC outcome and limits
-
-The disposable rendering and visual-fidelity spikes proved that OpenTUI can
-sustain portable spatial rendering, navigation, resize and clean terminal
-lifecycle behaviour. The first live map iteration now tests whether that
-spatial representation is preferable to a strong operational view. Enhanced
-terminal graphics and the half-block raster direction remain rejected because
-they create compatibility and custom-renderer complexity without providing the
-flexibility of a real canvas.
-
-Therefore v0 uses ordinary terminal cells, typography, colour and restrained
-motion for a spatial universe of goal bodies and direct agent satellites. It
-does not emit graphics protocols or revive a custom ANSI raster engine. OpenTUI
-remains isolated inside the terminal-renderer module, so it can still be
-replaced if live use exposes input, lifecycle or portability failures.
-
-The embedded Herdr lens follows the same portability rule: `TerminalScreen`
-interprets the subset of ANSI/VT state needed for ordinary agent CLIs and
-renders it as OpenTUI cells. It is intentionally not a promise of Kitty/Sixel,
-mouse-protocol, scrollback or provider-specific full-screen parity; `Enter`
-foreground attachment remains available when native parity matters.
-
-The live renderer keeps the map full width rather than allocating a permanent
-right-hand inspector. Selecting a goal, agent or inbox opens a transient
-floating card anchored near that item; the card is clamped to the map and
-shortens on narrow terminals. The portfolio does not spend map space on
-unassigned agents: it reports the inbox count as a visible warning, then
-lets the operator open the list lens when they want to triage it. Attention and
-focused-inbox lenses can use a compact vertical list, while the goal-level `a`
-action opens a searchable assignment picker. These are presentation lenses
-over Goal → Agent state, not new domain nodes or a richer graphics mode.
-
-Evidence:
-
-- [OpenTUI rendering spike](../../prototypes/opentui-rendering-spike/VERDICT.md)
-- [Native visual-fidelity spike](../../prototypes/opentui-visual-fidelity/VERDICT.md)
-- [ANSI half-block spike](../../prototypes/ansi-halfblock-rendering-spike/VERDICT.md)
-
-## Live agent integration: Herdr first
-
-Herdr is the first live Agent-host adapter because it already exposes
-snapshots, events, agent state, worktree provenance and attachment operations
-across several agent providers. The terminal-surface POC demonstrated a live
-Herdr observe/control stream rendered through the OpenTUI panel, with the
-Herdr-owned agent surviving release. The production TUI now exposes that stream
-as an embedded terminal lens; foreground attach remains the fallback for
-unsupported agents and provider-native features outside the lens.
-
-Herdr's terminal control stream is the V0 embedded-terminal path. Herdr
-continues to own the agent process and PTY; Observatory only renders the stream
-and routes explicit input, resize and release. This is an adapter capability,
-not an AO-owned multiplexer. The disposable AO-owned PTY remains evidence for
-renderer feasibility only.
-
-AO talks to Herdr through its public local protocol. It does not embed, fork or
-import Herdr implementation code.
-
-This maintains a clean licensing and module seam while ensuring Herdr-specific
-workspace, tab and pane concepts do not leak into AO records.
-
-### Dependency-inversion policy
-
-Herdr is a required first host, not the shape of the application. The only
-allowed production coupling is the Herdr adapter plus composition-time host
-selection. The control-plane modules and renderer interfaces must remain free
-of Herdr imports, protocol payloads, CLI command strings and native IDs.
-
-The generic `SessionHost` contract is deliberately small and capability-based.
-It may grow only in response to a demonstrated second host or user workflow;
-unsupported operations are represented explicitly instead of being hidden by
-guesses. A future tmux adapter, Superlogical-style host or AO-owned
-multiplexer must be addable without changing Universe, SQLite schema,
-projections or renderers. That adapter-replacement check is a release gate for
-any second host.
-
-The mock host keeps core and renderer tests independent of Herdr. Production
-host adapters must add the shared contract suite, sanitised protocol fixtures,
-feature/version detection and a non-destructive live smoke where the host is
-available. Observatory depends on Herdr for the first live product slice, but
-never on unpublished Herdr internals.
-
-Relevant documentation:
-
-- [Herdr documentation](https://herdr.dev/docs/)
-- [Herdr socket interface](https://herdr.dev/docs/socket-api/)
-
-## Local control transport
-
-The production control plane should expose schema-validated JSON over a Unix
-domain socket on macOS and Linux.
-
-Reasons:
-
-- local-only by default;
-- straightforward CLI and agent access;
-- streaming events without polling the database;
-- filesystem permissions for single-user access; and
-- independence from renderer and adapter runtimes.
-
-The first web walking slice uses a smaller read-only loopback HTTP adapter in
-the web composition root. It returns serialized production projections and
-polls them on the existing reconciliation cadence. It does not implement the
-future command socket, subscriptions, WebSockets or terminal frames. This keeps
-the browser from becoming a second domain interface while avoiding a daemon
-before concurrent clients require one.
-
-External input must be validated at runtime. TypeScript compile-time types do
-not validate socket messages, adapter payloads, database migrations or agent
-commands.
-
-## Proposed source layout
-
-Do not create a package for every named module on day one. Start with one Bun
-workspace and keep module interfaces explicit inside it.
+Bun is the application runtime and package manager. Bun-specific imports belong
+in adapters, persistence and executable composition roots. The Universe remains
+ordinary TypeScript with injected store, clock and identifier implementations.
+
+Effect is used at the asynchronous host/runtime edge:
+
+- `SessionHost` operations return typed Effects;
+- host terminal output is an Effect Stream; and
+- the server composition root executes and finalises those resources.
+
+Effect values do not cross into `universe/`, SQLite records, projections or
+spatial calculations. It is a lifecycle tool, not a second domain model.
+
+Use `bun:sqlite` directly rather than adding an ORM. The Universe owns one
+transactional write path, database rows remain adapter details, and browser code
+never reads the database.
+
+## Browser presentation
+
+React with native SVG and CSS is the accepted renderer.
+
+- SVG owns the Atlas geometry, labels and stable logical transforms.
+- HTML/CSS owns drawers, forms, inspectors, review and accessibility.
+- xterm.js owns browser terminal interpretation and input presentation.
+- Vite owns browser transformation, development serving and production builds.
+
+PixiJS was rejected after direct pan/zoom comparison because rasterised text and
+scene scaling reduced clarity without solving a product requirement. Electron
+is deferred because the current local browser process already provides the GUI;
+add a desktop shell only for a measured packaging or OS-integration need.
+
+The Mineral visual language is an art direction over production projections,
+not a fixture tree or a second semantic model. Atlas, Ledger, Attention, Catch
+up, Inbox and Closeout are complementary lenses over the same accepted state.
+
+## Host and terminal integration
+
+Herdr is the first live `SessionHost` because it already exposes agent
+inventory, state, worktree provenance, launch, close and terminal operations.
+Only `src/hosts/herdr/` and composition code may know Herdr protocols or native
+identifiers.
+
+The browser asks the loopback server to open an accepted Agent. The server:
+
+1. re-resolves generic `AgentAccess` through `SessionHost`;
+2. opens a host-owned terminal with bounded dimensions;
+3. emits frames over SSE using a random process-local handle;
+4. accepts same-origin input, resize, scroll and release actions; and
+5. releases all sessions on shutdown.
+
+xterm.js renders those frames in the browser. It does not persist terminal
+history, create a PTY or receive a concrete Herdr target. Linked executions use
+the same capability and remain transient tabs, not Universe objects.
+
+The replacement test remains strict: a future tmux or other host adapter must
+not require changes to Universe, persistence, projection or browser interfaces.
+
+## Local transport
+
+The current product is one in-process, single-user application:
+
+```text
+Browser -> 127.0.0.1 HTTP/SSE -> Universe + SessionHost + SQLite
+```
+
+Mutation endpoints require exact loopback Origin, JSON content type and an
+explicit intent header. The browser receives narrow projections and operation
+results, never SQLite records, arbitrary filesystem paths or the internal
+command union.
+
+Polling is sufficient for snapshot reconciliation in this walking slice. A
+versioned Unix-socket or subscription transport is deferred until concurrent
+clients or external agent processes create a measured need. Do not introduce a
+daemon merely because the architecture could support one.
+
+## Toolchain and quality
+
+Oxfmt owns formatting. Oxlint, selected type-aware checks and the vendored
+Anti-Slop plugins own likely defects and boundary policy. A separate TypeScript
+check remains mandatory. Disposable top-level prototype trees are excluded;
+maintained source and documentation are not.
+
+Stable commands are:
+
+```sh
+bun run format
+bun run check
+bun test
+bun run build:web
+```
+
+Versions are pinned where rapid tool evolution could make builds
+non-reproducible. Commit the Bun lockfile and upgrade deliberately after the
+domain, adapter, API and browser checks pass.
+
+## Source layout
 
 ```text
 src/
-├── universe/
-├── attention/
-├── projection/
-├── spatial/
-├── renderer/            # OpenTUI client
+├── universe/            # accepted semantic state and commands
+├── attention/           # deterministic attention rules
+├── projection/          # renderer-facing read models
+├── spatial/             # pure logical positions and viewport math
 ├── runtime/             # shared composition
-├── web/                 # loopback adapter and web composition root
-├── persistence/
-│   └── sqlite/
-├── hosts/
-│   └── herdr/
-└── session-launch/
+├── web/                 # loopback API and application entry point
+├── persistence/sqlite/  # durable implementation detail
+├── hosts/herdr/         # concrete live-host translation
+├── hosts/mock/          # deterministic evidence path
+├── session-launch/      # workspace/host launch coordination
+└── workspaces/          # bounded local workspace capabilities
 
-web/
-└── src/                 # React, native SVG and CSS browser client
-
-fixtures/
-└── herdr/
+web/src/                 # React, SVG, CSS and xterm.js client
+prototypes/              # isolated historical evidence only
 ```
 
-Split independently deployed clients or reusable protocol types into workspace
-packages only when a second consumer creates a real seam. Avoid a monorepo of
-shallow pass-through packages.
+Do not create packages or pass-through layers before a second deployment unit
+or consumer creates a real seam.
 
-## Initial quality commands
+## Alternatives and reconsideration triggers
 
-The repository should converge on a small interface for humans, agents and CI:
+Node.js remains viable, but Bun currently reduces tool and integration count.
+Rust would be the preferred candidate if Observatory later owns PTYs, terminal
+emulation, a multiplexer or a demanding always-on daemon. Go remains a credible
+single-binary alternative, but offers no current advantage for this semantic
+control plane and browser client.
 
-```sh
-bun run format      # apply repository-wide formatting before handoff
-bun run check       # format check, lint and type check
-bun run test        # deterministic tests
-bun run test:all    # compatibility alias for the complete test suite
-bun run dev         # live terminal command centre
-bun run test:herdr  # Herdr adapter and sanitised fixture checks
-```
+Reconsider TypeScript/Bun when measured evidence shows that:
 
-The exact underlying flags belong in scripts rather than agent instructions.
-Agents should learn the stable project commands, not the current tool invocation
-details.
+- Observatory must own process or PTY lifetime;
+- a native multiplexer becomes near-term scope;
+- Bun distribution, memory, latency or crash behaviour is unacceptable;
+- required host inspection becomes predominantly native code; or
+- browser delivery cannot meet a concrete product requirement.
 
-## Dependency policy
-
-- Prefer platform functionality supplied by Bun before adding wrappers.
-- Keep the Universe module free of Bun, SQLite, OpenTUI and Herdr imports.
-- Keep all Herdr-specific imports and protocol knowledge inside
-  `src/hosts/herdr/` and the composition root; host adapters are the only
-  allowed translation boundary.
-- Pin fast-moving dependencies, particularly OpenTUI and Oxfmt.
-- Upgrade intentionally with domain, adapter and renderer fixtures.
-- Avoid an ORM until repeated persistence complexity demonstrates that direct
-  SQL is harming locality.
-- Avoid a graph database; AO's semantic graph is small and SQLite can represent
-  typed nodes and edges directly.
-- Avoid a general agent framework; integrations call the control interface
-  through ordinary CLI commands or structured messages.
-
-## Alternatives considered
-
-### Rust
-
-Rust is the preferred technology for a future AO-native multiplexer, but not for
-the v1 semantic control plane.
-
-Advantages:
-
-- strong fit for pseudo-terminals, process control and terminal protocols;
-- mature Ratatui ecosystem;
-- robust single-binary distribution;
-- excellent concurrency and resource control; and
-- mature SQLite integration through `rusqlite`.
-
-Costs now:
-
-- slower product iteration while the information model is uncertain;
-- separate implementation from the later browser client;
-- more type and protocol duplication across clients; and
-- systems complexity before AO owns systems responsibilities.
-
-Relevant documentation:
-
-- [Ratatui](https://ratatui.rs/)
-- [rusqlite](https://docs.rs/rusqlite/latest/rusqlite/)
-
-### Go
-
-Go with Bubble Tea is a strong conventional terminal stack and a credible
-single-binary alternative.
-
-Advantages:
-
-- mature, production-tested TUI framework;
-- easy concurrency and distribution; and
-- faster implementation than Rust for many developers.
-
-Costs for AO:
-
-- little sharing with the later browser client;
-- no decisive advantage for the metadata control plane; and
-- no measured advantage over the accepted TypeScript and OpenTUI v0 stack.
-
-Relevant documentation:
-
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-
-### Node.js instead of Bun
-
-Node.js is viable but not preferred for v1. Bun reduces tool count through
-native TypeScript, SQLite, testing and executable compilation. AO should not rely
-on Bun-specific behaviour inside its domain modules, preserving a migration path
-if Bun becomes a constraint.
-
-## Triggers to reconsider TypeScript/Bun
-
-Reconsider the application runtime when evidence shows one of these conditions:
-
-- AO must own pseudo-terminals or terminal emulation;
-- an AO-native multiplexer becomes near-term scope;
-- OpenTUI cannot meet rendering or input requirements;
-- Bun executable distribution is unreliable on target systems;
-- required host inspection needs extensive native code;
-- daemon memory, latency or crash behaviour is unacceptable in measured use; or
-- the JavaScript native-extension surface becomes the dominant maintenance cost.
-
-The first response should be a native adapter behind an existing seam, not an
-automatic whole-system rewrite.
-
-## Versioning policy
-
-- Commit the Bun lockfile.
-- Pin OpenTUI and Oxfmt exactly during v0.
-- Pin the Oxc command packages to compatible versions.
-- Record the minimum Bun version in the repository.
-- Let automated dependency updates open proposals, but merge only after the
-  domain, adapter, quality and renderer checks pass.
-- Do not depend on unpublished internals from Herdr, OpenTUI or Oxc.
+The first response should usually be a native adapter behind an existing seam,
+not a whole-system rewrite.
 
 ## Consequences
 
 Positive:
 
-- One language across the riskiest product experiments.
-- Fast local and agent feedback loops.
-- Minimal database and build infrastructure.
-- Renderer and host technologies remain replaceable.
-- Rust remains available exactly where it would provide real leverage.
+- one maintained GUI and one interaction model;
+- one language across the riskiest product surfaces;
+- strong density, review and accessibility primitives;
+- minimal database and server infrastructure; and
+- replaceable host and persistence technologies.
 
 Negative:
 
-- Bun and OpenTUI are younger than Node.js, Rust/Ratatui or Go/Bubble Tea.
-- OpenTUI introduces a native Zig dependency beneath the TypeScript client.
-- A future native multiplexer will probably add a second language.
-- Runtime validation discipline is essential because TypeScript types disappear
-  at external seams.
+- browser terminal behaviour still depends on a streaming host capability;
+- runtime validation remains essential at every external seam;
+- Bun and parts of the tooling are younger than conservative alternatives; and
+- a future native runtime could add a second language.
 
 Accepted trade-off:
 
-> AO should optimise learning about the product before optimising ownership of
-> terminal infrastructure it may never need to build.
+> Optimise learning about supervision, trust and spatial orientation before
+> owning terminal infrastructure or maintaining a second client.

@@ -1,12 +1,12 @@
 # Local web Observatory walking slice
 
-Status: command, catch-up and hosted-terminal loops implemented and visually QA'd; human feel sign-off pending
-Date: 2026-08-25
+Status: sole maintained client; command, catch-up and hosted-terminal loops implemented
+Updated: 2026-08-27
 
 ## Decision
 
-Observatory now has a maintained local web renderer. It uses React with native
-SVG and CSS and consumes the same production projections as the native client.
+Observatory has one maintained client: the local web GUI. It uses React with
+native SVG and CSS and consumes production Universe projections.
 The Mineral Ledger prototype supplied art-direction evidence only; its fixture
 state and component tree are not production dependencies.
 
@@ -50,8 +50,8 @@ another writable Observatory process.
   scroll requests remain generic terminal capabilities and do not become agent
   input or browser-local fake scrollback;
 
-The web surface also carries the useful keyboard-first parts of the native
-renderer: `j`/`k` or arrow keys move through Goal and Agent selection, `Enter`
+The web surface is fully keyboard operable: `j`/`k` or arrow keys move through
+Goal and Agent selection, `Enter`
 focuses a Goal or opens the selected Agent terminal, `Space`/`f` focuses the
 current map item, `+`/`-`/`0` control the camera, and `h`/`l`/PageUp/PageDown
 pan it. `a` opens the attention queue, `g` jumps to the next attention item,
@@ -117,7 +117,7 @@ general audit log or transcript store.
 ## Acceptance evidence
 
 - `bun run check` passes maintained source, web types and boundary lint.
-- `bun test` passes the complete control-plane and renderer suite.
+- `bun test` passes the complete control-plane, API and web-support suite.
 - `bun run build:web` produces the static browser client.
 - The clean-room `portfolio` mock reconciles 75 agents, assigns 71 through
   `Universe` commands to 12 pinned goals and leaves four unassigned.

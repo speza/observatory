@@ -12,7 +12,7 @@ or terminal multiplexer.
 
 A strong name should:
 
-- feel natural as a terminal-native developer tool;
+- feel natural as a local developer tool;
 - suggest orientation, attention and comprehension;
 - remain provider-independent;
 - avoid implying that spawning more agents is itself the objective;
@@ -40,7 +40,7 @@ See all the work.
 The product name does not need the word `Agent`. The category explanation can
 carry it instead:
 
-> A terminal-native observatory for AI agent work.
+> A local observatory for AI agent work.
 
 The existing `ao` codename remains a strong executable name and can be read as
 `Agent Observatory` without requiring that expansion in the public brand.
@@ -78,7 +78,7 @@ Keep your agents in view.
 Strengths:
 
 - energetic, modern and visually suggestive;
-- sounds like a polished native developer tool;
+- sounds like a polished developer tool;
 - naturally supports motion, hierarchy and relationships;
 - shorter and more immediately brand-like than Observatory.
 
@@ -182,7 +182,7 @@ The broader agent-management category is increasingly active:
 No project found in the initial search clearly combines AO's complete thesis:
 durable cross-repository goals, stable spatial organisation, delegation and Git
 relationships, explainable human attention, provider-independent hosted
-agents and a terminal-native universe.
+agents and a local graphical universe with host-owned terminal access.
 
 That is an initial landscape scan, not exhaustive market or legal diligence.
 

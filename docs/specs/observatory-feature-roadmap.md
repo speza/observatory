@@ -1,230 +1,111 @@
-# Observatory feature roadmap and surface ownership
+# Observatory feature roadmap
 
-Status: draft for review
+Status: accepted web-first direction
 
-Date: 2026-08-26
+Date: 2026-08-27
 
 Depends on:
 
 - [Goal-centred agent orchestration map](../design/agent-orchestration-map.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
-- [V0 live Herdr universe/map](v0-live-herdr-command-centre.md)
 - [Local web Observatory walking slice](local-web-observatory-walking-slice.md)
 
-## Purpose
+## Product decision
 
-The visual direction has crossed the proof threshold. The next uncertainty is
-usefulness: can Observatory help one operator understand, triage, resume and
-verify a large body of concurrent agent work?
+Observatory has one maintained client: the local web GUI. The native TUI was
+retired after proving the product boundaries because graphical interfaces have
+the stronger long-term fit for portfolio density, evidence, diffs, multiple
+terminal surfaces, accessibility and rapid iteration.
 
-This document is the implementation roadmap and the ownership map for the
-three surfaces. It prevents the roadmap becoming a list of disconnected UI
-features and makes it explicit whether a capability belongs in the semantic
-control plane, the native terminal client, the local browser client, or more
-than one of them.
+`CORE` owns durable meaning, commands, persistence, reconciliation, projections
+and host capabilities. `WEB` owns the Atlas, Ledger, attention and review
+experience. A future command-line interface may start the server, report status
+or submit structured commands, but it must not become a second interactive UI.
+Herdr remains the terminal-native fallback for provider-specific or recovery
+workflows.
 
-## Product decision: keep both clients for now
+## Current baseline
 
-Keep the TUI and the local web client through V1 and the first real dogfood
-evaluation. They are two projections of one control plane, not two competing
-semantic products.
+| Feature                                          | CORE       | WEB       | Note                                 |
+| ------------------------------------------------ | ---------- | --------- | ------------------------------------ |
+| Goal → Agent topology and assignment             | Done       | Done      | Durable semantic baseline            |
+| Goal lifecycle, priority and accepted position   | Done       | Done/Next | Web position editing remains missing |
+| SQLite persistence and atomic commands           | Done       | —         | Browser never accesses SQLite        |
+| Herdr reconciliation and uncertainty             | Done       | Done      | Snapshot polling walking slice       |
+| Explainable blocked/waiting/stale attention      | Done       | Done      | Initial signal vocabulary only       |
+| Catch-up checkpoint and semantic changes         | Done       | Done      | Explicit acknowledgement             |
+| Atlas, Ledger, Inbox and Closeout                | Projection | Done      | One model, several lenses            |
+| Host-owned terminal and linked executions        | Done       | Done      | xterm.js renders host streams        |
+| Agent launch and workspace preparation           | Done       | Done      | Shared coordinator                   |
+| Host-synchronised closeout                       | Done       | Done      | Close before semantic archive        |
+| Read-only working-tree review                    | Done       | Done      | Bounded server-side path resolution  |
+| Search and related-Agent evidence                | Done       | Next      | Immediate discovery slice            |
+| Verification and handoff evidence                | Next       | Next      | Major trust gap                      |
+| Rich deterministic attention                     | Next       | Next      | Major usefulness gap                 |
+| Typed delegation/result/dependency relationships | Next       | Next      | Preserve provenance                  |
+| Cross-agent Git and integration warnings         | Next       | Next      | Evidence, not map nodes              |
 
-- **CORE** owns durable meaning, commands, persistence, reconciliation,
-  projections and host capability boundaries.
-- **TUI** is the keyboard-first operational client and the reliable terminal
-  fallback. It is the fastest path to Herdr-native launch, attachment and
-  recovery workflows.
-- **WEB** is the primary high-fidelity orientation client. It owns the Mineral
-  Atlas composition, pointer interaction, responsive layout and richer visual
-  explanation.
+## Product risks still to prove
 
-The clients must share semantic behaviour for finding, triaging, inspecting,
-assigning, completing, archiving and opening a hosted Agent. They do not need
-identical geometry, key bindings or animation. A feature should not be built
-twice merely because it is visually different, but a task-critical semantic
-capability should not be trapped in one client without an explicit reason.
+1. **Verification is thin.** Runtime `done` is visible, but trustworthy result
+   evidence, check state, review state and integration readiness are incomplete.
+2. **Attention is narrow.** Returned results, downstream blockers, failed
+   checks, stalled work and context pressure do not yet form a complete model.
+3. **Atlas geography is stable but not sufficiently semantic.** Goal membership
+   is clear; delegation, dependency, handoff and integration relationships are
+   not yet represented truthfully enough to prove that space beats a strong
+   Ledger.
+4. **The GUI needs full live-host sign-off.** Mock and API coverage are strong;
+   browser → Herdr terminal → return, host loss and resize/scroll need sustained
+   real use.
+5. **Atlas versus Ledger remains unproven.** Preference and visual character are
+   not evidence of faster, more accurate supervision.
 
-Re-evaluate this split after the one-week live-host dogfood and the Atlas versus
-Ledger task comparison. Do not remove the TUI before the web client proves that
-it can replace keyboard-first recovery and host-edge workflows in practice.
-
-## Ownership contract
-
-`CORE` means the pure Universe/projection/persistence behaviour plus the
-injected host/provider edge where necessary. `TUI` and `WEB` mean renderer and
-client work over those contracts; neither is allowed to invent durable state.
-
-| Mark       | Meaning                                                              |
-| ---------- | -------------------------------------------------------------------- |
-| `Done`     | Implemented and covered by the current acceptance baseline           |
-| `Next`     | Required for the next product slice                                  |
-| `Later`    | Valid follow-on after the next slice proves useful                   |
-| `Deferred` | Deliberately excluded until new evidence or a second consumer exists |
-| `—`        | Not owned by that surface for this phase                             |
-
-## Feature ownership matrix
-
-### Semantic model, projections and trust
-
-| Feature                                                                                         | CORE  | TUI   | WEB   | Priority / note                                                                                      |
-| ----------------------------------------------------------------------------------------------- | ----- | ----- | ----- | ---------------------------------------------------------------------------------------------------- |
-| Goal → Agent durable topology and direct assignment                                             | Done  | Done  | Done  | Shared semantic baseline                                                                             |
-| Goal lifecycle, priority, description and accepted map position                                 | Done  | Done  | Done  | Web can edit metadata; web position editing is still missing                                         |
-| Agent identity, rename/description and unassignment                                             | Done  | Done  | Done  | Host identity remains opaque                                                                         |
-| SQLite restart, migrations and atomic commands                                                  | Done  | Done  | —     | Web goes through CORE; never reaches SQLite                                                          |
-| Herdr snapshot reconciliation, stale and unknown state                                          | Done  | Done  | Done  | Web currently consumes the polled projection                                                         |
-| Explainable attention with reason and age                                                       | Done  | Done  | Done  | Initial blocked/waiting/stale signals only                                                           |
-| Rich attention: stalled, parent-waiting, result-returned, integration-blocked, context pressure | Next  | Next  | Next  | Biggest trust/usefulness expansion after discovery                                                   |
-| Catch-up checkpoint and semantic change projection                                              | Done  | Next  | Done  | Add a compact TUI catch-up lens for client parity                                                    |
-| Metadata search over goals, Agents and host/Git facts                                           | Done  | Done  | Next  | Core and TUI exist; web transport and UI are the immediate slice                                     |
-| Evidence-backed related-Agent candidates                                                        | Done  | Done  | Next  | Web needs transport, inspector UI and adopt/dismiss commands                                         |
-| Code-context list/map lens                                                                      | Done  | Done  | Later | Supporting lens; not a new topology layer                                                            |
-| Typed delegation, dependency, result and integration relationships                              | Next  | Next  | Next  | Keep distinct from Goal → Agent and Git topology                                                     |
-| Verification and handoff evidence                                                               | Next  | Next  | Next  | Distinguish runtime `done` from verified/integration-ready                                           |
-| Read-only agent working-tree diff/review                                                        | Next  | —     | Done  | Web reads the primary reported workspace as bounded Git evidence; multi-repo change sets remain open |
-| Cross-agent Git overlap, divergence and integration warnings                                    | Next  | Next  | Next  | Evidence and warnings, never durable map nodes                                                       |
-| Provider facts and optional hooks                                                               | Later | Later | Later | Progressive enrichment; no transcript ingestion by default                                           |
-| Archive history and restore lens                                                                | Later | Later | Later | Archive exists; restore/history is intentionally deferred                                            |
-
-### Host and execution surfaces
-
-| Feature                                                              | CORE     | TUI      | WEB      | Priority / note                                                                                                                        |
-| -------------------------------------------------------------------- | -------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Host-owned embedded terminal                                         | Done     | Done     | Done     | SessionHost remains the only host seam                                                                                                 |
-| Terminal input, resize, scroll, release and return-state restoration | Done     | Done     | Done     | Web primary-terminal loop is implemented                                                                                               |
-| Linked execution terminal and sibling picker                         | Done     | Done     | Done     | Web uses a transient `Main` + companion tab deck; `New terminal` creates repeatable tabs in the parent Herdr workspace                 |
-| Native foreground handoff                                            | Done     | Done     | —        | TUI/host-edge capability; browser can offer a clear explanation instead                                                                |
-| Start-agent coordinator and workspace preparation                    | Done     | Done     | Done     | Web and TUI share the coordinator, WorkspaceProvider and SessionHost launch capability                                                 |
-| Host-synchronised Agent closeout                                     | Done     | Next     | Done     | Web closeout and CORE coordination are implemented; TUI parity remains next; see [closeout plan](agent-closeout-and-host-lifecycle.md) |
-| Host-loss recovery and live watch optimisation                       | Next     | Next     | Next     | Polling is sufficient for the walking slice; recovery must be tested live                                                              |
-| Agent quick messages or structured approvals                         | Deferred | Deferred | Deferred | Do not broaden interaction until exact-target trust is proven                                                                          |
-| AO daemon, concurrent clients and general event transport            | Deferred | Deferred | Deferred | Introduce only when one in-process client is a real constraint                                                                         |
-
-### Presentation and navigation
-
-| Feature                                              | CORE                 | TUI  | WEB                 | Priority / note                                                             |
-| ---------------------------------------------------- | -------------------- | ---- | ------------------- | --------------------------------------------------------------------------- |
-| Goal-centred Atlas/map                               | Projection           | Done | Done                | Atlas remains the primary orientation surface                               |
-| Supporting Ledger/grouped list                       | Projection           | Done | Done                | Precision/scanning baseline                                                 |
-| Attention queue and actionable Inbox                 | Projection           | Done | Done                | Unassigned observations stay outside map topology                           |
-| Focused goal/agent view and preserved camera context | Layout/projection    | Done | Done                | Selecting a child in a focused goal must not jump the camera                |
-| Semantic zoom and density control                    | Projection contract  | Done | Next                | Web has focus-driven labels but not the full TUI detail control             |
-| Search-result focus into owning Goal/Agent context   | Projection           | Done | Next                | Must work from every web lens                                               |
-| Persistent goal dragging and accepted anchor editing | Commands/layout      | Done | Next                | Web currently pans but does not persist moved goals                         |
-| Collision-aware labels and dense-scale layout        | Layout/projection    | Done | Done/next hardening | Keep deterministic; no browser graph engine                                 |
-| Context menu/action palette                          | Commands             | Done | Next                | Add accessible pointer and keyboard action entry                            |
-| Theme, reduced motion and state key                  | Projection semantics | Done | Done                | Visual treatment must not carry meaning alone                               |
-| Catch-up jump to affected target                     | Projection           | Next | Done                | TUI parity is the remaining client gap                                      |
-| Keyboard navigation and terminal-safe fallback       | —                    | Done | Done/partial        | Web uses browser bindings; add missing semantic actions, not identical keys |
-
-## What the original specs still leave open
-
-These are not forgotten implementation details; they are the deliberate next
-product questions from the original design:
-
-1. **Verification is still thin.** The current inspector shows runtime and
-   repository facts, but not trustworthy result evidence, review state or
-   integration readiness.
-2. **Attention is still narrow.** Blocked/waiting and stale observations work;
-   returned results, downstream blockers, failed checks and context pressure do
-   not yet form a complete attention model.
-3. **Relationships are not yet durable semantics.** Related-agent evidence is
-   implemented, but delegation, dependency, result consumption and integration
-   still need typed observations and explicit human actions.
-4. **Git topology is an incremental evidence lens.** The web now exposes a
-   bounded, read-only working-tree diff for a selected Agent. Overlap,
-   divergence, pull requests and checks still need typed evidence and should
-   enrich decisions without turning repositories or worktrees into map nodes.
-5. **The web has not yet had full live-host sign-off.** The mock and API
-   baselines are green, but the browser-to-Herdr map → terminal → return,
-   host-loss and resize/scroll flows still need direct dogfooding.
-6. **The Atlas versus Ledger experiment is not complete.** The visual POC was
-   closed, but the product decision still needs task evidence: catch-up,
-   attention, dormant-work resumption, relationship discovery and outcome
-   verification.
-
-Provider adapters, transcript ingestion, a daemon, an AO-owned multiplexer,
-automatic assignment/completion, and a generic graph engine remain deliberate
-non-goals for this roadmap.
-
-## Web additions required from the TUI
-
-The web does not need every TUI affordance immediately. The following are the
-meaningful gaps, in order:
-
-### First web slice: discovery and context
-
-1. Expose `search` and `related-agents` through the loopback API.
-2. Add a browser command palette/search surface with keyboard navigation.
-3. Add related-Agent evidence to the inspector with explicit adopt/dismiss.
-4. Make every result preserve the owning Goal, camera context and inspector.
-5. Add a read-only workspace review surface for the selected Agent's bounded
-   Git diff, with file navigation, unified/split rendering and a paired
-   host-terminal context.
-6. Add contract tests for transport, command allow-list and human authority.
-
-### Web parity hardening
-
-1. Add persisted goal movement and a clear reset/revert affordance.
-2. Add explicit semantic-density controls rather than relying only on focus.
-3. Add an accessible action menu for related, context and host actions.
-4. Add richer terminal deck actions (tab close/reopen state, explicit focus
-   affordances and host-loss recovery) after live use.
-5. Fix attention-jump navigation so `g` also focuses the target camera, not only
-   the selection.
-
-### TUI parity work
-
-The reverse gap matters too: catch-up is a core projection and web surface but
-does not yet have a native TUI lens. Add a compact keyboard-first catch-up view
-before claiming full cross-client parity.
+Provider transcript ingestion, a remotely accessible service, an AO-owned
+multiplexer, automatic assignment/completion and a generic graph engine remain
+non-goals.
 
 ## Delivery sequence
 
-### Now — Web discovery slice
+### Now — discovery and context
 
-- Search transport and browser command palette.
-- Related-agent transport, inspector panel and adopt/dismiss actions.
-- Host-provided companion-terminal deck: `Main` plus transient browser tabs,
-  with Herdr prepared shells created in the parent workspace.
-- Navigation/selection regression tests.
-- Mock dogfood at the 12-goal/75-agent fixture.
+1. Expose search and related-Agent projections through the loopback API.
+2. Add a browser command palette with keyboard navigation.
+3. Add related-Agent evidence with explicit adopt and dismiss commands.
+4. Preserve owning Goal, camera context and inspector for every result.
+5. Complete live browser acceptance for terminal return and host loss.
 
-### Next — Trust and daily operation
+### Next — trust and daily operation
 
-- TUI parity for host-synchronised `Close & archive` and the Closeout lens.
-- TUI catch-up lens and web attention-jump hardening.
-- Verification/evidence contract spike with synthetic evidence first.
-- Richer deterministic attention signals.
-- Live Herdr/browser resilience and terminal return acceptance.
+1. Define a verification/evidence contract with synthetic evidence first.
+2. Add deterministic returned-result, stalled, failed-check and downstream
+   blocker attention signals.
+3. Make completion a coherent flow: reported done → inspect evidence → review
+   diff/checks → accept, revise, close or archive.
+4. Harden terminal tabs, resize, release and host-loss recovery from real use.
+5. Add persisted goal movement and explicit semantic-density controls.
 
-### Later — Context and scale
+### Later — relationships and scale
 
-- Cross-agent Git/worktree overlap, divergence and integration evidence (the
-  first web working-tree diff is already part of the walking slice).
-- Typed delegation/result/dependency relationships.
-- Web context lens and persisted goal movement.
-- Provider enrichment and broader host adapters only after the Herdr seam has
-  survived real use.
+1. Add typed delegation, result, dependency and integration relationships.
+2. Surface cross-Agent workspace overlap, divergence and integration risk.
+3. Add provider enrichment only through provenance-bearing plugin observations.
+4. Evaluate a second production host only after Herdr workflows prove useful;
+   use it to validate `SessionHost`, not broaden the domain model.
 
-Every slice should include CORE contract changes, the consuming renderer work,
-deterministic fixtures, automated tests and the relevant mock/live dogfood. Do
-not split work into “frontend polish” and “backend plumbing” that cannot be
-validated as an operator task.
+## Evaluation gate
 
-## Acceptance gate
-
-The roadmap is working when a user managing at least 20 mixed agents can:
+Compare Atlas and Ledger with the same 20–40 Agent world. The decisive session
+is a return after 24–72 hours of realistic changes. Measure whether the operator
+can:
 
 - explain active Goal state in under two minutes;
 - identify every item requiring judgment without opening every Agent;
-- find a named Agent or Goal and reach its owning context in under ten seconds;
-- discover and safely adopt or dismiss related work;
-- catch up on changes without losing spatial context;
+- find a named Goal or Agent and reach its context in under ten seconds;
+- catch up without losing orientation;
 - distinguish runtime completion from verified integration readiness; and
-- move from overview to the correct terminal, artifact or review surface and
-  return without reconstructing their place.
+- reach the correct terminal, artifact or review surface and return without
+  reconstructing their place.
 
-The map remains the primary hypothesis. If users consistently return to the
-Ledger or Herdr sidebar for these tasks, simplify or change the spatial product
-rather than adding more decoration.
+If users consistently use Ledger or Herdr to orient, simplify or change the
+spatial product. Do not defend the Atlas by adding decoration.

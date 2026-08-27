@@ -34,8 +34,8 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
   injected generic `SessionHost` capability port.
 - Effect owns asynchronous host/runtime work: `SessionHost` returns typed
   Effects and terminal output is an Effect Stream. Keep `universe/`, SQLite
-  records, projections and spatial calculations Effect-free; the TUI is the
-  imperative edge that runs host Effects.
+  records, projections and spatial calculations Effect-free; the web server
+  composition root is the imperative edge that runs host Effects.
 - Keep host-specific behaviour behind the `SessionHost` seam. Herdr identifiers
   and attachment targets remain opaque outside its adapter.
 - Herdr is the deliberate required live host for V0/V1. That is a product
@@ -78,7 +78,7 @@ SessionHost -> HostSnapshot -> Universe -> UniverseStore
 - Never commit real session transcripts, credentials or private host data.
   Fixtures must be synthetic or sanitised.
 - Exercise host behaviour through `SessionHost`; use the mock adapter for
-  deterministic coverage. For renderer changes, also dogfood `bun run dev:mock`.
+  deterministic coverage. For renderer changes, also dogfood `bun run web:mock`.
 
 ## Quality
 

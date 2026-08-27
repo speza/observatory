@@ -1,10 +1,14 @@
 # Contextual linked execution surfaces
 
-Status: accepted and implemented for the native renderer and web terminal deck
+Status: accepted and implemented in the web terminal deck
 Date: 2026-08-26
 Related: [Agent and linked execution model](agent-execution-model.md),
 [Embedded terminal interaction](../design/terminal-interaction.md),
 [Observatory technical architecture](../design/technical-architecture.md)
+
+> Native-renderer comparisons below are retained as implementation history. The
+> OpenTUI client was retired on 2026-08-27; only the web terminal deck is
+> maintained.
 
 ## Summary
 
@@ -27,12 +31,9 @@ reveals `Open linked terminal` in its inspector/menu and through the keyboard
 shortcut. If the host reports multiple available linked executions, Observatory
 opens a picker showing each shell or sibling Agent by label.
 
-The clients use deliberately bounded terminal compositions:
-
-- the native renderer keeps one primary surface and one selected linked
-  execution surface at a time; and
-- the web renderer keeps a primary `Main` tab plus any number of selected
-  observed or newly created companion tabs.
+The web GUI uses a deliberately bounded terminal composition: a primary `Main`
+tab plus any number of selected observed or newly created companion tabs. The
+former native composition is historical and no longer constrains this surface.
 
 The web tabs are a browser presentation of host-owned terminal sessions, not a
 new multiplexer. Each tab has an independent host controller, while the map,
@@ -112,8 +113,8 @@ There is no duplicate durable shell object and no automatic Goal assignment.
 2. Choose `Open linked terminal` or press the linked-terminal shortcut.
 3. If one execution is available, open it directly.
 4. If several are available, choose one in the linked-execution picker.
-5. Observatory shows the chosen surface beside the map and keeps the Agent
-   selection and spatial context.
+5. Observatory opens the chosen terminal tab while retaining the Agent
+   selection and map state beneath the terminal deck.
 
 ### Open beside the Agent terminal
 

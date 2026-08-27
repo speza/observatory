@@ -1,11 +1,16 @@
 # Native terminal surface POCs
 
-Status: Herdr-backed lens implemented; broader terminal product decision remains open
+Status: historical evidence; native client retired 2026-08-27
 Date: 2026-08-22
 Depends on: [V0 live Herdr universe/map](v0-live-herdr-command-centre.md)
 
 Design context: [technical architecture](../design/technical-architecture.md),
 [technology decisions](../design/technology-decisions.md)
+
+> These completed experiments proved that the `SessionHost` terminal seam was
+> viable. Their OpenTUI implementation was removed with the native client. The
+> production browser terminal now consumes the surviving generic capability
+> through xterm.js and the loopback gateway.
 
 ## Question
 

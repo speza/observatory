@@ -64,14 +64,13 @@ Each linked execution has:
 - an opaque terminal target and adapter-owned identity binding when available; and
 - an `observed` or `prepared` source plus an explanation.
 
-The capability list is N-sized. The first renderer presents a picker for all
-available linked executions and opens the selected one as the single secondary
-surface beside the primary map or Agent terminal.
+The capability list is N-sized. The web GUI presents a picker for all available
+linked executions and opens selected entries as companion tabs beside the
+primary `Main` terminal.
 
-Host snapshots continue while terminal surfaces are open. `Ctrl-Shift-R` forces
-an immediate refresh without taking ordinary `R` input away from the focused
-shell. A picker refresh revalidates its owner and replaces its rows from the
-latest host capability; it closes only when no valid linked target remains.
+Host snapshots continue while terminal surfaces are open. A picker refresh
+revalidates its owner and replaces its rows from the latest host capability; it
+closes only when no valid linked target remains.
 
 ## Shell-to-agent promotion
 
@@ -99,9 +98,9 @@ but it never silently assigns an Agent to a Goal.
 - The user can open a linked execution entirely inside Observatory.
 - More than one linked execution opens a labelled picker; the user chooses the
   shell or sibling Agent to inspect.
-- The primary surface remains visible while the selected linked surface runs.
-- Selecting another Agent releases the old contextual terminal, preserving the
-  normal one-primary/one-linked surface constraint.
+- The selected Agent and map context remain intact while terminal tabs run.
+- Selecting another Agent releases the old primary and companion terminal
+  sessions.
 - A linked execution that becomes recognised appears as its own Agent node after
   reconciliation; it is never duplicated as a durable linked-execution node.
 

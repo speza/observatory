@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
-Status: implemented V1 control plane and local web walking slice; feature roadmap in review
-Date: 2026-08-26
+Status: implemented V1 control plane and web-only local product
+Updated: 2026-08-27
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
@@ -13,8 +13,7 @@ Feature ownership and delivery: [Observatory feature roadmap](../specs/observato
 ## Purpose
 
 This document defines the technical shape of Observatory: a local semantic
-control plane with portable native and high-fidelity local web projections over
-agents hosted by other tools.
+control plane with one maintained React GUI over agents hosted by other tools.
 
 The architecture serves one operator loop: understand what the concurrent work
 is doing, catch up on what changed, identify the result that matters, find where
@@ -24,23 +23,21 @@ model. AO is therefore responsible for durable intent, accountability,
 attention, relationships and verification context; agent runtimes remain
 responsible for their own internal planning and task execution graphs.
 
-The implementation language and initial toolchain are selected separately in
-the technology decision record. Disposable renderer experiments established the
-v0 presentation split; live product evidence must drive later layout decisions.
+The implementation language and toolchain are selected separately in the
+technology decision record. Disposable and retired renderer experiments remain
+historical evidence; live web-product evidence drives current layout decisions.
 
 The staged native-terminal experiments are specified in
 [Native terminal surface POCs](../specs/terminal-surface-pocs.md). They test
 terminal fidelity and Herdr transport separately from the semantic control
 plane and do not change the implemented V0 boundary by themselves.
 
-The 2026-08-22 evidence pass found both experiments technically plausible:
-Bun/OpenTUI can host a small native terminal surface, and Herdr can stream a
-live agent into the same panel while retaining process ownership after
-release. The first Herdr-backed embedded-terminal slice is now implemented
-behind the SessionHost seam and has passed deterministic mock coverage plus a
-non-destructive live map → terminal → release → map smoke. This promotes the
-host-owned capability, not the disposable AO-owned PTY, into V0. It does not add
-transcript ingestion or justify an AO-owned daemon.
+The 2026-08-22 evidence pass found that Herdr could stream a live Agent while
+retaining process ownership after release. That host-owned capability remains
+implemented behind `SessionHost` and now terminates in xterm.js through the
+loopback gateway. The retired OpenTUI experiment proved the seam but is no
+longer a maintained client or dependency. This does not add transcript
+ingestion or justify an Observatory-owned daemon.
 
 The terminal interaction and scroll-ownership decision is recorded in
 [Embedded terminal interaction](terminal-interaction.md). That document explains
@@ -51,19 +48,17 @@ The [agent and linked execution model](../specs/agent-execution-model.md) and
 decision extend the same boundary to transient shells and sibling-agent
 surfaces beside the selected Agent. The local web client now adds a bounded,
 read-only working-tree diff review through the separate workspace capability;
-interactive/native diff tooling remains outside the `SessionHost` interface,
-and the TUI can still use a linked shell for provider-specific review workflows.
+interactive diff tooling remains outside the `SessionHost` interface, and a
+linked shell or Herdr itself handles provider-specific review workflows.
 
-## Client split
+## Client decision
 
-The current product direction keeps both the native TUI and the local web
-client through V1. The TUI is the keyboard-first operational fallback and the
-most direct host-edge client; the web client is the higher-fidelity orientation
-surface for the Mineral Atlas, pointer interaction and responsive explanation.
-They consume the same CORE commands and projections, but do not duplicate
-geometry or renderer-specific interaction. The feature roadmap is the
-authoritative list of which capabilities are CORE, TUI and WEB, and which
-client gaps are intentional or scheduled.
+Observatory has one maintained application client: the local web GUI. It owns
+the Mineral Atlas, Ledger, attention, review and hosted-terminal experiences.
+The OpenTUI client was retired on 2026-08-27 after proving the architecture but
+before client parity became a permanent product tax. Herdr remains the native
+terminal fallback. A future CLI may expose launch, status and structured
+commands, but must not become another interactive renderer.
 
 ## Architectural objective
 
@@ -79,7 +74,7 @@ The architecture must support:
 - human and agent mutation through the same interface;
 - completed disposable rendering experiments followed by a live Herdr walking
   slice;
-- a rich terminal client without making terminal rendering part of the domain;
+- a rich browser terminal without making terminal rendering part of the domain;
 - future tmux and other agent-host adapters; and
 - a possible AO-native multiplexer without requiring one for v1.
 
@@ -94,7 +89,7 @@ separately in [Plugin architecture](plugin-architecture.md).
 ```text
                         Human / external agent
                                  │
-                       CLI + control interface
+                Browser GUI / narrow command API
                                  │
 ┌────────────────────────────────▼─────────────────────────────────┐
 │                     AO control plane                            │
@@ -114,10 +109,10 @@ separately in [Plugin architecture](plugin-architecture.md).
           hosted terminals
 
 Control-plane projections
-         ├── native spatial universe client
-         ├── attention/list/inspector supporting lenses
+         ├── local web Atlas / Ledger GUI
+         ├── attention/review/inspector supporting lenses
          ├── deterministic test fixtures
-         └── local web Atlas / Ledger client
+         └── future structured CLI consumers
 ```
 
 The control plane is the only module allowed to author trusted AO state.
@@ -236,11 +231,10 @@ openLinkedExecutionTerminal(LinkedExecution,
                                                 -> Effect<HostTerminalOpenResult, HostError>
 ```
 
-V0 obtains fresh snapshots on a renderer-controlled polling interval, including
+V0 obtains fresh snapshots on a composition-root polling interval, including
 while embedded terminal surfaces are open so shell-to-Agent promotion remains
-observable. `Ctrl-Shift-R` provides an immediate refresh without reserving
-ordinary `R` input from the focused shell. A future host event stream may
-reduce polling, but it is not part of this seam yet.
+observable. A future host event stream may reduce polling, but it is not part
+of this seam yet.
 `launch` creates a host execution but does not assign semantic meaning;
 reconciliation must observe the resulting Agent before the coordinator assigns
 it to a Goal. `access` returns the capabilities and opaque attachment targets
@@ -281,8 +275,8 @@ This keeps the module deep and avoids copying Herdr or tmux mechanics into
 every caller.
 
 Opening a terminal accepts an optional `TerminalOpenOptions.resizeMode`. The
-default `fit` mode sizes the host PTY to the client viewport, as the native TUI
-and the web workspace-review split do. The `preserve` mode remains available
+default `fit` mode sizes the host PTY to the client viewport, as the browser
+terminal and workspace-review split do. The `preserve` mode remains available
 for a future read-mostly browser surface that must not impose its viewport on
 the host terminal.
 
@@ -314,25 +308,21 @@ classifies recognised sibling agents as linked executions. The adapter returns
 only opaque targets and human-readable explanations: Herdr workspaces, tabs,
 panes and split layouts never become Observatory nodes.
 
-The renderer owns terminal-cell interpretation and the transient terminal
-surfaces. The native renderer keeps two slots (primary plus one selected linked
-execution); the web renderer keeps a primary terminal and multiple selected
-linked executions as tabs. It can show a map beside a linked execution, or an
-Agent terminal beside one, and cycles focus explicitly between them. Modal
-pickers are rendered in a root overlay above terminal surfaces so selection
-remains visible and interactive. The host remains responsible for process
-ownership, resize and release. Releasing a linked execution releases
+The browser owns terminal interpretation through xterm.js and transient
+terminal presentation. It keeps a primary terminal and multiple selected linked
+executions as tabs, and can show workspace evidence beside the active terminal.
+The host remains responsible for process ownership, resize and release.
+Releasing a linked execution releases
 Observatory's controller; it must not silently terminate an existing user-owned
-shell process. Native diff/review presentation is intentionally outside this
-interface: the linked shell is the flexible surface for those workflows.
+shell process. The bounded browser diff is a separate workspace capability, not
+part of `SessionHost`.
 
 An embedded PTY is not a guarantee of native provider UI. In particular, image
 or file attachment may depend on an OS picker, terminal clipboard/graphics
 protocol or provider-specific command. Do not grow `SessionHost` into a
 universal upload interface; expose proven capabilities and retain a
-capability-gated native handoff for provider-only interactions. The TUI keeps the
-embedded terminal as the default (`t` or `Enter`) and makes native handoff an
-explicit `o` action.
+capability-gated explanation or Herdr route for provider-only interactions. The
+browser terminal is the default in-product route.
 
 The first launch slice is implemented and specified in
 [session-launch.md](../specs/session-launch.md). It keeps `SessionHost` as the
@@ -715,15 +705,11 @@ and adapters must not query SQLite directly.
 
 ## Local control transport
 
-The control plane should be usable from a CLI, long-running renderer and agent
-skill. The transport therefore needs request/response commands plus event
-subscriptions.
-
-Initial direction for agent launch is a local JSON CLI/command surface that
-the TUI and an installable agent skill can call. A daemon is deliberately later:
-when a second live client or concurrent agent process needs subscriptions,
-carry the same versioned commands and events over a user-owned Unix domain
-socket on macOS/Linux (and a named-pipe adapter later if needed).
+The control plane currently serves one in-process browser GUI over loopback
+HTTP and SSE. A future structured CLI or agent skill may consume versioned
+commands, but that is not a reason to maintain a second renderer. A daemon and
+general subscription transport remain later decisions for demonstrated
+concurrent-client needs.
 
 The first production web slice uses an in-process loopback HTTP adapter. The
 `web` composition root owns one `Universe`, reconciles one selected
@@ -762,9 +748,9 @@ authenticated service.
 
 This is an ordinary browser surface launched by `bun run web` or
 `bun run web:mock`, not an Electron application. Projection polling is an
-intentional walking-slice transport, not the final multi-client protocol. Add a
-versioned local command/subscription transport when the web renderer must run
-concurrently with another live client. The hosted terminal uses SSE plus narrow
+intentional walking-slice transport. Add a versioned local
+command/subscription transport only when a real concurrent consumer requires
+it. The hosted terminal uses SSE plus narrow
 POST actions because its data flow does not yet require a general WebSocket
 transport. The browser never owns or creates a PTY.
 
@@ -799,13 +785,13 @@ lifecycle
 acceptance
 ```
 
-The web and terminal renderers decide how to encode those facts while preserving
-meaning and accessibility.
+The web renderer decides how to encode those facts while preserving meaning and
+accessibility.
 
 Renderer-specific objects and event types stop at the renderer module. The
 Projection and Layout modules define what exists and where it is logically
-placed; a renderer maps that state onto its viewport. This keeps the terminal
-technology replaceable without creating a second semantic model.
+placed; the browser maps that state onto its viewport without creating a second
+semantic model.
 
 ### Local interaction state
 
@@ -868,7 +854,7 @@ the same `SessionHost` interface as Herdr and is selected only by the explicit
 frames rather than sleeping or mutating a second domain model. Each frame emits
 stable synthetic native identities, opaque access targets and sanitized agent
 metadata. The real Universe reconciliation, stale-agent handling, attention
-evaluation, projections, layout and TUI attachment-return path therefore run
+evaluation, projections, layout and browser terminal-return path therefore run
 unchanged.
 
 The default `orbit` scenario starts at twenty agents, introduces additional
@@ -879,12 +865,13 @@ through `Universe.execute`; it never runs for the live Herdr host. The mock
 attachment action is intentionally local and reports simulated focus rather
 than claiming to control a real terminal.
 
-## Terminal client
+## Retired native-client evidence
 
-The terminal is the first real client. It is a restrained, keyboard-first
-spatial universe built from portable cells, typography, colour and limited
-semantic motion. It does not emulate a graphical canvas or provide a second
-enhanced-graphics mode in v0.
+The native terminal client was the first real renderer and established several
+useful interaction and layout rules. It was retired on 2026-08-27. The remainder
+of this section records that historical evidence; it is not a maintained-client
+contract. Current behaviour and future work belong to the web GUI and feature
+roadmap.
 
 The default projection is a portfolio map of stable goal bodies and direct
 agent satellites. Goal size communicates agent load, human-set priority has
@@ -1047,7 +1034,7 @@ for recognition, missing metadata, stale locators and malformed native state.
 
 ### End-to-end tests
 
-The v0 live Herdr slice should demonstrate:
+The completed v0 live Herdr slice demonstrated the following boundary:
 
 1. discover existing vanilla agents into an unassigned inbox;
 2. create a goal and assign an agent directly to it;
@@ -1059,40 +1046,43 @@ The v0 live Herdr slice should demonstrate:
 8. focus or attach to the real hosted agent; and
 9. complete and archive a goal only through an explicit human action.
 
-## Delivery sequence
+## Implementation sequence record
+
+The phases below record how the current architecture was reached. They are not
+the active product roadmap; current priorities live in the
+[feature roadmap](../specs/observatory-feature-roadmap.md).
 
 ### Phase 0 — rendering discovery (complete)
 
 - OpenTUI proved viable for a portable native spatial universe client.
 - Spatial, enhanced-graphics and ANSI-raster experiments did not justify a
   custom graphical terminal renderer.
-- Native TUI proved the first spatial boundary; the maintained web Observatory
-  now provides higher visual fidelity over the same semantic model.
+- The native client proved the first spatial boundary and was then retired; the
+  web GUI is now the sole maintained product renderer.
 
-### Phase 1 — live Herdr walking slice
+### Phase 1 — live Herdr walking slice (complete)
 
 - Implement only the Universe, Attention, Projection and SQLite behaviour needed
   by the v0 workflow.
 - Add Herdr snapshot discovery and focus/attachment through the Agent-host
   interface.
-- Build the native goal-centred universe map, direct agent satellites,
+- Build the goal-centred universe map, direct Agent satellites,
   unassigned inbox, inspector, supporting list lens and search.
 - Keep the process in-process; do not add a daemon solely for this slice.
 - Dogfood with real agents before broadening the model.
 
-### Phase 2 — live-state hardening
+### Phase 2 — live-state hardening (partially complete)
 
 - Add Herdr watch/reconciliation and stale-host recovery.
 - Add the minimum provider recognition needed for reliable attention signals.
 - Add Git/worktree inspection as agent metadata and conflict warnings.
-- Run the one-week test with at least 15 real recognized agents; do not
-  count shell-only panes, tabs or workspaces as agents.
+- The outstanding evidence gate is a one-week test with at least 15 real
+  recognized agents, excluding shell-only panes, tabs and workspaces.
 
-### Phase 3 — interaction and agent integration
+### Phase 3 — interaction and agent integration (partially complete)
 
-- Run the [native terminal surface POCs](../specs/terminal-surface-pocs.md):
-  first an AO-owned Bun PTY for renderer fidelity, then a Herdr-backed control
-  stream for durable-agent behaviour.
+- Preserve the completed [native terminal surface POCs](../specs/terminal-surface-pocs.md)
+  as historical evidence for the host-owned terminal boundary.
 - Add targeted quick messages only after exact-target UX is trusted.
 - Add the `StartAgent` CLI/skill flow for agent-created goals, workspace
   preparation and agent assignment; keep the one-request contract above
@@ -1101,7 +1091,7 @@ The v0 live Herdr slice should demonstrate:
 - Introduce the local daemon and control transport when multiple clients or
   agent processes create a real need.
 
-### Phase 4 — local web observatory
+### Phase 4 — local web observatory (complete walking slice)
 
 - Build a maintained React client with native SVG and CSS over the accepted
   universe-map, command-centre and inspector projections.
@@ -1129,9 +1119,7 @@ The v0 live Herdr slice should demonstrate:
 
 ## Decisions deliberately deferred
 
-- Web/canvas rendering library
-- Layout algorithm
-- Exact local transport framing
+- Broader Atlas relationship and layout semantics
 - Whether the daemon starts on demand or runs continuously
 - Provider-specific metadata mechanisms
 - Pull-request provider integrations

@@ -1,37 +1,49 @@
 # Observatory
 
-An agent observatory: a goal-centred spatial universe for supervising many AI
-agent executions across providers, repositories and git worktrees.
+Observatory is a local, goal-centred GUI for supervising many AI agent
+executions across providers, repositories and Git worktrees.
 
-Observatory exists for the gap between increasingly autonomous agent execution
-and human supervision. It should help answer five questions at a glance: what
-the work is doing, what changed while you were away, which result matters,
-where your judgment is needed, and whether reported completion can be trusted.
-The map is useful only if it makes those answers easier than reconstructing them
-from a flat agent list.
+It addresses the gap between increasingly autonomous execution and human
+supervision. The product should answer five questions quickly:
 
-## V0 live Herdr universe
+1. What is the work doing?
+2. What changed while I was away?
+3. Which result matters?
+4. Where is my judgment needed?
+5. Can I trust what says it is finished?
 
-The project-root implementation is a Bun/TypeScript OpenTUI spatial universe
-backed by SQLite. It discovers recognized live Herdr agents through
-`herdr api snapshot`, keeps human-owned goals, assignments and stable goal
-positions across restarts, and directly attaches to a real Herdr Agent through
-the installed CLI. Herdr panes, tabs and workspaces are agent metadata and
-opaque attachment targets; shell-only panes are transient linked executions,
-not durable Observatory Agents. When Herdr exposes its controller stream, `t`
-opens a host-owned embedded terminal inside the TUI; `y` opens a linked shell or
-sibling Agent beside the map or primary terminal. `Tab` changes input focus,
-`Ctrl-Shift-Y` opens the linked picker from a terminal, and `Enter` remains the
-foreground-native fallback.
-The default
-database is `data/ao.sqlite`; set `AO_DB_PATH` to use another database.
+The Atlas is useful only when its stable Goal → Agent geography makes those
+answers easier than reconstructing them from a flat list. Attention, Catch up,
+Ledger, Inbox, inspector, workspace review and hosted terminals are supporting
+lenses over the same trusted state.
 
-Herdr is intentionally required for the first live product slice, not baked
-into the control plane. The `SessionHost` seam keeps future tmux,
-Superlogical-style or Observatory-owned hosts replaceable; `AO_HOST=mock`
-exercises the same path without a live Herdr instance.
+## Product shape
 
-Install and verify the project:
+The maintained product has one client: a local React GUI rendered with native
+SVG and CSS. Observatory serves it from the same Bun process that owns the
+Universe, SQLite store and selected `SessionHost` adapter.
+
+```text
+Browser GUI -> loopback API -> Universe -> SQLite
+                              |
+                              -> SessionHost -> Herdr
+```
+
+The browser never reads SQLite or concrete host protocols. It consumes
+projections and submits a narrow set of human commands. Herdr is intentionally
+required for the first live product slice, but remains behind the generic
+`SessionHost` capability seam. `AO_HOST=mock` exercises the same product path
+without a live Herdr installation.
+
+The former OpenTUI client was retired on 2026-08-27. It proved the renderer and
+host boundaries, but maintaining a second client constrained density, review
+workflows and product iteration without strengthening the core hypothesis.
+Historical disposable rendering experiments remain under `prototypes/` as
+evidence; they are not maintained application code.
+
+## Run
+
+Install and verify:
 
 ```sh
 bun install
@@ -39,301 +51,89 @@ bun run check
 bun test
 ```
 
-Run against the live Herdr instance:
+Run against the current Herdr host:
 
 ```sh
-AO_DB_PATH=/private/tmp/ao-v0-live.sqlite bun run dev
+bun run start
 ```
 
-The terminal-surface experiments remain disposable and do not add managed
-agents or persistence. POC A starts a local shell inside an OpenTUI terminal
-panel; POC B renders a selected Herdr agent through Herdr's observe/control
-stream. Press Ctrl-Q to leave either prototype:
+The default database is `data/ao.sqlite`. Use another path when needed:
 
 ```sh
-bun run dev:pty-poc
-AO_HERDR_TARGET=<agent-or-pane-id> bun run dev:herdr-terminal-poc
-AO_HERDR_MOCK=1 bun run dev:herdr-terminal-poc
+AO_DB_PATH=/private/tmp/observatory.sqlite bun run start
 ```
 
-Their scope and current evidence are recorded in
-[Native terminal surface POCs](docs/specs/terminal-surface-pocs.md).
+Open `http://127.0.0.1:4310` after the server starts.
 
-For a repeatable dogfood loop without changing the live Herdr host, use the
-deterministic mock adapter. It starts with 20 synthetic Agents, adds Agents
-over the loop, rotates blocked/waiting/done states, and temporarily drops a
-Agent so Observatory's stale/recovery path is exercised. The optional portfolio seed
-creates three goals and assigns the first Agents through the same Universe
-commands used by the TUI:
+Run the deterministic 12-goal, 75-agent development portfolio:
 
 ```sh
-bun run dev:mock
-```
-
-The script uses `${TMPDIR:-/tmp}/ao-mock.sqlite`. For an explicit disposable
-database or a faster scenario tick:
-
-```sh
-AO_HOST=mock AO_MOCK_SCENARIO=orbit AO_MOCK_SEED=portfolio \
-AO_MOCK_TICK_MS=1000 AO_DB_PATH=/private/tmp/ao-mock.sqlite bun run dev
-```
-
-Mock attachment reports success locally but does not focus a real pane. Mock
-names, metadata and locators are synthetic; no Herdr agent contents are
-copied into the scenario. The adapter tests are deterministic and run without
-waiting:
-
-```sh
-bun test src/hosts/mock/mock.test.ts
-```
-
-Oxc owns the committed lint and format configuration (`.oxlintrc.json` and
-`.oxfmtrc.json`). The stable quality commands are:
-
-```sh
-bun run format       # format every supported maintained file; run before handoff
-bun run format:check # verify repository-wide formatting without writing
-bun run lint
-bun run lint:fix
-bun run check        # required before commit or agent handoff
-```
-
-The maintained source is checked by the vendored Anti-Slop Oxlint plugins in
-`tools/oxlint/anti-slop/`. Effect is used for the asynchronous host/runtime
-edge: `SessionHost` operations are typed Effects, terminal output is a
-cancellable Effect Stream, and the pure universe model remains ordinary
-TypeScript. Disposable prototypes are excluded from the production lint/format
-gate. Optional capabilities follow the proposed [plugin architecture](docs/design/plugin-architecture.md)
-so external work references and future hosts do not become kernel-specific
-special cases.
-
-Oxlint treats correctness and suspicious findings as errors, reports
-performance findings as warnings, checks imports, and runs type-aware promise
-rules. Broad stylistic and pedantic categories remain disabled so Oxfmt owns
-presentation and lint output stays actionable.
-
-At 80x24 the primary surface is a portfolio, cell-native map of goal bodies and
-their direct Agent satellites. The attention queue, unassigned inbox, flat
-grouped list lens and inspector remain supporting lenses. The main controls are:
-
-Unassigned Agents are hidden from the portfolio map by default. The header
-shows an `INBOX !N · v list` warning whenever Agents need organising; `v`
-opens the supporting grouped list. `A` or focusing an inbox item exposes the
-attention-first inbox list, and the goal-level `a` picker supports
-type-to-filter assignment. The inbox remains a supporting lens rather than a
-topology node or a new kind of work object. Goal satellites use stable,
-identity-derived positions on the portfolio map.
-Stale or unavailable Agents remain visible in the list and attention lenses;
-select one and press `x` to confirm archiving it from active views. Archiving
-keeps its history and assignment, and a later Herdr refresh updates its facts
-without silently restoring it.
-Live-but-idle Agents use a dot; actively working Agents use a rotating
-half-moon marker and restrained green border pulse. Herdr's transient working
-marker is removed from the Agent name before Observatory adds its own.
-On a clean database, the map shows an onboarding prompt: create a goal with
-`n`, then press `a` to assign Agents from it.
-
-Selecting a goal or Agent opens a transient floating inspector card
-near the selected item. It is clamped inside the map, never reserves a
-permanent sidebar, and can be hidden with `i`; `Enter` on an Agent still
-attaches to the real Herdr target. On a narrow terminal the card shortens its
-lower-priority copy while preserving the selected title, and the focused
-goal/list lens is preferred over compressing the whole universe. Creating a
-goal selects it automatically; `a` then opens an inbox
-picker so Agents can be assigned without first navigating to an individual
-Agent.
-
-SQLite persists each goal's world position and pinned flag. Refresh and restart
-therefore preserve body locations; map pan, zoom, focus and search are client
-navigation state, restored across a Herdr attach/return but not written to the
-database. New goals use a deterministic free-space scan that considers the
-current satellite footprint without reflowing accepted goals. Drag a goal body
-to move its persisted anchor; its Agents follow the goal's orbit. Drag empty
-map space (or an Agent card) to pan the viewport. Clicking a goal enters its
-goal-only satellite view. Selecting an unassigned Agent and pressing `f`
-opens the supporting inbox list lens. Clicking empty map space clears the
-selection and floating inspector.
-
-On the portfolio map, `j`/`k` cycles goal bodies only. After focusing a goal,
-`j`/`k` cycles that goal's Agents clockwise around the body; the inbox lens
-cycles its unassigned Agents. The grouped list keeps its flat row navigation.
-
-| Key              | Action                                                                                               |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `j` / `k`        | Portfolio: cycle goals; focused goal/inbox: cycle Agents                                             |
-| `h` / `l`        | Pan the map left/right                                                                               |
-| `U` / `D`        | Pan the map up/down                                                                                  |
-| `+` / `-`        | Zoom the map                                                                                         |
-| `f` / `0`        | Focus selected goal or inbox list / reset portfolio viewport                                         |
-| Mouse click/drag | Click a goal to focus it; drag a goal body to move it; drag empty space to pan and clear selection   |
-| Right-click      | Open the context menu without changing the primary selection; choosing an action promotes its target |
-| `v`              | Toggle the supporting grouped-list lens                                                              |
-| `A`              | Toggle the attention lens; dim healthy work and keep current/uncertain items in spatial context      |
-| `g`              | Jump to the next attention item                                                                      |
-| `z`              | Cycle semantic label detail without moving map nodes                                                 |
-| `t`              | Open the selected Agent in the embedded host terminal; Ctrl-Q/Esc releases back to the map           |
-| `y`              | Open a linked shell or sibling Agent; choose from the picker when several are available              |
-| `Tab`            | Cycle map, primary-terminal and linked-terminal focus                                                |
-| `Ctrl-Shift-Y`   | Open the linked-execution picker while a terminal is focused                                         |
-| `Ctrl-Shift-R`   | Refresh the host snapshot while a terminal is focused                                                |
-| `Enter`          | Attach directly to the selected live Herdr Agent; detach to return with map state                    |
-| `n`              | Create a goal (title, description, priority)                                                         |
-| `r` / `d`        | Rename or edit the selected goal/Agent                                                               |
-| `p`              | Change selected goal priority                                                                        |
-| `a` / `u`        | Assign from a selected goal/Agent or unassign an Agent                                               |
-| `c` / `x`        | Confirm complete/archive a goal, or archive an Agent                                                 |
-| `/`              | Search goals and Agent metadata                                                                      |
-| `R`              | Reconcile a fresh Herdr snapshot                                                                     |
-| `i`              | Toggle the floating inspector card                                                                   |
-| `s`              | Exercise suspend/resume                                                                              |
-| `q`              | Cleanly exit                                                                                         |
-
-Documented manual acceptance flow:
-
-1. Start with a new `AO_DB_PATH`; confirm every recognized Herdr agent appears
-   in the unassigned inbox and shell-only panes do not become Agents. For the scale trial,
-   use at least 15 recognized agents when the live environment provides them;
-   do not count tabs or non-agent panes as Agents.
-2. Create three goals, including a P0 goal; edit a title and description. Each
-   new goal should become selected, and pressing `a` should open a searchable
-   picker of inbox Agents. Assign several Agents from that picker, then
-   reassign one Agent through the Agent-to-goal picker. Confirm the default
-   view shows three stable goal bodies, no inbox cards, and an `INBOX !N · v
-list` warning; goal size follows Agent load, and P0 is a distinct
-   persistent priority treatment from attention badges. Drag one goal to a new
-   location and confirm its orbit follows; click it or press `f` and confirm
-   the focused view shows only that goal and its Agents. Select an inbox item
-   and confirm its floating card does not consume permanent map area; click
-   empty map space and confirm the selection and card clear.
-   Press `Esc` to return to the portfolio.
-   Toggle `A` to inspect the attention lens, and use `z` to cycle overview,
-   context and detail labels without changing node positions. With no current
-   attention, the lens should remain usable and offer a clear return to the
-   portfolio.
-3. Exit with `q`, start again with the same database, and confirm the goals and
-   assignment remain.
-4. Have Herdr report a real pane as blocked, press `R`, and confirm the
-   attention row explains the state and elapsed wait. The installed Herdr 0.8
-   CLI exposes the reliable human-input state as `blocked`; Observatory also accepts
-   `waiting` from a host adapter. A reversible check is:
-
-   ```sh
-   pane_id="<real idle agent pane id from herdr api snapshot>"
-   agent_label="<agent field from the same snapshot, usually claude>"
-   herdr pane report-agent "$pane_id" --source observatory-v0-acceptance --agent "$agent_label" --state blocked --message "Observatory attention acceptance"
-   # run Observatory and press R
-   herdr pane report-agent "$pane_id" --source observatory-v0-acceptance --agent "$agent_label" --state idle --message "Observatory attention acceptance restored"
-   ```
-
-   The diagnostic count is shown in the host header. Use an idle pane for this
-   check and restore it with `report-agent --state idle`; `release-agent` clears
-   Herdr's recognition authority for an existing agent pane in the installed
-   Herdr CLI.
-
-5. Use `/` to find a live Agent; accept the result and confirm the map focuses
-   its owning goal and satellite. Press `Enter` to exercise focus/return and
-   confirm the selected goal/Agent, map lens, viewport and search state are
-   restored as far as Herdr permits. Use `g` on the blocked Agent and confirm
-   the owning goal is reachable even when the Agent is outside the portfolio
-   viewport; use `A` to review the same item in the attention lens.
-6. Select an Agent, press `y`, and choose among the available shell and sibling
-   Agent links. Confirm the linked surface opens inside Observatory beside the
-   map. Open the primary Agent terminal too and confirm both terminals remain
-   visible; use `Tab` and mouse clicks to move focus, then run `pwd` or a
-   preferred diff tool in the linked shell. `Ctrl-Shift-R` refreshes while a
-   terminal is focused; a later host snapshot should promote a linked shell
-   started with Claude, Codex or Pi into a normal Agent without creating a
-   durable shell node.
-7. Stop or hide a test agent so it becomes stale, select it from the list or
-   attention lens, then archive it with `x` and confirmation. Confirm it leaves
-   active projections while its identity and assignment remain persisted. The
-   web Closeout surface also batches this local-only stale cleanup.
-8. Complete a goal with `c` and confirmation, observe its dimmed body, then
-   archive it explicitly with `x` and confirmation.
-
-The deterministic suites are split into module, projection, SQLite migration/
-rollback, layout and sanitized Herdr adapter tests:
-
-```sh
-bun run test:herdr
-bun run test:all
-```
-
-V0 deliberately has no daemon, provider transcript parsing, quick
-message/approval actions, worktree nodes, relationship graph beyond direct
-Goal → Agent containment, or Kitty/Sixel/image/raster rendering. Native diff
-rendering is also deferred: use a linked shell to run the person's preferred
-diff/review tool.
-
-## Local web Observatory
-
-The first maintained web walking slice renders the real Universe projections
-with React and native SVG/CSS. It binds to loopback, keeps SQLite and
-host-specific protocols out of the browser, and submits a deliberately narrow
-set of human commands through the same Universe used by the native client.
-
-The TUI and web client are both maintained through V1. The TUI remains the
-keyboard-first operational fallback; the web client is the higher-fidelity
-orientation surface. They share CORE meaning and commands without requiring
-identical presentation. See the [feature roadmap and surface ownership](docs/specs/observatory-feature-roadmap.md)
-for the current split and planned parity work.
-
-The Atlas inspector can create and edit goals, set priority, assign or unassign
-agents, complete goals, and explicitly archive agents or completed goals. For a
-live Agent, `Close & archive` first closes the revalidated host execution;
-`Archive only` deliberately leaves it running. The Closeout drawer separates
-live done results awaiting human review from Agents confirmed ended externally,
-and supports bounded batch cleanup. Archive actions require confirmation and
-remain subject to Universe invariants.
-`New agent` starts a hosted session through the shared launch coordinator: choose
-an active goal or Inbox, an existing checkout or new worktree, a host-supported
-agent, and an optional name and prompt. The browser can browse directories but
-never invokes Git, Herdr or an agent binary directly.
-The Catch up lens groups accepted semantic changes since the last explicit
-operator checkpoint. An Agent inspector can also open its host-owned terminal
-in a floating xterm.js surface; closing it releases the host session without
-changing map selection or durable state.
-The same inspector can open a read-only workspace review for an observed Agent:
-the browser requests the Agent id, while the server resolves its trusted
-worktree and returns a bounded Git diff. Changed files can be browsed in a
-unified or split view; large, binary, unavailable and non-Git workspaces remain
-explicit rather than being guessed.
-
-```sh
-# clean-room 12-goal / 75-agent scale fixture
 bun run web:mock
-
-# current Herdr-backed Universe
-bun run web
 ```
 
-Open `http://127.0.0.1:4310`. For live frontend iteration, run
-`bun run dev:web:api` and `bun run dev:web` in separate terminals. The mock
-host provides deterministic catch-up and terminal evidence without private
-session content. Do not run the web and terminal clients concurrently against the same
-database; the in-process walking slice is not a multi-client daemon.
+It uses `${TMPDIR:-/tmp}/ao-web-mock.sqlite`, synthetic host facts and no real
+session content.
 
-Browser controls mirror the useful native navigation: clicking a goal focuses
-it, while clicking a session enters its parent goal and selects it; empty-field
-clicks clear the selection. Double-click remains an explicit marker-focus
-action. `j`/`k` or the arrow keys move selection; `Enter` focuses a goal or
-opens an Agent terminal; `Space`/`f` focuses; `+`/`-`/`0` zoom; `h`/`l` and
-PageUp/PageDown pan; `a` opens attention, `g` jumps to the next signal, `v`
-switches Atlas/Ledger, `b` opens the actionable unassigned Inbox, `n` opens
-New goal, `N` opens New agent, `i` toggles the inspector, `t` opens the selected terminal, and
-`Esc` closes the topmost surface. Catch-up entries return to Atlas and focus
-their affected Goal or Agent. Press `?`
-or use the masthead button for the in-app guide.
+For frontend development, run these in separate terminals:
 
-Design documents:
+```sh
+bun run dev:api
+bun run dev
+```
+
+The Vite client runs on port 4310 and proxies the loopback API on port 4311.
+
+## Current capabilities
+
+- durable human-owned goals, priority, completion and archive;
+- stable Goal → Agent assignments and accepted goal positions;
+- Herdr snapshot reconciliation with stale and unavailable state preserved;
+- explainable attention for blocked, waiting and uncertain agents;
+- durable semantic Catch up since the last explicit acknowledgement;
+- Atlas and Ledger projections over the same state;
+- actionable Inbox and Closeout workflows;
+- goal editing, agent assignment and host-backed agent launch;
+- host-synchronised close and archive;
+- host-owned primary and linked terminals rendered with xterm.js; and
+- bounded, read-only working-tree diff review.
+
+The application is local-only and single-user. It does not ingest transcripts,
+own agent processes or PTYs, automatically accept completion, merge work, or
+expose the control plane remotely.
+
+## Browser controls
+
+- Click a goal to focus it; click an Agent to select it in its goal context.
+- Drag the field to pan and use the wheel or `+`/`-` to zoom.
+- `j`/`k` or arrow keys move selection.
+- `Enter` focuses a goal or opens the selected Agent terminal.
+- `Space`/`f` focuses; `0` resets the camera.
+- `a` opens Attention; `g` jumps to the next signal.
+- `v` switches Atlas and Ledger; `b` opens Inbox; `c` opens Closeout.
+- `n` creates a goal; `N` starts an Agent.
+- `i` toggles the inspector; `t` opens the selected terminal.
+- `Esc` closes the topmost surface; `?` opens the complete guide.
+
+## Quality commands
+
+```sh
+bun run format
+bun run format:check
+bun run lint
+bun run typecheck
+bun run check
+bun test
+bun run build:web
+```
+
+Oxfmt owns formatting. Oxlint, the vendored Anti-Slop plugins and TypeScript
+check maintained source. Disposable prototypes are excluded deliberately.
+
+## Documentation
 
 - [Product design](docs/design/agent-orchestration-map.md)
 - [Technical architecture](docs/design/technical-architecture.md)
 - [Technology decisions](docs/design/technology-decisions.md)
-- [Naming exploration](docs/design/naming.md)
-
-Implementation specifications:
-
-- [V0 live Herdr universe/map](docs/specs/v0-live-herdr-command-centre.md)
-- [Local web Observatory walking slice](docs/specs/local-web-observatory-walking-slice.md)
-- [Feature roadmap and surface ownership](docs/specs/observatory-feature-roadmap.md)
+- [Feature roadmap](docs/specs/observatory-feature-roadmap.md)
+- [Local web walking slice](docs/specs/local-web-observatory-walking-slice.md)
+- [Application review and recommendations](docs/reviews/2026-08-27-application-review.md)

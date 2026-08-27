@@ -1,8 +1,12 @@
 # Observatory agent launch and workspace preparation
 
-Status: TUI and local web launch slices implemented; CLI work remains
+Status: web launch slice implemented; native-client passages are historical
 Date: 2026-08-23
 Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md)
+
+> The OpenTUI client described in parts of this implementation record was
+> retired on 2026-08-27. The coordinator, workspace provider and `SessionHost`
+> launch contract remain current; the web GUI is their sole maintained client.
 
 ## Why this exists
 
@@ -33,9 +37,9 @@ workflow while keeping project, Git and Herdr mechanics behind adapters.
 The canonical operation is a single `StartAgent` intent:
 
 ```text
-TUI / local CLI / agent skill
-          |
-          v
+Web GUI / local CLI / agent skill
+             |
+             v
 StartAgentCoordinator
    |              |                 |
    v              v                 v
@@ -73,14 +77,14 @@ until a human or an explicit link operation assigns it.
 5. **Prompt** — optional initial instruction and optional agent name.
 
 The wizard should make the common path one or two selections rather than
-forcing a full configuration form. The first TUI and local web slices are intentionally
-smaller: open `New agent` (or press `N`), keep the current directory or browse another directory,
-choose an existing checkout or a new worktree, then select the host-supported
-agent, optional name and prompt. The initial location choices come from the current
-directory, known agent worktrees and the optional `AO_WORKSPACE_LOCATIONS`
-path-list environment variable. Recency ranking, branch/base/path controls and
-provider argument editing remain follow-up work on the same coordinator
-contract.
+forcing a full configuration form. The maintained web slice is intentionally
+smaller: open `New agent` (or press `N`), keep the current directory or browse
+another directory, choose an existing checkout or a new worktree, then select
+the host-supported agent, optional name and prompt. The initial location
+choices come from the current directory, known agent worktrees and the optional
+`AO_WORKSPACE_LOCATIONS` path-list environment variable. Recency ranking,
+branch/base/path controls and provider argument editing remain follow-up work
+on the same coordinator contract.
 
 The selected project is a location, not a new Observatory topology node. The
 resulting agent carries repository, branch and worktree metadata; the map
@@ -139,10 +143,10 @@ StartAgentIntent {
 }
 ```
 
-The exact transport is deliberately separate from this interface. The first
-consumer can be a local JSON CLI (`observatory agent start --json`) and the
-TUI can call the same coordinator directly. A Unix-socket control transport is
-only justified once a second live client or concurrent agent process needs
+The exact transport is deliberately separate from this interface. The web
+gateway calls the coordinator directly. A future local JSON CLI
+(`observatory agent start --json`) can use the same operation. A Unix-socket
+control transport is only justified once a concurrent agent process needs
 subscriptions; it must not become a second domain interface.
 
 `requestId` is required for agent callers. V1 promises retry detection within
@@ -154,9 +158,9 @@ reconciliation, or failed.
 
 ### `StartAgentCoordinator`
 
-This is the deep module exposed to the TUI, CLI and agent skill. Its interface
-owns ordering, failure handling, reconciliation and goal assignment so callers
-do not repeat those steps.
+This is the deep module exposed through the web gateway and any future CLI or
+agent skill. Its interface owns ordering, failure handling, reconciliation and
+goal assignment so callers do not repeat those steps.
 
 ```text
 start(intent) -> Effect<StartAgentResult, LaunchError>
@@ -271,16 +275,16 @@ Agent launch policy is explicit:
 - **auto:** launch immediately within configured workspace and agent limits;
 - **hybrid:** launch allow-listed requests, propose the rest.
 
-The TUI's human-created launches are immediate actions. Completion, archive and
+The GUI's human-created launches are immediate actions. Completion, archive and
 other semantic lifecycle mutations retain their existing human-control policy.
 
 ## Native agent UI and attachments
 
 Starting an agent through Observatory does not make Observatory a replacement
-for every provider TUI. The embedded surface is a host-owned PTY rendered by
-OpenTUI, not Claude Code, Codex, OpenCode or PI's native client. It can preserve
-normal terminal keys, text input, resize and ordinary terminal paste, but it
-cannot promise provider-specific UI features.
+for every provider interface. The embedded browser surface renders a host-owned
+PTY through xterm.js; it is not Claude Code, Codex, OpenCode or Pi's own client.
+It can preserve normal terminal keys, text input, resize and ordinary terminal
+paste, but it cannot promise provider-specific UI features.
 
 Image and file input is the first important example. A native client may rely on
 an OS file picker, a terminal emulator's image/clipboard protocol, or a
@@ -298,18 +302,17 @@ The V1 policy is therefore:
   genuinely require the provider's own UI or terminal emulator. Handoff is an
   exception path, not a second default interaction mode.
 
-The TUI exposes the embedded terminal with `t` or `Enter`. When an agent
-reports `native-handoff`, `o` temporarily suspends Observatory and invokes the
-host's opaque native target, then restores the Observatory selection on return.
-If the capability is absent, Observatory explains that the embedded terminal is
-the supported surface instead of guessing from the provider name.
+The web GUI exposes the embedded terminal with `t` or `Enter`. Herdr remains the
+explicit terminal-native escape route for operations the browser surface cannot
+represent. Observatory must not guess support from the provider name or turn
+that recovery route into a second maintained client.
 
 Provider plugins may later translate a local file reference or image into a
 provider-native interaction. That belongs behind a narrow provider capability
 port, not in the Universe or the generic terminal renderer. Until such a
 plugin exists, the inspector should say plainly that image upload is available
-only in the native client and preserve the agent selection when the user
-hands off.
+only through a proven host/provider route and preserve the agent selection when
+the user leaves for that route.
 
 ## Failure and recovery
 
@@ -330,14 +333,14 @@ state:
 
 For live Herdr diagnosis, set `AO_LAUNCH_LOG` to an NDJSON file before starting
 Observatory, for example `AO_LAUNCH_LOG=/tmp/observatory-launch.ndjson bun run
-dev`. The trace records launch steps, pane ids, retry attempts, exit codes and
+start`. The trace records launch steps, pane ids, retry attempts, exit codes and
 bounded host errors; it never records prompts, terminal output or transcripts.
 
 ## V1 acceptance slice
 
 The first proof should be deliberately narrow:
 
-1. From the TUI, choose a recent project and launch Codex or Claude in an
+1. From the web GUI, choose a recent project and launch Codex or Claude in an
    existing checkout.
 2. Repeat with a new Git worktree and a user-specified branch.
 3. Assign the launched agent to the selected goal and select it on the map.

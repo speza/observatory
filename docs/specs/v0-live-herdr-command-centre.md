@@ -1,6 +1,6 @@
 # V0 live Herdr universe/map
 
-Status: implemented; live spatial and embedded-terminal smoke verified
+Status: historical implementation record; native client retired 2026-08-27
 Date: 2026-08-22  
 Depends on:
 
@@ -9,6 +9,11 @@ Depends on:
 - [Technology decisions](../design/technology-decisions.md)
 - [Agent and linked execution model](agent-execution-model.md)
 - [Contextual linked execution surfaces](contextual-companion-surfaces.md)
+
+> This specification records the retired OpenTUI walking slice. Its semantic,
+> persistence and `SessionHost` decisions remain relevant; all native-renderer
+> requirements and controls are historical. The local web GUI is the sole
+> maintained product client.
 
 ## Objective
 
