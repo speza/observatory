@@ -4,7 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# Dependency installation belongs in setup. Resume only confirms the restored
+# Dependency installation belongs in setup. Resume confirms the restored
 # workspace can run Bun commands without network access.
 command -v bun >/dev/null
 test -d node_modules
+
+# Kernel settings are not guaranteed to survive an orb snapshot restore.
+if [[ "$(< /proc/sys/vm/overcommit_memory)" != "1" ]]; then
+  sudo -n sysctl -w vm.overcommit_memory=1
+fi

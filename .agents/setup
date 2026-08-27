@@ -12,5 +12,12 @@ step "Checking Bun"
 command -v bun >/dev/null
 bun --version
 
+step "Configuring virtual memory for Oxlint plugins"
+# Oxlint's JavaScript-plugin bridge reserves a 4 GiB virtual arena. Small
+# no-swap orbs need permissive overcommit even though the arena is sparsely used.
+if [[ "$(< /proc/sys/vm/overcommit_memory)" != "1" ]]; then
+  sudo -n sysctl -w vm.overcommit_memory=1
+fi
+
 step "Installing locked JavaScript dependencies"
 bun install --frozen-lockfile

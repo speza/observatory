@@ -38,6 +38,12 @@
     "eqeqeq": ["error", "always"],
     "no-duplicate-imports": "error",
     "import/no-cycle": "error",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ],
     "typescript/consistent-type-imports": [
       "error",
       {

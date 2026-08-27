@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
-// eslint-disable-next-line import/no-unassigned-import -- Registers the renderer's package CSS.
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import type { AgentView } from "../../src/projection/types.ts";
 import type { WebWorkingTreeDiffResponse } from "../../src/web/protocol.ts";
