@@ -389,7 +389,7 @@
   background: transparent;
   cursor: pointer;
 }
-.zoom-control button:nth-child(2) {
+.zoom-control__level {
   min-width: 55px;
 }
 .zoom-control button:last-child {

@@ -145,12 +145,6 @@ export const selectionBelongsToFocus = (
   );
 };
 
-export const allPoints = (projection: UniverseMapProjection): readonly { x: number; y: number }[] =>
-  projection.goals.flatMap((goal) => [
-    goal.mapPosition,
-    ...goal.agents.map((agent) => agent.mapPosition),
-  ]);
-
 export const goalRadius = (goal: MapGoalView): number =>
   Math.min(82, 52 + Math.sqrt(goal.agents.length) * 8);
 
@@ -250,3 +244,43 @@ export const goalAgentPoints = (
       }),
     ),
   );
+
+export interface AtlasContentBounds {
+  readonly minimumX: number;
+  readonly maximumX: number;
+  readonly minimumY: number;
+  readonly maximumY: number;
+}
+
+/** Bounds of the visible goal bodies, captions, agent nodes, and their outer orbits. */
+export const atlasContentBounds = (projection: UniverseMapProjection): AtlasContentBounds => {
+  if (projection.goals.length === 0) {
+    return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
+  }
+
+  const bounds = projection.goals.map((goal) => {
+    const radius = goalRadius(goal);
+    const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
+    const orbitWidth = Math.max(0, ...orbits.map((orbit) => orbit.radiusX)) + 22;
+    const orbitHeight = Math.max(0, ...orbits.map((orbit) => orbit.radiusY)) + 22;
+    const titleLines = linesFor(goal.title);
+    const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 7)) / 2;
+    const left = Math.max(radius + 3, orbitWidth, titleWidth);
+    const right = left;
+    const top = Math.max(radius + 3, orbitHeight);
+    const bottom = Math.max(radius + 42 + Math.max(0, titleLines.length - 1) * 18, orbitHeight);
+    return {
+      minimumX: goal.mapPosition.x - left,
+      maximumX: goal.mapPosition.x + right,
+      minimumY: goal.mapPosition.y - top,
+      maximumY: goal.mapPosition.y + bottom,
+    };
+  });
+
+  return {
+    minimumX: Math.min(...bounds.map((bound) => bound.minimumX)),
+    maximumX: Math.max(...bounds.map((bound) => bound.maximumX)),
+    minimumY: Math.min(...bounds.map((bound) => bound.minimumY)),
+    maximumY: Math.max(...bounds.map((bound) => bound.maximumY)),
+  };
+};

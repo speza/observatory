@@ -8,6 +8,7 @@ import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
 import { FixedClock, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
 import { Atlas, focusedLabelOffsets } from "./Atlas.tsx";
+import { atlasContentBounds } from "./atlasGeometry.ts";
 
 interface RenderedGoal {
   readonly id: string;
@@ -118,8 +119,18 @@ describe("production web Atlas", () => {
     expect(markup).not.toContain("goal-fill-");
     expect(markup).toContain("goal-clip-");
     expect(markup).toContain("ATTN</text>");
-    expect(markup).toContain('class="atlas__world" data-camera-zoom="1"');
-    expect(markup).toContain("scale(1)");
+    expect(markup).toContain('aria-label="Fit map to screen"');
+    const cameraZoom = Number(markup.match(/data-camera-zoom="([^"]+)"/u)?.[1]);
+    expect(cameraZoom).toBeGreaterThan(0);
+    expect(cameraZoom).toBeLessThanOrEqual(1.15);
+    expect(markup).toContain(`scale(${cameraZoom})`);
+    const contentBounds = atlasContentBounds(projection);
+    expect((contentBounds.maximumX - contentBounds.minimumX) * cameraZoom).toBeLessThanOrEqual(
+      1200 - 96,
+    );
+    expect((contentBounds.maximumY - contentBounds.minimumY) * cameraZoom).toBeLessThanOrEqual(
+      760 - 144,
+    );
     expect(assignedAgents).toHaveLength(71);
     expect(new Set(goals.map((goal) => goal.y)).size).toBeGreaterThanOrEqual(10);
     for (const agent of assignedAgents) {

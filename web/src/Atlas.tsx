@@ -427,14 +427,22 @@ export const Atlas = ({
         </g>
       </svg>
       <div className="zoom-control" aria-label="Map zoom controls">
-        <button onClick={zoomOut} type="button">
+        <button aria-label="Zoom out" onClick={zoomOut} type="button">
           −
         </button>
-        <button onClick={resetCamera} type="button">
+        <button
+          aria-label="Reset map zoom"
+          className="zoom-control__level"
+          onClick={resetCamera}
+          type="button"
+        >
           {Math.round(camera.zoom * 100)}%
         </button>
-        <button onClick={zoomIn} type="button">
+        <button aria-label="Zoom in" onClick={zoomIn} type="button">
           +
+        </button>
+        <button aria-label="Fit map to screen" onClick={reset} type="button">
+          Fit
         </button>
       </div>
     </div>
