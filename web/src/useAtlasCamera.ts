@@ -10,6 +10,7 @@ import {
 import type { UniverseMapProjection } from "../../src/projection/types.ts";
 import {
   atlasContentBounds,
+  atlasGoalSpacingScale,
   goalAgentPoints,
   selectionBelongsToFocus,
   type AtlasCameraCommand,
@@ -31,6 +32,7 @@ interface AtlasLayout {
   readonly centreX: number;
   readonly centreY: number;
   readonly fitCamera: Camera;
+  readonly goalSpacingScale: number;
   readonly worldX: number;
   readonly worldY: number;
 }
@@ -45,9 +47,10 @@ const atlasLayout = (
   reservedLeft: number,
   reservedRight: number,
 ): AtlasLayout => {
-  const bounds = atlasContentBounds(projection);
-  const availableWidth = Math.max(240, size.width - reservedLeft - reservedRight - 96);
-  const availableHeight = Math.max(220, size.height - 144);
+  const goalSpacingScale = atlasGoalSpacingScale(projection);
+  const bounds = atlasContentBounds(projection, goalSpacingScale);
+  const availableWidth = Math.max(1, size.width - reservedLeft - reservedRight - 96);
+  const availableHeight = Math.max(1, size.height - 144);
   const contentWidth = Math.max(1, bounds.maximumX - bounds.minimumX);
   const contentHeight = Math.max(1, bounds.maximumY - bounds.minimumY);
   return {
@@ -62,6 +65,7 @@ const atlasLayout = (
       panX: 0,
       panY: 0,
     },
+    goalSpacingScale,
     worldX: (bounds.minimumX + bounds.maximumX) / 2,
     worldY: (bounds.minimumY + bounds.maximumY) / 2,
   };
@@ -143,8 +147,8 @@ export const useAtlasCamera = ({
   }, []);
 
   const screenPoint = (point: { readonly x: number; readonly y: number }) => ({
-    x: layout.centreX + point.x - layout.worldX,
-    y: layout.centreY + point.y - layout.worldY,
+    x: layout.centreX + point.x * layout.goalSpacingScale - layout.worldX,
+    y: layout.centreY + point.y * layout.goalSpacingScale - layout.worldY,
   });
 
   const pointForSelection = (target: Selection | undefined) => {

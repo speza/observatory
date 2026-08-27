@@ -252,28 +252,89 @@ export interface AtlasContentBounds {
   readonly maximumY: number;
 }
 
+interface GoalLocalBounds {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
+  const radius = goalRadius(goal);
+  const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
+  const orbitWidth = Math.max(0, ...orbits.map((orbit) => orbit.radiusX)) + 22;
+  const orbitHeight = Math.max(0, ...orbits.map((orbit) => orbit.radiusY)) + 22;
+  const titleLines = linesFor(goal.title);
+  const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
+  return {
+    left: Math.max(radius + 3, orbitWidth, titleWidth),
+    right: Math.max(radius + 3, orbitWidth, titleWidth),
+    top: Math.max(radius + 3, orbitHeight),
+    bottom: Math.max(radius + 54 + Math.max(0, titleLines.length - 1) * 18, orbitHeight),
+  };
+};
+
+const goalSpacingBounds = (goal: MapGoalView): GoalLocalBounds => {
+  const radius = goalRadius(goal);
+  const titleLines = linesFor(goal.title);
+  const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
+  return {
+    left: Math.max(radius + 3, titleWidth),
+    right: Math.max(radius + 3, titleWidth),
+    top: radius + 3,
+    bottom: radius + 54 + Math.max(0, titleLines.length - 1) * 18,
+  };
+};
+
+/** Expand durable goal anchors just enough that their rendered groups cannot overlap. */
+export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number => {
+  let scale = 1;
+  const goalBounds = projection.goals.map(goalSpacingBounds);
+  for (let leftIndex = 0; leftIndex < projection.goals.length; leftIndex += 1) {
+    const left = projection.goals[leftIndex];
+    const leftBounds = goalBounds[leftIndex];
+    if (!left || !leftBounds) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < projection.goals.length; rightIndex += 1) {
+      const right = projection.goals[rightIndex];
+      const rightBounds = goalBounds[rightIndex];
+      if (!right || !rightBounds) continue;
+      const deltaX = Math.abs(left.mapPosition.x - right.mapPosition.x);
+      const deltaY = Math.abs(left.mapPosition.y - right.mapPosition.y);
+      const horizontalScale =
+        deltaX < 0.01
+          ? Number.POSITIVE_INFINITY
+          : (leftBounds.right + rightBounds.left + 16) / deltaX;
+      const verticalExtent =
+        left.mapPosition.y <= right.mapPosition.y
+          ? leftBounds.bottom + rightBounds.top
+          : leftBounds.top + rightBounds.bottom;
+      const verticalScale =
+        deltaY < 0.01 ? Number.POSITIVE_INFINITY : (verticalExtent + 16) / deltaY;
+      const separationScale = Math.min(horizontalScale, verticalScale);
+      if (Number.isFinite(separationScale)) scale = Math.max(scale, separationScale);
+    }
+  }
+  return scale;
+};
+
 /** Bounds of the visible goal bodies, captions, agent nodes, and their outer orbits. */
-export const atlasContentBounds = (projection: UniverseMapProjection): AtlasContentBounds => {
+export const atlasContentBounds = (
+  projection: UniverseMapProjection,
+  goalSpacingScale = 1,
+): AtlasContentBounds => {
   if (projection.goals.length === 0) {
     return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
   }
 
   const bounds = projection.goals.map((goal) => {
-    const radius = goalRadius(goal);
-    const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
-    const orbitWidth = Math.max(0, ...orbits.map((orbit) => orbit.radiusX)) + 22;
-    const orbitHeight = Math.max(0, ...orbits.map((orbit) => orbit.radiusY)) + 22;
-    const titleLines = linesFor(goal.title);
-    const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 7)) / 2;
-    const left = Math.max(radius + 3, orbitWidth, titleWidth);
-    const right = left;
-    const top = Math.max(radius + 3, orbitHeight);
-    const bottom = Math.max(radius + 42 + Math.max(0, titleLines.length - 1) * 18, orbitHeight);
+    const local = goalLocalBounds(goal);
+    const goalX = goal.mapPosition.x * goalSpacingScale;
+    const goalY = goal.mapPosition.y * goalSpacingScale;
     return {
-      minimumX: goal.mapPosition.x - left,
-      maximumX: goal.mapPosition.x + right,
-      minimumY: goal.mapPosition.y - top,
-      maximumY: goal.mapPosition.y + bottom,
+      minimumX: goalX - local.left,
+      maximumX: goalX + local.right,
+      minimumY: goalY - local.top,
+      maximumY: goalY + local.bottom,
     };
   });
 

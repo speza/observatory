@@ -8,7 +8,7 @@ import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
 import { FixedClock, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
 import { Atlas, focusedLabelOffsets } from "./Atlas.tsx";
-import { atlasContentBounds } from "./atlasGeometry.ts";
+import { atlasContentBounds, atlasGoalSpacingScale } from "./atlasGeometry.ts";
 
 interface RenderedGoal {
   readonly id: string;
@@ -124,7 +124,7 @@ describe("production web Atlas", () => {
     expect(cameraZoom).toBeGreaterThan(0);
     expect(cameraZoom).toBeLessThanOrEqual(1.15);
     expect(markup).toContain(`scale(${cameraZoom})`);
-    const contentBounds = atlasContentBounds(projection);
+    const contentBounds = atlasContentBounds(projection, atlasGoalSpacingScale(projection));
     expect((contentBounds.maximumX - contentBounds.minimumX) * cameraZoom).toBeLessThanOrEqual(
       1200 - 96,
     );
@@ -176,5 +176,42 @@ describe("production web Atlas", () => {
       }),
     );
     expect(staleMarkup).not.toContain("agent--uncertain");
+  });
+
+  test("expands crowded durable anchors before fitting the map", async () => {
+    const clock = new FixedClock(50_000);
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario("portfolio") });
+    const { universe } = makeUniverse({ clock });
+    expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
+    expect(seedMockPortfolio(universe)).toEqual({ createdGoals: 12, assignedAgents: 71 });
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const crowdedProjection: UniverseMapProjection = {
+      ...projection,
+      goals: projection.goals.slice(0, 5).map((goal, index) => ({
+        ...goal,
+        mapPosition: { x: (index % 3) * 36, y: Math.floor(index / 3) * 36 },
+      })),
+    };
+    const markup = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection: crowdedProjection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    const goals = renderedGoals(markup);
+
+    for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
+      const left = goals[leftIndex];
+      if (!left) continue;
+      for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
+        const right = goals[rightIndex];
+        if (!right) continue;
+        expect(Math.hypot(left.x - right.x, left.y - right.y)).toBeGreaterThanOrEqual(
+          left.radius + right.radius + 15.9,
+        );
+      }
+    }
   });
 });
