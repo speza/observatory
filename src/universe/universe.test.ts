@@ -98,6 +98,37 @@ describe("Universe", () => {
     ).toEqual({ ok: false, error: "Archived goals cannot receive agents." });
   });
 
+  test("assigns multiple agents atomically", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Batch destination" });
+    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+
+    expect(
+      universe.execute({
+        type: "AssignAgents",
+        agentIds: ["agent-1", "missing", "agent-2"],
+        goalId: "goal-1",
+      }),
+    ).toEqual({ ok: false, error: "Agent missing not found." });
+    expect(universe.snapshot().agents.every((agent) => !agent.primaryGoalId)).toBe(true);
+
+    expect(
+      universe.execute({
+        type: "AssignAgents",
+        agentIds: ["agent-1", "agent-2"],
+        goalId: "goal-1",
+      }),
+    ).toEqual({
+      ok: true,
+      goalId: "goal-1",
+      affectedAgentIds: ["agent-1", "agent-2"],
+    });
+    expect(universe.snapshot().agents.map((agent) => agent.primaryGoalId)).toEqual([
+      "goal-1",
+      "goal-1",
+    ]);
+  });
+
   test("adopts related agents in a human-controlled batch and preserves dismissal state", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Primary outcome" });

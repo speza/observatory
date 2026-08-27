@@ -16,16 +16,13 @@ import type {
   WebTerminalScrollRequest,
 } from "../../src/web/protocol.ts";
 import { Schema } from "effect";
-
-interface ProjectionKindEnvelope {
-  readonly kind?: string;
-}
-
-interface PortfolioEnvelope {
-  readonly map?: ProjectionKindEnvelope;
-  readonly commandCentre?: ProjectionKindEnvelope;
-  readonly catchUp?: ProjectionKindEnvelope;
-}
+import {
+  CommandResponseSchema,
+  InspectorProjectionSchema,
+  PortfolioResponseSchema,
+  StartAgentResponseSchema,
+  WorkingTreeDiffResponseSchema,
+} from "./apiSchemas.ts";
 
 const TerminalOpenSchema = Schema.Struct({ sessionId: Schema.String, message: Schema.String });
 const LaunchGoalSchema = Schema.Struct({
@@ -94,19 +91,7 @@ const responseFor = async (path: string, signal?: AbortSignal): Promise<Response
 
 export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioResponse> => {
   const response = await responseFor("/api/portfolio", signal);
-  const body: unknown = await response.json();
-  if (Object.prototype.toString.call(body) !== "[object Object]")
-    throw new Error("Observatory returned an invalid portfolio envelope.");
-  // SAFETY: The JSON value was checked as an object before reading its optional discriminants.
-  const envelope = body as PortfolioEnvelope;
-  if (
-    envelope.map?.kind !== "universe-map" ||
-    envelope.commandCentre?.kind !== "command-centre" ||
-    envelope.catchUp?.kind !== "catch-up"
-  )
-    throw new Error("Observatory returned an invalid projection pair.");
-  // SAFETY: Both required projection discriminants were validated from the same-origin endpoint.
-  return envelope as PortfolioResponse;
+  return Schema.decodeUnknownSync(PortfolioResponseSchema)(await response.json());
 };
 
 export const fetchInspector = async (
@@ -118,19 +103,7 @@ export const fetchInspector = async (
     `/api/inspector?type=${type}&id=${encodeURIComponent(id)}`,
     signal,
   );
-  const body: unknown = await response.json();
-  if (Object.prototype.toString.call(body) !== "[object Object]")
-    throw new Error("Observatory returned an invalid inspector envelope.");
-  // SAFETY: The JSON value was checked as an object before reading its optional discriminant.
-  const envelope = body as ProjectionKindEnvelope;
-  if (
-    envelope.kind !== "goal-inspector" &&
-    envelope.kind !== "agent-inspector" &&
-    envelope.kind !== "empty-inspector"
-  )
-    throw new Error("Observatory returned an invalid inspector projection.");
-  // SAFETY: Every inspector projection discriminant was validated from the same-origin endpoint.
-  return envelope as InspectorProjection;
+  return Schema.decodeUnknownSync(InspectorProjectionSchema)(await response.json());
 };
 
 export const fetchWorkingTreeDiff = async (
@@ -138,15 +111,9 @@ export const fetchWorkingTreeDiff = async (
   signal?: AbortSignal,
 ): Promise<WebWorkingTreeDiffResponse> => {
   const response = await responseFor(`/api/diff?agentId=${encodeURIComponent(agentId)}`, signal);
-  const body: unknown = await response.json();
-  if (Object.prototype.toString.call(body) !== "[object Object]")
-    throw new Error("Observatory returned an invalid diff envelope.");
-  // SAFETY: The JSON value was checked as an object before reading its optional discriminant.
-  const envelope = body as Partial<WebWorkingTreeDiffResponse>;
-  if (envelope.kind !== "working-tree-diff" || envelope.agentId !== agentId)
-    throw new Error("Observatory returned an invalid workspace diff.");
-  // SAFETY: The same-origin endpoint validated the workspace diff discriminant and agent id.
-  return envelope as WebWorkingTreeDiffResponse;
+  const body = Schema.decodeUnknownSync(WorkingTreeDiffResponseSchema)(await response.json());
+  if (body.agentId !== agentId) throw new Error("Observatory returned an invalid workspace diff.");
+  return body;
 };
 
 export const executeCommand = async (command: WebCommand): Promise<WebCommandResponse> => {
@@ -170,14 +137,9 @@ export const executeCommand = async (command: WebCommand): Promise<WebCommandRes
       : `Observatory command failed (${response.status}).`;
     throw new Error(message);
   }
-  if (Object.prototype.toString.call(body) !== "[object Object]")
-    throw new Error("Observatory returned an invalid command response.");
-  // SAFETY: The same-origin JSON response is a plain object; its nested discriminants are checked next.
-  const envelope = body as Partial<WebCommandResponse>;
-  if (!envelope.result?.ok || envelope.portfolio?.map.kind !== "universe-map")
-    throw new Error("Observatory returned an invalid command response.");
-  // SAFETY: The successful command result and both required portfolio discriminants were validated.
-  return envelope as WebCommandResponse;
+  const decoded = Schema.decodeUnknownSync(CommandResponseSchema)(body);
+  if (!decoded.result.ok) throw new Error("Observatory returned an invalid command response.");
+  return decoded;
 };
 
 const errorMessage = async (response: Response, fallback: string): Promise<string> => {
@@ -218,15 +180,7 @@ export const startWebAgent = async (
   });
   if (!response.ok)
     throw new Error(await errorMessage(response, `Agent launch failed (${response.status}).`));
-  const body: unknown = await response.json();
-  if (Object.prototype.toString.call(body) !== "[object Object]")
-    throw new Error("Observatory returned an invalid launch response.");
-  // SAFETY: The JSON response was checked as a plain object before its discriminants are inspected.
-  const envelope = body as Partial<WebStartAgentResponse>;
-  if (!envelope.result?.requestId || envelope.portfolio?.map.kind !== "universe-map")
-    throw new Error("Observatory returned an invalid launch response.");
-  // SAFETY: The request id and portfolio projection discriminants were validated above.
-  return envelope as WebStartAgentResponse;
+  return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
 };
 
 const terminalMutation = async (path: string, body: string): Promise<Response> => {

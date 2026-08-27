@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PortfolioResponse } from "../../src/web/api.ts";
 import { fetchPortfolio } from "./api.ts";
 
@@ -10,29 +10,50 @@ export interface PortfolioState {
 
 type InternalPortfolioState = Omit<PortfolioState, "accept">;
 
+export const latestPortfolio = (
+  current: PortfolioResponse | undefined,
+  candidate: PortfolioResponse,
+): PortfolioResponse =>
+  !current || candidate.map.generatedAt >= current.map.generatedAt ? candidate : current;
+
 export const usePortfolio = (): PortfolioState => {
   const [state, setState] = useState<InternalPortfolioState>({});
-  const accept = useCallback((data: PortfolioResponse): void => setState({ data }), []);
+  const request = useRef<AbortController | undefined>(undefined);
+  const refreshEpoch = useRef(0);
+  const accept = useCallback((data: PortfolioResponse): void => {
+    refreshEpoch.current += 1;
+    request.current?.abort();
+    setState((current) => ({ data: latestPortfolio(current.data, data) }));
+  }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let disposed = false;
+    let timer: number | undefined;
     const refresh = async (): Promise<void> => {
+      const epoch = refreshEpoch.current;
+      const controller = new AbortController();
+      request.current = controller;
       try {
         const data = await fetchPortfolio(controller.signal);
-        setState({ data });
+        if (disposed || controller.signal.aborted || epoch !== refreshEpoch.current) return;
+        setState((current) => ({ data: latestPortfolio(current.data, data) }));
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (disposed || controller.signal.aborted || epoch !== refreshEpoch.current) return;
         setState((current) => ({
           ...current,
           error: error instanceof Error ? error.message : "Observatory refresh failed.",
         }));
+      } finally {
+        if (request.current === controller) request.current = undefined;
+        if (!disposed) timer = window.setTimeout(() => void refresh(), 2_000);
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2_000);
     return () => {
-      controller.abort();
-      window.clearInterval(timer);
+      disposed = true;
+      refreshEpoch.current += 1;
+      request.current?.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [accept]);
 

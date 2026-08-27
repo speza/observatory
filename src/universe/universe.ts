@@ -61,6 +61,11 @@ export type UniverseCommand =
       readonly goalId: GoalId;
     }
   | {
+      readonly type: "AssignAgents";
+      readonly agentIds: readonly AgentId[];
+      readonly goalId: GoalId;
+    }
+  | {
       readonly type: "AdoptRelatedAgents";
       readonly goalId: GoalId;
       readonly agentIds: readonly AgentId[];
@@ -436,6 +441,25 @@ export class Universe {
           (dismissal) => dismissal.goalId !== goal.id || dismissal.agentId !== command.agentId,
         );
         result = { ok: true, agentId: agent.id, goalId: goal.id };
+        break;
+      }
+      case "AssignAgents": {
+        const goal = findGoal(next, command.goalId);
+        if (!goal) return { ok: false, error: "Goal not found." };
+        if (goal.status === "archived")
+          return { ok: false, error: "Archived goals cannot receive agents." };
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0) return { ok: false, error: "At least one agent is required." };
+        const missingAgentId = agentIds.find((agentId) => !findAgent(next, agentId));
+        if (missingAgentId) return { ok: false, error: `Agent ${missingAgentId} not found.` };
+        const selected = new Set(agentIds);
+        next.agents = next.agents.map((agent) =>
+          selected.has(agent.id) ? { ...agent, primaryGoalId: goal.id } : agent,
+        );
+        next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
+          (dismissal) => dismissal.goalId !== goal.id || !selected.has(dismissal.agentId),
+        );
+        result = { ok: true, goalId: goal.id, affectedAgentIds: agentIds };
         break;
       }
       case "AdoptRelatedAgents": {

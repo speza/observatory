@@ -612,6 +612,7 @@ SetGoalPriority
 CompleteGoal
 ArchiveGoal
 AssignAgent
+AssignAgents
 ImportAgent
 ProposeRelationship
 AcceptProposal
@@ -713,7 +714,7 @@ The first production web slice uses an in-process loopback HTTP adapter. The
 `web` composition root owns one `Universe`, reconciles one selected
 `SessionHost`, serves the static browser client, and exposes JSON for the
 existing universe-map, command-centre, catch-up and inspector projections. A narrow web
-command gateway accepts only goal editing, assignment, completion and archive
+command gateway accepts only goal editing, single or atomic batch assignment, completion and archive
 commands and delegates their invariants and persistence to `Universe`. It is
 not CRUD and does not expose the full internal command union. It binds to
 `127.0.0.1`; mutations require an exact loopback Origin, JSON content type and

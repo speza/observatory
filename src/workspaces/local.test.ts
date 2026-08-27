@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   LocalWorkspaceProvider,
@@ -119,7 +120,7 @@ describe("local workspace provider", () => {
   });
 
   test("preserves repository-relative untracked paths with a/ or b/ prefixes", async () => {
-    const root = await mkdtemp(join("/private/tmp", "ao-workspace-untracked-"));
+    const root = await mkdtemp(join(tmpdir(), "ao-workspace-untracked-"));
     try {
       await mkdir(join(root, "a"), { recursive: true });
       await writeFile(join(root, "a", "foo.ts"), "hello\n");

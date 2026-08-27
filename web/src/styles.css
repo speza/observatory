@@ -1185,6 +1185,25 @@ button {
   color: var(--muted);
   font-size: 14px;
 }
+.inspector__error {
+  margin: 10px 20px;
+  padding: 12px;
+  border-left: 2px solid var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 12px;
+}
+.inspector__error p {
+  margin: 0 0 10px;
+}
+.inspector__error button {
+  padding: 6px 9px;
+  border: 1px solid currentColor;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 .inspector__line {
   padding: 9px 20px;
   border-bottom: 1px solid var(--faint);
@@ -1336,13 +1355,25 @@ button {
 }
 
 .modal-backdrop {
-  position: absolute;
+  position: fixed;
   z-index: 34;
   inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--ink) 24%, transparent);
   backdrop-filter: blur(4px);
+}
+.modal-backdrop::backdrop,
+.workspace-review-backdrop::backdrop {
+  background: transparent;
 }
 .goal-dialog {
   width: min(460px, calc(100vw - 40px));
@@ -2155,9 +2186,16 @@ button {
   position: fixed;
   z-index: 46;
   inset: var(--masthead-height) 0 0;
+  width: 100%;
+  max-width: none;
+  height: calc(100% - var(--masthead-height));
+  max-height: none;
+  margin: 0;
   display: grid;
   place-items: stretch;
   padding: 0;
+  border: 0;
+  color: inherit;
   background: color-mix(in srgb, #0d100f 72%, transparent);
   backdrop-filter: blur(7px);
 }

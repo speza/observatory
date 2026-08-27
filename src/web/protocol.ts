@@ -25,6 +25,7 @@ export type WebCommand =
     }
   | { readonly type: "SetGoalPriority"; readonly goalId: string; readonly priority: Priority }
   | { readonly type: "AssignAgent"; readonly agentId: string; readonly goalId: string }
+  | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgent"; readonly agentId: string }
   | { readonly type: "CompleteGoal"; readonly goalId: string }

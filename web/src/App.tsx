@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AttentionItem } from "../../src/attention/attention.ts";
 import type {
   AgentView,
@@ -7,22 +7,19 @@ import type {
   InspectorProjection,
   CatchUpProjection,
 } from "../../src/projection/types.ts";
-import type { Priority } from "../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
 import { executeCommand, fetchInspector } from "./api.ts";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
+import { Inspector } from "./Inspector.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
+import { NewGoalDialog } from "./NewGoalDialog.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
 import { usePortfolio } from "./usePortfolio.ts";
-
-const WorkingTreeDiff = lazy(() =>
-  import("./WorkingTreeDiff.tsx").then(({ WorkingTreeDiff: component }) => ({
-    default: component,
-  })),
-);
+import { WorkspaceReview } from "./WorkspaceReview.tsx";
 
 type Theme = "light" | "dark";
 type View = "atlas" | "ledger";
+type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
   ...projection.goals.flatMap((goal) => goal.agents),
@@ -117,6 +114,7 @@ const AttentionQueue = ({
 interface InboxPanelProps {
   readonly projection: CommandCentreProjection;
   readonly pending: boolean;
+  readonly error?: string;
   readonly onAssign: (agentIds: readonly string[], goalId: string) => Promise<boolean>;
   readonly onClose: () => void;
   readonly onSelect: (selection: Selection) => void;
@@ -125,6 +123,7 @@ interface InboxPanelProps {
 const InboxPanel = ({
   projection,
   pending,
+  error,
   onAssign,
   onClose,
   onSelect,
@@ -204,6 +203,7 @@ const InboxPanel = ({
           ))
         )}
       </div>
+      {error ? <p className="command-error">{error}</p> : null}
       <footer className="inbox-panel__assign">
         <label>
           <span>Assign selected to</span>
@@ -305,358 +305,6 @@ const CatchUpPanel = ({
     </footer>
   </aside>
 );
-
-interface InspectorProps {
-  readonly projection?: InspectorProjection;
-  readonly commandCentre: CommandCentreProjection;
-  readonly commandError?: string;
-  readonly commandPending: boolean;
-  readonly onCommand: (command: WebCommand) => Promise<WebCommandResponse | undefined>;
-  readonly onClose: () => void;
-  readonly onOpenTerminal: (agent: AgentView) => void;
-  readonly onReviewChanges: (agent: AgentView) => void;
-}
-
-const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
-
-const Inspector = ({
-  projection,
-  commandCentre,
-  commandError,
-  commandPending,
-  onCommand,
-  onClose,
-  onOpenTerminal,
-  onReviewChanges,
-}: InspectorProps): React.JSX.Element => {
-  const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
-  const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [confirming, setConfirming] = useState<"goal" | "agent">();
-
-  useEffect(() => {
-    setTitle(goal?.title ?? "");
-    setDescription(goal?.description ?? "");
-    setConfirming(undefined);
-  }, [goal?.description, goal?.id, goal?.title, agent?.id]);
-
-  const heading =
-    projection?.kind === "goal-inspector"
-      ? projection.goal.title
-      : projection?.kind === "agent-inspector"
-        ? projection.agent.displayName
-        : "Selection";
-  return (
-    <aside className="inspector" aria-label="Selection inspector">
-      <header>
-        <div>
-          <p className="overline">INSPECTOR / OBSERVED STATE</p>
-          <h2>{heading}</h2>
-        </div>
-        <button aria-label="Close inspector" onClick={onClose} type="button">
-          ×
-        </button>
-      </header>
-      {!projection ? <p className="inspector__loading">Loading trusted facts…</p> : null}
-      {goal ? (
-        <div className="inspector__controls">
-          <label>
-            <span>Goal title</span>
-            <input onChange={(event) => setTitle(event.target.value)} value={title} />
-          </label>
-          <label>
-            <span>Description</span>
-            <textarea
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Why this goal exists and what success looks like"
-              rows={4}
-              value={description}
-            />
-          </label>
-          <button
-            disabled={commandPending || !title.trim()}
-            onClick={() => {
-              void (async () => {
-                if (
-                  title !== goal.title &&
-                  !(await onCommand({ type: "RenameGoal", goalId: goal.id, title }))
-                )
-                  return;
-                if (description !== (goal.description ?? ""))
-                  await onCommand({
-                    type: "SetGoalDescription",
-                    goalId: goal.id,
-                    description,
-                  });
-              })();
-            }}
-            type="button"
-          >
-            Save goal details
-          </button>
-          <fieldset>
-            <legend>Priority</legend>
-            <div className="priority-picker">
-              {priorities.map((priority) => (
-                <button
-                  aria-pressed={goal.priority === priority}
-                  disabled={commandPending}
-                  key={priority}
-                  onClick={() =>
-                    void onCommand({ type: "SetGoalPriority", goalId: goal.id, priority })
-                  }
-                  type="button"
-                >
-                  {priority}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-          <div className="lifecycle-actions">
-            {goal.status === "active" ? (
-              <button
-                disabled={commandPending}
-                onClick={() => void onCommand({ type: "CompleteGoal", goalId: goal.id })}
-                type="button"
-              >
-                Mark complete
-              </button>
-            ) : null}
-            {goal.status === "completed" && confirming !== "goal" ? (
-              <button onClick={() => setConfirming("goal")} type="button">
-                Archive goal…
-              </button>
-            ) : null}
-            {confirming === "goal" ? (
-              <div className="confirm-action">
-                <p>Archive this completed goal? It will leave active projections.</p>
-                <button
-                  disabled={commandPending}
-                  onClick={() => {
-                    void onCommand({ type: "ArchiveGoal", goalId: goal.id }).then((response) => {
-                      if (response) onClose();
-                    });
-                  }}
-                  type="button"
-                >
-                  Confirm archive
-                </button>
-                <button onClick={() => setConfirming(undefined)} type="button">
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      {projection?.kind === "agent-inspector" ? (
-        <>
-          <div className="inspector__controls">
-            <button onClick={() => onOpenTerminal(projection.agent)} type="button">
-              Open terminal
-            </button>
-            <button onClick={() => onReviewChanges(projection.agent)} type="button">
-              Review workspace changes
-            </button>
-            <label>
-              <span>Assigned goal</span>
-              <select
-                disabled={commandPending}
-                onChange={(event) => {
-                  const goalId = event.target.value;
-                  void onCommand(
-                    goalId
-                      ? { type: "AssignAgent", agentId: projection.agent.id, goalId }
-                      : { type: "UnassignAgent", agentId: projection.agent.id },
-                  );
-                }}
-                value={projection.agent.primaryGoalId ?? ""}
-              >
-                <option value="">Unassigned inbox</option>
-                {commandCentre.goals
-                  .filter((candidate) => candidate.status === "active")
-                  .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.priority} · {candidate.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {projection.agent.hostHealth !== "live" && confirming !== "agent" ? (
-              <button onClick={() => setConfirming("agent")} type="button">
-                Archive stale agent…
-              </button>
-            ) : null}
-            {confirming === "agent" ? (
-              <div className="confirm-action">
-                <p>Archive this unavailable observation? Its identity and history are retained.</p>
-                <button
-                  disabled={commandPending}
-                  onClick={() => {
-                    void onCommand({ type: "ArchiveAgent", agentId: projection.agent.id }).then(
-                      (response) => {
-                        if (response) onClose();
-                      },
-                    );
-                  }}
-                  type="button"
-                >
-                  Confirm archive
-                </button>
-                <button onClick={() => setConfirming(undefined)} type="button">
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <dl>
-            <div>
-              <dt>Runtime</dt>
-              <dd>{projection.agent.runtimeState}</dd>
-            </div>
-            <div>
-              <dt>Host fact</dt>
-              <dd>{projection.agent.hostHealth}</dd>
-            </div>
-            <div>
-              <dt>Repository</dt>
-              <dd>{projection.agent.repository ?? "Unknown"}</dd>
-            </div>
-            <div>
-              <dt>Branch</dt>
-              <dd>{projection.agent.branch ?? "Unknown"}</dd>
-            </div>
-          </dl>
-        </>
-      ) : null}
-      {commandError ? <p className="command-error">{commandError}</p> : null}
-      <footer>Commands are validated and persisted by the Universe.</footer>
-    </aside>
-  );
-};
-
-interface WorkspaceReviewProps {
-  readonly agent: AgentView;
-  readonly theme: Theme;
-  readonly onClose: () => void;
-}
-
-const WorkspaceReview = ({ agent, theme, onClose }: WorkspaceReviewProps): React.JSX.Element => (
-  <div
-    className="workspace-review-backdrop"
-    onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}
-    role="presentation"
-  >
-    <section
-      aria-label={`Workspace review for ${agent.displayName}`}
-      aria-modal="true"
-      className="workspace-review"
-      onMouseDown={(event) => event.stopPropagation()}
-      role="dialog"
-    >
-      <div className="workspace-review__terminal">
-        <TerminalDeck agent={agent} embedded key={agent.id} onClose={onClose} theme={theme} />
-      </div>
-      <div className="workspace-review__diff">
-        <Suspense
-          fallback={
-            <div className="workspace-review__loading" role="status">
-              Preparing workspace diff…
-            </div>
-          }
-        >
-          <WorkingTreeDiff agent={agent} embedded onClose={onClose} theme={theme} />
-        </Suspense>
-      </div>
-    </section>
-  </div>
-);
-
-interface NewGoalDialogProps {
-  readonly pending: boolean;
-  readonly error?: string;
-  readonly onCancel: () => void;
-  readonly onCreate: (command: WebCommand) => Promise<void>;
-}
-
-const NewGoalDialog = ({
-  pending,
-  error,
-  onCancel,
-  onCreate,
-}: NewGoalDialogProps): React.JSX.Element => {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<Priority>("P2");
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <section
-        aria-labelledby="new-goal-title"
-        aria-modal="true"
-        className="goal-dialog"
-        role="dialog"
-      >
-        <header>
-          <div>
-            <p className="overline">NEW SEMANTIC OBJECT</p>
-            <h2 id="new-goal-title">Create a goal</h2>
-          </div>
-          <button aria-label="Close new goal dialog" onClick={onCancel} type="button">
-            ×
-          </button>
-        </header>
-        <div className="goal-dialog__body">
-          <label>
-            <span>Goal title</span>
-            <input autoFocus onChange={(event) => setTitle(event.target.value)} value={title} />
-          </label>
-          <label>
-            <span>Description</span>
-            <textarea
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Why this matters and what success looks like"
-              rows={5}
-              value={description}
-            />
-          </label>
-          <label>
-            <span>Priority</span>
-            <select
-              onChange={(event) =>
-                setPriority(
-                  priorities.find((candidate) => candidate === event.target.value) ?? "P2",
-                )
-              }
-              value={priority}
-            >
-              {priorities.map((candidate) => (
-                <option key={candidate} value={candidate}>
-                  {candidate}
-                </option>
-              ))}
-            </select>
-          </label>
-          {error ? <p className="command-error">{error}</p> : null}
-        </div>
-        <footer>
-          <button onClick={onCancel} type="button">
-            Cancel
-          </button>
-          <button
-            disabled={pending || !title.trim()}
-            onClick={() => void onCreate({ type: "CreateGoal", title, description, priority })}
-            type="button"
-          >
-            {pending ? "Creating…" : "Create goal"}
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-};
 
 interface LedgerProps {
   readonly projection: CommandCentreProjection;
@@ -791,17 +439,15 @@ export const App = (): React.JSX.Element => {
   const [motion, setMotion] = useState(
     () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
-  const [queueOpen, setQueueOpen] = useState(false);
-  const [inboxOpen, setInboxOpen] = useState(false);
-  const [catchUpOpen, setCatchUpOpen] = useState(false);
+  const [sidePanel, setSidePanel] = useState<SidePanel>();
   const [selection, setSelection] = useState<Selection>();
-  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
   const [diffAgent, setDiffAgent] = useState<AgentView>();
   const [inspector, setInspector] = useState<InspectorProjection>();
+  const [inspectorError, setInspectorError] = useState<string>();
   const [inspectorRevision, setInspectorRevision] = useState(0);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
   const [newAgentOpen, setNewAgentOpen] = useState(false);
@@ -812,15 +458,17 @@ export const App = (): React.JSX.Element => {
   useEffect(() => {
     if (!selection) {
       setInspector(undefined);
+      setInspectorError(undefined);
       return;
     }
     const controller = new AbortController();
     setInspector(undefined);
+    setInspectorError(undefined);
     void fetchInspector(selection.type, selection.id, controller.signal)
       .then(setInspector)
-      .catch(() => {
+      .catch((error) => {
         if (!controller.signal.aborted)
-          setInspector({ kind: "empty-inspector", lines: ["Inspector unavailable."] });
+          setInspectorError(error instanceof Error ? error.message : "Inspector unavailable.");
       });
     return () => controller.abort();
   }, [selection, inspectorRevision]);
@@ -870,10 +518,7 @@ export const App = (): React.JSX.Element => {
 
   const select = (next: Selection): void => {
     setSelection(next);
-    setInspectorOpen(true);
-    setQueueOpen(false);
-    setInboxOpen(false);
-    setCatchUpOpen(false);
+    setSidePanel("inspector");
   };
 
   const selectAndFocus = (next: Selection): void => {
@@ -883,10 +528,7 @@ export const App = (): React.JSX.Element => {
   };
 
   const assignInboxAgents = async (agentIds: readonly string[], goalId: string): Promise<boolean> =>
-    agentIds.reduce<Promise<boolean>>(async (previous, agentId) => {
-      if (!(await previous)) return false;
-      return (await runCommand({ type: "AssignAgent", agentId, goalId })) !== undefined;
-    }, Promise.resolve(true));
+    (await runCommand({ type: "AssignAgents", agentIds, goalId })) !== undefined;
 
   const allSelections = useMemo<readonly Selection[]>(() => {
     if (!data) return [];
@@ -920,9 +562,7 @@ export const App = (): React.JSX.Element => {
   const openSelectedTerminal = (): void => {
     if (!selectedAgent) return;
     setTerminalAgent(selectedAgent);
-    setInspectorOpen(false);
-    setQueueOpen(false);
-    setCatchUpOpen(false);
+    setSidePanel(undefined);
   };
 
   const openWorkspaceReview = (agent: AgentView): void => {
@@ -972,20 +612,8 @@ export const App = (): React.JSX.Element => {
           setDiffAgent(undefined);
           return;
         }
-        if (catchUpOpen) {
-          setCatchUpOpen(false);
-          return;
-        }
-        if (queueOpen) {
-          setQueueOpen(false);
-          return;
-        }
-        if (inboxOpen) {
-          setInboxOpen(false);
-          return;
-        }
-        if (inspectorOpen) {
-          setInspectorOpen(false);
+        if (sidePanel) {
+          setSidePanel(undefined);
           return;
         }
         setSelection(undefined);
@@ -999,9 +627,7 @@ export const App = (): React.JSX.Element => {
         newGoalOpen ||
         terminalAgent ||
         shortcutsOpen ||
-        catchUpOpen ||
-        queueOpen ||
-        inboxOpen
+        (sidePanel && sidePanel !== "inspector")
       )
         return;
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
@@ -1047,16 +673,10 @@ export const App = (): React.JSX.Element => {
         focusSelection();
       } else if (key === "a") {
         event.preventDefault();
-        setQueueOpen((value) => !value);
-        setInboxOpen(false);
-        setCatchUpOpen(false);
-        setInspectorOpen(false);
+        setSidePanel((value) => (value === "attention" ? undefined : "attention"));
       } else if (key === "b") {
         event.preventDefault();
-        setInboxOpen((value) => !value);
-        setQueueOpen(false);
-        setCatchUpOpen(false);
-        setInspectorOpen(false);
+        setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
       } else if (key === "v") {
         event.preventDefault();
         setView((value) => (value === "atlas" ? "ledger" : "atlas"));
@@ -1070,7 +690,7 @@ export const App = (): React.JSX.Element => {
         setNewAgentOpen(true);
       } else if (key === "i") {
         event.preventDefault();
-        if (selection) setInspectorOpen((value) => !value);
+        if (selection) setSidePanel((value) => (value === "inspector" ? undefined : "inspector"));
       } else if (key === "g") {
         event.preventDefault();
         jumpToAttention();
@@ -1089,16 +709,13 @@ export const App = (): React.JSX.Element => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     allSelections,
-    catchUpOpen,
     data,
     diffAgent,
-    inboxOpen,
-    inspectorOpen,
     newGoalOpen,
     newAgentOpen,
-    queueOpen,
     selection,
     selectedAgent,
+    sidePanel,
     shortcutsOpen,
     terminalAgent,
     view,
@@ -1193,12 +810,9 @@ export const App = (): React.JSX.Element => {
             <span>Working</span>
           </div>
           <button
-            aria-expanded={queueOpen}
+            aria-expanded={sidePanel === "attention"}
             onClick={() => {
-              setQueueOpen((value) => !value);
-              setInboxOpen(false);
-              setCatchUpOpen(false);
-              setInspectorOpen(false);
+              setSidePanel((value) => (value === "attention" ? undefined : "attention"));
             }}
             type="button"
           >
@@ -1206,12 +820,9 @@ export const App = (): React.JSX.Element => {
             <span>Attention</span>
           </button>
           <button
-            aria-expanded={inboxOpen}
+            aria-expanded={sidePanel === "inbox"}
             onClick={() => {
-              setInboxOpen((value) => !value);
-              setQueueOpen(false);
-              setCatchUpOpen(false);
-              setInspectorOpen(false);
+              setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
               setView("atlas");
             }}
             type="button"
@@ -1233,13 +844,10 @@ export const App = (): React.JSX.Element => {
           </button>
         ) : null}
         <button
-          aria-expanded={catchUpOpen}
+          aria-expanded={sidePanel === "catch-up"}
           className={`catch-up-trigger ${data.catchUp.pending ? "is-pending" : ""}`}
           onClick={() => {
-            setCatchUpOpen((value) => !value);
-            setQueueOpen(false);
-            setInboxOpen(false);
-            setInspectorOpen(false);
+            setSidePanel((value) => (value === "catch-up" ? undefined : "catch-up"));
           }}
           type="button"
         >
@@ -1254,10 +862,10 @@ export const App = (): React.JSX.Element => {
             onSelect={select}
             onClearSelection={() => {
               setSelection(undefined);
-              setInspectorOpen(false);
+              setSidePanel(undefined);
             }}
             projection={data.map}
-            reservedLeft={queueOpen || inboxOpen ? 390 : 0}
+            reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 390 : 0}
             reservedRight={0}
             selection={selection}
             theme={theme}
@@ -1266,54 +874,50 @@ export const App = (): React.JSX.Element => {
         ) : (
           <Ledger onSelect={select} projection={data.commandCentre} />
         )}
-        {queueOpen ? (
+        {sidePanel === "attention" ? (
           <AttentionQueue
-            onClose={() => setQueueOpen(false)}
+            onClose={() => setSidePanel(undefined)}
             onSelect={selectAndFocus}
             projection={data.commandCentre}
           />
         ) : null}
-        {inboxOpen ? (
+        {sidePanel === "inbox" ? (
           <InboxPanel
+            error={commandError}
             onAssign={assignInboxAgents}
-            onClose={() => setInboxOpen(false)}
+            onClose={() => setSidePanel(undefined)}
             onSelect={(next) => {
               setSelection(next);
-              setInspectorOpen(true);
-              setQueueOpen(false);
-              setCatchUpOpen(false);
+              setSidePanel("inspector");
             }}
             pending={commandPending}
             projection={data.commandCentre}
           />
         ) : null}
-        {catchUpOpen ? (
+        {sidePanel === "catch-up" ? (
           <CatchUpPanel
             onAcknowledge={async () => {
               const response = await runCommand({ type: "AcknowledgeCatchUp" });
-              if (response) setCatchUpOpen(false);
+              if (response) setSidePanel(undefined);
             }}
-            onClose={() => setCatchUpOpen(false)}
+            onClose={() => setSidePanel(undefined)}
             onSelect={selectAndFocus}
             pending={commandPending}
             projection={data.catchUp}
           />
         ) : null}
         {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
-        {selection &&
-        inspectorOpen &&
-        !terminalAgent &&
-        !catchUpOpen &&
-        !queueOpen &&
-        !inboxOpen ? (
+        {selection && sidePanel === "inspector" && !terminalAgent ? (
           <Inspector
             commandCentre={data.commandCentre}
             commandError={commandError}
             commandPending={commandPending}
-            onClose={() => setInspectorOpen(false)}
+            error={inspectorError}
+            onClose={() => setSidePanel(undefined)}
             onCommand={runCommand}
             projection={inspector}
             onOpenTerminal={setTerminalAgent}
+            onRetry={() => setInspectorRevision((value) => value + 1)}
             onReviewChanges={openWorkspaceReview}
           />
         ) : null}
@@ -1367,7 +971,7 @@ export const App = (): React.JSX.Element => {
             setNewAgentOpen(false);
             if (response.result.agentId) {
               setSelection({ type: "agent", id: response.result.agentId });
-              setInspectorOpen(true);
+              setSidePanel("inspector");
               setInspectorRevision((value) => value + 1);
             } else if (response.result.goalId) {
               setSelection({ type: "goal", id: response.result.goalId });

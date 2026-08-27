@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   WebLaunchOptionsResponse,
   WebStartAgentRequest,
@@ -6,6 +6,7 @@ import type {
   WebWorkspaceBrowserResponse,
 } from "../../src/web/protocol.ts";
 import { browseLaunchWorkspace, fetchLaunchOptions, startWebAgent } from "./api.ts";
+import { ModalDialog } from "./ModalDialog.tsx";
 
 interface NewAgentDialogProps {
   readonly defaultGoalId?: string;
@@ -27,8 +28,10 @@ export const NewAgentDialog = ({
   const [agentName, setAgentName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [browser, setBrowser] = useState<WebWorkspaceBrowserResponse>();
+  const [browserLoading, setBrowserLoading] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const browseRequest = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -50,17 +53,30 @@ export const NewAgentDialog = ({
     return () => controller.abort();
   }, [defaultGoalId]);
 
+  useEffect(() => () => browseRequest.current?.abort(), []);
+
   const selectedAgent = useMemo(
     () => options?.agents.find((agent) => agent.kind === agentKind),
     [agentKind, options?.agents],
   );
 
   const browse = async (path: string): Promise<void> => {
+    browseRequest.current?.abort();
+    const controller = new AbortController();
+    browseRequest.current = controller;
+    setBrowserLoading(true);
     setError(undefined);
     try {
-      setBrowser(await browseLaunchWorkspace(path));
+      const result = await browseLaunchWorkspace(path, controller.signal);
+      if (!controller.signal.aborted && browseRequest.current === controller) setBrowser(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Workspace could not be browsed.");
+      if (!controller.signal.aborted)
+        setError(cause instanceof Error ? cause.message : "Workspace could not be browsed.");
+    } finally {
+      if (browseRequest.current === controller) {
+        browseRequest.current = undefined;
+        setBrowserLoading(false);
+      }
     }
   };
 
@@ -93,13 +109,8 @@ export const NewAgentDialog = ({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section
-        aria-labelledby="new-agent-title"
-        aria-modal="true"
-        className="goal-dialog agent-dialog"
-        role="dialog"
-      >
+    <ModalDialog ariaLabelledBy="new-agent-title" className="modal-backdrop" onClose={onCancel}>
+      <section className="goal-dialog agent-dialog">
         <header>
           <div>
             <p className="overline">NEW HOSTED SESSION</p>
@@ -126,17 +137,18 @@ export const NewAgentDialog = ({
             <div className="agent-dialog__location">
               <input
                 autoFocus
+                data-autofocus
                 list="launch-locations"
                 onChange={(event) => setLocation(event.target.value)}
                 placeholder="Choose or enter a directory"
                 value={location}
               />
               <button
-                disabled={!location.trim()}
+                disabled={browserLoading || !location.trim()}
                 onClick={() => void browse(location)}
                 type="button"
               >
-                Browse
+                {browserLoading ? "Browsing…" : "Browse"}
               </button>
             </div>
             <datalist id="launch-locations">
@@ -245,6 +257,6 @@ export const NewAgentDialog = ({
           </button>
         </footer>
       </section>
-    </div>
+    </ModalDialog>
   );
 };

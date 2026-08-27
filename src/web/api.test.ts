@@ -369,7 +369,7 @@ describe("ObservatoryWebApi", () => {
     if (!goalId) throw new Error("Expected created goal id.");
     expect(createdBody.portfolio.commandCentre.goals[0]?.title).toBe("Build the command loop");
 
-    expect((await command({ type: "AssignAgent", agentId, goalId })).status).toBe(200);
+    expect((await command({ type: "AssignAgents", agentIds: [agentId], goalId })).status).toBe(200);
     expect((await command({ type: "SetGoalPriority", goalId, priority: "P0" })).status).toBe(200);
     expect((await command({ type: "UnassignAgent", agentId })).status).toBe(200);
     fixture.clock.value += 1_000;
