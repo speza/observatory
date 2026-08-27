@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type {
   CommandCentreProjection,
   CatchUpProjection,
+  CloseoutProjection,
   Projection,
   UniverseMapProjection,
 } from "../projection/types.ts";
@@ -14,6 +15,7 @@ import { WebCommandError, WebCommandGateway } from "./commands.ts";
 import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
 import type {
   WebCommandResponse,
+  WebCloseoutResponse,
   WebLaunchOptionsResponse,
   WebStartAgentResponse,
   WebWorkspaceBrowserResponse,
@@ -23,11 +25,14 @@ import type {
   WebTerminalOpenResponse,
 } from "./protocol.ts";
 import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
+import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
+import { WebCloseoutError, WebCloseoutGateway } from "./closeout.ts";
 
 export interface PortfolioResponse {
   readonly map: UniverseMapProjection;
   readonly commandCentre: CommandCentreProjection;
   readonly catchUp: CatchUpProjection;
+  readonly closeout: CloseoutProjection;
 }
 
 interface ErrorResponse {
@@ -45,6 +50,7 @@ type WebResponse =
   | WebTerminalOpenResponse
   | WebTerminalLinksResponse
   | WebTerminalActionResponse
+  | WebCloseoutResponse
   | ErrorResponse;
 
 const json = (body: WebResponse, status = 200): Response =>
@@ -65,6 +71,7 @@ export class ObservatoryWebApi {
   private readonly commands: WebCommandGateway;
   private readonly terminals: WebTerminalGateway | undefined;
   private readonly launch: WebLaunchGateway | undefined;
+  private readonly closeout: WebCloseoutGateway | undefined;
 
   constructor(
     private readonly universe: Universe,
@@ -79,6 +86,9 @@ export class ObservatoryWebApi {
   ) {
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host) : undefined;
+    this.closeout = host
+      ? new WebCloseoutGateway(createAgentCloseoutCoordinator({ universe, host }))
+      : undefined;
     this.launch =
       host && launch
         ? new WebLaunchGateway(universe, host, launch.workspace, launch.coordinator)
@@ -92,6 +102,22 @@ export class ObservatoryWebApi {
     if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url);
 
     if (url.pathname.startsWith("/api/launch/")) return this.agentLaunch(request, url);
+
+    if (url.pathname === "/api/closeout/close") {
+      if (!this.closeout) return json({ error: "Agent closeout is unavailable." }, 501);
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const rejected = this.rejectMutation(request);
+      if (rejected) return rejected;
+      try {
+        const result = await this.closeout.closeAndArchive(await request.text());
+        const portfolio = this.portfolio(this.clock.now());
+        if (portfolio instanceof Response) return portfolio;
+        return json({ result, portfolio } satisfies WebCloseoutResponse);
+      } catch (error) {
+        if (error instanceof WebCloseoutError) return json({ error: error.message }, error.status);
+        return json({ error: "Agent closeout failed unexpectedly." }, 500);
+      }
+    }
 
     if (url.pathname === "/api/commands") {
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -187,13 +213,15 @@ export class ObservatoryWebApi {
     const map = this.universe.project({ kind: "universe-map", now });
     const commandCentre = this.universe.project({ kind: "command-centre", now });
     const catchUp = this.universe.project({ kind: "catch-up", now });
+    const closeout = this.universe.project({ kind: "closeout", now });
     if (
       map.kind !== "universe-map" ||
       commandCentre.kind !== "command-centre" ||
-      catchUp.kind !== "catch-up"
+      catchUp.kind !== "catch-up" ||
+      closeout.kind !== "closeout"
     )
       return json({ error: "Projection contract mismatch." }, 500);
-    return { map, commandCentre, catchUp };
+    return { map, commandCentre, catchUp, closeout };
   }
 
   private async terminal(request: Request, url: URL): Promise<Response> {

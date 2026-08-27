@@ -133,6 +133,7 @@ export class MockHostAdapter implements SessionHost {
   private readonly liveLinkedExecutionTargets = new Map<string, string>();
   private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
   private readonly launched = new Map<string, HostAgentObservation>();
+  private readonly closed = new Set<string>();
   private launchSequence = 0;
   private linkedTerminalSequence = 0;
 
@@ -169,7 +170,7 @@ export class MockHostAdapter implements SessionHost {
           observedAt,
         })),
         ...Array.from(this.launched.values(), (agent) => ({ ...agent, observedAt })),
-      ];
+      ].filter((agent) => !this.closed.has(agent.nativeId));
       for (const agent of agents) {
         this.liveTargets.set(agent.nativeId, {
           kind: "mock-agent",
@@ -302,6 +303,7 @@ export class MockHostAdapter implements SessionHost {
         capabilities: [
           "embedded-terminal",
           "native-handoff",
+          "close-agent",
           ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
             ? ["linked-terminal" as const]
             : []),
@@ -333,6 +335,27 @@ export class MockHostAdapter implements SessionHost {
           message: "The agent is no longer present in the latest mock frame.",
         };
       return { ok: true, message: `Simulated focus for mock agent ${token}.` };
+    });
+  }
+
+  closeAgent(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
+    return Effect.sync(() => {
+      if (!access.supported || !access.target) return { ok: false, message: access.explanation };
+      const token = parseTarget(access.target);
+      if (!token)
+        return {
+          ok: false,
+          message: "The mock close target is invalid or unsupported.",
+        };
+      if (!this.liveTargets.has(token)) {
+        if (this.closed.has(token))
+          return { ok: true, message: `Mock agent ${token} had already ended.` };
+        return { ok: false, message: "The agent is no longer present in the latest mock frame." };
+      }
+      this.closed.add(token);
+      this.launched.delete(token);
+      this.liveTargets.delete(token);
+      return { ok: true, message: `Closed mock agent ${token}.` };
     });
   }
 

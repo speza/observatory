@@ -39,8 +39,8 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
         <dd>Focus the current selection</dd>
       </div>
       <div>
-        <dt>a / b / v / n / N</dt>
-        <dd>Attention, inbox, view, new goal, new agent</dd>
+        <dt>a / b / c / v / n / N</dt>
+        <dd>Attention, inbox, closeout, view, new goal, new agent</dd>
       </div>
       <div>
         <dt>i / ? / Esc</dt>

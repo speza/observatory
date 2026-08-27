@@ -258,6 +258,21 @@ result.
 Do not expose Herdr workspaces, tabs and panes as universal domain concepts.
 They remain adapter details referenced through opaque native identifiers.
 
+The implemented web closeout slice adds one generic per-Agent close capability
+to this existing seam. It does not make Observatory the process owner: the host
+continues to decide how a recognised Agent execution is closed. A closeout
+coordinator obtains fresh access, asks the adapter to close the opaque target,
+reconciles the resulting host snapshot and only then submits `ArchiveAgent` to
+the Universe. The Herdr adapter may translate this to a pane-close operation,
+but that command and pane identity remain private to the adapter. See
+[Agent closeout and host lifecycle](../specs/agent-closeout-and-host-lifecycle.md).
+
+Closing and archiving remain distinct operations. Host failure must leave the
+semantic Agent active; successful host close followed by persistence failure
+must converge through stale reconciliation and a retryable local archive.
+Unsupported close capability leaves `Archive only` available without claiming
+that execution stopped.
+
 Terminal input, resize and release are capabilities of the host-owned terminal
 stream returned by `openTerminal` or `openLinkedExecutionTerminal`. The host
 still owns the PTY and its lifecycle; clients only render and transport it.
@@ -713,9 +728,11 @@ socket on macOS/Linux (and a named-pipe adapter later if needed).
 The first production web slice uses an in-process loopback HTTP adapter. The
 `web` composition root owns one `Universe`, reconciles one selected
 `SessionHost`, serves the static browser client, and exposes JSON for the
-existing universe-map, command-centre, catch-up and inspector projections. A narrow web
-command gateway accepts only goal editing, single or atomic batch assignment, completion and archive
-commands and delegates their invariants and persistence to `Universe`. It is
+existing universe-map, command-centre, catch-up, closeout and inspector
+projections. A narrow web command gateway accepts only goal editing, single or
+atomic batch assignment, completion and archive commands and delegates their
+invariants and persistence to `Universe`. A separate bounded closeout gateway
+coordinates fresh host access, close, reconciliation and semantic archive. It is
 not CRUD and does not expose the full internal command union. It binds to
 `127.0.0.1`; mutations require an exact loopback Origin, JSON content type and
 an explicit intent header. The browser polls because host refresh is already
@@ -888,8 +905,10 @@ metadata. Goal satellites continue to use
 identity-derived, collision-aware perimeter slots. This is deterministic slot
 allocation, not a force-directed graph layout.
 
-Stale or unavailable agents may be explicitly archived by a human from the
-supporting list or attention lens. Archive removes the agent from active
+Agents may be explicitly archived by a human without stopping their host
+execution. The web Closeout surface separately offers `Close & archive` for a
+live Agent and local archive for an Agent confirmed stale. Archive removes the
+agent from active
 projections without deleting its identity, assignment or observed history;
 future host reconciliation updates the archived record but does not silently
 restore it.

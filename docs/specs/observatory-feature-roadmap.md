@@ -88,16 +88,17 @@ client work over those contracts; neither is allowed to invent durable state.
 
 ### Host and execution surfaces
 
-| Feature                                                              | CORE     | TUI      | WEB      | Priority / note                                                                                                        |
-| -------------------------------------------------------------------- | -------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Host-owned embedded terminal                                         | Done     | Done     | Done     | SessionHost remains the only host seam                                                                                 |
-| Terminal input, resize, scroll, release and return-state restoration | Done     | Done     | Done     | Web primary-terminal loop is implemented                                                                               |
-| Linked execution terminal and sibling picker                         | Done     | Done     | Done     | Web uses a transient `Main` + companion tab deck; `New terminal` creates repeatable tabs in the parent Herdr workspace |
-| Native foreground handoff                                            | Done     | Done     | —        | TUI/host-edge capability; browser can offer a clear explanation instead                                                |
-| Start-agent coordinator and workspace preparation                    | Done     | Done     | Done     | Web and TUI share the coordinator, WorkspaceProvider and SessionHost launch capability                                 |
-| Host-loss recovery and live watch optimisation                       | Next     | Next     | Next     | Polling is sufficient for the walking slice; recovery must be tested live                                              |
-| Agent quick messages or structured approvals                         | Deferred | Deferred | Deferred | Do not broaden interaction until exact-target trust is proven                                                          |
-| AO daemon, concurrent clients and general event transport            | Deferred | Deferred | Deferred | Introduce only when one in-process client is a real constraint                                                         |
+| Feature                                                              | CORE     | TUI      | WEB      | Priority / note                                                                                                                        |
+| -------------------------------------------------------------------- | -------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Host-owned embedded terminal                                         | Done     | Done     | Done     | SessionHost remains the only host seam                                                                                                 |
+| Terminal input, resize, scroll, release and return-state restoration | Done     | Done     | Done     | Web primary-terminal loop is implemented                                                                                               |
+| Linked execution terminal and sibling picker                         | Done     | Done     | Done     | Web uses a transient `Main` + companion tab deck; `New terminal` creates repeatable tabs in the parent Herdr workspace                 |
+| Native foreground handoff                                            | Done     | Done     | —        | TUI/host-edge capability; browser can offer a clear explanation instead                                                                |
+| Start-agent coordinator and workspace preparation                    | Done     | Done     | Done     | Web and TUI share the coordinator, WorkspaceProvider and SessionHost launch capability                                                 |
+| Host-synchronised Agent closeout                                     | Done     | Next     | Done     | Web closeout and CORE coordination are implemented; TUI parity remains next; see [closeout plan](agent-closeout-and-host-lifecycle.md) |
+| Host-loss recovery and live watch optimisation                       | Next     | Next     | Next     | Polling is sufficient for the walking slice; recovery must be tested live                                                              |
+| Agent quick messages or structured approvals                         | Deferred | Deferred | Deferred | Do not broaden interaction until exact-target trust is proven                                                                          |
+| AO daemon, concurrent clients and general event transport            | Deferred | Deferred | Deferred | Introduce only when one in-process client is a real constraint                                                                         |
 
 ### Presentation and navigation
 
@@ -191,6 +192,7 @@ before claiming full cross-client parity.
 
 ### Next — Trust and daily operation
 
+- TUI parity for host-synchronised `Close & archive` and the Closeout lens.
 - TUI catch-up lens and web attention-jump hardening.
 - Verification/evidence contract spike with synthetic evidence first.
 - Richer deterministic attention signals.

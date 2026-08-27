@@ -14,6 +14,7 @@ interface InspectorProps {
   readonly commandError?: string;
   readonly commandPending: boolean;
   readonly onCommand: (command: WebCommand) => Promise<WebCommandResponse | undefined>;
+  readonly onCloseAndArchive: (agentIds: readonly string[]) => Promise<boolean>;
   readonly onClose: () => void;
   readonly onOpenTerminal: (agent: AgentView) => void;
   readonly onRetry: () => void;
@@ -29,6 +30,7 @@ export const Inspector = ({
   commandError,
   commandPending,
   onCommand,
+  onCloseAndArchive,
   onClose,
   onOpenTerminal,
   onRetry,
@@ -38,7 +40,7 @@ export const Inspector = ({
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [confirming, setConfirming] = useState<"goal" | "agent">();
+  const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
 
   useEffect(() => {
     setTitle(goal?.title ?? "");
@@ -196,14 +198,46 @@ export const Inspector = ({
                   ))}
               </select>
             </label>
-            {projection.agent.hostHealth !== "live" && confirming !== "agent" ? (
-              <button onClick={() => setConfirming("agent")} type="button">
-                Archive stale agent…
+            {projection.agent.hostHealth === "live" && confirming !== "agent-close" ? (
+              <button onClick={() => setConfirming("agent-close")} type="button">
+                Close & archive…
               </button>
             ) : null}
-            {confirming === "agent" ? (
+            {confirming === "agent-close" ? (
               <div className="confirm-action">
-                <p>Archive this unavailable observation? Its identity and history are retained.</p>
+                <p>
+                  {projection.agent.runtimeState === "done"
+                    ? "Close this host execution and archive its Observatory record? Runtime done is not verification."
+                    : `Stop this ${projection.agent.runtimeState} Agent in the host and archive its Observatory record?`}
+                </p>
+                <button
+                  disabled={commandPending}
+                  onClick={() => {
+                    void onCloseAndArchive([projection.agent.id]).then((succeeded) => {
+                      if (succeeded) onClose();
+                    });
+                  }}
+                  type="button"
+                >
+                  Confirm close & archive
+                </button>
+                <button onClick={() => setConfirming(undefined)} type="button">
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+            {confirming !== "agent-archive" ? (
+              <button onClick={() => setConfirming("agent-archive")} type="button">
+                {projection.agent.hostHealth === "live" ? "Archive only…" : "Archive Agent…"}
+              </button>
+            ) : null}
+            {confirming === "agent-archive" ? (
+              <div className="confirm-action">
+                <p>
+                  {projection.agent.hostHealth === "live"
+                    ? "Hide this Agent from active Observatory views while leaving its host execution running?"
+                    : "Archive this ended or unavailable observation? Its identity and history are retained."}
+                </p>
                 <button
                   disabled={commandPending}
                   onClick={() => {

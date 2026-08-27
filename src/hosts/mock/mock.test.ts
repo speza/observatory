@@ -63,7 +63,12 @@ describe("Mock host adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
-    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
+    expect(access.capabilities).toEqual([
+      "embedded-terminal",
+      "native-handoff",
+      "close-agent",
+      "linked-terminal",
+    ]);
     expect(access.linkedExecutions).toHaveLength(4);
     expect(access.linkedExecutions.map((execution) => execution.kind)).toEqual([
       "shell",

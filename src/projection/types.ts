@@ -38,6 +38,7 @@ export type ProjectionQuery =
     }
   | { readonly kind: "search"; readonly now: number; readonly query: string }
   | { readonly kind: "catch-up"; readonly now: number }
+  | { readonly kind: "closeout"; readonly now: number }
   | {
       readonly kind: "inspector";
       readonly now: number;
@@ -208,6 +209,26 @@ export interface CatchUpProjection {
   readonly counts: Record<UniverseChange["outcome"], number>;
 }
 
+export interface CloseoutGoalCount {
+  readonly goalId?: string;
+  readonly goalTitle: string;
+  readonly results: number;
+  readonly ended: number;
+}
+
+export interface CloseoutProjection {
+  readonly kind: "closeout";
+  readonly generatedAt: number;
+  readonly results: readonly AgentView[];
+  readonly ended: readonly AgentView[];
+  readonly goals: readonly CloseoutGoalCount[];
+  readonly counts: {
+    readonly results: number;
+    readonly ended: number;
+    readonly total: number;
+  };
+}
+
 export type InspectorProjection =
   | {
       readonly kind: "goal-inspector";
@@ -232,6 +253,7 @@ export type Projection =
   | RelatedAgentsProjection
   | SearchProjection
   | CatchUpProjection
+  | CloseoutProjection
   | InspectorProjection;
 
 export interface ProjectionModule {

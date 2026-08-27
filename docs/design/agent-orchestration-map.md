@@ -478,6 +478,22 @@ On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
 the application from scratch.
 
+### Closeout and host lifecycle
+
+The web Closeout surface reduces lifecycle housekeeping without weakening the
+distinction between observation and accepted truth. Runtime `done` enters a
+results-to-review lane; host absence enters an ended-externally lane and never
+becomes completion. Stale Agents may be shelved from the active Atlas as a
+reversible projection choice before the human archives them.
+
+For a live Agent, `Close & archive` first asks the generic session host to close
+the revalidated opaque execution and only then archives Observatory's semantic
+record. `Archive only` remains an explicit secondary action when the operator
+wants the execution to continue. Host-specific stop mechanics stay inside the
+adapter, and automatic host termination requires a later explicit policy. The
+delivery and failure plan is specified in
+[Agent closeout and host lifecycle](../specs/agent-closeout-and-host-lifecycle.md).
+
 Candidate input semantics are:
 
 ```text

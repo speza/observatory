@@ -30,6 +30,7 @@ import type {
   RelatedAgentsProjection,
   SearchProjection,
   CatchUpProjection,
+  CloseoutProjection,
   SearchResult,
   AgentView,
   UniverseMapProjection,
@@ -51,6 +52,11 @@ const compareAgents = (left: AgentView, right: AgentView): number => {
   if (left.hostHealth !== right.hostHealth) return left.hostHealth === "live" ? -1 : 1;
   return left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id);
 };
+
+const byGoalThenName = (left: AgentView, right: AgentView): number =>
+  (left.goalTitle ?? "Unassigned").localeCompare(right.goalTitle ?? "Unassigned") ||
+  left.displayName.localeCompare(right.displayName) ||
+  left.id.localeCompare(right.id);
 
 const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   if (hosts.length === 0) return undefined;
@@ -668,6 +674,60 @@ const projectInspector = (
   return { kind: "agent-inspector", agent: view, lines };
 };
 
+const projectCloseout = (
+  state: {
+    readonly goals: readonly Goal[];
+    readonly agents: readonly Agent[];
+    readonly hosts: readonly HostHealth[];
+  },
+  now: number,
+): CloseoutProjection => {
+  const activeGoals = new Map(
+    state.goals.filter((goal) => goal.status !== "archived").map((goal) => [goal.id, goal]),
+  );
+  const attention = evaluateAttention(
+    now,
+    state.goals,
+    state.agents.filter((agent) => agent.archivedAt === undefined),
+    state.hosts,
+  );
+  const candidates = state.agents
+    .filter(
+      (agent) =>
+        agent.archivedAt === undefined &&
+        (!agent.primaryGoalId || activeGoals.has(agent.primaryGoalId)),
+    )
+    .map((agent) => agentView(agent, state.goals, attention.items));
+  const results = candidates
+    .filter((agent) => agent.hostHealth === "live" && agent.runtimeState === "done")
+    .sort(byGoalThenName);
+  const ended = candidates.filter((agent) => agent.hostHealth === "stale").sort(byGoalThenName);
+  const groupKeys = new Set([...results, ...ended].map((agent) => agent.primaryGoalId ?? ""));
+  const goals = [...groupKeys]
+    .map((goalId) => {
+      const goal = goalId ? activeGoals.get(goalId) : undefined;
+      return {
+        goalId: goal?.id,
+        goalTitle: goal?.title ?? "Unassigned",
+        results: results.filter((agent) => (agent.primaryGoalId ?? "") === goalId).length,
+        ended: ended.filter((agent) => (agent.primaryGoalId ?? "") === goalId).length,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.goalTitle.localeCompare(right.goalTitle) ||
+        (left.goalId ?? "").localeCompare(right.goalId ?? ""),
+    );
+  return {
+    kind: "closeout",
+    generatedAt: now,
+    results,
+    ended,
+    goals,
+    counts: { results: results.length, ended: ended.length, total: results.length + ended.length },
+  };
+};
+
 export const createProjectionModule = (): ProjectionModule => ({
   project(state, query): Projection {
     switch (query.kind) {
@@ -685,6 +745,8 @@ export const createProjectionModule = (): ProjectionModule => ({
         return projectSearch(state, query.query);
       case "catch-up":
         return projectCatchUp(state, query.now);
+      case "closeout":
+        return projectCloseout(state, query.now);
       case "inspector":
         return projectInspector(state, query.now, query.target);
     }
@@ -699,5 +761,6 @@ export {
   projectInspector,
   projectSearch,
   projectCatchUp,
+  projectCloseout,
   projectUniverseMap,
 };

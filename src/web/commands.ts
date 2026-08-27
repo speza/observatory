@@ -43,6 +43,10 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
   }),
   Schema.Struct({ type: Schema.Literal("UnassignAgent"), agentId: Id }),
   Schema.Struct({ type: Schema.Literal("ArchiveAgent"), agentId: Id }),
+  Schema.Struct({
+    type: Schema.Literal("ArchiveAgents"),
+    agentIds: Schema.Array(Id).pipe(Schema.minItems(1), Schema.maxItems(500)),
+  }),
   Schema.Struct({ type: Schema.Literal("CompleteGoal"), goalId: Id }),
   Schema.Struct({ type: Schema.Literal("ArchiveGoal"), goalId: Id }),
   Schema.Struct({ type: Schema.Literal("AcknowledgeCatchUp") }),

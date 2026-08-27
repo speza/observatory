@@ -208,6 +208,19 @@
   font-weight: 700;
   letter-spacing: 0.08em;
 }
+.goal__closeout rect {
+  fill: var(--paper-panel);
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+.goal__closeout text {
+  fill: var(--accent);
+  text-anchor: middle;
+  font-family: "DM Mono", monospace;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
 .agent__field {
   fill-opacity: 0.13;
   stroke: currentColor;

@@ -112,7 +112,11 @@ export interface LinkedExecution {
 }
 
 /** A deliberately small, agent-specific set of interaction surfaces. */
-export type AgentCapability = "embedded-terminal" | "native-handoff" | "linked-terminal";
+export type AgentCapability =
+  | "embedded-terminal"
+  | "native-handoff"
+  | "linked-terminal"
+  | "close-agent";
 
 export interface AgentAccess {
   readonly supported: boolean;
@@ -167,6 +171,7 @@ export interface SessionHost {
     readonly nativeId: string;
   }): Effect.Effect<AgentAccess, HostError>;
   activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError>;
+  closeAgent(access: AgentAccess): Effect.Effect<HostActionResult, HostError>;
   openTerminal(
     access: AgentAccess,
     dimensions: TerminalDimensions,

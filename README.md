@@ -181,7 +181,7 @@ cycles its unassigned Agents. The grouped list keeps its flat row navigation.
 | `r` / `d`        | Rename or edit the selected goal/Agent                                                               |
 | `p`              | Change selected goal priority                                                                        |
 | `a` / `u`        | Assign from a selected goal/Agent or unassign an Agent                                               |
-| `c` / `x`        | Confirm complete/archive a goal, or archive a stale Agent                                            |
+| `c` / `x`        | Confirm complete/archive a goal, or archive an Agent                                                 |
 | `/`              | Search goals and Agent metadata                                                                      |
 | `R`              | Reconcile a fresh Herdr snapshot                                                                     |
 | `i`              | Toggle the floating inspector card                                                                   |
@@ -246,7 +246,8 @@ list` warning; goal size follows Agent load, and P0 is a distinct
    durable shell node.
 7. Stop or hide a test agent so it becomes stale, select it from the list or
    attention lens, then archive it with `x` and confirmation. Confirm it leaves
-   active projections while its identity and assignment remain persisted.
+   active projections while its identity and assignment remain persisted. The
+   web Closeout surface also batches this local-only stale cleanup.
 8. Complete a goal with `c` and confirmation, observe its dimmed body, then
    archive it explicitly with `x` and confirmation.
 
@@ -278,8 +279,12 @@ identical presentation. See the [feature roadmap and surface ownership](docs/spe
 for the current split and planned parity work.
 
 The Atlas inspector can create and edit goals, set priority, assign or unassign
-agents, complete goals, and explicitly archive completed goals or stale agents.
-Archive actions require confirmation and remain subject to Universe invariants.
+agents, complete goals, and explicitly archive agents or completed goals. For a
+live Agent, `Close & archive` first closes the revalidated host execution;
+`Archive only` deliberately leaves it running. The Closeout drawer separates
+live done results awaiting human review from Agents confirmed ended externally,
+and supports bounded batch cleanup. Archive actions require confirmation and
+remain subject to Universe invariants.
 `New agent` starts a hosted session through the shared launch coordinator: choose
 an active goal or Inbox, an existing checkout or new worktree, a host-supported
 agent, and an optional name and prompt. The browser can browse directories but

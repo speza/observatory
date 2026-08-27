@@ -451,7 +451,7 @@ describe("ObservatoryWebApi", () => {
 
     const opened = await mutation("/api/terminal/open", {
       agentId: agent.id,
-      dimensions: { columns: 80, rows: 24 },
+      dimensions: { columns: 480, rows: 180 },
     });
     expect(opened.status).toBe(200);
     const openedBody: WebTerminalOpenResponse = await opened.json();
@@ -522,6 +522,52 @@ describe("ObservatoryWebApi", () => {
       200,
     );
     await api.close();
+  });
+
+  test("closes host Agents before archiving them through the closeout endpoint", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const agent = fixture.universe
+      .snapshot()
+      .agents.find((candidate) => candidate.nativeId === "mock-p01");
+    if (!agent) throw new Error("Expected the deterministic mock Agent.");
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+
+    const response = await api.fetch(
+      new Request("http://localhost/api/closeout/close", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({ agentIds: [agent.id] }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.result).toMatchObject({
+      ok: true,
+      results: [{ agentId: agent.id, status: "closed-and-archived" }],
+    });
+    expect(body.portfolio.commandCentre.counts.agents).toBe(19);
+    expect(
+      fixture.universe.snapshot().agents.find((candidate) => candidate.id === agent.id),
+    ).toMatchObject({
+      hostHealth: "stale",
+      archivedAt: fixture.clock.now(),
+    });
+
+    const foreign = await api.fetch(
+      new Request("http://localhost/api/closeout/close", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://foreign" },
+        body: JSON.stringify({ agentIds: [agent.id] }),
+      }),
+    );
+    expect(foreign.status).toBe(403);
   });
 
   test("protects terminal mutations with the browser command boundary", async () => {

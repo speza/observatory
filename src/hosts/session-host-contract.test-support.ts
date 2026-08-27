@@ -61,6 +61,14 @@ export const defineSessionHostContractTests = (
       expect(await Effect.runPromise(host.activate(access))).toMatchObject({ ok: true });
     });
 
+    test("closes an Agent through a capability-gated host action", async () => {
+      const { host, agent } = await createHarness();
+      await Effect.runPromise(host.snapshot());
+      const access = await Effect.runPromise(host.access(agent));
+      expect(access.capabilities).toContain("close-agent");
+      expect(await Effect.runPromise(host.closeAgent(access))).toMatchObject({ ok: true });
+    });
+
     test("supports one available linked execution lifecycle", async () => {
       const { host, agent } = await createHarness();
       await Effect.runPromise(host.snapshot());

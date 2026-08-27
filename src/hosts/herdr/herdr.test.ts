@@ -291,7 +291,12 @@ describe("Herdr adapter", () => {
       }),
     );
     expect(access.supported).toBe(true);
-    expect(access.capabilities).toEqual(["embedded-terminal", "native-handoff", "linked-terminal"]);
+    expect(access.capabilities).toEqual([
+      "embedded-terminal",
+      "native-handoff",
+      "close-agent",
+      "linked-terminal",
+    ]);
     expect(access.linkedExecutions).toHaveLength(4);
     expect(access.linkedExecutions[0]).toMatchObject({
       kind: "shell",
@@ -308,6 +313,69 @@ describe("Herdr adapter", () => {
     });
     expect(runner.calls.at(-1)).toEqual(["herdr", "agent", "attach", "fixture-w2:p1"]);
     expect(runner.options.at(-1)).toEqual({ interactive: true });
+  });
+
+  test("revalidates an opaque Agent target before closing its Herdr pane", async () => {
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+
+    expect(await Effect.runPromise(adapter.closeAgent(access))).toEqual({
+      ok: true,
+      message: "Closed Herdr agent fixture-w2:p1.",
+    });
+    expect(runner.calls.at(-1)).toEqual(["herdr", "pane", "close", "fixture-w2:p1"]);
+  });
+
+  test("refuses to close a reused Herdr pane identity", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    runner.setResult({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ...fixture,
+        result: {
+          ...result,
+          snapshot: {
+            ...snapshot,
+            panes: Array.isArray(snapshot.panes)
+              ? snapshot.panes.map((pane) => {
+                  if (!isRecord(pane) || stringValue(pane, "pane_id") !== "fixture-w2:p1")
+                    return pane;
+                  return { ...pane, terminal_id: "replacement-terminal" };
+                })
+              : [],
+          },
+        },
+      }),
+      stderr: "",
+    });
+
+    const closed = await Effect.runPromise(adapter.closeAgent(access));
+
+    expect(closed.ok).toBe(false);
+    expect(closed.message).toContain("target changed");
+    expect(runner.calls.some((call) => call.slice(0, 3).join(" ") === "herdr pane close")).toBe(
+      false,
+    );
   });
 
   test("classifies a recognized sibling pane as an agent linked execution", async () => {

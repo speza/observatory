@@ -3,6 +3,7 @@ import type { PortfolioResponse } from "../../src/web/api.ts";
 import type {
   WebCommand,
   WebCommandResponse,
+  WebCloseoutResponse,
   WebLaunchOptionsResponse,
   WebStartAgentRequest,
   WebStartAgentResponse,
@@ -21,6 +22,7 @@ import {
   InspectorProjectionSchema,
   PortfolioResponseSchema,
   StartAgentResponseSchema,
+  CloseoutResponseSchema,
   WorkingTreeDiffResponseSchema,
 } from "./apiSchemas.ts";
 
@@ -140,6 +142,22 @@ export const executeCommand = async (command: WebCommand): Promise<WebCommandRes
   const decoded = Schema.decodeUnknownSync(CommandResponseSchema)(body);
   if (!decoded.result.ok) throw new Error("Observatory returned an invalid command response.");
   return decoded;
+};
+
+export const closeAndArchiveAgents = async (
+  agentIds: readonly string[],
+): Promise<WebCloseoutResponse> => {
+  const response = await fetch("/api/closeout/close", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-ao-command": "1",
+    },
+    body: JSON.stringify({ agentIds }),
+  });
+  if (!response.ok)
+    throw new Error(await errorMessage(response, `Agent closeout failed (${response.status}).`));
+  return Schema.decodeUnknownSync(CloseoutResponseSchema)(await response.json());
 };
 
 const errorMessage = async (response: Response, fallback: string): Promise<string> => {

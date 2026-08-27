@@ -505,6 +505,7 @@ button {
 
 .attention-queue,
 .inbox-panel,
+.closeout-panel,
 .inspector {
   position: absolute;
   z-index: 15;
@@ -530,6 +531,10 @@ button {
 .inbox-panel {
   left: 28px;
 }
+.closeout-panel {
+  left: 28px;
+  width: 400px;
+}
 .inspector {
   right: 28px;
   max-height: calc(100% - 176px);
@@ -537,6 +542,7 @@ button {
 }
 .attention-queue > header,
 .inbox-panel > header,
+.closeout-panel > header,
 .inspector > header {
   display: flex;
   justify-content: space-between;
@@ -546,6 +552,7 @@ button {
 }
 .attention-queue h2,
 .inbox-panel h2,
+.closeout-panel h2,
 .inspector h2,
 .ledger h2 {
   margin: 3px 0 0;
@@ -554,6 +561,7 @@ button {
 }
 .attention-queue .overline,
 .inbox-panel .overline,
+.closeout-panel .overline,
 .inspector .overline,
 .ledger .overline {
   margin: 0;
@@ -562,6 +570,7 @@ button {
 }
 .attention-queue header button,
 .inbox-panel header button,
+.closeout-panel header button,
 .inspector header button {
   align-self: flex-start;
   border: 0;
@@ -574,6 +583,107 @@ button {
   flex: 1;
   overflow: auto;
   padding: 18px 20px;
+}
+.closeout-panel__body {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 20px;
+}
+.closeout-lane + .closeout-lane {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+.closeout-lane__description {
+  margin: -3px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.closeout-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--faint);
+}
+.closeout-item > input {
+  width: 15px;
+  height: 15px;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.closeout-item__identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.closeout-item__identity strong,
+.closeout-item__identity small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.closeout-item__identity strong {
+  font-size: 14px;
+}
+.closeout-item__identity small {
+  color: var(--ink);
+  font-size: 12px;
+}
+.closeout-item__identity em {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+.closeout-item__identity:hover strong {
+  color: var(--accent);
+}
+.closeout-item__actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.closeout-item__actions button,
+.closeout-lane__batch {
+  padding: 5px 7px;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.closeout-item__actions button:last-child,
+.closeout-lane__batch {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.closeout-item__actions button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+.closeout-lane__batch {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+}
+.closeout-lane__confirm {
+  margin-top: 10px;
 }
 .inbox-panel__toolbar {
   display: flex;
@@ -775,6 +885,7 @@ button {
 }
 .attention-queue footer,
 .inbox-panel footer,
+.closeout-panel footer,
 .inspector footer {
   padding: 12px 20px;
   border-top: 1px solid var(--hairline);
@@ -1322,6 +1433,7 @@ button {
   }
   .attention-queue,
   .inbox-panel,
+  .closeout-panel,
   .inspector,
   .catch-up-panel {
     top: 72px;

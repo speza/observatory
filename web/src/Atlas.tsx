@@ -164,6 +164,10 @@ export const Atlas = ({
               (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
             );
             const hasUncertainAgent = goal.agents.some((agent) => agent.hostHealth !== "live");
+            const resultCount = goal.agents.filter(
+              (agent) => agent.hostHealth === "live" && agent.runtimeState === "done",
+            ).length;
+            const endedCount = goal.agents.filter((agent) => agent.hostHealth === "stale").length;
             const agentPoints = goalAgentPoints(goal, centre);
             const orbitBands = [
               ...new Map(agentPoints.map((point) => [point.band, point])).values(),
@@ -244,7 +248,7 @@ export const Atlas = ({
                   ))}
                 </g>
                 <g
-                  aria-label={`${goal.title}, ${goal.agents.length} agents, priority ${goal.priority}`}
+                  aria-label={`${goal.title}, ${goal.agents.length} agents, priority ${goal.priority}, ${resultCount} results to review, ${endedCount} ended`}
                   className={`goal__body ${selected ? "is-selected" : ""}`}
                   data-goal-id={goal.id}
                   data-radius={radius}
@@ -300,6 +304,17 @@ export const Atlas = ({
                     >
                       <rect height="22" rx="11" width="48" x="-24" y="-11" />
                       <text y="3">{goal.attentionCount} ATTN</text>
+                    </g>
+                  ) : null}
+                  {resultCount + endedCount > 0 ? (
+                    <g
+                      className="goal__closeout"
+                      transform={`translate(${radius * -0.46} ${-radius * 0.58})`}
+                    >
+                      <rect height="22" rx="11" width="56" x="-28" y="-11" />
+                      <text y="3">
+                        {resultCount}R · {endedCount}E
+                      </text>
                     </g>
                   ) : null}
                 </g>

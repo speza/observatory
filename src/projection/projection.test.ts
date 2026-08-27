@@ -373,4 +373,24 @@ describe("projections", () => {
       4, 3,
     ]);
   });
+
+  test("projects done results separately from Agents confirmed ended by the host", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot(
+        [observation("done", "finished result", "done"), observation("ended", "ended agent")],
+        clock.now(),
+      ),
+    );
+    clock.value += 1_000;
+    universe.reconcile(hostSnapshot([observation("done", "finished result", "done")], clock.now()));
+
+    const projection = universe.project({ kind: "closeout", now: clock.now() });
+
+    expect(projection.kind).toBe("closeout");
+    if (projection.kind !== "closeout") throw new Error("Expected closeout projection.");
+    expect(projection.results.map((agent) => agent.displayName)).toEqual(["finished result"]);
+    expect(projection.ended.map((agent) => agent.displayName)).toEqual(["ended agent"]);
+    expect(projection.counts).toEqual({ results: 1, ended: 1, total: 2 });
+  });
 });

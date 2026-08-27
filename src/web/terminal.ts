@@ -11,13 +11,14 @@ import {
 } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { Agent } from "../universe/types.ts";
-import type {
-  WebTerminalActionResponse,
-  WebTerminalEvent,
-  WebTerminalLink,
-  WebTerminalLinksResponse,
-  WebTerminalOpenResponse,
-  WebTerminalScrollRequest,
+import {
+  WEB_TERMINAL_DIMENSION_LIMITS,
+  type WebTerminalActionResponse,
+  type WebTerminalEvent,
+  type WebTerminalLink,
+  type WebTerminalLinksResponse,
+  type WebTerminalOpenResponse,
+  type WebTerminalScrollRequest,
 } from "./protocol.ts";
 
 const MAX_TERMINAL_BODY_BYTES = 65_536;
@@ -26,8 +27,17 @@ const MAX_LINK_HANDLES = 256;
 const SessionId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
 const LinkId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
 const Dimensions = Schema.Struct({
-  columns: Schema.Number.pipe(Schema.int(), Schema.between(20, 320)),
-  rows: Schema.Number.pipe(Schema.int(), Schema.between(5, 120)),
+  columns: Schema.Number.pipe(
+    Schema.int(),
+    Schema.between(
+      WEB_TERMINAL_DIMENSION_LIMITS.minColumns,
+      WEB_TERMINAL_DIMENSION_LIMITS.maxColumns,
+    ),
+  ),
+  rows: Schema.Number.pipe(
+    Schema.int(),
+    Schema.between(WEB_TERMINAL_DIMENSION_LIMITS.minRows, WEB_TERMINAL_DIMENSION_LIMITS.maxRows),
+  ),
 });
 const OpenRequest = Schema.Struct({
   agentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),

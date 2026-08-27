@@ -87,6 +87,7 @@ export type UniverseCommand =
       readonly description?: string;
     }
   | { readonly type: "ArchiveAgent"; readonly agentId: AgentId }
+  | { readonly type: "ArchiveAgents"; readonly agentIds: readonly AgentId[] }
   | { readonly type: "CompleteGoal"; readonly goalId: GoalId }
   | { readonly type: "ArchiveGoal"; readonly goalId: GoalId }
   | { readonly type: "AcknowledgeCatchUp" };
@@ -565,13 +566,22 @@ export class Universe {
         const agent = findAgent(next, command.agentId);
         if (!agent) return { ok: false, error: "Agent not found." };
         if (agent.archivedAt !== undefined) return { ok: true, agentId: agent.id };
-        if (agent.hostHealth === "live")
-          return {
-            ok: false,
-            error: "Only stale or unavailable agents can be archived.",
-          };
         replaceAgent(next, { ...agent, archivedAt: now });
         result = { ok: true, agentId: agent.id };
+        break;
+      }
+      case "ArchiveAgents": {
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0) return { ok: false, error: "At least one agent is required." };
+        const missingAgentId = agentIds.find((agentId) => !findAgent(next, agentId));
+        if (missingAgentId) return { ok: false, error: `Agent ${missingAgentId} not found.` };
+        const selected = new Set(agentIds);
+        next.agents = next.agents.map((agent) =>
+          selected.has(agent.id) && agent.archivedAt === undefined
+            ? { ...agent, archivedAt: now }
+            : agent,
+        );
+        result = { ok: true, affectedAgentIds: agentIds };
         break;
       }
       case "CompleteGoal": {

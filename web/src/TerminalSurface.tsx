@@ -2,7 +2,11 @@ import { useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from 
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { AgentView } from "../../src/projection/types.ts";
-import type { WebTerminalLink, WebTerminalScrollRequest } from "../../src/web/protocol.ts";
+import {
+  boundWebTerminalDimensions,
+  type WebTerminalLink,
+  type WebTerminalScrollRequest,
+} from "../../src/web/protocol.ts";
 import {
   openWebTerminal,
   parseWebTerminalEvent,
@@ -29,6 +33,17 @@ interface TerminalSurfaceProps {
 const decodeFrame = (value: string): Uint8Array => {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+};
+
+const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
+  fit.fit();
+  const dimensions = boundWebTerminalDimensions({
+    columns: terminal.cols,
+    rows: terminal.rows,
+  });
+  if (dimensions.columns !== terminal.cols || dimensions.rows !== terminal.rows)
+    terminal.resize(dimensions.columns, dimensions.rows);
+  return dimensions;
 };
 
 export const TerminalSurface = ({
@@ -74,12 +89,12 @@ export const TerminalSurface = ({
     const terminal = terminalRef.current;
     const fit = fitRef.current;
     if (!active || !terminal || !fit) return;
-    fit.fit();
+    const dimensions = fitTerminal(terminal, fit);
     terminal.focus();
     const sessionId = sessionRef.current;
     if (!sessionId || resizeMode === "preserve") return;
-    void resizeWebTerminal(sessionId, { columns: terminal.cols, rows: terminal.rows }).catch(
-      (error) => setStatus(error instanceof Error ? error.message : "Terminal resize failed."),
+    void resizeWebTerminal(sessionId, dimensions).catch((error) =>
+      setStatus(error instanceof Error ? error.message : "Terminal resize failed."),
     );
   }, [active, resizeMode]);
 
@@ -105,7 +120,7 @@ export const TerminalSurface = ({
     fitRef.current = fit;
     terminal.loadAddon(fit);
     terminal.open(element);
-    fit.fit();
+    const dimensions = fitTerminal(terminal, fit);
     if (activeRef.current) terminal.focus();
     let sessionId: string | undefined;
     let events: EventSource | undefined;
@@ -123,11 +138,7 @@ export const TerminalSurface = ({
       return false;
     });
 
-    void openWebTerminal(
-      agent.id,
-      { columns: terminal.cols, rows: terminal.rows },
-      { linkId: link?.id, resizeMode },
-    )
+    void openWebTerminal(agent.id, dimensions, { linkId: link?.id, resizeMode })
       .then((opened) => {
         if (disposed) {
           void releaseWebTerminal(opened.sessionId);
@@ -155,12 +166,9 @@ export const TerminalSurface = ({
         events.addEventListener("message", receive);
         events.addEventListener("error", disconnect);
         observer = new ResizeObserver(() => {
-          fit.fit();
+          const resized = fitTerminal(terminal, fit);
           if (!sessionId || resizeMode === "preserve" || !activeRef.current) return;
-          void resizeWebTerminal(sessionId, {
-            columns: terminal.cols,
-            rows: terminal.rows,
-          }).catch((error) =>
+          void resizeWebTerminal(sessionId, resized).catch((error) =>
             setStatus(error instanceof Error ? error.message : "Terminal resize failed."),
           );
         });

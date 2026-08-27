@@ -324,7 +324,7 @@ describe("Universe", () => {
     expect(universe.snapshot().agents[0]?.nativeId).toBe("pane-1");
   });
 
-  test("archives stale agents without deleting their identity or assignment", () => {
+  test("archives Agents without deleting their identity or assignment", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Keep the context" });
     universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
@@ -334,18 +334,14 @@ describe("Universe", () => {
       goalId: "goal-1",
     });
     expect(universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
-      ok: false,
-      error: "Only stale or unavailable agents can be archived.",
+      ok: true,
+      agentId: "agent-1",
     });
 
     clock.value = 1_001_000;
     universe.reconcile(hostSnapshot([observation("pane-2")], clock.value));
-    expect(universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
-      ok: true,
-      agentId: "agent-1",
-    });
     const archived = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
-    expect(archived?.archivedAt).toBe(clock.value);
+    expect(archived?.archivedAt).toBe(1_000_000);
 
     const active = universe.project({ kind: "command-centre", now: clock.value });
     if (active.kind !== "command-centre") throw new Error("wrong projection");
@@ -358,7 +354,20 @@ describe("Universe", () => {
     universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")], clock.value));
     const rediscovered = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
     expect(rediscovered?.hostHealth).toBe("live");
-    expect(rediscovered?.archivedAt).toBe(1_001_000);
+    expect(rediscovered?.archivedAt).toBe(1_000_000);
+  });
+
+  test("archives multiple Agents atomically", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+
+    expect(
+      universe.execute({ type: "ArchiveAgents", agentIds: ["agent-1", "agent-2", "agent-1"] }),
+    ).toEqual({ ok: true, affectedAgentIds: ["agent-1", "agent-2"] });
+    expect(universe.snapshot().agents.map((agent) => agent.archivedAt)).toEqual([
+      clock.now(),
+      clock.now(),
+    ]);
   });
 
   test("rejects duplicate native identities without guessing", () => {

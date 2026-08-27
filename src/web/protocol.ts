@@ -8,6 +8,7 @@ import type {
   WorkspaceSelection,
 } from "../workspaces/types.ts";
 import type { StartAgentResult } from "../session-launch/types.ts";
+import type { AgentCloseoutBatchResult } from "../agent-closeout/types.ts";
 import type { PortfolioResponse } from "./api.ts";
 
 export type WebCommand =
@@ -28,12 +29,22 @@ export type WebCommand =
   | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgent"; readonly agentId: string }
+  | { readonly type: "ArchiveAgents"; readonly agentIds: readonly string[] }
   | { readonly type: "CompleteGoal"; readonly goalId: string }
   | { readonly type: "ArchiveGoal"; readonly goalId: string }
   | { readonly type: "AcknowledgeCatchUp" };
 
 export interface WebCommandResponse {
   readonly result: CommandResult;
+  readonly portfolio: PortfolioResponse;
+}
+
+export interface WebCloseoutRequest {
+  readonly agentIds: readonly string[];
+}
+
+export interface WebCloseoutResponse {
+  readonly result: AgentCloseoutBatchResult;
   readonly portfolio: PortfolioResponse;
 }
 
@@ -78,6 +89,40 @@ export interface WebTerminalOpenResponse {
   readonly sessionId: string;
   readonly message: string;
 }
+
+/** Bounded generously enough for full-screen terminals on modern high-resolution displays. */
+export const WEB_TERMINAL_DIMENSION_LIMITS = {
+  minColumns: 1,
+  maxColumns: 1_000,
+  minRows: 1,
+  maxRows: 500,
+} as const;
+
+export interface WebTerminalDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+const boundedTerminalDimension = (value: number, minimum: number, maximum: number): number => {
+  const integer = Number.isFinite(value) ? Math.trunc(value) : minimum;
+  return Math.min(maximum, Math.max(minimum, integer));
+};
+
+/** Keep the browser grid and host PTY on the same safe dimensions at any viewport size. */
+export const boundWebTerminalDimensions = (
+  dimensions: WebTerminalDimensions,
+): WebTerminalDimensions => ({
+  columns: boundedTerminalDimension(
+    dimensions.columns,
+    WEB_TERMINAL_DIMENSION_LIMITS.minColumns,
+    WEB_TERMINAL_DIMENSION_LIMITS.maxColumns,
+  ),
+  rows: boundedTerminalDimension(
+    dimensions.rows,
+    WEB_TERMINAL_DIMENSION_LIMITS.minRows,
+    WEB_TERMINAL_DIMENSION_LIMITS.maxRows,
+  ),
+});
 
 /** A browser-safe handle for a host-provided companion terminal. */
 export interface WebTerminalLink {

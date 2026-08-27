@@ -147,11 +147,30 @@ const CatchUp = Schema.Struct({
     value: Schema.Number,
   }),
 });
+const CloseoutGoalCount = Schema.Struct({
+  goalId: Schema.optional(Schema.String),
+  goalTitle: Schema.String,
+  results: Schema.Number,
+  ended: Schema.Number,
+});
+const Closeout = Schema.Struct({
+  kind: Schema.Literal("closeout"),
+  generatedAt: Schema.Number,
+  results: Schema.Array(AgentView),
+  ended: Schema.Array(AgentView),
+  goals: Schema.Array(CloseoutGoalCount),
+  counts: Schema.Struct({
+    results: Schema.Number,
+    ended: Schema.Number,
+    total: Schema.Number,
+  }),
+});
 
 export const PortfolioResponseSchema = Schema.Struct({
   map: UniverseMap,
   commandCentre: CommandCentre,
   catchUp: CatchUp,
+  closeout: Closeout,
 });
 
 export const InspectorProjectionSchema = Schema.Union(
@@ -199,6 +218,27 @@ const StartAgentResult = Schema.Struct({
 });
 export const StartAgentResponseSchema = Schema.Struct({
   result: StartAgentResult,
+  portfolio: PortfolioResponseSchema,
+});
+
+const AgentCloseoutResult = Schema.Struct({
+  ok: Schema.Boolean,
+  agentId: Schema.String,
+  status: Schema.Literal(
+    "closed-and-archived",
+    "already-ended-and-archived",
+    "already-archived",
+    "unsupported",
+    "rejected",
+  ),
+  message: Schema.String,
+});
+export const CloseoutResponseSchema = Schema.Struct({
+  result: Schema.Struct({
+    ok: Schema.Boolean,
+    results: Schema.Array(AgentCloseoutResult),
+    message: Schema.String,
+  }),
   portfolio: PortfolioResponseSchema,
 });
 

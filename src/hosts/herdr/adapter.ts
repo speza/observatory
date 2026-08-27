@@ -769,6 +769,7 @@ export class HerdrHostAdapter implements SessionHost {
         capabilities: [
           ...(fingerprint ? ["embedded-terminal" as const] : []),
           "native-handoff",
+          ...(fingerprint ? ["close-agent" as const] : []),
           ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
             ? ["linked-terminal" as const]
             : []),
@@ -837,6 +838,44 @@ export class HerdrHostAdapter implements SessionHost {
         return { ok: true, message: `Attached to the real Herdr agent ${token}.` };
       },
       catch: () => hostError("host.activate", "Herdr could not attach to the agent."),
+    });
+  }
+
+  closeAgent(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
+    return Effect.tryPromise({
+      try: async () => {
+        if (!access.supported || !access.target) return { ok: false, message: access.explanation };
+        if (!access.capabilities.includes("close-agent"))
+          return {
+            ok: false,
+            message: "This Herdr agent does not expose a safe close capability.",
+          };
+        const token = parseTarget(access.target);
+        if (!token || !access.target.fingerprint)
+          return { ok: false, message: "The Herdr close target is invalid or unsupported." };
+        const snapshot = await this.snapshotInternal();
+        if (!snapshot.available)
+          return {
+            ok: false,
+            message: snapshot.error ?? "Herdr is unavailable; the Agent lifecycle is uncertain.",
+          };
+        const current = this.liveTargets.get(token);
+        if (!current) return { ok: true, message: `Herdr agent ${token} had already ended.` };
+        if (current.fingerprint !== access.target.fingerprint)
+          return {
+            ok: false,
+            message: "The Herdr Agent target changed before close; no process was stopped.",
+          };
+        const result = await this.runner.run(["herdr", "pane", "close", token]);
+        if (result.exitCode !== 0)
+          return {
+            ok: false,
+            message: commandFailureMessage(result, `Herdr could not close ${token}.`),
+          };
+        return { ok: true, message: `Closed Herdr agent ${token}.` };
+      },
+      catch: (error) =>
+        hostError("host.closeAgent", error instanceof Error ? error.message : String(error)),
     });
   }
 

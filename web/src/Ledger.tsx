@@ -20,7 +20,13 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
             <strong>{goal.title}</strong>
             <small>
               {goal.agents.length} agents · {goal.attentionCount} attention · {goal.staleCount}{" "}
-              uncertain
+              uncertain ·{" "}
+              {
+                goal.agents.filter(
+                  (agent) => agent.runtimeState === "done" && agent.hostHealth === "live",
+                ).length
+              }{" "}
+              results
             </small>
           </button>
           <ul>

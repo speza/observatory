@@ -5,10 +5,11 @@ import type {
   InspectorProjection,
 } from "../../src/projection/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
-import { executeCommand, fetchInspector } from "./api.ts";
+import { closeAndArchiveAgents, executeCommand, fetchInspector } from "./api.ts";
 import { AttentionQueue } from "./AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
 import { CatchUpPanel } from "./CatchUpPanel.tsx";
+import { CloseoutPanel } from "./CloseoutPanel.tsx";
 import { InboxPanel } from "./InboxPanel.tsx";
 import { Inspector } from "./Inspector.tsx";
 import { KeyboardGuide } from "./KeyboardGuide.tsx";
@@ -21,7 +22,7 @@ import { WorkspaceReview } from "./WorkspaceReview.tsx";
 
 type Theme = "light" | "dark";
 type View = "atlas" | "ledger";
-type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
+type SidePanel = "attention" | "inbox" | "catch-up" | "closeout" | "inspector";
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
   ...projection.goals.flatMap((goal) => goal.agents),
@@ -138,6 +139,31 @@ export const App = (): React.JSX.Element => {
 
   const assignInboxAgents = async (agentIds: readonly string[], goalId: string): Promise<boolean> =>
     (await runCommand({ type: "AssignAgents", agentIds, goalId })) !== undefined;
+
+  const archiveAgents = async (agentIds: readonly string[]): Promise<boolean> =>
+    (await runCommand({ type: "ArchiveAgents", agentIds })) !== undefined;
+
+  const runCloseout = async (agentIds: readonly string[]): Promise<boolean> => {
+    setCommandPending(true);
+    setCommandError(undefined);
+    try {
+      const response = await closeAndArchiveAgents(agentIds);
+      portfolio.accept(response.portfolio);
+      setInspectorRevision((value) => value + 1);
+      setLaunchNotice(response.result.message);
+      const failures = response.result.results.filter((result) => !result.ok);
+      if (failures.length > 0) {
+        setCommandError(failures.map((result) => result.message).join(" "));
+        return false;
+      }
+      return true;
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : "Agent closeout failed.");
+      return false;
+    } finally {
+      setCommandPending(false);
+    }
+  };
 
   const allSelections = useMemo<readonly Selection[]>(() => {
     if (!data) return [];
@@ -286,6 +312,9 @@ export const App = (): React.JSX.Element => {
       } else if (key === "b") {
         event.preventDefault();
         setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
+      } else if (key === "c") {
+        event.preventDefault();
+        setSidePanel((value) => (value === "closeout" ? undefined : "closeout"));
       } else if (key === "v") {
         event.preventDefault();
         setView((value) => (value === "atlas" ? "ledger" : "atlas"));
@@ -439,6 +468,16 @@ export const App = (): React.JSX.Element => {
             <strong>{String(data.commandCentre.counts.unassigned).padStart(2, "0")}</strong>
             <span>Inbox</span>
           </button>
+          <button
+            aria-expanded={sidePanel === "closeout"}
+            onClick={() => {
+              setSidePanel((value) => (value === "closeout" ? undefined : "closeout"));
+            }}
+            type="button"
+          >
+            <strong>{String(data.closeout.counts.total).padStart(2, "0")}</strong>
+            <span>Closeout</span>
+          </button>
         </div>
         {portfolio.error ? (
           <div className="refresh-error">{portfolio.error} · showing last trusted projection</div>
@@ -474,7 +513,11 @@ export const App = (): React.JSX.Element => {
               setSidePanel(undefined);
             }}
             projection={data.map}
-            reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 390 : 0}
+            reservedLeft={
+              sidePanel === "attention" || sidePanel === "inbox" || sidePanel === "closeout"
+                ? 430
+                : 0
+            }
             reservedRight={0}
             selection={selection}
             theme={theme}
@@ -515,6 +558,24 @@ export const App = (): React.JSX.Element => {
             projection={data.catchUp}
           />
         ) : null}
+        {sidePanel === "closeout" ? (
+          <CloseoutPanel
+            error={commandError}
+            onArchive={archiveAgents}
+            onClose={() => setSidePanel(undefined)}
+            onCloseAndArchive={runCloseout}
+            onReview={(agent) => {
+              setSidePanel(undefined);
+              openWorkspaceReview(agent);
+            }}
+            onSelect={(next) => {
+              setSelection(next);
+              setSidePanel("inspector");
+            }}
+            pending={commandPending}
+            projection={data.closeout}
+          />
+        ) : null}
         {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
         {selection && sidePanel === "inspector" && !terminalAgent ? (
           <Inspector
@@ -524,6 +585,7 @@ export const App = (): React.JSX.Element => {
             error={inspectorError}
             onClose={() => setSidePanel(undefined)}
             onCommand={runCommand}
+            onCloseAndArchive={runCloseout}
             projection={inspector}
             onOpenTerminal={setTerminalAgent}
             onRetry={() => setInspectorRevision((value) => value + 1)}
