@@ -10,6 +10,9 @@ Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
 Continuity and recovery: [Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md)
 
+Future distributed execution study:
+[Distributed execution and host aggregation](distributed-execution-and-host-aggregation.md)
+
 Feature ownership and delivery: [Observatory feature roadmap](../specs/observatory-feature-roadmap.md)
 
 ## Purpose
