@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type {
   CommandCentreProjection,
   CatchUpProjection,
@@ -11,6 +11,9 @@ import type { Universe } from "../universe/universe.ts";
 import type { Clock } from "../universe/types.ts";
 import type { WorkspaceDiffReader, WorkspaceProvider } from "../workspaces/types.ts";
 import type { StartAgentCoordinator } from "../session-launch/types.ts";
+import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
+import type { PluginRegistry } from "../plugins/registry.ts";
+import type { ProviderSessionRecoveryModule } from "../provider-sessions/types.ts";
 import { WebCommandError, WebCommandGateway } from "./commands.ts";
 import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
 import type {
@@ -23,6 +26,10 @@ import type {
   WebWorkingTreeDiffResponse,
   WebTerminalActionResponse,
   WebTerminalOpenResponse,
+  WebAgentRepositoryStatusResponse,
+  WebPluginStatusResponse,
+  WebRecoveredSessionsResponse,
+  WebTrackRecoveredSessionResponse,
 } from "./protocol.ts";
 import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
@@ -39,6 +46,11 @@ interface ErrorResponse {
   readonly error: string;
 }
 
+const RecoveredTrackRequestSchema = Schema.Struct({
+  handle: Schema.String,
+  goalId: Schema.optional(Schema.String),
+});
+
 type WebResponse =
   | PortfolioResponse
   | Projection
@@ -51,6 +63,10 @@ type WebResponse =
   | WebTerminalLinksResponse
   | WebTerminalActionResponse
   | WebCloseoutResponse
+  | WebAgentRepositoryStatusResponse
+  | WebPluginStatusResponse
+  | WebRecoveredSessionsResponse
+  | WebTrackRecoveredSessionResponse
   | ErrorResponse;
 
 const json = (body: WebResponse, status = 200): Response =>
@@ -83,6 +99,9 @@ export class ObservatoryWebApi {
       readonly coordinator: StartAgentCoordinator;
       readonly workspace: WorkspaceProvider;
     },
+    private readonly repositoryStatus?: AgentRepositoryStatusReader,
+    private readonly plugins?: PluginRegistry,
+    private readonly providerSessions?: ProviderSessionRecoveryModule,
   ) {
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host) : undefined;
@@ -90,8 +109,8 @@ export class ObservatoryWebApi {
       ? new WebCloseoutGateway(createAgentCloseoutCoordinator({ universe, host }))
       : undefined;
     this.launch =
-      host && launch
-        ? new WebLaunchGateway(universe, host, launch.workspace, launch.coordinator)
+      host && launch && plugins
+        ? new WebLaunchGateway(universe, plugins, launch.workspace, launch.coordinator)
         : undefined;
   }
 
@@ -102,6 +121,8 @@ export class ObservatoryWebApi {
     if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url);
 
     if (url.pathname.startsWith("/api/launch/")) return this.agentLaunch(request, url);
+
+    if (url.pathname.startsWith("/api/recovery/")) return this.providerRecovery(request, url);
 
     if (url.pathname === "/api/closeout/close") {
       if (!this.closeout) return json({ error: "Agent closeout is unavailable." }, 501);
@@ -159,6 +180,29 @@ export class ObservatoryWebApi {
       return json(projection);
     }
 
+    if (url.pathname === "/api/plugins") {
+      if (!this.plugins) return json({ error: "Plugin diagnostics are unavailable." }, 501);
+      return json({ kind: "plugin-status", plugins: this.plugins.status() });
+    }
+
+    if (url.pathname === "/api/repository") {
+      const agentId = url.searchParams.get("agentId")?.trim();
+      if (!agentId) return json({ error: "An agent id is required." }, 400);
+      if (!this.repositoryStatus)
+        return json({ error: "Repository status inspection is unavailable." }, 501);
+      const freshness = url.searchParams.get("refresh") === "1" ? "refresh" : "cached";
+      try {
+        return json(await Effect.runPromise(this.repositoryStatus.inspect(agentId, { freshness })));
+      } catch (error) {
+        const status =
+          error instanceof Error && "kind" in error && error.kind === "agent-not-found" ? 404 : 503;
+        return json(
+          { error: error instanceof Error ? error.message : "Repository inspection failed." },
+          status,
+        );
+      }
+    }
+
     if (url.pathname === "/api/diff") {
       const agentId = url.searchParams.get("agentId")?.trim();
       if (!agentId) return json({ error: "An agent id is required." }, 400);
@@ -207,6 +251,7 @@ export class ObservatoryWebApi {
 
   async close(): Promise<void> {
     await this.terminals?.closeAll();
+    if (this.plugins) await Effect.runPromise(this.plugins.close());
   }
 
   private portfolio(now: number): PortfolioResponse | Response {
@@ -302,6 +347,15 @@ export class ObservatoryWebApi {
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebStartAgentResponse);
       }
+      if (url.pathname === "/api/launch/resume") {
+        if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+        const rejected = this.rejectMutation(request);
+        if (rejected) return rejected;
+        const result = await this.launch.resume(await request.text());
+        const portfolio = this.portfolio(this.clock.now());
+        if (portfolio instanceof Response) return portfolio;
+        return json({ result, portfolio } satisfies WebStartAgentResponse);
+      }
       return json({ error: "Not found." }, 404);
     } catch (error) {
       return error instanceof WebLaunchError
@@ -319,6 +373,46 @@ export class ObservatoryWebApi {
     if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
       return json({ error: "Commands require application/json." }, 415);
     return undefined;
+  }
+
+  private async providerRecovery(request: Request, url: URL): Promise<Response> {
+    if (!this.providerSessions)
+      return json({ error: "Provider-session recovery is unavailable." }, 501);
+    if (url.pathname === "/api/recovery/sessions") {
+      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      if (url.searchParams.get("refresh") === "1")
+        await Effect.runPromise(this.providerSessions.refresh());
+      return json({
+        kind: "recovered-sessions",
+        sessions: this.providerSessions.candidates(),
+      } satisfies WebRecoveredSessionsResponse);
+    }
+    if (url.pathname === "/api/recovery/track") {
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const rejected = this.rejectMutation(request);
+      if (rejected) return rejected;
+      try {
+        const values = Schema.decodeUnknownSync(Schema.parseJson(RecoveredTrackRequestSchema))(
+          await request.text(),
+        );
+        if (!values.handle.trim())
+          return json({ error: "A session-import handle is required." }, 400);
+        const goalId = values.goalId?.trim() || undefined;
+        const tracked = this.providerSessions.track(values.handle, goalId);
+        const portfolio = this.portfolio(this.clock.now());
+        if (portfolio instanceof Response) return portfolio;
+        return json({ ...tracked, portfolio } satisfies WebTrackRecoveredSessionResponse);
+      } catch (error) {
+        return json(
+          {
+            error:
+              error instanceof Error ? error.message : "Provider session could not be imported.",
+          },
+          409,
+        );
+      }
+    }
+    return json({ error: "Not found." }, 404);
   }
 
   private terminalError(error: WebTerminalError): Response {

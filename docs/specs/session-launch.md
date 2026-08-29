@@ -2,7 +2,7 @@
 
 Status: web launch slice implemented; native-client passages are historical
 Date: 2026-08-23
-Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md)
+Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md), [provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
 
 > The OpenTUI client described in parts of this implementation record was
 > retired on 2026-08-27. The coordinator, workspace provider and `SessionHost`
@@ -41,18 +41,19 @@ Web GUI / local CLI / agent skill
              |
              v
 StartAgentCoordinator
-   |              |                 |
-   v              v                 v
-Workspace     Universe          SessionHost
-provider      commands          (Herdr first)
-   |                                |
-   +-- recent projects / Git         +-- workspace / pane / agent launch
-                                   +-- host snapshot and reconciliation
+   |              |                 |                    |
+   v              v                 v                    v
+Workspace     Universe       AgentHarness           SessionHost
+provider      commands       plugin                 (Herdr first)
+   |                             |                       |
+   +-- recent projects / Git     +-- start/resume plan   +-- execution surface
+                                                        +-- host snapshot
 ```
 
 The caller supplies one request. Observatory resolves or prepares the
-workspace, asks the selected `SessionHost` to launch the agent, reconciles the
-resulting host observation, and assigns the agent to the requested goal.
+workspace, asks the selected `AgentHarness` plugin for a structured start plan,
+asks the `SessionHost` to execute it, reconciles the resulting host observation,
+and assigns the agent to the requested goal.
 
 The caller does not call Herdr directly in the normal path. Herdr remains the
 V0/V1 implementation behind `SessionHost`. An agent started directly through
@@ -70,17 +71,17 @@ until a human or an explicit link operation assigns it.
    and choose a directory. The local web client also provides an explicit,
    validated path-entry escape hatch, but it is not the default interaction.
 3. **Workspace** — existing checkout or new worktree.
-4. **Agent** — one of the initial launch options: Claude Code, Codex or Pi;
-   the host supplies the selectable options and user-facing labels so users do
-   not need to remember provider command names. Other discovered providers may
-   remain observable, but are not launch choices in this first slice.
+4. **Agent** — one of the enabled, available harness plugins. Claude Code and
+   Codex are the first target adapters; users do not need to remember provider
+   command names. Other host-discovered agents remain observable but are not
+   managed launch choices without a matching harness plugin.
 5. **Prompt** — optional initial instruction and optional agent name.
 
 The wizard should make the common path one or two selections rather than
 forcing a full configuration form. The maintained web slice is intentionally
 smaller: open `New agent` (or press `N`), keep the current directory or browse
 another directory, choose an existing checkout or a new worktree, then select
-the host-supported agent, optional name and prompt. The initial location
+an available harness, optional name and prompt. The initial location
 choices come from the current directory, known agent worktrees and the optional
 `AO_WORKSPACE_LOCATIONS` path-list environment variable. Recency ranking,
 branch/base/path controls and provider argument editing remain follow-up work
@@ -136,7 +137,7 @@ StartAgentIntent {
   requestId: string                 // caller-provided idempotency key
   goal: ExistingGoal | NewGoal | Inbox
   workspace: ExistingLocation | NewWorktree
-  agent: { kind: string, name?: string, args?: string[] }
+  harness: { id: string, args?: string[] }
   prompt?: string
   agentName?: string
   mode?: "manual" | "auto" | "hybrid"
@@ -170,13 +171,26 @@ It must:
 
 1. validate the intent and resolve the goal reference;
 2. ask the workspace provider to resolve or prepare a working directory;
-3. ask the host to launch the requested agent in that directory;
-4. refresh/reconcile the host snapshot;
-5. locate the resulting accepted agent without inventing a fake agent;
-6. assign it to the requested goal when one was supplied; and
-7. return a receipt containing the Observatory agent id when available.
+3. ask the selected harness plugin for a structured new-session plan;
+4. ask the host to execute that plan in the prepared directory;
+5. receive or reconcile the provider-owned session identity through a
+   structured result, lifecycle observation or provider catalogue;
+6. refresh the host snapshot and bind the exact execution;
+7. reconcile without inventing a fake Agent;
+8. assign it to the requested goal when one was supplied; and
+9. return a receipt containing the Observatory Agent id when available.
 
 The renderer never runs `git`, `herdr`, a shell command or a provider binary.
+
+A new provider conversation identifier is not a launch input. Claude Code,
+Codex and similar systems generate their own identifier and expose it through a
+hook, structured result or provider API. The first post-launch snapshot may
+therefore prove only that the launched execution contains the selected harness.
+For a supported managed harness, the coordinator keeps the operation `pending
+identity` until the opaque provider reference arrives; host launch success
+alone does not create and assign a managed Agent. A recurring lifecycle
+observation or provider catalogue can repair a missed startup acknowledgement.
+Host-only compatibility remains an explicitly degraded, human-accepted path.
 
 ### Workspace provider
 
@@ -201,30 +215,43 @@ This is a plugin-capability seam at the control-plane edge. A later provider
 could support another VCS, a remote checkout or a Superlogical workspace
 without changing the Universe or renderer.
 
-### `SessionHost` launch capability
+### Agent harness capability
+
+Agent selection, provider availability, command construction and native resume
+semantics belong to an `AgentHarness` plugin. The required interface covers
+availability, new-session planning, exact-session resume and continuity proof.
+It returns a structured process plan and never spawns outside the selected
+host. See [Agent harness plugins](agent-harness-plugins.md).
+
+### `SessionHost` execution capability
 
 `SessionHost` remains the only host seam. Its existing snapshot/access/terminal
-operations stay intact; launch is added as a capability with an explicit
-unsupported result for hosts that cannot provide it.
+operations stay intact. Its launch capability becomes provider-neutral and
+accepts the structured process plan produced by the selected harness plugin,
+with an explicit unsupported result for hosts that cannot execute it.
 
 ```text
-listLaunchOptions() -> Effect<HostLaunchOption[], HostError>
-launch({
+launchExecution({
   workingDirectory,
-  agentKind,
   agentName?,
-  args?,
-  prompt?,
+  processPlan,
   requestId
 }) -> Effect<HostLaunchResult, HostError>
 ```
 
 The Herdr adapter hides the concrete host sequence: create/open the Herdr
-execution container, create a pane in the prepared working directory, start
-the recognized agent, and send the initial prompt. Git worktree preparation
-remains the workspace provider's responsibility. The adapter returns an opaque
-host receipt/native identity; Herdr workspace, tab and pane ids never enter
-Universe types or renderer interfaces.
+execution container, create a pane in the prepared working directory and run
+the supplied process plan. It does not select a provider binary, construct a
+resume command or decide whether a native conversation is a continuation. It
+may normalise Herdr's agent-session and restore evidence into the generic host
+observation contract for the harness to judge. Git worktree preparation remains
+the workspace provider's responsibility. The adapter returns an opaque host
+receipt/native identity; Herdr workspace, tab and pane ids never enter Universe
+types or renderer interfaces.
+
+Launch choices now come from enabled `agent-harness` plugins and requests use
+a stable `harnessId`. The host accepts only a structured process plan; it does
+not advertise agents or construct provider commands.
 
 The mock adapter implements the same capability with deterministic synthetic
 agents so the whole coordinator can be tested without Herdr.
@@ -325,6 +352,8 @@ state:
 - worktree created, host launch failed: preserve it and offer cleanup;
 - host launch accepted, no matching snapshot yet: return `pending` and retry
   reconciliation;
+- host execution observed, provider identity not yet known: return `pending
+identity`; do not assign a managed Agent or retry the process launch;
 - host launch accepted, agent disappears: retain only the host's normal stale
   observation rules; do not invent an agent;
 - duplicate request id: return the existing receipt rather than launching a
@@ -354,10 +383,11 @@ The first proof should be deliberately narrow:
 8. Confirm direct vanilla Herdr agents remain discoverable and manually
    assignable.
 
-The maintained local web client now covers steps 1–4 through a loopback launch
-gateway. It lists choices from `WorkspaceProvider` and `SessionHost`, accepts a
-bounded `StartAgent` request, delegates the full operation to
-`StartAgentCoordinator`, and returns the refreshed portfolio. The browser does
+The maintained local web client currently covers steps 1–4 through a loopback
+launch gateway. During the harness migration it will list choices from
+`WorkspaceProvider` and the harness registry rather than `SessionHost`, accept
+a bounded `StartAgent` request, delegate the full operation to
+`StartAgentCoordinator`, and return the refreshed portfolio. The browser does
 not run Git or host commands and never receives Herdr-native identifiers.
 
 The slice is successful when starting work feels like a single Observatory

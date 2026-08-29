@@ -77,10 +77,12 @@ export const createAgentCloseoutCoordinator = (dependencies: {
       }
       if (current.hostHealth !== "live")
         return rejected(agentId, "The Agent host state is uncertain; no execution was closed.");
+      if (!current.execution)
+        return rejected(agentId, "The Agent has no current host execution to close.");
 
       const access = yield* dependencies.host.access({
-        hostKind: current.hostKind,
-        nativeId: current.nativeId,
+        hostKind: current.execution.hostKind,
+        nativeId: current.execution.nativeId,
       });
       if (!hasAgentCapability(access, "close-agent"))
         return {

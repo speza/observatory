@@ -1,3 +1,4 @@
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { UniverseMapProjection } from "../../src/projection/types.ts";
 import {
   agentLinesFor,
@@ -27,6 +28,10 @@ interface AtlasProps {
   readonly motion?: boolean;
   readonly cameraCommand?: AtlasCameraCommand;
   readonly onClearSelection?: () => void;
+  readonly onMoveGoal?: (
+    goalId: string,
+    position: { readonly x: number; readonly y: number },
+  ) => void | Promise<void>;
   readonly onSelect: (selection: Selection) => void;
 }
 
@@ -58,6 +63,7 @@ export const Atlas = ({
   motion = true,
   cameraCommand,
   onClearSelection,
+  onMoveGoal,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
   const {
@@ -69,6 +75,7 @@ export const Atlas = ({
     focusedSelection,
     focusPoint,
     isPanning,
+    layout,
     reset,
     resetCamera,
     screenPoint,
@@ -78,6 +85,81 @@ export const Atlas = ({
     zoomIn,
     zoomOut,
   } = useAtlasCamera({ cameraCommand, projection, reservedLeft, reservedRight, selection });
+  const goalDrag = useRef<
+    | {
+        readonly goalId: string;
+        readonly pointerId: number;
+        readonly startClientX: number;
+        readonly startClientY: number;
+        readonly startPosition: { readonly x: number; readonly y: number };
+        position: { readonly x: number; readonly y: number };
+        moved: boolean;
+      }
+    | undefined
+  >(undefined);
+  const suppressGoalClick = useRef<string | undefined>(undefined);
+  const [draggedGoal, setDraggedGoal] = useState<{
+    readonly goalId: string;
+    readonly position: { readonly x: number; readonly y: number };
+  }>();
+
+  const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
+    const drag = goalDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const bounds = svg.getBoundingClientRect();
+    const deltaX =
+      ((event.clientX - drag.startClientX) * size.width) /
+      Math.max(1, bounds.width) /
+      camera.zoom /
+      layout.goalSpacingScale;
+    const deltaY =
+      ((event.clientY - drag.startClientY) * size.height) /
+      Math.max(1, bounds.height) /
+      camera.zoom /
+      layout.goalSpacingScale;
+    if (Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) >= 4) {
+      drag.moved = true;
+    }
+    const position = {
+      x: drag.startPosition.x + deltaX,
+      y: drag.startPosition.y + deltaY,
+    };
+    drag.position = position;
+    setDraggedGoal({
+      goalId: drag.goalId,
+      position,
+    });
+  };
+
+  const endGoalDrag = (event: ReactPointerEvent<SVGGElement>, commit: boolean): void => {
+    const drag = goalDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (commit && drag.moved) {
+      suppressGoalClick.current = drag.goalId;
+      const committedPosition = {
+        x: Math.round(drag.position.x),
+        y: Math.round(drag.position.y),
+      };
+      setDraggedGoal({ goalId: drag.goalId, position: committedPosition });
+      void Promise.resolve(onMoveGoal?.(drag.goalId, committedPosition)).finally(() => {
+        setDraggedGoal((current) =>
+          current?.goalId === drag.goalId &&
+          current.position.x === committedPosition.x &&
+          current.position.y === committedPosition.y
+            ? undefined
+            : current,
+        );
+      });
+    } else {
+      setDraggedGoal(undefined);
+    }
+    goalDrag.current = undefined;
+  };
 
   return (
     <div
@@ -148,7 +230,9 @@ export const Atlas = ({
           transform={worldTransform}
         >
           {projection.goals.map((goal) => {
-            const centre = screenPoint(goal.mapPosition);
+            const displayedPosition =
+              draggedGoal?.goalId === goal.id ? draggedGoal.position : goal.mapPosition;
+            const centre = screenPoint(displayedPosition);
             const radius = goalRadius(goal);
             const token = hash(goal.id);
             const palette = palettes[theme][token % palettes[theme].length] ?? palettes[theme][0];
@@ -163,7 +247,15 @@ export const Atlas = ({
             const hasWorkingAgent = goal.agents.some(
               (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
             );
-            const hasUncertainAgent = goal.agents.some((agent) => agent.hostHealth !== "live");
+            const hasUncertainAgent = goal.agents.some((agent) =>
+              [
+                "possibly-running",
+                "unavailable",
+                "stale-observation",
+                "conflict",
+                "continuity-lost",
+              ].includes(agent.lifecycleState),
+            );
             const resultCount = goal.agents.filter(
               (agent) => agent.hostHealth === "live" && agent.runtimeState === "done",
             ).length;
@@ -255,6 +347,10 @@ export const Atlas = ({
                   data-screen-x={centre.x.toFixed(2)}
                   data-screen-y={centre.y.toFixed(2)}
                   onClick={() => {
+                    if (suppressGoalClick.current === goal.id) {
+                      suppressGoalClick.current = undefined;
+                      return;
+                    }
                     const next = { type: "goal" as const, id: goal.id };
                     onSelect(next);
                     focusPoint(centre, next);
@@ -265,6 +361,24 @@ export const Atlas = ({
                     focusPoint(centre, { type: "goal", id: goal.id });
                   }}
                   onFocus={() => onSelect({ type: "goal", id: goal.id })}
+                  onPointerCancel={(event) => endGoalDrag(event, false)}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0 || !onMoveGoal) return;
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    goalDrag.current = {
+                      goalId: goal.id,
+                      pointerId: event.pointerId,
+                      startClientX: event.clientX,
+                      startClientY: event.clientY,
+                      startPosition: goal.mapPosition,
+                      position: goal.mapPosition,
+                      moved: false,
+                    };
+                    setDraggedGoal({ goalId: goal.id, position: goal.mapPosition });
+                  }}
+                  onPointerMove={continueGoalDrag}
+                  onPointerUp={(event) => endGoalDrag(event, true)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
@@ -272,6 +386,7 @@ export const Atlas = ({
                     }
                   }}
                   role="button"
+                  style={{ cursor: onMoveGoal ? "grab" : "pointer" }}
                   tabIndex={0}
                   transform={`translate(${centre.x} ${centre.y})`}
                 >
@@ -340,7 +455,13 @@ export const Atlas = ({
                   const point = agentPoints[agentIndex];
                   if (!point) return null;
                   const attention = agent.attention?.requiresHumanInput === true;
-                  const uncertain = agent.hostHealth !== "live";
+                  const uncertain = [
+                    "possibly-running",
+                    "unavailable",
+                    "stale-observation",
+                    "conflict",
+                    "continuity-lost",
+                  ].includes(agent.lifecycleState);
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
                   const showLabel = visibleLabelIds.has(agent.id);
                   const nearLeftEdge = point.x < reservedLeft + 150;

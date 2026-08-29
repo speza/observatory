@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "example-code-host",
+  "displayName": "Example code host",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "entrypoint": "./plugin.ts",
+  "capabilities": ["code-host"]
+}

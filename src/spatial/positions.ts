@@ -205,6 +205,37 @@ export const initialGoalMapPosition = (
 };
 
 /**
+ * Keep an unpinned goal at its accepted anchor while its rendered footprint
+ * still fits. If added agents make that footprint collide, move only that
+ * goal to the nearest deterministic free slot. Pinned positions deliberately
+ * bypass this repair at the Universe seam.
+ */
+export const repairGoalMapPosition = (
+  goalId: string,
+  current: MapPosition,
+  occupied: readonly GoalLayoutOccupancy[],
+  agentCount: number,
+): MapPosition => {
+  const currentOccupancy = { position: current, agentCount };
+  if (occupied.every((existing) => !goalsOverlap(currentOccupancy, existing))) {
+    return { ...current };
+  }
+
+  const candidates = [...goalCandidates(goalId)].sort((left, right) => {
+    const distanceFromCurrent = (position: MapPosition): number =>
+      (position.x - current.x) ** 2 + (position.y - current.y) ** 2;
+    const distanceDelta = distanceFromCurrent(left) - distanceFromCurrent(right);
+    if (distanceDelta !== 0) return distanceDelta;
+    return positionKey(left).localeCompare(positionKey(right));
+  });
+  for (const candidate of candidates) {
+    const next = { position: candidate, agentCount };
+    if (occupied.every((existing) => !goalsOverlap(next, existing))) return { ...candidate };
+  }
+  return { ...(candidates.at(-1) ?? current) };
+};
+
+/**
  * Derive stable local satellite positions without adding another topology.
  * Slot assignment is identity-derived and collision-aware, so adding a new
  * agent does not make the existing satellites collapse onto one another.

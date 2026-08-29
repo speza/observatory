@@ -1,6 +1,8 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
+import { Schema } from "effect";
 import {
   type Goal,
   type HostHealth,
@@ -9,6 +11,14 @@ import {
   type UniverseStore,
   type UniverseChange,
 } from "../../universe/types.ts";
+import type {
+  LaunchReceipt,
+  LaunchRecovery,
+  LaunchReceiptStore,
+  StartAgentResult,
+} from "../../session-launch/types.ts";
+import type { ProviderSessionStore, StoredProviderSession } from "../../provider-sessions/types.ts";
+import type { ProviderSessionSnapshot } from "../../plugin-sdk/index.ts";
 
 interface GoalRow {
   id: string;
@@ -27,8 +37,23 @@ interface GoalRow {
 
 interface AgentRow {
   id: string;
-  host_kind: string;
-  native_id: string;
+  host_kind: string | null;
+  native_id: string | null;
+  host_locator: string | null;
+  host_instance_id: string | null;
+  execution_observed_at: number | null;
+  harness_id: string | null;
+  continuity_scope_id: string | null;
+  native_conversation_kind: string | null;
+  native_conversation_value: string | null;
+  continuity: string;
+  provider_continuity: string | null;
+  execution_presence: string | null;
+  resume_capability: string | null;
+  observation_health: string | null;
+  provider_observed_at: number | null;
+  execution_history_json: string | null;
+  conflicting_executions_json: string | null;
   display_name: string;
   display_name_source: string;
   description: string | null;
@@ -46,7 +71,6 @@ interface AgentRow {
   provider: string | null;
   execution_container_id: string | null;
   execution_container_label: string | null;
-  host_locator: string;
   archived_at: number | null;
 }
 
@@ -58,6 +82,7 @@ interface RelatedAgentDismissalRow {
 
 interface HostRow {
   host_kind: string;
+  host_instance_id: string | null;
   status: string;
   last_observed_at: number | null;
   last_error: string | null;
@@ -79,6 +104,89 @@ interface OperatorCheckpointRow {
   acknowledged_at: number;
 }
 
+interface LaunchReceiptRow {
+  request_id: string;
+  intent_fingerprint: string;
+  result_json: string;
+  recovery_json: string | null;
+}
+
+interface ProviderSessionRow {
+  handle: string;
+  harness_id: string;
+  continuity_scope_id: string;
+  native_kind: string;
+  native_value: string;
+  provider_instance_id: string;
+  home_site_ref: string | null;
+  created_at: number | null;
+  last_active_at: number | null;
+  title: string | null;
+  workspace_ref: string | null;
+  resume_eligibility: string;
+  provenance: string;
+  observed_at: number;
+}
+
+interface ProviderSessionAliasRow {
+  handle: string;
+  harness_id: string;
+  continuity_scope_id: string;
+  native_kind: string;
+  native_value: string;
+}
+
+export interface DatabaseResetSummary {
+  readonly removedGoals: number;
+  readonly removedAgents: number;
+  readonly preservedAgents: number;
+  readonly clearedLaunchReceipts: number;
+}
+
+interface DatabaseResetCounts {
+  readonly goals: number;
+  readonly agents: number;
+  readonly launchReceipts: number;
+}
+
+const PreparedWorkspaceSchema = Schema.Struct({
+  path: Schema.String,
+  repository: Schema.optional(Schema.String),
+  branch: Schema.optional(Schema.String),
+  worktree: Schema.Boolean,
+  warnings: Schema.Array(Schema.String),
+});
+const StartAgentResultSchema: Schema.Schema<StartAgentResult> = Schema.Struct({
+  status: Schema.Literal("started", "already-observed", "pending", "failed"),
+  message: Schema.String,
+  requestId: Schema.String,
+  goalId: Schema.optional(Schema.String),
+  agentId: Schema.optional(Schema.String),
+  workspace: Schema.optional(PreparedWorkspaceSchema),
+  warnings: Schema.optional(Schema.Array(Schema.String)),
+});
+const NativeConversationRefSchema = Schema.Struct({
+  harnessId: Schema.String,
+  continuityScopeId: Schema.optional(Schema.String),
+  kind: Schema.String,
+  value: Schema.String,
+});
+const AgentExecutionBindingSchema = Schema.Struct({
+  hostKind: Schema.String,
+  hostInstanceId: Schema.String,
+  nativeId: Schema.String,
+  hostLocator: Schema.String,
+  observedAt: Schema.Number,
+});
+const LaunchRecoverySchema: Schema.Schema<LaunchRecovery> = Schema.Struct({
+  kind: Schema.Literal("start", "resume"),
+  harnessId: Schema.String,
+  executionRef: Schema.String,
+  nativeConversationRef: Schema.optional(NativeConversationRefSchema),
+  goalId: Schema.optional(Schema.String),
+  agentId: Schema.optional(Schema.String),
+});
+
 const asPriority = (value: string): Goal["priority"] =>
   value === "P0" || value === "P1" || value === "P2" || value === "P3" ? value : "P2";
 const asGoalStatus = (value: string): Goal["status"] =>
@@ -96,6 +204,24 @@ const asHealth = (value: string): Agent["hostHealth"] =>
   value === "live" || value === "stale" || value === "unavailable" ? value : "stale";
 const asSource = (value: string): Agent["displayNameSource"] =>
   value === "human" ? "human" : "host";
+const asContinuity = (value: string): Agent["continuity"] =>
+  value === "proved" || value === "interrupted" || value === "replaced" ? value : "unknown";
+const asProviderContinuity = (value: string | null): Agent["providerContinuity"] =>
+  value === "confirmed" || value === "missing" ? value : "unknown";
+const asExecutionPresence = (value: string | null): Agent["executionPresence"] =>
+  value === "live" || value === "absent" || value === "conflict" ? value : "unknown";
+const asResumeCapability = (value: string | null): Agent["resumeCapability"] =>
+  value === "eligible" || value === "blocked" || value === "unsupported" ? value : "unknown";
+const asObservationHealth = (value: string | null): Agent["observationHealth"] =>
+  value === "fresh" || value === "unavailable" ? value : "stale";
+const executionBindings = (value: string | null): Agent["executionHistory"] => {
+  if (!value) return [];
+  try {
+    return Schema.decodeUnknownSync(Schema.Array(AgentExecutionBindingSchema))(JSON.parse(value));
+  } catch {
+    return [];
+  }
+};
 const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
   value === "new" ||
   value === "changed" ||
@@ -107,7 +233,26 @@ const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
 const asChangeTarget = (value: string): UniverseChange["targetType"] =>
   value === "goal" ? "goal" : "agent";
 
-export class SqliteUniverseStore implements UniverseStore {
+const providerSessionHandle = (
+  harnessId: string,
+  continuityScopeId: string,
+  kind: string,
+  value: string,
+): string =>
+  `ps_${createHash("sha256")
+    .update(`${harnessId}\u0000${continuityScopeId}\u0000${kind}\u0000${value}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+
+const resumeEligibility = (value: string): StoredProviderSession["resumeEligibility"] =>
+  value === "same-site" || value === "provider-account" || value === "blocked" ? value : "unknown";
+
+const sessionProvenance = (value: string): StoredProviderSession["provenance"] =>
+  value === "provider-index" ? "provider-index" : "session-header";
+
+export class SqliteUniverseStore
+  implements UniverseStore, LaunchReceiptStore, ProviderSessionStore
+{
   readonly db: Database;
 
   constructor(path: string) {
@@ -146,8 +291,6 @@ export class SqliteUniverseStore implements UniverseStore {
       .map((row) => {
         const agent = {
           id: row.id,
-          hostKind: row.host_kind,
-          nativeId: row.native_id,
           displayName: row.display_name,
           displayNameSource: asSource(row.display_name_source),
           runtimeState: asRuntimeState(row.runtime_state),
@@ -156,8 +299,36 @@ export class SqliteUniverseStore implements UniverseStore {
           lastSeenAt: row.last_seen_at,
           lastObservedAt: row.last_observed_at,
           lastChangedAt: row.last_changed_at,
-          hostLocator: row.host_locator,
+          continuity: asContinuity(row.continuity),
+          providerContinuity: asProviderContinuity(row.provider_continuity),
+          executionPresence: asExecutionPresence(row.execution_presence),
+          resumeCapability: asResumeCapability(row.resume_capability),
+          observationHealth: asObservationHealth(row.observation_health),
+          providerObservedAt: row.provider_observed_at ?? undefined,
+          executionObservedAt: row.execution_observed_at ?? undefined,
+          executionHistory: executionBindings(row.execution_history_json),
+          conflictingExecutions: executionBindings(row.conflicting_executions_json),
         };
+        if (row.host_kind && row.native_id && row.host_locator)
+          Object.assign(agent, {
+            execution: {
+              hostKind: row.host_kind,
+              hostInstanceId: row.host_instance_id ?? `${row.host_kind}:legacy`,
+              nativeId: row.native_id,
+              hostLocator: row.host_locator,
+              observedAt: row.execution_observed_at ?? row.last_observed_at,
+            },
+          });
+        if (row.harness_id) Object.assign(agent, { harnessId: row.harness_id });
+        if (row.harness_id && row.native_conversation_kind && row.native_conversation_value)
+          Object.assign(agent, {
+            nativeConversationRef: {
+              harnessId: row.harness_id,
+              continuityScopeId: row.continuity_scope_id ?? undefined,
+              kind: row.native_conversation_kind,
+              value: row.native_conversation_value,
+            },
+          });
         if (row.description) Object.assign(agent, { description: row.description });
         if (row.primary_goal_id) Object.assign(agent, { primaryGoalId: row.primary_goal_id });
         if (row.attention_since !== null)
@@ -183,6 +354,7 @@ export class SqliteUniverseStore implements UniverseStore {
           row.status === "live" || row.status === "unavailable" ? row.status : "stale";
         const host = {
           hostKind: row.host_kind,
+          hostInstanceId: row.host_instance_id ?? `${row.host_kind}:legacy`,
           status,
           diagnosticCount: row.diagnostic_count,
         };
@@ -259,13 +431,28 @@ export class SqliteUniverseStore implements UniverseStore {
         );
       }
       const agent = this.db.prepare(
-        "INSERT INTO agents (id, host_kind, native_id, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, host_locator, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO agents (id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const row of state.agents) {
         agent.run(
           row.id,
-          row.hostKind,
-          row.nativeId,
+          row.execution?.hostKind ?? null,
+          row.execution?.hostInstanceId ?? null,
+          row.execution?.nativeId ?? null,
+          row.execution?.hostLocator ?? null,
+          row.execution?.observedAt ?? row.executionObservedAt ?? null,
+          row.harnessId ?? null,
+          row.nativeConversationRef?.continuityScopeId ?? null,
+          row.nativeConversationRef?.kind ?? null,
+          row.nativeConversationRef?.value ?? null,
+          row.continuity,
+          row.providerContinuity,
+          row.executionPresence,
+          row.resumeCapability,
+          row.observationHealth,
+          row.providerObservedAt ?? null,
+          JSON.stringify(row.executionHistory),
+          JSON.stringify(row.conflictingExecutions),
           row.displayName,
           row.displayNameSource,
           row.description ?? null,
@@ -283,16 +470,16 @@ export class SqliteUniverseStore implements UniverseStore {
           row.provider ?? null,
           row.executionContainer?.id ?? null,
           row.executionContainer?.label ?? null,
-          row.hostLocator,
           row.archivedAt ?? null,
         );
       }
       const host = this.db.prepare(
-        "INSERT INTO hosts (host_kind, status, last_observed_at, last_error, diagnostic_count) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO hosts (host_kind, host_instance_id, status, last_observed_at, last_error, diagnostic_count) VALUES (?, ?, ?, ?, ?, ?)",
       );
       for (const row of state.hosts)
         host.run(
           row.hostKind,
+          row.hostInstanceId,
           row.status,
           row.lastObservedAt ?? null,
           row.lastError ?? null,
@@ -330,6 +517,259 @@ export class SqliteUniverseStore implements UniverseStore {
     this.db.close();
   }
 
+  reconcileProviderSessions(snapshot: ProviderSessionSnapshot): void {
+    const write = this.db.transaction(() => {
+      if (snapshot.complete)
+        this.db
+          .prepare("DELETE FROM provider_sessions WHERE provider_instance_id = ?")
+          .run(snapshot.providerInstanceId);
+      const upsert = this.db.prepare(`
+        INSERT INTO provider_sessions (
+          handle, harness_id, continuity_scope_id, native_kind, native_value,
+          provider_instance_id, home_site_ref, created_at, last_active_at, title,
+          workspace_ref, resume_eligibility, provenance, observed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(handle) DO UPDATE SET
+          provider_instance_id = excluded.provider_instance_id,
+          home_site_ref = excluded.home_site_ref,
+          created_at = COALESCE(excluded.created_at, provider_sessions.created_at),
+          last_active_at = COALESCE(excluded.last_active_at, provider_sessions.last_active_at),
+          title = COALESCE(excluded.title, provider_sessions.title),
+          workspace_ref = COALESCE(excluded.workspace_ref, provider_sessions.workspace_ref),
+          resume_eligibility = excluded.resume_eligibility,
+          provenance = excluded.provenance,
+          observed_at = excluded.observed_at
+      `);
+      const deleteAliases = this.db.prepare(
+        "DELETE FROM provider_session_aliases WHERE handle = ?",
+      );
+      const insertAlias = this.db.prepare(
+        "INSERT OR IGNORE INTO provider_session_aliases (handle, harness_id, continuity_scope_id, native_kind, native_value) VALUES (?, ?, ?, ?, ?)",
+      );
+      for (const session of snapshot.sessions) {
+        const reference = session.nativeConversationRef;
+        if (
+          reference.harnessId !== snapshot.harnessId ||
+          reference.continuityScopeId !== snapshot.continuityScopeId ||
+          session.providerInstanceId !== snapshot.providerInstanceId
+        )
+          throw new Error("Provider session escaped its declared snapshot scope.");
+        const handle = providerSessionHandle(
+          reference.harnessId,
+          snapshot.continuityScopeId,
+          reference.kind,
+          reference.value,
+        );
+        upsert.run(
+          handle,
+          reference.harnessId,
+          snapshot.continuityScopeId,
+          reference.kind,
+          reference.value,
+          session.providerInstanceId,
+          session.homeSiteRef ?? null,
+          session.createdAt ?? null,
+          session.lastActiveAt ?? null,
+          session.title?.slice(0, 160) ?? null,
+          session.workspaceRef ?? null,
+          session.resumeEligibility,
+          session.provenance,
+          snapshot.observedAt,
+        );
+        deleteAliases.run(handle);
+        for (const alias of session.nativeConversationAliases ?? []) {
+          if (
+            alias.harnessId !== snapshot.harnessId ||
+            alias.continuityScopeId !== snapshot.continuityScopeId
+          )
+            throw new Error("Provider session alias escaped its declared snapshot scope.");
+          insertAlias.run(
+            handle,
+            alias.harnessId,
+            snapshot.continuityScopeId,
+            alias.kind,
+            alias.value,
+          );
+        }
+      }
+    });
+    write();
+  }
+
+  providerSessions(): readonly StoredProviderSession[] {
+    return this.db
+      .query<ProviderSessionRow, []>(
+        "SELECT * FROM provider_sessions ORDER BY COALESCE(last_active_at, created_at, observed_at) DESC, handle",
+      )
+      .all()
+      .map((row) => this.providerSessionFromRow(row));
+  }
+
+  providerSession(handle: string): StoredProviderSession | undefined {
+    const row = this.db
+      .query<ProviderSessionRow, [string]>("SELECT * FROM provider_sessions WHERE handle = ?")
+      .get(handle);
+    return row ? this.providerSessionFromRow(row) : undefined;
+  }
+
+  private providerSessionFromRow(row: ProviderSessionRow): StoredProviderSession {
+    const aliases = this.db
+      .query<ProviderSessionAliasRow, [string]>(
+        "SELECT * FROM provider_session_aliases WHERE handle = ? ORDER BY native_kind, native_value",
+      )
+      .all(row.handle)
+      .map((alias) => ({
+        harnessId: alias.harness_id,
+        continuityScopeId: alias.continuity_scope_id,
+        kind: alias.native_kind,
+        value: alias.native_value,
+      }));
+    return {
+      handle: row.handle,
+      nativeConversationRef: {
+        harnessId: row.harness_id,
+        continuityScopeId: row.continuity_scope_id,
+        kind: row.native_kind,
+        value: row.native_value,
+      },
+      nativeConversationAliases: aliases,
+      providerInstanceId: row.provider_instance_id,
+      homeSiteRef: row.home_site_ref ?? undefined,
+      createdAt: row.created_at ?? undefined,
+      lastActiveAt: row.last_active_at ?? undefined,
+      title: row.title ?? undefined,
+      workspaceRef: row.workspace_ref ?? undefined,
+      resumeEligibility: resumeEligibility(row.resume_eligibility),
+      provenance: sessionProvenance(row.provenance),
+      observedAt: row.observed_at,
+    };
+  }
+
+  backupTo(path: string): void {
+    this.db.prepare("VACUUM INTO ?").run(path);
+  }
+
+  resetSemanticState(): DatabaseResetSummary {
+    const counts = this.resetCounts();
+    this.db.transaction(() => {
+      this.db.exec(`
+        DELETE FROM related_agent_dismissals;
+        UPDATE agents
+        SET primary_goal_id = NULL,
+            archived_at = NULL,
+            attention_since = NULL,
+            runtime_state = 'unknown',
+            runtime_state_source = 'observatory.semantic-reset',
+            host_health = 'stale',
+            continuity = CASE
+              WHEN native_conversation_value IS NOT NULL THEN 'interrupted'
+              ELSE 'unknown'
+            END;
+        DELETE FROM goals;
+        DELETE FROM hosts;
+        DELETE FROM universe_changes;
+        DELETE FROM operator_checkpoint;
+        DELETE FROM launch_receipts;
+        DELETE FROM provider_sessions;
+      `);
+    })();
+    return {
+      removedGoals: counts.goals,
+      removedAgents: 0,
+      preservedAgents: counts.agents,
+      clearedLaunchReceipts: counts.launchReceipts,
+    };
+  }
+
+  resetAllState(): DatabaseResetSummary {
+    const counts = this.resetCounts();
+    this.db.transaction(() => {
+      this.db.exec(`
+        DELETE FROM related_agent_dismissals;
+        DELETE FROM agents;
+        DELETE FROM goals;
+        DELETE FROM hosts;
+        DELETE FROM universe_changes;
+        DELETE FROM operator_checkpoint;
+        DELETE FROM launch_receipts;
+        DELETE FROM provider_sessions;
+      `);
+    })();
+    return {
+      removedGoals: counts.goals,
+      removedAgents: counts.agents,
+      preservedAgents: 0,
+      clearedLaunchReceipts: counts.launchReceipts,
+    };
+  }
+
+  private resetCounts(): DatabaseResetCounts {
+    return {
+      goals:
+        this.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM goals").get()?.count ??
+        0,
+      agents:
+        this.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM agents").get()?.count ??
+        0,
+      launchReceipts:
+        this.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM launch_receipts").get()
+          ?.count ?? 0,
+    };
+  }
+
+  private loadLaunchReceipt(requestId: string): LaunchReceipt | undefined {
+    const row = this.db
+      .query<LaunchReceiptRow, [string]>(
+        "SELECT request_id, intent_fingerprint, result_json, recovery_json FROM launch_receipts WHERE request_id = ?",
+      )
+      .get(requestId);
+    if (!row) return undefined;
+    const result = Schema.decodeUnknownSync(StartAgentResultSchema)(JSON.parse(row.result_json));
+    if (result.requestId !== row.request_id) throw new Error("Launch receipt result is invalid.");
+    return {
+      requestId: row.request_id,
+      intentFingerprint: row.intent_fingerprint,
+      result,
+      recovery: row.recovery_json
+        ? Schema.decodeUnknownSync(LaunchRecoverySchema)(JSON.parse(row.recovery_json))
+        : undefined,
+    };
+  }
+
+  reserveLaunchReceipt(receipt: LaunchReceipt) {
+    const inserted = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO launch_receipts (request_id, intent_fingerprint, result_json, recovery_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        receipt.requestId,
+        receipt.intentFingerprint,
+        JSON.stringify(receipt.result),
+        receipt.recovery ? JSON.stringify(receipt.recovery) : null,
+        Date.now(),
+      );
+    if (inserted.changes === 1) return { kind: "reserved" as const };
+    const stored = this.loadLaunchReceipt(receipt.requestId);
+    if (!stored) throw new Error("Launch receipt reservation was not persisted.");
+    return stored.intentFingerprint === receipt.intentFingerprint
+      ? { kind: "existing" as const, receipt: stored }
+      : { kind: "conflict" as const };
+  }
+
+  saveLaunchReceipt(receipt: LaunchReceipt): void {
+    this.db
+      .prepare(
+        "UPDATE launch_receipts SET result_json = ?, recovery_json = ?, updated_at = ? WHERE request_id = ? AND intent_fingerprint = ?",
+      )
+      .run(
+        JSON.stringify(receipt.result),
+        receipt.recovery ? JSON.stringify(receipt.recovery) : null,
+        Date.now(),
+        receipt.requestId,
+        receipt.intentFingerprint,
+      );
+  }
+
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -352,8 +792,23 @@ export class SqliteUniverseStore implements UniverseStore {
       );
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
-        host_kind TEXT NOT NULL,
-        native_id TEXT NOT NULL,
+        host_kind TEXT,
+        host_instance_id TEXT,
+        native_id TEXT,
+        host_locator TEXT,
+        execution_observed_at INTEGER,
+        harness_id TEXT,
+        continuity_scope_id TEXT,
+        native_conversation_kind TEXT,
+        native_conversation_value TEXT,
+        continuity TEXT NOT NULL DEFAULT 'unknown',
+        provider_continuity TEXT NOT NULL DEFAULT 'unknown',
+        execution_presence TEXT NOT NULL DEFAULT 'unknown',
+        resume_capability TEXT NOT NULL DEFAULT 'unknown',
+        observation_health TEXT NOT NULL DEFAULT 'stale',
+        provider_observed_at INTEGER,
+        execution_history_json TEXT NOT NULL DEFAULT '[]',
+        conflicting_executions_json TEXT NOT NULL DEFAULT '[]',
         display_name TEXT NOT NULL,
         display_name_source TEXT NOT NULL,
         description TEXT,
@@ -371,13 +826,12 @@ export class SqliteUniverseStore implements UniverseStore {
         provider TEXT,
         execution_container_id TEXT,
         execution_container_label TEXT,
-        host_locator TEXT NOT NULL,
         archived_at INTEGER,
-        UNIQUE(host_kind, native_id),
         FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
       );
       CREATE TABLE IF NOT EXISTS hosts (
-        host_kind TEXT PRIMARY KEY,
+        host_kind TEXT NOT NULL,
+        host_instance_id TEXT PRIMARY KEY,
         status TEXT NOT NULL,
         last_observed_at INTEGER,
         last_error TEXT,
@@ -409,6 +863,235 @@ export class SqliteUniverseStore implements UniverseStore {
       );
       INSERT OR IGNORE INTO schema_migrations (version, applied_at)
         VALUES (2, unixepoch() * 1000);
+    `);
+    this.migrateAgentIdentity();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS launch_receipts (
+        request_id TEXT PRIMARY KEY,
+        intent_fingerprint TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        recovery_json TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (4, unixepoch() * 1000);
+    `);
+    this.migrateLaunchRecovery();
+    this.migrateProviderSessionScope();
+    this.migrateProviderSessions();
+    this.migrateExecutionContinuity();
+    this.migrateHostInstances();
+  }
+
+  private migrateHostInstances(): void {
+    const columns = this.db
+      .query<{ name: string; pk: number }, []>("PRAGMA table_info(hosts)")
+      .all();
+    if (columns.find(({ name }) => name === "host_instance_id")?.pk !== 1) {
+      this.db.exec(`
+        CREATE TABLE hosts_by_instance (
+          host_kind TEXT NOT NULL,
+          host_instance_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          last_observed_at INTEGER,
+          last_error TEXT,
+          diagnostic_count INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO hosts_by_instance
+          (host_kind, host_instance_id, status, last_observed_at, last_error, diagnostic_count)
+          SELECT host_kind, COALESCE(host_instance_id, host_kind || ':legacy'), status,
+            last_observed_at, last_error, diagnostic_count FROM hosts;
+        DROP TABLE hosts;
+        ALTER TABLE hosts_by_instance RENAME TO hosts;
+      `);
+    }
+    this.db.exec(`
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (9, unixepoch() * 1000);
+    `);
+  }
+
+  private migrateExecutionContinuity(): void {
+    const agentColumns = new Set(
+      this.db
+        .query<{ name: string }, []>("PRAGMA table_info(agents)")
+        .all()
+        .map(({ name }) => name),
+    );
+    const additions = [
+      ["host_instance_id", "TEXT"],
+      ["execution_observed_at", "INTEGER"],
+      ["provider_continuity", "TEXT NOT NULL DEFAULT 'unknown'"],
+      ["execution_presence", "TEXT NOT NULL DEFAULT 'unknown'"],
+      ["resume_capability", "TEXT NOT NULL DEFAULT 'unknown'"],
+      ["observation_health", "TEXT NOT NULL DEFAULT 'stale'"],
+      ["provider_observed_at", "INTEGER"],
+      ["execution_history_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["conflicting_executions_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ] as const;
+    for (const [name, definition] of additions)
+      if (!agentColumns.has(name))
+        this.db.exec(`ALTER TABLE agents ADD COLUMN ${name} ${definition}`);
+    const hostColumns = new Set(
+      this.db
+        .query<{ name: string }, []>("PRAGMA table_info(hosts)")
+        .all()
+        .map(({ name }) => name),
+    );
+    if (!hostColumns.has("host_instance_id"))
+      this.db.exec("ALTER TABLE hosts ADD COLUMN host_instance_id TEXT");
+    this.db.exec(`
+      UPDATE agents SET host_instance_id = host_kind || ':legacy'
+        WHERE host_kind IS NOT NULL AND host_instance_id IS NULL;
+      UPDATE agents SET execution_observed_at = last_observed_at
+        WHERE host_kind IS NOT NULL AND execution_observed_at IS NULL;
+      UPDATE hosts SET host_instance_id = host_kind || ':legacy'
+        WHERE host_instance_id IS NULL;
+      DROP INDEX IF EXISTS agents_live_execution_identity;
+      CREATE UNIQUE INDEX agents_live_execution_identity
+        ON agents(host_instance_id, native_id)
+        WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (8, unixepoch() * 1000);
+    `);
+  }
+
+  private migrateProviderSessions(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS provider_sessions (
+        handle TEXT PRIMARY KEY,
+        harness_id TEXT NOT NULL,
+        continuity_scope_id TEXT NOT NULL,
+        native_kind TEXT NOT NULL,
+        native_value TEXT NOT NULL,
+        provider_instance_id TEXT NOT NULL,
+        home_site_ref TEXT,
+        created_at INTEGER,
+        last_active_at INTEGER,
+        title TEXT,
+        workspace_ref TEXT,
+        resume_eligibility TEXT NOT NULL,
+        provenance TEXT NOT NULL,
+        observed_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS provider_sessions_instance
+        ON provider_sessions(provider_instance_id);
+      CREATE TABLE IF NOT EXISTS provider_session_aliases (
+        handle TEXT NOT NULL,
+        harness_id TEXT NOT NULL,
+        continuity_scope_id TEXT NOT NULL,
+        native_kind TEXT NOT NULL,
+        native_value TEXT NOT NULL,
+        PRIMARY KEY(handle, harness_id, continuity_scope_id, native_kind, native_value),
+        FOREIGN KEY(handle) REFERENCES provider_sessions(handle) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS provider_session_alias_identity
+        ON provider_session_aliases(harness_id, continuity_scope_id, native_kind, native_value);
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (7, unixepoch() * 1000);
+    `);
+  }
+
+  private migrateProviderSessionScope(): void {
+    const columns = this.db
+      .query<{ name: string }, []>("PRAGMA table_info(agents)")
+      .all()
+      .map(({ name }) => name);
+    if (!columns.includes("continuity_scope_id"))
+      this.db.exec("ALTER TABLE agents ADD COLUMN continuity_scope_id TEXT");
+    this.db.exec(`
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (6, unixepoch() * 1000);
+    `);
+  }
+
+  private migrateLaunchRecovery(): void {
+    const columns = this.db
+      .query<{ name: string }, []>("PRAGMA table_info(launch_receipts)")
+      .all()
+      .map(({ name }) => name);
+    if (!columns.includes("recovery_json"))
+      this.db.exec("ALTER TABLE launch_receipts ADD COLUMN recovery_json TEXT");
+    this.db.exec(`
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (5, unixepoch() * 1000);
+    `);
+  }
+
+  private migrateAgentIdentity(): void {
+    const migrated = this.db
+      .query<{ found: number }, []>(
+        "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 3",
+      )
+      .get()?.found;
+    if (migrated) return;
+    const columns = this.db
+      .query<{ name: string }, []>("PRAGMA table_info(agents)")
+      .all()
+      .map(({ name }) => name);
+    if (!columns.includes("continuity")) {
+      this.db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        this.db.transaction(() => {
+          this.db.exec(`
+            CREATE TABLE agents_v3 (
+              id TEXT PRIMARY KEY,
+              host_kind TEXT,
+              native_id TEXT,
+              host_locator TEXT,
+              harness_id TEXT,
+              continuity_scope_id TEXT,
+              native_conversation_kind TEXT,
+              native_conversation_value TEXT,
+              continuity TEXT NOT NULL DEFAULT 'unknown',
+              display_name TEXT NOT NULL,
+              display_name_source TEXT NOT NULL,
+              description TEXT,
+              primary_goal_id TEXT,
+              runtime_state TEXT NOT NULL,
+              runtime_state_source TEXT NOT NULL,
+              host_health TEXT NOT NULL,
+              last_seen_at INTEGER NOT NULL,
+              last_observed_at INTEGER NOT NULL,
+              last_changed_at INTEGER NOT NULL,
+              attention_since INTEGER,
+              repository TEXT,
+              branch TEXT,
+              worktree TEXT,
+              provider TEXT,
+              execution_container_id TEXT,
+              execution_container_label TEXT,
+              archived_at INTEGER,
+              FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
+            );
+            INSERT INTO agents_v3 (
+              id, host_kind, native_id, host_locator, continuity, display_name,
+              display_name_source, description, primary_goal_id, runtime_state,
+              runtime_state_source, host_health, last_seen_at, last_observed_at,
+              last_changed_at, attention_since, repository, branch, worktree,
+              provider, execution_container_id, execution_container_label, archived_at
+            )
+            SELECT
+              id, host_kind, native_id, host_locator, 'unknown', display_name,
+              display_name_source, description, primary_goal_id, runtime_state,
+              runtime_state_source, host_health, last_seen_at, last_observed_at,
+              last_changed_at, attention_since, repository, branch, worktree,
+              provider, execution_container_id, execution_container_label, archived_at
+            FROM agents;
+            DROP TABLE agents;
+            ALTER TABLE agents_v3 RENAME TO agents;
+          `);
+        })();
+      } finally {
+        this.db.exec("PRAGMA foreign_keys = ON");
+      }
+    }
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS agents_live_execution_identity
+        ON agents(host_kind, native_id)
+        WHERE host_kind IS NOT NULL AND native_id IS NOT NULL;
+      INSERT INTO schema_migrations (version, applied_at)
+        VALUES (3, unixepoch() * 1000);
     `);
   }
 }

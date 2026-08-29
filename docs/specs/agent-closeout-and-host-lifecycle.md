@@ -9,6 +9,12 @@ Depends on:
 - [Goal-centred agent orchestration map](../design/agent-orchestration-map.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Observatory feature roadmap](observatory-feature-roadmap.md)
+- [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+
+> **Continuity amendment, 2026-08-28:** the implemented closeout slice used
+> `stale` as a proxy for host absence. The target recovery model separates
+> stale evidence, confirmed execution absence and provider-session continuity.
+> Only a fresh complete host snapshot can prove that no execution is present.
 
 ## Why
 
@@ -29,8 +35,10 @@ absence into accepted completion.
 - **Archive only** remains available as a secondary explicit action. It hides
   the Agent from active Observatory projections but leaves its host execution
   running.
-- A stale Agent is already absent from the host, so its closeout action only
-  archives the Observatory record.
+- A dormant Agent has a confirmed provider session and no current execution, so
+  its closeout action archives the Observatory record without a host close.
+- A stale or unavailable Agent has unknown execution presence. Its explicit
+  action is `Archive only`; Observatory must not claim that execution stopped.
 - Runtime `done` is not authoritative completion. Done Agents remain awaiting
   review until the operator accepts, keeps or archives them.
 - Stale Agents may be automatically shelved from the Atlas into a reversible
@@ -46,8 +54,9 @@ The web client adds a **Closeout** surface with two lanes:
 1. **Results to review** contains live Agents reporting `done`. The primary
    action is `Review`; after inspection the operator can choose
    `Accept & close`, `Keep active` or `Archive only`.
-2. **Ended externally** contains stale Agents no longer reported by the host.
-   These can be archived individually or in a batch.
+2. **No current execution** contains Agents whose absence is confirmed by a
+   fresh complete host snapshot. Stale or unavailable Agents remain a separate
+   uncertain subset and can only be archived explicitly.
 
 Goals and the portfolio header show compact closeout counts such as
 `2 results · 3 ended`. Shelved Agents no longer consume normal Atlas space, but
@@ -57,8 +66,8 @@ unreviewed results.
 
 Working or blocked Agents can still be closed, but the confirmation must state
 that execution will stop. The first bulk close action is limited to `done`
-Agents. Bulk archive may include stale Agents because their host execution is
-already absent.
+Agents. Bulk archive may include confirmed dormant Agents. It must not imply
+that stale or unavailable executions are already absent.
 
 ## Architecture
 

@@ -8,6 +8,8 @@ Technology choices: [Observatory technology decisions](technology-decisions.md)
 
 Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
+Continuity and recovery: [Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md)
+
 Feature ownership and delivery: [Observatory feature roadmap](../specs/observatory-feature-roadmap.md)
 
 ## Purpose
@@ -99,7 +101,7 @@ separately in [Plugin architecture](plugin-architecture.md).
 │         └──────────── persistent local state ──┘                 │
 └───────────────┬───────────────────┬──────────────────┬───────────┘
                 │                   │                  │
-        agent-host seam    provider-facts seam    Git seam
+        agent-host seam    agent-harness seam     Git seam
                 │                   │                  │
          ┌──────┴──────┐      ┌─────┴──────┐      repository /
          │             │      │            │      worktree state
@@ -176,8 +178,10 @@ future AO-native multiplexer would be another adapter.
 #### Host abstraction policy
 
 Herdr is the required live host for V0/V1. This keeps the first product slice
-focused and lets Herdr own agent persistence, process lifetime and PTY
-transport. It does not make Herdr a dependency of the semantic control plane.
+focused and lets Herdr own process lifetime, PTY transport and current
+execution restoration. Provider sessions own conversation continuity. It does
+not make Herdr a dependency of the semantic control plane or the durable Agent
+identity.
 
 `SessionHost` is the sole external-host seam. Only the Herdr adapter and the
 composition root may know Herdr protocol payloads, CLI commands or native
@@ -207,6 +211,16 @@ The adapter owns its meaning and identity; core modules may compare exact
 references as provenance-bearing evidence but do not expose the host's
 workspace, tab or pane concepts as domain objects.
 
+Herdr may additionally contribute optional agent-aware evidence and
+host-assisted restoration through this seam. That is a deliberate advantage
+over a lowest-common-denominator multiplexer, not permission for Herdr to own
+Claude Code, Codex, Pi or another harness's launch and resume policy. Harness
+plugins construct provider-specific start/resume plans and judge native
+conversation continuity; `SessionHost` executes plans and reports the strongest
+bounded evidence the selected host can prove. The detailed contract and phased
+migration are defined in
+[Agent harness plugins](../specs/agent-harness-plugins.md).
+
 The replacement test is architectural, not aspirational: selecting a future
 tmux adapter, Superlogical-style host or AO-owned multiplexer at composition
 time must leave Universe, persistence, projections and renderers unchanged.
@@ -216,12 +230,11 @@ coverage; every production adapter also needs sanitised fixtures and a live
 smoke path where available.
 
 The implemented V0/V1 host interface remains smaller than the underlying host
-interfaces:
+interfaces and contains no provider-specific launch members:
 
 ```text
 snapshot()                                      -> Effect<HostSnapshot, HostError>
-listLaunchOptions()                             -> Effect<HostLaunchOption[], HostError>
-launch(HostLaunchRequest)                       -> Effect<HostLaunchResult, HostError>
+launchExecution(HostExecutionLaunchRequest)     -> Effect<HostLaunchResult, HostError>
 access({ hostKind, nativeId })                  -> Effect<AgentAccess, HostError>
 activate(AgentAccess)                           -> Effect<HostActionResult, HostError>
 openTerminal(AgentAccess, TerminalDimensions, TerminalOpenOptions?)
@@ -235,10 +248,28 @@ V0 obtains fresh snapshots on a composition-root polling interval, including
 while embedded terminal surfaces are open so shell-to-Agent promotion remains
 observable. A future host event stream may reduce polling, but it is not part
 of this seam yet.
-`launch` creates a host execution but does not assign semantic meaning;
+`launchExecution` runs a harness-owned structured process plan but does not
+assign semantic meaning;
 reconciliation must observe the resulting Agent before the coordinator assigns
 it to a Goal. `access` returns the capabilities and opaque attachment targets
 proven for the selected Agent.
+
+The implemented architecture splits agent-harness lifecycle from execution hosting.
+`AgentHarness` plugins own availability, structured start/resume plans and
+native conversation continuity. `SessionHost` accepts a generic process plan
+and owns only its execution surface. Claude Code, Codex and third-party
+harnesses use the same registry and host operation. See [Agent harness
+plugins](../specs/agent-harness-plugins.md).
+
+New-session native identity remains provider-owned. A harness does not invent a
+Claude, Codex or other provider identifier to make launch synchronous. Hooks,
+structured provider results and native integrations contribute asynchronous,
+provenance-bearing evidence through the host edge; recurring lifecycle events
+may repair a missed startup observation. Provider catalogue snapshots recover
+dormant sessions independently of host executions and repair missed events.
+Providers without a reliable identity mechanism remain usable only through an
+explicitly degraded host-bound path and cannot offer exact resume or
+database-wipe recovery.
 
 `AgentAccess` reports a small capability list per agent because the same host
 may offer different operations depending on provider recognition, permissions,
@@ -345,16 +376,31 @@ are still transient views over the same Agent and neither creates a second
 workspace or repository model. Companion tabs use server-issued opaque link
 handles and are revalidated through `SessionHost` before opening.
 
-### Provider-facts module
+The next verification slice deepens this edge into one
+`AgentRepositoryStatusReader`. A caller supplies only an Observatory Agent id;
+the module resolves its trusted host-observed worktree, combines bounded local
+Git status with pull-request facts from contributed `CodeHostingProvider`
+plugins, and returns one provenance-bearing snapshot. GitHub is the first
+built-in plugin and uses structured `gh` output; a synthetic plugin and external
+example use the same versioned manifest, loader and contract suite. Neither the
+renderer nor Universe learns provider fields, command syntax, authentication or
+filesystem paths. Remote status is cached by repository/branch/HEAD and never
+fetched on every host poll. See
+[Observatory plugin system](../specs/observatory-plugin-system.md) and
+[Agent repository status and code-host plugins](../specs/agent-repository-and-code-host-plugins.md).
 
-The Provider-facts module enriches a host observation with facts specific to an
-agent CLI. An agent host knows where a process runs; a provider adapter knows
-what the process means.
+### Agent-harness and provider-session module
+
+Provider facts and catalogue discovery sit behind the deeper `AgentHarness`
+plugin interface. An agent host knows where a process runs; a harness adapter
+knows which provider sessions exist, how its CLI starts and resumes, and how to
+prove native conversation continuity.
 
 ```text
-recognise(HostObservation)          -> Recognition
-inspect(NativeAgentReference)     -> ProviderFacts
-watch(NativeAgentReference)       -> EventStream<ProviderObservation>?
+snapshotSessions(ProviderInstance) -> ProviderSessionSnapshot
+recognise(HostObservation)         -> Recognition
+inspect(NativeAgentReference)      -> ProviderFacts
+watch(ProviderInstance)            -> EventStream<ProviderObservation>?
 ```
 
 Candidate facts include:
@@ -367,16 +413,20 @@ Candidate facts include:
 - context usage where exposed; and
 - parent agent identity where exposed.
 
-AO does not ingest transcripts in v1. It stores a native locator so a user or
-chief-of-staff agent can retrieve the transcript through the provider's normal
-storage or CLI.
+AO does not ingest transcripts by default. Catalogue discovery reads bounded
+provider metadata, while start, resume and continuity use the provider's opaque
+native conversation reference rather than conversation contents. A later
+capability may expose bounded transcript or result inspection with explicit
+provenance.
 
-Provider support is progressive:
+Harness support is progressive:
 
-1. process recognition and filesystem discovery;
-2. native metadata inspection;
-3. optional hook integration; and
-4. optional AO skill commands executed by the agent.
+1. host-only process recognition and terminal access;
+2. provider-session catalogue discovery;
+3. plugin-backed new-session and exact-session resume;
+4. proved native conversation continuity and replaceable execution binding;
+5. optional native metadata or hook integration; and
+6. optional richer harness controls.
 
 ### Git topology module
 
@@ -638,7 +688,7 @@ The CLI is a thin caller of this interface. An illustrative surface is:
 ```sh
 ao goal create --title "Ship model router" --priority p1
 ao agent import <native-ref> --goal <goal-id>
-ao agent launch --goal <goal-id> --provider codex --host herdr
+ao agent launch --goal <goal-id> --harness codex --host herdr
 ao relation propose --type delegated-to --from <parent> --to <child>
 ao attention request --agent <id> --type question --summary "Choose cache policy"
 ao goal context <goal-id> --format json
@@ -901,10 +951,15 @@ future host reconciliation updates the archived record but does not silently
 restore it.
 
 New goals use the Layout module's nearest-free placement scan. It is dynamic at
-insertion time because it considers current footprint and occupied space, but
-it does not continuously reflow accepted goals. A manually dragged goal stores
-its world-space anchor and its direct agent satellites continue to derive
-their positions relative to that anchor. Clicking or focusing a goal selects a
+insertion time because it considers current footprint and occupied space. If an
+unpinned goal later gains enough direct agents to collide, the same module
+repairs only that goal into the nearest deterministic free slot; it does not
+globally reflow accepted goals. The Atlas also spaces complete rendered
+footprints, including satellite orbits, as a projection-time safety net for
+older persisted layouts. A manually dragged goal stores and pins its
+world-space anchor, and its direct agent satellites continue to derive their
+positions relative to that anchor. Pinned goals are never moved by automatic
+repair. Clicking or focusing a goal selects a
 goal-only map projection in the renderer; that view contains the goal and all
 of its direct agents, not repositories, worktrees or panes. Selecting an
 unassigned agent and focusing it reaches the supporting inbox list lens.
@@ -972,6 +1027,9 @@ V1 is local-only and single-user.
 - Restrict store and socket filesystem permissions.
 - Never ingest transcripts by default.
 - Treat native transcript locators and repository paths as sensitive metadata.
+  A local explicit Agent inspector may expose an ID-kind provider session
+  reference for diagnosis and copying; transcript-path references and aliases
+  never enter browser projections.
 - Keep host launch arguments structured; do not build commands through shell
   string concatenation.
 - Require explicit authority for auto-mode mutations.
@@ -986,12 +1044,27 @@ accounts or proprietary agent transcripts.
 
 ## Failure handling
 
-- Host unavailable: preserve the universe and mark host observations stale.
+- Host unavailable: preserve the Universe and mark execution presence unknown;
+  do not convert transport loss into dormancy or process exit.
+- Provider unavailable: preserve saved session continuity as unknown until a
+  scoped catalogue refresh succeeds.
 - Adapter crash: restart independently; do not corrupt accepted state.
-- Duplicate discovery: reconcile by host plus native identifier, then provider
-  identity where available.
-- Missing transcript: keep the locator and display unavailable rather than
-  deleting the agent.
+- Duplicate discovery: reconcile managed Agents by exact scoped provider
+  identity, then bind current host executions; host-native identity alone does
+  not establish durable continuity.
+- Missing provider session: preserve the Agent and report continuity lost only
+  when a complete provider scope proves absence.
+- Current implementation persists provider continuity, execution presence,
+  resume capability and observation health independently. Provider-session
+  recovery scopes exact host evidence before Universe reconciliation; native
+  provider aliases may canonicalise to one session, but cwd, title and recency
+  never do. Execution bindings are keyed by host instance and retained as
+  history when a complete snapshot proves them absent.
+- A same-harness, same-workspace unidentified execution is plausible-live
+  evidence, not identity proof. The Universe projects the provider-backed Agent
+  as `possibly-running`, and the launch coordinator blocks ordinary resume at
+  its existing interface until the ambiguity disappears or exact evidence
+  arrives.
 - Stale agent report: show source and age; a fresher deterministic host fact may
   supersede runtime state.
 - Launch succeeds but assignment fails: retain the discovered agent in the
@@ -1131,7 +1204,8 @@ the active product roadmap; current priorities live in the
 - A renderer can be replaced without changing domain or host adapters.
 - An agent host can be replaced without changing domain or renderers.
 - Replay and live Herdr observations produce the same projections.
-- Vanilla agents are useful without AO-specific hooks.
+- Vanilla executions are useful without AO-specific hooks, but durable managed
+  continuity remains explicitly unsupported until provider identity is proved.
 - Enhanced metadata can arrive without restarting or recreating an agent.
 - Adding an unrelated agent does not disrupt the current terminal selection.
 - A blocked agent inside a collapsed goal reaches the overview with an
@@ -1141,7 +1215,9 @@ the active product roadmap; current priorities live in the
 - Type-to-find and attention navigation place a selected result in its owning
   goal context.
 - Agent retries do not duplicate goals, agents or relationships.
-- No transcript contents are required to reconstruct the universe after restart.
+- No transcript contents are required to reconcile the Universe after restart;
+  metadata-only provider catalogues can reconstruct recovery candidates after
+  a database reset.
 - The live Herdr adapter can disconnect and reconcile without losing accepted
   state.
 - A user can inspect and message one supported agent without leaving the map,

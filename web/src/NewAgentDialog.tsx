@@ -24,7 +24,7 @@ export const NewAgentDialog = ({
   const [location, setLocation] = useState("");
   const [workspaceMode, setWorkspaceMode] = useState<"existing" | "worktree">("existing");
   const [branch, setBranch] = useState("feat/observatory-agent");
-  const [agentKind, setAgentKind] = useState("");
+  const [harnessId, setHarnessId] = useState("");
   const [agentName, setAgentName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [browser, setBrowser] = useState<WebWorkspaceBrowserResponse>();
@@ -39,11 +39,7 @@ export const NewAgentDialog = ({
       .then((result) => {
         setOptions(result);
         setLocation(result.locations.find((choice) => choice.available)?.path ?? "");
-        setAgentKind(
-          result.agents.find((agent) => agent.kind === "codex")?.kind ??
-            result.agents[0]?.kind ??
-            "",
-        );
+        setHarnessId(result.agents[0]?.harnessId ?? "");
         if (defaultGoalId && !result.goals.some((goal) => goal.id === defaultGoalId)) setGoalId("");
       })
       .catch((cause) => {
@@ -56,8 +52,8 @@ export const NewAgentDialog = ({
   useEffect(() => () => browseRequest.current?.abort(), []);
 
   const selectedAgent = useMemo(
-    () => options?.agents.find((agent) => agent.kind === agentKind),
-    [agentKind, options?.agents],
+    () => options?.agents.find((agent) => agent.harnessId === harnessId),
+    [harnessId, options?.agents],
   );
 
   const browse = async (path: string): Promise<void> => {
@@ -82,7 +78,7 @@ export const NewAgentDialog = ({
 
   const submit = async (): Promise<void> => {
     const cleanLocation = location.trim();
-    if (!cleanLocation || !agentKind) return;
+    if (!cleanLocation || !harnessId) return;
     if (workspaceMode === "worktree" && !branch.trim()) {
       setError("A branch name is required for a new worktree.");
       return;
@@ -96,7 +92,7 @@ export const NewAgentDialog = ({
         workspaceMode === "worktree"
           ? { kind: "worktree", repositoryPath: cleanLocation, branch: branch.trim() }
           : { kind: "existing", path: cleanLocation },
-      agentKind,
+      harnessId,
       agentName: agentName.trim() || undefined,
       prompt: prompt.trim() || undefined,
     };
@@ -225,9 +221,9 @@ export const NewAgentDialog = ({
           ) : null}
           <label>
             <span>Agent</span>
-            <select onChange={(event) => setAgentKind(event.target.value)} value={agentKind}>
+            <select onChange={(event) => setHarnessId(event.target.value)} value={harnessId}>
               {options?.agents.map((agent) => (
-                <option key={agent.kind} value={agent.kind}>
+                <option key={agent.harnessId} value={agent.harnessId}>
                   {agent.label}
                 </option>
               ))}
@@ -249,7 +245,7 @@ export const NewAgentDialog = ({
             Cancel
           </button>
           <button
-            disabled={pending || !options || !location.trim() || !agentKind}
+            disabled={pending || !options || !location.trim() || !harnessId}
             onClick={() => void submit()}
             type="button"
           >

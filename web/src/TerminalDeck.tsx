@@ -136,7 +136,7 @@ export const TerminalDeck = ({
     >
       <header className="terminal-deck__header">
         <div className="terminal-deck__identity">
-          <p className="overline">TERMINAL DECK / {agent.hostKind}</p>
+          <p className="overline">TERMINAL DECK / {agent.execution?.hostKind ?? "detached"}</p>
           <h2>{activeLabel}</h2>
         </div>
         <div className="terminal-deck__actions">

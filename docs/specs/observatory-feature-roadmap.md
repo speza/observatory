@@ -1,14 +1,17 @@
 # Observatory feature roadmap
 
-Status: accepted web-first direction
+Status: accepted web-first direction; plugin and harness baseline implemented
 
-Date: 2026-08-27
+Date: 2026-08-28
 
 Depends on:
 
 - [Goal-centred agent orchestration map](../design/agent-orchestration-map.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Local web Observatory walking slice](local-web-observatory-walking-slice.md)
+- [Agent harness plugins](agent-harness-plugins.md)
+- [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+- [Agent repository and code-host plugins](agent-repository-and-code-host-plugins.md)
 
 ## Product decision
 
@@ -26,29 +29,33 @@ workflows.
 
 ## Current baseline
 
-| Feature                                          | CORE       | WEB       | Note                                 |
-| ------------------------------------------------ | ---------- | --------- | ------------------------------------ |
-| Goal → Agent topology and assignment             | Done       | Done      | Durable semantic baseline            |
-| Goal lifecycle, priority and accepted position   | Done       | Done/Next | Web position editing remains missing |
-| SQLite persistence and atomic commands           | Done       | —         | Browser never accesses SQLite        |
-| Herdr reconciliation and uncertainty             | Done       | Done      | Snapshot polling walking slice       |
-| Explainable blocked/waiting/stale attention      | Done       | Done      | Initial signal vocabulary only       |
-| Catch-up checkpoint and semantic changes         | Done       | Done      | Explicit acknowledgement             |
-| Atlas, Ledger, Inbox and Closeout                | Projection | Done      | One model, several lenses            |
-| Host-owned terminal and linked executions        | Done       | Done      | xterm.js renders host streams        |
-| Agent launch and workspace preparation           | Done       | Done      | Shared coordinator                   |
-| Host-synchronised closeout                       | Done       | Done      | Close before semantic archive        |
-| Read-only working-tree review                    | Done       | Done      | Bounded server-side path resolution  |
-| Search and related-Agent evidence                | Done       | Next      | Immediate discovery slice            |
-| Verification and handoff evidence                | Next       | Next      | Major trust gap                      |
-| Rich deterministic attention                     | Next       | Next      | Major usefulness gap                 |
-| Typed delegation/result/dependency relationships | Next       | Next      | Preserve provenance                  |
-| Cross-agent Git and integration warnings         | Next       | Next      | Evidence, not map nodes              |
+| Feature                                          | CORE       | WEB  | Note                                 |
+| ------------------------------------------------ | ---------- | ---- | ------------------------------------ |
+| Goal → Agent topology and assignment             | Done       | Done | Durable semantic baseline            |
+| Goal lifecycle, priority and accepted position   | Done       | Done | Auto-repair plus drag-to-pin         |
+| SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
+| Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |
+| Explainable blocked/waiting/stale attention      | Done       | Done | Initial signal vocabulary only       |
+| Catch-up checkpoint and semantic changes         | Done       | Done | Explicit acknowledgement             |
+| Atlas, Ledger, Inbox and Closeout                | Projection | Done | One model, several lenses            |
+| Host-owned terminal and linked executions        | Done       | Done | xterm.js renders host streams        |
+| Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |
+| Agent-harness plugins and exact resume           | Done       | Done | Claude and Codex live-validated      |
+| Provider catalogue and dormant-session recovery  | Done       | Done | Scoped rebinding and exact resume    |
+| Contributed plugins and repository status        | Done       | Done | GitHub is the first code-host plugin |
+| Host-synchronised closeout                       | Done       | Done | Close before semantic archive        |
+| Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
+| Search and related-Agent evidence                | Done       | Next | Immediate discovery slice            |
+| Verification and handoff evidence                | Next       | Next | Major trust gap                      |
+| Rich deterministic attention                     | Next       | Next | Major usefulness gap                 |
+| Typed delegation/result/dependency relationships | Next       | Next | Preserve provenance                  |
+| Cross-agent Git and integration warnings         | Next       | Next | Evidence, not map nodes              |
 
 ## Product risks still to prove
 
-1. **Verification is thin.** Runtime `done` is visible, but trustworthy result
-   evidence, check state, review state and integration readiness are incomplete.
+1. **Verification is thin.** Runtime `done`, local repository state and bounded
+   pull-request/check facts are visible, but trustworthy result and handoff
+   evidence remains incomplete.
 2. **Attention is narrow.** Returned results, downstream blockers, failed
    checks, stalled work and context pressure do not yet form a complete model.
 3. **Atlas geography is stable but not sufficiently semantic.** Goal membership
@@ -69,11 +76,17 @@ non-goals.
 
 ### Now — discovery and context
 
-1. Expose search and related-Agent projections through the loopback API.
-2. Add a browser command palette with keyboard navigation.
-3. Add related-Agent evidence with explicit adopt and dismiss commands.
-4. Preserve owning Goal, camera context and inspector for every result.
-5. Complete live browser acceptance for terminal return and host loss.
+1. Implement metadata-only Claude and Codex provider-session catalogues and a
+   full-screen Session import lens.
+2. Prove laptop/Herdr restart as `dormant/resumable`, with exact resume into a
+   new execution and no automatic continuation.
+3. Expose search and related-Agent projections through the loopback API.
+4. Add a browser command palette with keyboard navigation.
+5. Add related-Agent evidence with explicit adopt and dismiss commands.
+6. Preserve owning Goal, camera context and inspector for every result.
+7. Complete live browser acceptance for terminal return and host loss.
+8. Dogfood repository/code-host status against real Agent pull requests and
+   preserve ambiguity when more than one candidate matches.
 
 ### Next — trust and daily operation
 
@@ -83,7 +96,7 @@ non-goals.
 3. Make completion a coherent flow: reported done → inspect evidence → review
    diff/checks → accept, revise, close or archive.
 4. Harden terminal tabs, resize, release and host-loss recovery from real use.
-5. Add persisted goal movement and explicit semantic-density controls.
+5. Add explicit semantic-density controls.
 
 ### Later — relationships and scale
 

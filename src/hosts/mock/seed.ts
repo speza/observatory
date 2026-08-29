@@ -174,7 +174,11 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
   }
 
   const agentsByNativeId = new Map(
-    universe.snapshot().agents.map((agent) => [agent.nativeId, agent.id]),
+    universe
+      .snapshot()
+      .agents.flatMap((agent) =>
+        agent.execution ? [[agent.execution.nativeId, agent.id] as const] : [],
+      ),
   );
   let assignedAgents = 0;
   for (const goal of selectedGoals) {

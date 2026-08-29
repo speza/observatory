@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MockHostAdapter } from "../../src/hosts/mock/adapter.ts";
 import { createMockScenario } from "../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
-import { FixedClock, makeUniverse } from "../../src/universe/test-support.ts";
+import { FixedClock, hostSnapshot, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
 import { Atlas, focusedLabelOffsets } from "./Atlas.tsx";
 import { atlasContentBounds, atlasGoalSpacingScale } from "./atlasGeometry.ts";
@@ -211,6 +211,92 @@ describe("production web Atlas", () => {
         expect(Math.hypot(left.x - right.x, left.y - right.y)).toBeGreaterThanOrEqual(
           left.radius + right.radius + 15.9,
         );
+      }
+    }
+  });
+
+  test("keeps full agent orbits separated when empty goals are populated later", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "admin" });
+    universe.execute({ type: "CreateGoal", title: "observatory - general" });
+    universe.execute({ type: "CreateGoal", title: "maia / copilot" });
+    universe.reconcile(
+      hostSnapshot(
+        Array.from({ length: 18 }, (_, index) => ({
+          nativeId: `pane-${index}`,
+          displayName: `Agent ${index}`,
+          runtimeState: "working" as const,
+          runtimeStateSource: "test",
+          hostLocator: `test:pane-${index}`,
+          observedAt: clock.now(),
+        })),
+      ),
+    );
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    universe.execute({
+      type: "AssignAgents",
+      agentIds: ["agent-2", "agent-3"],
+      goalId: "goal-2",
+    });
+    universe.execute({
+      type: "AssignAgents",
+      agentIds: Array.from({ length: 15 }, (_, index) => `agent-${index + 4}`),
+      goalId: "goal-3",
+    });
+
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const persistedCrowdedProjection: UniverseMapProjection = {
+      ...projection,
+      goals: projection.goals.map((goal, index) => ({
+        ...goal,
+        // Reproduce an older accepted row whose anchors were chosen before
+        // these goals gained their direct agents.
+        mapPosition: { x: index * 144, y: 0 },
+      })),
+    };
+    const markup = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection: persistedCrowdedProjection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    const goals = renderedGoals(markup);
+    const agents = renderedAgents(markup);
+    expect(
+      goals
+        .map((goal) => agents.filter((agent) => agent.goalId === goal.id).length)
+        .sort((left, right) => left - right),
+    ).toEqual([1, 2, 15]);
+    for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
+      const left = goals[leftIndex];
+      if (!left) continue;
+      const leftAgents = agents.filter((agent) => agent.goalId === left.id);
+      const leftWidth = Math.max(
+        left.radius,
+        ...leftAgents.map((agent) => agent.orbitRadiusX + 22),
+      );
+      const leftHeight = Math.max(
+        left.radius,
+        ...leftAgents.map((agent) => agent.orbitRadiusY + 22),
+      );
+      for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
+        const right = goals[rightIndex];
+        if (!right) continue;
+        const rightAgents = agents.filter((agent) => agent.goalId === right.id);
+        const rightWidth = Math.max(
+          right.radius,
+          ...rightAgents.map((agent) => agent.orbitRadiusX + 22),
+        );
+        const rightHeight = Math.max(
+          right.radius,
+          ...rightAgents.map((agent) => agent.orbitRadiusY + 22),
+        );
+        expect(
+          Math.abs(left.x - right.x) >= leftWidth + rightWidth + 15.9 ||
+            Math.abs(left.y - right.y) >= leftHeight + rightHeight + 15.9,
+        ).toBe(true);
       }
     }
   });

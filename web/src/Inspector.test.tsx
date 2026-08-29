@@ -1,0 +1,68 @@
+import { describe, expect, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { hostSnapshot, makeUniverse } from "../../src/universe/test-support.ts";
+import { Inspector } from "./Inspector.tsx";
+
+describe("Inspector", () => {
+  test("shows bounded operational IDs without duplicating repository facts", () => {
+    const fixture = makeUniverse();
+    fixture.universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "execution-visible",
+          displayName: "Imported session",
+          runtimeState: "idle",
+          runtimeStateSource: "test",
+          observedAt: fixture.clock.now(),
+          repository: "synthetic/project",
+          branch: "main",
+          worktree: "/synthetic/project",
+          hostLocator: "opaque:execution-visible",
+        },
+      ]),
+    );
+    fixture.universe.execute({
+      type: "BindAgentIdentity",
+      agentId: "agent-1",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        kind: "session-id",
+        value: "provider-visible",
+      },
+    });
+    const projection = fixture.universe.project({
+      kind: "inspector",
+      now: fixture.clock.now(),
+      target: { type: "agent", id: "agent-1" },
+    });
+    const commandCentre = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (projection.kind !== "agent-inspector") throw new Error("Expected Agent inspector.");
+    if (commandCentre.kind !== "command-centre") throw new Error("Expected command centre.");
+
+    const markup = renderToStaticMarkup(
+      <Inspector
+        commandCentre={commandCentre}
+        commandPending={false}
+        onClose={() => {}}
+        onCloseAndArchive={async () => true}
+        onCommand={async () => undefined}
+        onOpenTerminal={() => {}}
+        onRetry={() => {}}
+        onReviewChanges={() => {}}
+        onResume={async () => {}}
+        projection={projection}
+      />,
+    );
+
+    expect(markup).toContain("Agent ID");
+    expect(markup).toContain("provider-visible");
+    expect(markup).toContain("execution-visible");
+    expect(markup).toContain("Workspace");
+    expect(markup).not.toContain("<dt>Repository</dt>");
+    expect(markup).not.toContain("<dt>Branch</dt>");
+  });
+});

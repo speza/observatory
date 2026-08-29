@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "github",
+  "displayName": "GitHub",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "entrypoint": "./plugin.ts",
+  "capabilities": ["code-host"]
+}

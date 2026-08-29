@@ -6,6 +6,7 @@ import type {
 } from "../../src/projection/types.ts";
 import type { Priority } from "../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
+import { RepositoryStatus } from "./RepositoryStatus.tsx";
 
 interface InspectorProps {
   readonly projection?: InspectorProjection;
@@ -19,9 +20,14 @@ interface InspectorProps {
   readonly onOpenTerminal: (agent: AgentView) => void;
   readonly onRetry: () => void;
   readonly onReviewChanges: (agent: AgentView) => void;
+  readonly onResume: (agent: AgentView) => Promise<void>;
 }
 
 const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
+
+const copyIdentifier = (value: string): void => {
+  void navigator.clipboard.writeText(value);
+};
 
 export const Inspector = ({
   projection,
@@ -35,9 +41,13 @@ export const Inspector = ({
   onOpenTerminal,
   onRetry,
   onReviewChanges,
+  onResume,
 }: InspectorProps): React.JSX.Element => {
   const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
+  const providerSessionId =
+    projection?.kind === "agent-inspector" ? projection.providerSession?.id : undefined;
+  const executionId = agent?.execution?.nativeId;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
@@ -167,7 +177,17 @@ export const Inspector = ({
       ) : null}
       {projection?.kind === "agent-inspector" ? (
         <>
+          <RepositoryStatus agent={projection.agent} onReviewChanges={onReviewChanges} />
           <div className="inspector__controls">
+            {projection.agent.canResume ? (
+              <button
+                disabled={commandPending}
+                onClick={() => void onResume(projection.agent)}
+                type="button"
+              >
+                Resume exact conversation
+              </button>
+            ) : null}
             <button onClick={() => onOpenTerminal(projection.agent)} type="button">
               Open terminal
             </button>
@@ -259,20 +279,57 @@ export const Inspector = ({
           </div>
           <dl>
             <div>
-              <dt>Runtime</dt>
-              <dd>{projection.agent.runtimeState}</dd>
+              <dt>Lifecycle</dt>
+              <dd>{projection.agent.lifecycleState}</dd>
             </div>
             <div>
-              <dt>Host fact</dt>
-              <dd>{projection.agent.hostHealth}</dd>
+              <dt>Continuity</dt>
+              <dd>
+                {projection.agent.providerContinuity} · {projection.agent.executionPresence}
+              </dd>
             </div>
             <div>
-              <dt>Repository</dt>
-              <dd>{projection.agent.repository ?? "Unknown"}</dd>
+              <dt>Agent ID</dt>
+              <dd className="inspector__identifier">
+                <code title={projection.agent.id}>{projection.agent.id}</code>
+                <button onClick={() => copyIdentifier(projection.agent.id)} type="button">
+                  Copy
+                </button>
+              </dd>
             </div>
             <div>
-              <dt>Branch</dt>
-              <dd>{projection.agent.branch ?? "Unknown"}</dd>
+              <dt>Provider session ID</dt>
+              <dd className="inspector__identifier">
+                {providerSessionId ? (
+                  <>
+                    <code title={providerSessionId}>{providerSessionId}</code>
+                    <button onClick={() => copyIdentifier(providerSessionId)} type="button">
+                      Copy
+                    </button>
+                  </>
+                ) : (
+                  "Unavailable"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Execution ID</dt>
+              <dd className="inspector__identifier">
+                {executionId ? (
+                  <>
+                    <code title={executionId}>{executionId}</code>
+                    <button onClick={() => copyIdentifier(executionId)} type="button">
+                      Copy
+                    </button>
+                  </>
+                ) : (
+                  "No current execution"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Workspace</dt>
+              <dd title={projection.agent.worktree}>{projection.agent.worktree ?? "Unknown"}</dd>
             </div>
           </dl>
         </>

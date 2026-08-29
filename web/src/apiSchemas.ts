@@ -29,6 +29,7 @@ const AttentionProjection = Schema.Struct({
 });
 const HostHealth = Schema.Struct({
   hostKind: Schema.String,
+  hostInstanceId: Schema.String,
   status: Schema.Literal("live", "stale", "unavailable"),
   lastObservedAt: Schema.optional(Schema.Number),
   lastError: Schema.optional(Schema.String),
@@ -40,8 +41,36 @@ const OptionalHostHealth = Schema.optionalToRequired(HostHealth, Schema.Undefine
 });
 const AgentFields = {
   id: Schema.String,
-  hostKind: Schema.String,
-  nativeId: Schema.String,
+  execution: Schema.optional(
+    Schema.Struct({
+      hostKind: Schema.String,
+      hostInstanceId: Schema.String,
+      nativeId: Schema.String,
+      hostLocator: Schema.String,
+      observedAt: Schema.Number,
+    }),
+  ),
+  harnessId: Schema.optional(Schema.String),
+  continuity: Schema.Literal("proved", "interrupted", "replaced", "unknown"),
+  providerContinuity: Schema.Literal("confirmed", "missing", "unknown"),
+  executionPresence: Schema.Literal("live", "absent", "unknown", "conflict"),
+  resumeCapability: Schema.Literal("eligible", "blocked", "unsupported", "unknown"),
+  observationHealth: Schema.Literal("fresh", "stale", "unavailable"),
+  providerObservedAt: Schema.optional(Schema.Number),
+  executionObservedAt: Schema.optional(Schema.Number),
+  canResume: Schema.Boolean,
+  lifecycleState: Schema.Literal(
+    "running",
+    "dormant",
+    "resumable",
+    "possibly-running",
+    "unavailable",
+    "unidentified-execution",
+    "continuity-lost",
+    "stale-observation",
+    "conflict",
+  ),
+  executionConflictCount: Schema.Number,
   displayName: Schema.String,
   displayNameSource: Schema.Literal("host", "human"),
   description: Schema.optional(Schema.String),
@@ -58,7 +87,6 @@ const AgentFields = {
   worktree: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
   executionContainer: Schema.optional(ExecutionContainer),
-  hostLocator: Schema.String,
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
@@ -182,6 +210,12 @@ export const InspectorProjectionSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("agent-inspector"),
     agent: AgentView,
+    providerSession: Schema.optional(
+      Schema.Struct({
+        kind: Schema.String,
+        id: Schema.String,
+      }),
+    ),
     lines: Schema.Array(Schema.String),
   }),
   Schema.Struct({ kind: Schema.Literal("empty-inspector"), lines: Schema.Array(Schema.String) }),
@@ -274,4 +308,58 @@ export const WorkingTreeDiffResponseSchema = Schema.Struct({
   agentId: Schema.String,
   agentName: Schema.String,
   goalTitle: Schema.optional(Schema.String),
+});
+
+const RepositoryIdentity = Schema.Struct({
+  host: Schema.String,
+  owner: Schema.String,
+  name: Schema.String,
+});
+const RepositoryPluginStatus = Schema.Struct({
+  id: Schema.String,
+  state: Schema.Literal("ready", "degraded", "disabled"),
+  diagnostics: Schema.Array(Schema.String),
+});
+const RepositoryPullRequest = Schema.Struct({
+  providerId: Schema.String,
+  repository: RepositoryIdentity,
+  number: Schema.Number,
+  url: Schema.String,
+  title: Schema.String,
+  state: Schema.Literal("open", "closed", "merged"),
+  draft: Schema.Boolean,
+  baseBranch: Schema.String,
+  headBranch: Schema.String,
+  head: Schema.String,
+  author: Schema.optional(Schema.String),
+  checks: Schema.Literal("passing", "pending", "failing", "unknown"),
+  review: Schema.Literal("approved", "changes-requested", "review-required", "unknown"),
+  mergeability: Schema.Literal("mergeable", "conflicting", "unknown"),
+  updatedAt: Schema.optional(Schema.String),
+  association: Schema.Literal("confirmed", "candidate", "ambiguous"),
+  headSync: Schema.Literal("current", "local-ahead", "different", "unknown"),
+});
+export const AgentRepositoryStatusResponseSchema = Schema.Struct({
+  kind: Schema.Literal("agent-repository-status"),
+  agentId: Schema.String,
+  status: Schema.Literal("complete", "partial", "unavailable", "not-applicable"),
+  observedAt: Schema.Number,
+  diagnostics: Schema.Array(Schema.String),
+  git: Schema.optional(
+    Schema.Struct({
+      worktree: Schema.String,
+      repository: RepositoryIdentity,
+      branch: Schema.optional(Schema.String),
+      head: Schema.String,
+      detached: Schema.Boolean,
+      upstream: Schema.optional(Schema.String),
+      ahead: Schema.optional(Schema.Number),
+      behind: Schema.optional(Schema.Number),
+      diff: WorkingTreeDiffResponseSchema.omit("agentId", "agentName", "goalTitle"),
+    }),
+  ),
+  pullRequests: Schema.Array(RepositoryPullRequest),
+  provider: Schema.optional(Schema.String),
+  providerCached: Schema.Boolean,
+  plugins: Schema.Array(RepositoryPluginStatus),
 });

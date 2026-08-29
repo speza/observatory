@@ -1,4 +1,5 @@
 import type { Effect, Stream } from "effect";
+import type { AgentProcessPlan, OpaqueNativeConversationRef } from "../plugin-sdk/index.ts";
 import type { ExecutionContainerRef, RuntimeState } from "../universe/types.ts";
 import type { HostError } from "./errors.ts";
 
@@ -19,14 +20,25 @@ export interface HostAgentObservation {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
+  readonly harnessEvidence?: HostHarnessEvidence;
   /** Optional host-observed execution context; its identity is opaque to core. */
   readonly executionContainer?: ExecutionContainerRef;
   /** Serialized and opaque outside the agent-host adapter. */
   readonly hostLocator: string;
 }
 
+export interface HostHarnessEvidence {
+  readonly detectedHarnessId?: string;
+  readonly nativeConversationRef?: OpaqueNativeConversationRef;
+  readonly restoreState?: "host-restored" | "not-restored" | "unknown";
+  readonly source: "native-integration" | "hook" | "process" | "unknown";
+  readonly observedAt: number;
+}
+
 export interface HostSnapshot {
   readonly hostKind: string;
+  /** Stable identity of this concrete host instance within its site. */
+  readonly hostInstanceId: string;
   readonly available: boolean;
   readonly observedAt: number;
   readonly agents: readonly HostAgentObservation[];
@@ -139,33 +151,23 @@ export interface HostActionResult {
   readonly message: string;
 }
 
-export interface HostLaunchRequest {
+export interface HostExecutionLaunchRequest {
   readonly workingDirectory: string;
-  readonly agentKind: string;
   readonly agentName?: string;
-  readonly args?: readonly string[];
-  readonly prompt?: string;
+  readonly processPlan: AgentProcessPlan;
   readonly requestId: string;
-}
-
-export interface HostLaunchOption {
-  /** Opaque to the control plane; passed back to the host when selected. */
-  readonly kind: string;
-  readonly label: string;
-  readonly description?: string;
 }
 
 export interface HostLaunchResult {
   readonly ok: boolean;
   readonly message: string;
-  /** Host-defined identity, used only to match a later snapshot observation. */
-  readonly nativeId?: string;
+  /** Opaque host execution target, used only to bind a later snapshot observation. */
+  readonly executionRef?: string;
 }
 
 export interface SessionHost {
   snapshot(): Effect.Effect<HostSnapshot, HostError>;
-  listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError>;
-  launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError>;
+  launchExecution(request: HostExecutionLaunchRequest): Effect.Effect<HostLaunchResult, HostError>;
   access(agent: {
     readonly hostKind: string;
     readonly nativeId: string;

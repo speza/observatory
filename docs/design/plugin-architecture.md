@@ -1,6 +1,6 @@
 # Observatory plugin architecture
 
-Status: proposed boundary; no general plugin runtime implemented yet  
+Status: accepted boundary; contributed plugin system planned
 Date: 2026-08-23  
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
@@ -12,10 +12,10 @@ Herdr agent host. GitHub pull requests, Jira or Linear issues, agent-provider
 facts, extra render lenses, skills and hooks must not become special cases in
 the Universe or renderer.
 
-This is a modularity policy, not a request to build a marketplace or dynamic
-loader immediately. The first implementation should establish the contracts
-and composition seam; it can keep plugins local and in-process while preserving
-a path to an isolated process later.
+This policy now includes a real contributed plugin system. The first runtime
+loads only explicitly configured local packages, keeps them in-process and
+trusted, and preserves a path to an isolated process later. It is not a request
+to build a marketplace, automatic installer or universal extension framework.
 
 ## Kernel versus plugin
 
@@ -52,10 +52,19 @@ v1:
 - **Workspace provider** — recent project locations, Git inspection and
   worktree preparation for agent launch. The first implementation is local
   Git; it is not a new map topology node.
-- **Provider facts** — optional metadata from Claude Code, Codex, OpenCode, Pi
-  or agent hooks/skills.
-- **Related work** — GitHub pull requests, Jira issues, Linear tickets and
-  similar external references attached to a goal or agent.
+- **Agent harness** — Claude Code, Codex, OpenCode, Pi and other coding-agent
+  CLIs. Each harness plugin owns availability, structured new-session and
+  resume plans, provider-owned session catalogue and identity acquisition, and
+  any optional provider facts or richer controls. Identity may arrive
+  asynchronously through hooks, a structured provider interface or another
+  declared observation mechanism; lack of one remains explicit. `SessionHost`
+  executes those plans in a host-owned surface and may contribute host-assisted
+  restore or agent-aware evidence; it does not choose provider commands or
+  define resume semantics.
+- **Code host** — GitHub first; later contributed GitLab or Bitbucket plugins
+  providing pull requests, checks, reviews and merge state.
+- **Related work** — Jira issues, Linear tickets and similar external
+  references attached to a goal or agent.
 - **Projection/lens** — optional attention, relationship or detail views that
   consume core projections rather than querying SQLite directly.
 - **Automation** — agent commands, skills and hooks that submit normal kernel
@@ -90,15 +99,32 @@ Provider-specific fields belong to the plugin or an explicitly namespaced
 extension payload, not to a growing core union. Contracts should be serializable
 so an eventual out-of-process plugin can use the same boundary.
 
-## Implementation sequence
+## First plugin implementation
 
-1. Define the registry, manifest and capability-port contracts without adding a
-   provider integration.
-2. Compose Herdr as a first-party plugin while preserving the generic
-   `SessionHost` contract tests.
-3. Add a synthetic related-work plugin to prove lifecycle, provenance,
-   projection and failure isolation.
-4. Only then evaluate GitHub, Jira and Linear adapters against real workflows.
+GitHub repository status is the first concrete contributed integration. Build
+the smallest real plugin runtime: a validated manifest, explicit local package
+configuration, versioned activation interface, registry, health diagnostics
+and one `code-host` capability. The built-in GitHub plugin, a synthetic plugin
+and external example all use the same loader and contract suite. Do not build a
+marketplace or automatic package installation. Herdr continues to satisfy
+`SessionHost`; plugin policy does not justify wrapping the working host seam in
+a pass-through layer.
 
-Until that work starts, external integrations remain deferred and no provider
-logic should leak into the kernel.
+The deep Agent repository-status module owns trusted worktree resolution, local
+Git inspection, remote correlation, caching, provenance and degraded states
+behind one small interface. Provider logic must not leak into the Universe or
+renderer. See [Observatory plugin system](../specs/observatory-plugin-system.md)
+and
+[Agent repository status and code-host plugins](../specs/agent-repository-and-code-host-plugins.md).
+
+The next capability category justified by a concrete workflow is
+`agent-harness`. It separates coding-agent lifecycle from the execution host:
+Herdr remains the first `SessionHost`, while harness plugins describe how to
+discover, start, identify and resume a particular CLI. Provider catalogues
+recover durable or dormant conversation candidates; host snapshots recover
+current executions; exact evidence joins the two. A new harness can therefore
+be added without editing the Herdr adapter, launch coordinator, Universe or
+renderer. Herdr's semantic state and native session restoration remain useful
+optional host capabilities rather than provider policy. See
+[Agent harness plugins](../specs/agent-harness-plugins.md) and
+[Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md).

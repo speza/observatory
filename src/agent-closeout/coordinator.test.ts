@@ -24,7 +24,7 @@ describe("Agent closeout coordinator", () => {
     });
     expect(
       (await Effect.runPromise(host.snapshot())).agents.some(
-        (candidate) => candidate.nativeId === agent.nativeId,
+        (candidate) => candidate.nativeId === agent.execution?.nativeId,
       ),
     ).toBe(false);
   });
@@ -36,7 +36,8 @@ describe("Agent closeout coordinator", () => {
     fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a mock Agent.");
-    await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent))));
+    if (!agent.execution) throw new Error("Expected a mock execution.");
+    await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent.execution))));
     const coordinator = createAgentCloseoutCoordinator({ universe: fixture.universe, host });
 
     const result = await Effect.runPromise(coordinator.closeAndArchive(agent.id));
@@ -54,14 +55,14 @@ describe("Agent closeout coordinator", () => {
       snapshot: () =>
         Effect.succeed({
           hostKind: "mock",
+          hostInstanceId: "mock:default",
           available: false,
           observedAt: fixture.clock.now(),
           agents: [],
           diagnostics: [],
           error: "Host offline.",
         }),
-      listLaunchOptions: () => unavailableHost.listLaunchOptions(),
-      launch: (request) => unavailableHost.launch(request),
+      launchExecution: (request) => unavailableHost.launchExecution(request),
       access: (agentRef) => unavailableHost.access(agentRef),
       activate: (access) => unavailableHost.activate(access),
       closeAgent: (access) => unavailableHost.closeAgent(access),

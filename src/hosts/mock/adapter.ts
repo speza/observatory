@@ -2,8 +2,7 @@ import { Effect, Stream } from "effect";
 import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
-  HostLaunchOption,
-  HostLaunchRequest,
+  HostExecutionLaunchRequest,
   HostLaunchResult,
   HostAgentObservation,
   HostSnapshot,
@@ -229,6 +228,7 @@ export class MockHostAdapter implements SessionHost {
       }
       return {
         hostKind: "mock",
+        hostInstanceId: "mock:default",
         available: true,
         observedAt,
         agents,
@@ -241,21 +241,18 @@ export class MockHostAdapter implements SessionHost {
     );
   }
 
-  listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError> {
-    return Effect.succeed([
-      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
-      { kind: "codex", label: "Codex", description: "Codex CLI" },
-      { kind: "pi", label: "Pi", description: "Pi coding agent" },
-    ]);
-  }
-
-  launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
+  launchExecution(request: HostExecutionLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
     return Effect.sync(() => {
-      const agentKind = request.agentKind.trim();
-      if (!agentKind)
-        return { ok: false, message: "A mock agent kind is required." } satisfies HostLaunchResult;
+      const harnessId = request.processPlan.harnessId.trim();
+      if (!harnessId)
+        return { ok: false, message: "A mock harness id is required." } satisfies HostLaunchResult;
       const id = `mock-launch-${++this.launchSequence}`;
-      const displayName = request.agentName?.trim() || `${agentKind} agent ${this.launchSequence}`;
+      const displayName = request.agentName?.trim() || `${harnessId} agent ${this.launchSequence}`;
+      const nativeConversationRef = request.processPlan.nativeConversationRef ?? {
+        harnessId,
+        kind: "session-id",
+        value: `mock-conversation-${this.launchSequence}`,
+      };
       const agent: HostAgentObservation = {
         nativeId: id,
         displayName,
@@ -265,14 +262,21 @@ export class MockHostAdapter implements SessionHost {
         repository: "synthetic/ao-playground",
         branch: "mock/launch",
         worktree: request.workingDirectory,
-        provider: agentKind,
+        provider: harnessId,
+        harnessEvidence: {
+          detectedHarnessId: harnessId,
+          nativeConversationRef,
+          restoreState: "not-restored",
+          source: "native-integration",
+          observedAt: this.clock.now(),
+        },
         hostLocator: `mock-agent:${id}`,
       };
       this.launched.set(id, agent);
       return {
         ok: true,
-        nativeId: id,
-        message: `Started a mock ${agentKind} agent in ${request.workingDirectory}.`,
+        executionRef: id,
+        message: `Started a mock ${harnessId} agent in ${request.workingDirectory}.`,
       } satisfies HostLaunchResult;
     });
   }

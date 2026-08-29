@@ -7,15 +7,6 @@ import { seedMockPortfolio } from "./seed.ts";
 import { defineSessionHostContractTests } from "../session-host-contract.test-support.ts";
 
 describe("Mock host adapter", () => {
-  test("offers the same curated launch set as the live host", async () => {
-    const adapter = new MockHostAdapter({ clock: new FixedClock(10_000) });
-    expect(await Effect.runPromise(adapter.listLaunchOptions())).toEqual([
-      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
-      { kind: "codex", label: "Codex", description: "Codex CLI" },
-      { kind: "pi", label: "Pi", description: "Pi coding agent" },
-    ]);
-  });
-
   test("loops deterministic agent frames and exposes state transitions", async () => {
     const clock = new FixedClock(10_000);
     const scenario = createMockScenario();
@@ -150,7 +141,10 @@ describe("Mock host adapter", () => {
     const staleProjection = universe.project({ kind: "universe-map", now: clock.now() });
     expect(staleProjection.kind).toBe("universe-map");
     if (staleProjection.kind !== "universe-map") throw new Error("Expected the universe map.");
-    expect(staleProjection.counts.stale).toBe(4);
+    expect(staleProjection.counts.stale).toBe(0);
+    expect(staleProjection.unassigned.every((agent) => agent.executionPresence === "absent")).toBe(
+      true,
+    );
     expect(staleProjection.counts.unassigned).toBe(4);
   });
 
@@ -224,21 +218,23 @@ describe("Mock host adapter", () => {
     const clock = new FixedClock(50_000);
     const adapter = new MockHostAdapter({ clock });
     const launched = await Effect.runPromise(
-      adapter.launch({
+      adapter.launchExecution({
         requestId: "launch-test",
         workingDirectory: "/synthetic/project",
-        agentKind: "codex",
         agentName: "launch-test",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
       }),
     );
     expect(launched.ok).toBe(true);
-    expect(launched.nativeId).toBe("mock-launch-1");
+    expect(launched.executionRef).toBe("mock-launch-1");
     const snapshot = await Effect.runPromise(adapter.snapshot());
-    expect(snapshot.agents.find((agent) => agent.nativeId === launched.nativeId)).toMatchObject({
-      displayName: "launch-test",
-      provider: "codex",
-      worktree: "/synthetic/project",
-    });
+    expect(snapshot.agents.find((agent) => agent.nativeId === launched.executionRef)).toMatchObject(
+      {
+        displayName: "launch-test",
+        provider: "codex",
+        worktree: "/synthetic/project",
+      },
+    );
   });
 });
 

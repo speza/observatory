@@ -12,10 +12,12 @@ import {
   parseWebTerminalEvent,
   releaseWebTerminal,
   resizeWebTerminal,
+  sendWebTerminalBytes,
   sendWebTerminalInput,
   sendWebTerminalScroll,
   webTerminalEventsUrl,
 } from "./api.ts";
+import { isModifiedTerminalKey, modifiedTerminalInput } from "./terminalKeyboard.ts";
 
 export type TerminalTheme = "light" | "dark";
 
@@ -127,7 +129,22 @@ export const TerminalSurface = ({
     let observer: ResizeObserver | undefined;
     let disposed = false;
 
+    const sendInput = (value: string): void => {
+      if (!sessionId || !activeRef.current) return;
+      void sendWebTerminalInput(sessionId, value).catch((error) =>
+        setStatus(error instanceof Error ? error.message : "Terminal input failed."),
+      );
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
+      if (isModifiedTerminalKey(event)) {
+        const modifiedInput = modifiedTerminalInput(event);
+        if (modifiedInput && sessionId && activeRef.current)
+          void sendWebTerminalBytes(sessionId, modifiedInput).catch((error) => {
+            setStatus(error instanceof Error ? error.message : "Terminal input failed.");
+          });
+        return false;
+      }
       if (event.type !== "keydown" || (event.key !== "PageUp" && event.key !== "PageDown"))
         return true;
       scrollTerminal({
@@ -178,12 +195,7 @@ export const TerminalSurface = ({
         setStatus(error instanceof Error ? error.message : "Terminal could not be opened."),
       );
 
-    const input = terminal.onData((value) => {
-      if (!sessionId || !activeRef.current) return;
-      void sendWebTerminalInput(sessionId, value).catch((error) =>
-        setStatus(error instanceof Error ? error.message : "Terminal input failed."),
-      );
-    });
+    const input = terminal.onData(sendInput);
 
     return () => {
       disposed = true;
@@ -221,7 +233,7 @@ export const TerminalSurface = ({
             <p className="overline">
               {link
                 ? `COMPANION TERMINAL / ${link.kind}`
-                : `HOST-OWNED TERMINAL / ${agent.hostKind}`}
+                : `HOST-OWNED TERMINAL / ${agent.execution?.hostKind ?? "detached"}`}
             </p>
             <h2>{link?.label ?? agent.displayName}</h2>
           </div>

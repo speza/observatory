@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "example-agent-harness",
+  "displayName": "Example Agent harness",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entrypoint": "plugin.ts",
+  "capabilities": ["agent-harness"]
+}

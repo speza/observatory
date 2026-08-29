@@ -274,22 +274,10 @@ const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
   };
 };
 
-const goalSpacingBounds = (goal: MapGoalView): GoalLocalBounds => {
-  const radius = goalRadius(goal);
-  const titleLines = linesFor(goal.title);
-  const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
-  return {
-    left: Math.max(radius + 3, titleWidth),
-    right: Math.max(radius + 3, titleWidth),
-    top: radius + 3,
-    bottom: radius + 54 + Math.max(0, titleLines.length - 1) * 18,
-  };
-};
-
 /** Expand durable goal anchors just enough that their rendered groups cannot overlap. */
 export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number => {
   let scale = 1;
-  const goalBounds = projection.goals.map(goalSpacingBounds);
+  const goalBounds = projection.goals.map(goalLocalBounds);
   for (let leftIndex = 0; leftIndex < projection.goals.length; leftIndex += 1) {
     const left = projection.goals[leftIndex];
     const leftBounds = goalBounds[leftIndex];

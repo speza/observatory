@@ -64,9 +64,9 @@ export const evaluateAttention = (
   for (const agent of agents) {
     const priority = priorities.get(agent.primaryGoalId ?? "") ?? "P3";
     const currentReason =
-      agent.hostHealth === "live" ? attentionReason(agent.runtimeState) : undefined;
+      agent.executionPresence === "live" ? attentionReason(agent.runtimeState) : undefined;
     if (currentReason) {
-      const sourceLabel = displayHostKind(agent.hostKind);
+      const sourceLabel = displayHostKind(agent.execution?.hostKind ?? "host");
       const startedAt = agent.attentionSince ?? agent.lastChangedAt;
       items.push({
         id: `${agent.id}:${currentReason}`,
@@ -88,8 +88,8 @@ export const evaluateAttention = (
       });
     }
 
-    if (agent.hostHealth !== "live") {
-      const sourceLabel = displayHostKind(agent.hostKind);
+    if (agent.observationHealth !== "fresh" || agent.executionPresence === "unknown") {
+      const sourceLabel = displayHostKind(agent.execution?.hostKind ?? "host");
       const startedAt = agent.lastSeenAt;
       items.push({
         id: `${agent.id}:host-stale`,

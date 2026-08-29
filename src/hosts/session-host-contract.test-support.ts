@@ -88,10 +88,10 @@ export const defineSessionHostContractTests = (
     test("returns a structured launch result", async () => {
       const { host } = await createHarness();
       const launched = await Effect.runPromise(
-        host.launch({
+        host.launchExecution({
           requestId: `contract-${label.toLocaleLowerCase()}`,
           workingDirectory: "/sandbox/alpha",
-          agentKind: "codex",
+          processPlan: { harnessId: "codex", executable: "codex", args: [] },
         }),
       );
       expect(launched).toMatchObject({ ok: expect.any(Boolean) });

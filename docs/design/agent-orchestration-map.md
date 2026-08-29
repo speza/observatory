@@ -304,6 +304,17 @@ related resources or supporting lenses, not as hard-coded kernel fields or a
 new required topology layer. See the [plugin architecture](plugin-architecture.md)
 for the boundary and failure rules.
 
+The first code-host slice joins each Agent's trusted observed worktree to local
+Git repository/branch/HEAD status and then to a verified pull request. The join
+belongs to Observatory, not Herdr: Herdr reports where the execution runs,
+while the repository-status module combines Git with contributed code-host
+plugins. GitHub is the first built-in plugin; GitLab and Bitbucket can be
+contributed through the same versioned capability. Agent cards and Goals receive
+compact summaries; the full Repository status stays in the inspector, Closeout
+and a later optional Git lens. A same-named branch is never sufficient to claim
+a pull-request association. See
+[Agent repository status and code-host plugins](../specs/agent-repository-and-code-host-plugins.md).
+
 Agent-supplied semantics are progressively enhanced:
 
 1. vanilla agents expose whatever can be discovered safely from their process,
@@ -378,8 +389,9 @@ recognised sibling Agents in the same host context. Observatory offers these in
 the Agent inspector and opens selected entries as companion terminal tabs. The
 map does not render them as nodes, and shell-only panes are not
 reconciled into the durable Agent inventory. If a person starts a supported
-Agent in a linked shell, the next authoritative host snapshot can reconcile it
-as a normal Agent using its existing native identity.
+Agent in a linked shell, provider identity and the next authoritative host
+snapshot can reconcile it as a normal Agent candidate. Host-native identity
+alone does not establish durable continuity or Goal assignment.
 
 ## Interaction model
 
@@ -619,9 +631,13 @@ New nodes receive the nearest deterministic free logical position. The placement
 scan considers the current goal body and direct-satellite footprint, prefers a
 compact horizontal portfolio, and expands its search when occupied space leaves
 no suitable slot. Existing accepted nodes do not reflow when another goal or
-agent appears. Manual movement pins the goal anchor and its satellites remain
-relative to it. Formatting is an explicit, undoable operation that can preserve
-pinned positions; continuous auto-format is not the default assumption.
+agent appears elsewhere. An unpinned goal is repaired locally when its own
+direct-agent footprint grows into an occupied footprint: the Layout module
+moves only that goal to the nearest deterministic free slot. Manual movement
+pins the goal anchor and its satellites remain relative to it; pinned goals are
+never moved by repair. Formatting is an explicit, undoable operation that can
+preserve pinned positions; continuous auto-format is not the default
+assumption.
 
 Type-to-find search should work from anywhere over goal and agent
 names and descriptions, including archived items. Selecting a result focuses it
@@ -652,9 +668,10 @@ a later host refresh may update the archived record but must not silently bring
 it back.
 
 Goal placement is a separate free-space operation: new goals are placed against
-the current occupied footprints, while accepted goal anchors remain stable.
-The Universe already accepts durable moved anchors, but browser position
-editing remains outstanding. Clicking a goal or using focus descends to a
+the current occupied footprints, while accepted pinned goal anchors remain
+stable. Adding agents repairs a colliding unpinned goal locally without
+reshuffling the portfolio. Dragging a goal in the browser persists and pins its
+new logical anchor. Clicking a goal or using focus descends to a
 goal-only map that contains that body and all of its direct agents. Selecting
 an unassigned agent keeps the supporting Inbox context. Creating a goal selects
 it automatically; assignment remains an explicit inspector action.

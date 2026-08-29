@@ -5,11 +5,11 @@ import { HerdrHostAdapter } from "../hosts/herdr/adapter.ts";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
 import { createMockScenario } from "../hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../hosts/mock/seed.ts";
-import { displayHostKind, type SessionHost } from "../hosts/types.ts";
+import { displayHostKind, type HostSnapshot, type SessionHost } from "../hosts/types.ts";
 import { SqliteUniverseStore } from "../persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "../projection/projection.ts";
-import { Universe } from "../universe/universe.ts";
-import type { Clock, IdGenerator, UniverseStore } from "../universe/types.ts";
+import { Universe, type ReconciliationResult } from "../universe/universe.ts";
+import type { Clock, IdGenerator } from "../universe/types.ts";
 
 export class SystemClock implements Clock {
   now(): number {
@@ -30,15 +30,21 @@ export interface ObservatoryRuntime {
   readonly clock: Clock;
   readonly host: SessionHost;
   readonly universe: Universe;
-  readonly store: UniverseStore;
+  readonly store: SqliteUniverseStore;
   readonly reconcile: ReturnType<typeof createReconcile>;
   readonly useMockHost: boolean;
 }
 
-const createReconcile = (host: SessionHost, universe: Universe) =>
+const createReconcile = (
+  host: SessionHost,
+  universe: Universe,
+  reconcileSnapshot: (snapshot: HostSnapshot) => ReconciliationResult = universe.reconcile.bind(
+    universe,
+  ),
+) =>
   Effect.gen(function* () {
     const snapshot = yield* host.snapshot();
-    const result = universe.reconcile(snapshot);
+    const result = reconcileSnapshot(snapshot);
     const hostLabel = displayHostKind(snapshot.hostKind);
     if (!result.accepted)
       return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
@@ -64,6 +70,7 @@ export const createObservatoryRuntime = (): ObservatoryRuntime => {
       })()
     : new HerdrHostAdapter({ clock });
   const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
+  universe.invalidateRuntimeFacts();
   const reconcile = createReconcile(host, universe);
   return {
     clock,
@@ -75,9 +82,14 @@ export const createObservatoryRuntime = (): ObservatoryRuntime => {
   };
 };
 
-export const initializeObservatoryRuntime = (runtime: ObservatoryRuntime) =>
+export const initializeObservatoryRuntime = (
+  runtime: ObservatoryRuntime,
+  reconcileSnapshot?: Parameters<typeof createReconcile>[2],
+) =>
   Effect.gen(function* () {
-    let message = yield* runtime.reconcile;
+    let message = yield* reconcileSnapshot
+      ? createReconcile(runtime.host, runtime.universe, reconcileSnapshot)
+      : runtime.reconcile;
     if (runtime.useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
       const seeded = seedMockPortfolio(runtime.universe);
       if (seeded.createdGoals > 0)

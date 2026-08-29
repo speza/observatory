@@ -2,11 +2,14 @@
 
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
-import { delimiter, extname, join, normalize } from "node:path";
+import { delimiter, extname, join, normalize, resolve } from "node:path";
 import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runtime/runtime.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { LocalWorkspaceProvider } from "../workspaces/local.ts";
 import { ObservatoryWebApi } from "./api.ts";
+import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry.ts";
+import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
+import { ProviderSessionRecovery } from "../provider-sessions/recovery.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -46,7 +49,6 @@ const staticResponse = async (url: URL): Promise<Response> => {
 const program = Effect.scoped(
   Effect.gen(function* () {
     const runtime = createObservatoryRuntime();
-    const initialMessage = yield* initializeObservatoryRuntime(runtime);
     const port = Number(process.env.AO_WEB_PORT ?? 4310);
     const configuredWorkspaceLocations = (process.env.AO_WORKSPACE_LOCATIONS ?? "")
       .split(delimiter)
@@ -60,12 +62,37 @@ const program = Effect.scoped(
     const workspace = new LocalWorkspaceProvider({
       locations: [...configuredWorkspaceLocations, ...discoveredWorkspaceLocations],
     });
+    const configuredPlugins = yield* Effect.promise(() =>
+      readPluginConfiguration(process.env.AO_PLUGIN_CONFIG),
+    );
+    const plugins = yield* loadPluginRegistry({
+      packages: [
+        { path: resolve(import.meta.dir, "../../plugins/agent-harnesses") },
+        { path: resolve(import.meta.dir, "../../plugins/github") },
+        ...configuredPlugins,
+      ],
+      now: () => runtime.clock.now(),
+    });
+    const repositoryStatus = new DefaultAgentRepositoryStatusReader(
+      runtime.universe,
+      runtime.clock,
+      workspace,
+      plugins,
+    );
+    const providerSessions = new ProviderSessionRecovery(plugins, runtime.store, runtime.universe);
     const startAgent = createStartAgentCoordinator({
       universe: runtime.universe,
       host: runtime.host,
+      harnesses: plugins,
       workspace,
-      refresh: runtime.reconcile,
+      receipts: runtime.store,
+      reconcileHost: providerSessions.reconcileHost.bind(providerSessions),
     });
+    const providerRefresh = yield* providerSessions.refresh();
+    const initialMessage = yield* initializeObservatoryRuntime(
+      runtime,
+      providerSessions.reconcileHost.bind(providerSessions),
+    );
     const api = new ObservatoryWebApi(
       runtime.universe,
       runtime.clock,
@@ -73,8 +100,12 @@ const program = Effect.scoped(
       runtime.host,
       workspace,
       { coordinator: startAgent, workspace },
+      repositoryStatus,
+      plugins,
+      providerSessions,
     );
     const refreshMs = Number(process.env.AO_WEB_REFRESH_MS ?? 2_000);
+    const providerRefreshMs = Number(process.env.AO_PROVIDER_REFRESH_MS ?? 60_000);
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port,
@@ -84,16 +115,26 @@ const program = Effect.scoped(
       },
     });
     const refresh = (): void => {
-      void Effect.runPromise(runtime.reconcile).catch((error: Error) => {
-        console.error(`Observatory refresh failed: ${error.message}`);
-      });
+      void Effect.runPromise(runtime.host.snapshot())
+        .then((snapshot) => providerSessions.reconcileHost(snapshot))
+        .catch((error: Error) => {
+          console.error(`Observatory refresh failed: ${error.message}`);
+        });
     };
     const timer = setInterval(refresh, refreshMs);
-    console.log(`${initialMessage}\nObservatory web · http://${server.hostname}:${server.port}`);
+    const providerTimer = setInterval(() => {
+      void Effect.runPromise(providerSessions.refresh()).catch((error: Error) => {
+        console.error(`Provider-session refresh failed: ${error.message}`);
+      });
+    }, providerRefreshMs);
+    console.log(
+      `${initialMessage} · ${providerRefresh.discoveredSessions} provider sessions discovered\nObservatory web · http://${server.hostname}:${server.port}`,
+    );
 
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         clearInterval(timer);
+        clearInterval(providerTimer);
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

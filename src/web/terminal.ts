@@ -48,13 +48,19 @@ const OpenRequest = Schema.Struct({
 const TextInputRequest = Schema.Struct({
   value: Schema.String.pipe(Schema.maxLength(32_768)),
 });
+const BytesInputRequest = Schema.Struct({
+  bytes: Schema.Array(Schema.Number.pipe(Schema.int(), Schema.between(0, 255))).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(32_768),
+  ),
+});
 const ScrollInputRequest = Schema.Struct({
   kind: Schema.Literal("scroll"),
   direction: Schema.Literal("up", "down"),
   lines: Schema.Number.pipe(Schema.int(), Schema.between(1, 512)),
   source: Schema.Literal("wheel", "page-key"),
 });
-const InputRequest = Schema.Union(TextInputRequest, ScrollInputRequest);
+const InputRequest = Schema.Union(TextInputRequest, BytesInputRequest, ScrollInputRequest);
 
 interface ActiveTerminal {
   readonly terminal: HostedTerminalSession;
@@ -105,11 +111,11 @@ export class WebTerminalGateway {
 
   async linkedExecutions(agentId: string): Promise<WebTerminalLinksResponse> {
     const agent = this.activeAgent(agentId);
+    if (!agent.execution) throw new WebTerminalError("Agent has no current host execution.", 409);
+    const currentBinding = agent.execution;
     let access;
     try {
-      access = await Effect.runPromise(
-        this.host.access({ hostKind: agent.hostKind, nativeId: agent.nativeId }),
-      );
+      access = await Effect.runPromise(this.host.access(currentBinding));
     } catch {
       throw new WebTerminalError("The host could not inspect linked terminals.", 502);
     }
@@ -127,8 +133,8 @@ export class WebTerminalGateway {
         retainedHandleIds.add(id);
         this.rememberLinkHandle(id, {
           agentId: agent.id,
-          hostKind: agent.hostKind,
-          nativeId: agent.nativeId,
+          hostKind: currentBinding.hostKind,
+          nativeId: currentBinding.nativeId,
           execution,
         });
       }
@@ -164,10 +170,9 @@ export class WebTerminalGateway {
   async open(body: string): Promise<WebTerminalOpenResponse> {
     const request = decode(OpenRequest, body);
     const agent = this.activeAgent(request.agentId);
+    if (!agent.execution) throw new WebTerminalError("Agent has no current host execution.", 409);
     try {
-      const access = await Effect.runPromise(
-        this.host.access({ hostKind: agent.hostKind, nativeId: agent.nativeId }),
-      );
+      const access = await Effect.runPromise(this.host.access(agent.execution));
       const options: TerminalOpenOptions | undefined = request.resizeMode
         ? { resizeMode: request.resizeMode }
         : undefined;
@@ -237,7 +242,9 @@ export class WebTerminalGateway {
     const input: Parameters<HostedTerminalSession["send"]>[0] =
       "value" in request
         ? { kind: "text", value: request.value }
-        : (request satisfies WebTerminalScrollRequest);
+        : "bytes" in request
+          ? { kind: "bytes", value: Uint8Array.from(request.bytes) }
+          : (request satisfies WebTerminalScrollRequest);
     return this.action(active.terminal.send(input));
   }
 
@@ -291,7 +298,10 @@ export class WebTerminalGateway {
     const handle = this.linkHandles.get(linkId);
     if (!handle || handle.agentId !== agent.id)
       throw new WebTerminalError("The linked terminal handle is no longer available.", 409);
-    if (handle.hostKind !== agent.hostKind || handle.nativeId !== agent.nativeId)
+    if (
+      handle.hostKind !== agent.execution?.hostKind ||
+      handle.nativeId !== agent.execution?.nativeId
+    )
       throw new WebTerminalError("The linked terminal belongs to a different Agent identity.", 409);
     if (!hasAgentCapability(access, "linked-terminal"))
       throw new WebTerminalError(access.explanation, 409);

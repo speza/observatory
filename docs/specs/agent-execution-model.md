@@ -4,7 +4,8 @@ Status: accepted implementation model
 Date: 2026-08-24
 Related: [Goal-centred agent orchestration map](../design/agent-orchestration-map.md),
 [Contextual linked execution surfaces](contextual-companion-surfaces.md),
-[Observatory technical architecture](../design/technical-architecture.md)
+[Observatory technical architecture](../design/technical-architecture.md),
+[Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
 
 ## Decision
 
@@ -14,7 +15,9 @@ location owned by `SessionHost`; it is not a second product identity.
 ```text
 Goal
 └── Agent*
-    └── host-observed linked executions*
+    ├── provider session?       durable continuity
+    ├── current execution?      replaceable host binding
+    └── linked executions*      transient supporting surfaces
 ```
 
 An Agent is the worker a person supervises. A linked execution is a shell or
@@ -23,9 +26,11 @@ Observatory does not own the process, PTY or Herdr topology.
 
 ## Durable model
 
-`UniverseState.agents` is the authoritative durable inventory of recognised
-agent work. Each observation receives one stable Observatory `AgentId`, matched
-by host kind and opaque native identity.
+`UniverseState.agents` is the authoritative durable inventory of accepted
+agent work. Each Agent receives one stable Observatory `AgentId`. For supported
+managed harnesses, an exact provider-session binding preserves continuity while
+host execution bindings are replaced. Host kind and opaque native execution
+identity locate a process; they do not identify the durable Agent.
 
 Goals assign directly to Agents:
 
@@ -42,13 +47,17 @@ from the earlier session-shaped schema is required.
 ## Host model
 
 `SessionHost` remains the only host seam. Herdr and future hosts own process
-lifecycle, panes, terminals and provider attachment mechanics. They report
-generic observations and capabilities; Herdr identifiers and topology remain
-opaque outside the adapter.
+lifecycle, panes, terminals and attachment mechanics. Agent-harness plugins own
+provider command construction, native resume and conversation continuity. They
+report generic observations and capabilities; Herdr and provider identifiers
+remain opaque outside their respective adapters. See
+[Agent harness plugins](agent-harness-plugins.md).
 
-`HostSnapshot.agents` is the host's authoritative recognised-agent inventory.
+`HostSnapshot.agents` is the host's authoritative recognised-execution
+inventory. It does not define the durable provider-session catalogue.
 Shell-only panes are not inserted into `UniverseState.agents`. When a durable
-Agent is accessed, the host may return transient `LinkedExecution` values:
+Agent is accessed through a current execution binding, the host may return
+transient `LinkedExecution` values:
 
 ```text
 HostSnapshot.agents
@@ -76,20 +85,22 @@ closes only when no valid linked target remains.
 
 Promotion is observational. The person opens a linked shell and starts Claude,
 Codex, Pi or another supported agent. On a later host snapshot, the host's
-authoritative agent inventory includes that execution. Reconciliation then
-creates or updates the normal Agent record using the same native identity; it
-does not create a duplicate shell-derived identity.
+recognised-execution inventory includes that execution. Reconciliation then
+waits for exact provider identity or explicit human acceptance before creating
+or rebinding the normal Agent. It does not create a duplicate shell-derived
+identity.
 
 ```text
 linked shell
   -> person starts an agent in it
-  -> host reports the recognised agent
-  -> Universe reconciles the same native execution as an Agent
+  -> host reports a recognised execution
+  -> provider identity is observed or remains unknown
+  -> Universe accepts or rebinds only with exact evidence or human intent
 ```
 
-Missing or ambiguous host facts remain uncertain observations. A shared
-worktree or execution-container match may support a related-agent projection,
-but it never silently assigns an Agent to a Goal.
+Missing or ambiguous provider or host facts remain uncertain observations. A
+shared worktree or execution-container match may support a related-agent
+projection, but it never silently assigns an Agent to a Goal.
 
 ## Interaction
 

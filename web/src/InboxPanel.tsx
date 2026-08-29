@@ -88,7 +88,7 @@ export const InboxPanel = ({
               >
                 <strong>{agent.displayName}</strong>
                 <small>{agent.goalTitle ?? "Unassigned observation"}</small>
-                <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
+                <em>{agent.lifecycleState}</em>
               </button>
             </div>
           ))

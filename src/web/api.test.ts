@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
+import { loadPluginRegistry } from "../plugins/registry.ts";
+import { resolve } from "node:path";
 import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
 import type {
   PreparedWorkspace,
@@ -9,6 +11,8 @@ import type {
   WorkspaceProvider,
   WorkspaceSelection,
 } from "../workspaces/types.ts";
+import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
+import type { ProviderSessionRecoveryModule } from "../provider-sessions/types.ts";
 import { ObservatoryWebApi, type PortfolioResponse } from "./api.ts";
 import type {
   WebCommand,
@@ -28,6 +32,7 @@ type TerminalTestBody =
       readonly resizeMode?: "fit" | "preserve";
     }
   | { readonly value: string }
+  | { readonly bytes: readonly number[] }
   | {
       readonly kind: "scroll";
       readonly direction: "up" | "down";
@@ -38,6 +43,64 @@ type TerminalTestBody =
   | { readonly release?: never };
 
 describe("ObservatoryWebApi", () => {
+  test("serves redacted recovery candidates and tracks by opaque browser handle", async () => {
+    const fixture = makeUniverse();
+    const recovery: ProviderSessionRecoveryModule = {
+      refresh: () =>
+        Effect.succeed({ observedProviders: 1, discoveredSessions: 1, diagnostics: [] }),
+      candidates: () => [
+        {
+          handle: "ps_public-handle",
+          harnessId: "codex",
+          providerLabel: "Codex",
+          title: "Recovered session",
+          workspaceRef: "/synthetic/project",
+          lastActiveAt: fixture.clock.now(),
+          resumeEligibility: "same-site",
+          provenance: "provider-index",
+          executionState: "unknown",
+        },
+      ],
+      track: (handle) => {
+        expect(handle).toBe("ps_public-handle");
+        return { agentId: "agent-recovered" };
+      },
+      reconcileHost: (snapshot) => fixture.universe.reconcile(snapshot),
+      observedExecution: () => undefined,
+    };
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      recovery,
+    );
+
+    const listed = await api.fetch(new Request("http://localhost/api/recovery/sessions?refresh=1"));
+    expect(listed.status).toBe(200);
+    const listedText = await listed.text();
+    expect(listedText).toContain("ps_public-handle");
+    expect(listedText).not.toContain("nativeConversationRef");
+
+    const tracked = await api.fetch(
+      new Request("http://localhost/api/recovery/track", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({ handle: "ps_public-handle" }),
+      }),
+    );
+    expect(tracked.status).toBe(200);
+    expect(await tracked.json()).toMatchObject({ agentId: "agent-recovered" });
+  });
+
   test("lists launch choices and starts an observed agent through the shared coordinator", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
@@ -71,16 +134,25 @@ describe("ObservatoryWebApi", () => {
           warnings: [],
         } satisfies PreparedWorkspace),
     };
-    const refresh = Effect.gen(function* () {
-      const snapshot = yield* host.snapshot();
-      const result = fixture.universe.reconcile(snapshot);
-      return result.accepted ? "refreshed" : "rejected";
-    });
+    const plugins = await Effect.runPromise(
+      loadPluginRegistry({
+        packages: [{ path: resolve(import.meta.dir, "../../plugins/agent-harnesses") }],
+        runner: {
+          run: async () => ({
+            exitCode: 0,
+            stdout: "test version",
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          }),
+        },
+      }),
+    );
     const coordinator = createStartAgentCoordinator({
       universe: fixture.universe,
       host,
+      harnesses: plugins,
       workspace,
-      refresh,
     });
     const api = new ObservatoryWebApi(
       fixture.universe,
@@ -89,6 +161,8 @@ describe("ObservatoryWebApi", () => {
       host,
       undefined,
       { coordinator, workspace },
+      undefined,
+      plugins,
     );
 
     const optionsResponse = await api.fetch(new Request("http://localhost/api/launch/options"));
@@ -96,7 +170,7 @@ describe("ObservatoryWebApi", () => {
     expect(optionsResponse.status).toBe(200);
     expect(options.goals[0]?.id).toBe(goal.goalId);
     expect(options.locations[0]?.path).toBe("/synthetic/project");
-    expect(options.agents.some((agent) => agent.kind === "codex")).toBe(true);
+    expect(options.agents.some((agent) => agent.harnessId === "codex")).toBe(true);
 
     const browserResponse = await api.fetch(
       new Request("http://localhost/api/launch/browse?path=/synthetic/project"),
@@ -116,7 +190,7 @@ describe("ObservatoryWebApi", () => {
           requestId: "web-launch-test",
           goalId: goal.goalId,
           workspace: { kind: "existing", path: "/synthetic/project" },
-          agentKind: "codex",
+          harnessId: "codex",
           agentName: "Web agent",
           prompt: "Prove the web launch path.",
         }),
@@ -135,6 +209,35 @@ describe("ObservatoryWebApi", () => {
         .find((candidate) => candidate.id === goal.goalId)
         ?.agents.some((agent) => agent.id === started.result.agentId),
     ).toBe(true);
+    expect(JSON.stringify(started.portfolio)).not.toContain("mock-conversation-");
+
+    fixture.universe.invalidateRuntimeFacts();
+    const resumable = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (resumable.kind !== "command-centre") throw new Error("Expected command centre.");
+    expect(resumable.goals[0]?.agents[0]?.canResume).toBe(false);
+    expect(resumable.goals[0]?.agents[0]?.lifecycleState).toBe("stale-observation");
+    const resumedResponse = await api.fetch(
+      new Request("http://localhost/api/launch/resume", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          requestId: "web-resume-test",
+          agentId: started.result.agentId,
+        }),
+      }),
+    );
+    const resumed: WebStartAgentResponse = await resumedResponse.json();
+    expect(resumedResponse.status).toBe(200);
+    expect(resumed.result.status).toBe("already-observed");
+    expect(resumed.result.agentId).toBe(started.result.agentId);
+    expect(JSON.stringify(resumed.portfolio)).not.toContain("mock-conversation-");
 
     const foreign = await api.fetch(
       new Request("http://localhost/api/launch/start", {
@@ -290,6 +393,58 @@ describe("ObservatoryWebApi", () => {
     expect(missing.status).toBe(400);
   });
 
+  test("serves repository status by trusted agent id without accepting repository inputs", async () => {
+    const fixture = makeUniverse();
+    fixture.universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "native-repository",
+          displayName: "Repository agent",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:native-repository",
+          worktree: "/trusted/worktree",
+          observedAt: fixture.clock.now(),
+        },
+      ]),
+    );
+    const agent = fixture.universe.snapshot().agents[0];
+    if (!agent) throw new Error("Expected reconciled agent.");
+    const reader: AgentRepositoryStatusReader = {
+      inspect: (agentId) =>
+        Effect.succeed({
+          kind: "agent-repository-status",
+          agentId,
+          status: "partial",
+          observedAt: fixture.clock.now(),
+          diagnostics: ["No pull request found for this repository and branch."],
+          pullRequests: [],
+          providerCached: false,
+          plugins: [],
+        }),
+    };
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      undefined,
+      undefined,
+      undefined,
+      reader,
+    );
+
+    const response = await api.fetch(
+      new Request(
+        `http://localhost/api/repository?agentId=${encodeURIComponent(agent.id)}&repository=other/private&path=/etc/passwd`,
+      ),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.agentId).toBe(agent.id);
+    expect(body.diagnostics[0]).toContain("No pull request");
+  });
+
   test("requires same-origin JSON with an explicit command header", async () => {
     const fixture = makeUniverse();
     const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
@@ -371,6 +526,19 @@ describe("ObservatoryWebApi", () => {
 
     expect((await command({ type: "AssignAgents", agentIds: [agentId], goalId })).status).toBe(200);
     expect((await command({ type: "SetGoalPriority", goalId, priority: "P0" })).status).toBe(200);
+    expect(
+      (
+        await command({
+          type: "SetGoalMapPosition",
+          goalId,
+          position: { x: 240, y: -96 },
+        })
+      ).status,
+    ).toBe(200);
+    expect(fixture.universe.snapshot().goals[0]?.mapPosition).toEqual({ x: 240, y: -96 });
+    expect(fixture.universe.snapshot().goals[0]?.mapPositionPinned).toBe(true);
+    expect((await command({ type: "ResetGoalMapPosition", goalId })).status).toBe(200);
+    expect(fixture.universe.snapshot().goals[0]?.mapPositionPinned).toBe(false);
     expect((await command({ type: "UnassignAgent", agentId })).status).toBe(200);
     fixture.clock.value += 1_000;
     fixture.universe.reconcile(hostSnapshot([], fixture.clock.now()));
@@ -414,7 +582,7 @@ describe("ObservatoryWebApi", () => {
     fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
     const agent = fixture.universe
       .snapshot()
-      .agents.find((candidate) => candidate.nativeId === "mock-p01");
+      .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
     if (!agent) throw new Error("Expected the deterministic mock agent.");
     const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
     const mutation = (path: string, body: TerminalTestBody): Promise<Response> =>
@@ -468,6 +636,20 @@ describe("ObservatoryWebApi", () => {
         })
       ).status,
     ).toBe(200);
+    expect(
+      (
+        await mutation(`/api/terminal/${sessionId}/input`, {
+          bytes: [0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75],
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await mutation(`/api/terminal/${sessionId}/input`, {
+          bytes: [256],
+        })
+      ).status,
+    ).toBe(400);
     expect(
       (
         await mutation(`/api/terminal/${sessionId}/input`, {
@@ -530,7 +712,7 @@ describe("ObservatoryWebApi", () => {
     fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
     const agent = fixture.universe
       .snapshot()
-      .agents.find((candidate) => candidate.nativeId === "mock-p01");
+      .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
     if (!agent) throw new Error("Expected the deterministic mock Agent.");
     const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
 

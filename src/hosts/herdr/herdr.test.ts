@@ -124,15 +124,6 @@ class FakeTerminalRunner implements TerminalCommandRunner {
 }
 
 describe("Herdr adapter", () => {
-  test("offers the initial curated launch set", async () => {
-    const adapter = new HerdrHostAdapter({ clock: new FixedClock(12_345) });
-    expect(await Effect.runPromise(adapter.listLaunchOptions())).toEqual([
-      { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
-      { kind: "codex", label: "Codex", description: "Codex CLI" },
-      { kind: "pi", label: "Pi", description: "Pi coding agent" },
-    ]);
-  });
-
   test("parses recognized agents into agents and ignores non-agent panes", () => {
     const snapshot = parseHerdrSnapshot(fixture, 12_345);
     expect(snapshot.available).toBe(true);
@@ -173,6 +164,53 @@ describe("Herdr adapter", () => {
     );
 
     expect(snapshot.agents[0]?.displayName).toBe("Model override");
+  });
+
+  test("translates native agent session evidence without interpreting its value", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            panes: [
+              {
+                pane_id: "restored",
+                terminal_id: "term",
+                workspace_id: "w",
+                tab_id: "t",
+                cwd: "/ordinary/workspace",
+              },
+            ],
+            agents: [
+              {
+                pane_id: "restored",
+                agent: "codex",
+                agent_session_restored: true,
+                agent_session: {
+                  source: "herdr-integration",
+                  agent: "codex",
+                  kind: "id",
+                  value: "opaque-session-value",
+                },
+              },
+            ],
+            workspaces: [],
+          },
+        },
+      },
+      99,
+    );
+    expect(snapshot.agents[0]?.harnessEvidence).toEqual({
+      detectedHarnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        kind: "id",
+        value: "opaque-session-value",
+      },
+      restoreState: "host-restored",
+      source: "native-integration",
+      observedAt: 99,
+    });
+    expect(snapshot.agents[0]?.worktree).toBe("/ordinary/workspace");
   });
 
   test("skips malformed observations without throwing", () => {
@@ -331,6 +369,14 @@ describe("Herdr adapter", () => {
       ok: true,
       message: "Closed Herdr agent fixture-w2:p1.",
     });
+    expect(runner.calls).toContainEqual([
+      "herdr",
+      "pane",
+      "send-keys",
+      "fixture-w2:p1",
+      "ctrl+c",
+      "ctrl+c",
+    ]);
     expect(runner.calls.at(-1)).toEqual(["herdr", "pane", "close", "fixture-w2:p1"]);
   });
 
@@ -425,7 +471,7 @@ describe("Herdr adapter", () => {
     );
   });
 
-  test("launches through a Herdr workspace and agent command without leaking pane topology", async () => {
+  test("executes a structured process plan without choosing a provider command", async () => {
     const runner = new FakeRunner({
       exitCode: 0,
       stdout: JSON.stringify(fixture),
@@ -436,12 +482,15 @@ describe("Herdr adapter", () => {
       clock: new FixedClock(100),
     });
     const result = await Effect.runPromise(
-      adapter.launch({
+      adapter.launchExecution({
         requestId: "launch-herdr-test",
         workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
         agentName: "launch-check",
-        prompt: "start safely",
+        processPlan: {
+          harnessId: "codex",
+          executable: "codex",
+          args: ["--model", "o3's model", "start safely"],
+        },
       }),
     );
     expect(result.ok).toBe(true);
@@ -457,58 +506,80 @@ describe("Herdr adapter", () => {
     ]);
     expect(runner.calls).toContainEqual([
       "herdr",
-      "agent",
-      "start",
-      "launch-check",
-      "--kind",
-      "codex",
-      "--pane",
+      "pane",
+      "run",
       "fixture-w1:p2",
-      "--timeout",
-      "30000",
+      "exec 'codex' '--model' 'o3'\"'\"'s model' 'start safely'",
     ]);
+    expect(result.executionRef).toBe("fixture-w1:p2");
+  });
+
+  test("reports a plan-known opaque conversation reference through Herdr", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    const panes = Array.isArray(snapshot.panes) ? snapshot.panes.filter(isRecord) : [];
+    const launchedPane = panes.find((pane) => stringValue(pane, "pane_id") === "fixture-w1:p2");
+    if (!launchedPane) throw new Error("Sanitized Herdr launch pane is missing.");
+    const observedFixture = {
+      ...fixture,
+      result: {
+        ...result,
+        snapshot: {
+          ...snapshot,
+          agents: [
+            ...(Array.isArray(snapshot.agents) ? snapshot.agents : []),
+            { ...launchedPane, agent: "codex", agent_status: "idle" },
+          ],
+        },
+      },
+    };
+    const runner = new FakeRunner(
+      { exitCode: 0, stdout: JSON.stringify(observedFixture), stderr: "" },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ result: { root_pane: { pane_id: "fixture-w1:p2" } } }),
+          stderr: "",
+        },
+      ],
+    );
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+
+    await Effect.runPromise(
+      adapter.launchExecution({
+        requestId: "resume-herdr-test",
+        workingDirectory: "/sandbox/alpha",
+        processPlan: {
+          harnessId: "codex",
+          executable: "codex",
+          args: ["resume", "opaque-session"],
+          nativeConversationRef: {
+            harnessId: "codex",
+            kind: "id",
+            value: "opaque-session",
+          },
+        },
+      }),
+    );
+
     expect(runner.calls).toContainEqual([
       "herdr",
-      "agent",
-      "prompt",
+      "pane",
+      "report-agent-session",
       "fixture-w1:p2",
-      "start safely",
+      "--source",
+      "herdr:codex",
+      "--agent",
+      "codex",
+      "--seq",
+      "100000000",
+      "--agent-session-id",
+      "opaque-session",
     ]);
   });
 
-  test("generates distinct names from the request suffix when no name is supplied", async () => {
-    const runner = new FakeRunner({
-      exitCode: 0,
-      stdout: JSON.stringify(fixture),
-      stderr: "",
-    });
-    const adapter = new HerdrHostAdapter({
-      runner,
-      clock: new FixedClock(100),
-    });
-
-    await Effect.runPromise(
-      adapter.launch({
-        requestId: "launch-m123456789-abc123",
-        workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
-      }),
-    );
-    await Effect.runPromise(
-      adapter.launch({
-        requestId: "launch-m123456789-def456",
-        workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
-      }),
-    );
-
-    const names = runner.calls
-      .filter((call) => call[0] === "herdr" && call[1] === "agent" && call[2] === "start")
-      .map((call) => call[3]);
-    expect(names).toEqual(["codex-launch-m123456789-abc123", "codex-launch-m123456789-def456"]);
-  });
-
-  test("returns Herdr's structured launch error to the caller", async () => {
+  test("does not echo process launch diagnostics that may contain session data", async () => {
     const runner = new FakeRunner(
       {
         exitCode: 0,
@@ -516,11 +587,6 @@ describe("Herdr adapter", () => {
         stderr: "",
       },
       [
-        {
-          exitCode: 0,
-          stdout: JSON.stringify(fixture),
-          stderr: "",
-        },
         {
           exitCode: 0,
           stdout: JSON.stringify({
@@ -534,8 +600,8 @@ describe("Herdr adapter", () => {
           exitCode: 1,
           stdout: JSON.stringify({
             error: {
-              code: "agent_name_taken",
-              message: "agent name codex-launch-m is already used",
+              code: "pane_run_failed",
+              message: "pane rejected the process command",
             },
           }),
           stderr: "",
@@ -548,15 +614,15 @@ describe("Herdr adapter", () => {
     });
 
     const result = await Effect.runPromise(
-      adapter.launch({
+      adapter.launchExecution({
         requestId: "launch-m123456789-duplicate",
         workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
       }),
     );
     expect(result).toEqual({
       ok: false,
-      message: "agent name codex-launch-m is already used",
+      message: "Herdr could not start codex.",
     });
   });
 
@@ -568,11 +634,6 @@ describe("Herdr adapter", () => {
         stderr: "",
       },
       [
-        {
-          exitCode: 0,
-          stdout: JSON.stringify(fixture),
-          stderr: "",
-        },
         {
           exitCode: 0,
           stdout: JSON.stringify({
@@ -588,82 +649,24 @@ describe("Herdr adapter", () => {
     });
 
     const result = await Effect.runPromise(
-      adapter.launch({
+      adapter.launchExecution({
         requestId: "launch-herdr-root-pane",
         workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
         agentName: "root-pane-check",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
       }),
     );
 
     expect(result.ok).toBe(true);
     expect(runner.calls).toContainEqual([
       "herdr",
-      "agent",
-      "start",
-      "root-pane-check",
-      "--kind",
-      "codex",
-      "--pane",
+      "pane",
+      "run",
       "created-workspace:p1",
-      "--timeout",
-      "30000",
+      "exec 'codex'",
     ]);
-    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(2);
-  });
-
-  test("retries while the new root shell is settling", async () => {
-    const runner = new FakeRunner(
-      {
-        exitCode: 0,
-        stdout: JSON.stringify(fixture),
-        stderr: "",
-      },
-      [
-        {
-          exitCode: 0,
-          stdout: JSON.stringify(fixture),
-          stderr: "",
-        },
-        {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            result: { root_pane: { pane_id: "settling-workspace:p1" } },
-          }),
-          stderr: "",
-        },
-        {
-          exitCode: 1,
-          stdout: "",
-          stderr: JSON.stringify({ error: { code: "agent_pane_busy" } }),
-        },
-        {
-          exitCode: 0,
-          stdout: JSON.stringify(fixture),
-          stderr: "",
-        },
-      ],
-    );
-    const adapter = new HerdrHostAdapter({
-      runner,
-      clock: new FixedClock(100),
-    });
-
-    const result = await Effect.runPromise(
-      adapter.launch({
-        requestId: "launch-herdr-settling-pane",
-        workingDirectory: "/sandbox/alpha",
-        agentKind: "codex",
-        agentName: "settling-pane-check",
-      }),
-    );
-
-    expect(result.ok).toBe(true);
-    expect(
-      runner.calls.filter(
-        (call) => call[0] === "herdr" && call[1] === "agent" && call[2] === "start",
-      ),
-    ).toHaveLength(2);
+    expect(result.executionRef).toBe("created-workspace:p1");
+    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(1);
   });
 
   test("does not claim access for unavailable or unknown agents", async () => {
@@ -761,6 +764,21 @@ describe("Herdr adapter", () => {
     expect(
       await Effect.runPromise(
         opened.terminal!.send({
+          kind: "bytes",
+          value: Uint8Array.of(0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75),
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: "Input sent to the Herdr terminal.",
+    });
+    expect(JSON.parse(String(terminalRunner.process.writes[1]))).toEqual({
+      type: "terminal.input",
+      bytes: "G1sxMzsydQ==",
+    });
+    expect(
+      await Effect.runPromise(
+        opened.terminal!.send({
           kind: "scroll",
           direction: "up",
           lines: 12,
@@ -773,7 +791,7 @@ describe("Herdr adapter", () => {
       ok: true,
       message: "Input sent to the Herdr terminal.",
     });
-    expect(JSON.parse(String(terminalRunner.process.writes[1]))).toEqual({
+    expect(JSON.parse(String(terminalRunner.process.writes[2]))).toEqual({
       type: "terminal.scroll",
       direction: "up",
       lines: 12,
@@ -790,7 +808,7 @@ describe("Herdr adapter", () => {
         source: "page-key",
       }),
     );
-    expect(JSON.parse(String(terminalRunner.process.writes[2]))).toMatchObject({
+    expect(JSON.parse(String(terminalRunner.process.writes[3]))).toMatchObject({
       type: "terminal.scroll",
       direction: "down",
       lines: 23,
@@ -802,7 +820,7 @@ describe("Herdr adapter", () => {
     });
     expect((await Effect.runPromise(opened.terminal!.release())).ok).toBe(true);
     expect(terminalRunner.process.killed).toBe(true);
-    expect(terminalRunner.process.writes).toHaveLength(5);
+    expect(terminalRunner.process.writes).toHaveLength(6);
   });
 
   test("opens an observed shell-only pane as a transient shell linked execution", async () => {

@@ -1,7 +1,7 @@
 import type { Effect } from "effect";
-import type { SessionHost } from "../hosts/types.ts";
-import type { HostError } from "../hosts/errors.ts";
-import type { Universe } from "../universe/universe.ts";
+import type { HostSnapshot, SessionHost } from "../hosts/types.ts";
+import type { AgentHarness, OpaqueNativeConversationRef } from "../plugin-sdk/index.ts";
+import type { ReconciliationResult, Universe } from "../universe/universe.ts";
 import type { GoalId, AgentId } from "../universe/types.ts";
 import type {
   PreparedWorkspace,
@@ -34,14 +34,21 @@ export interface StartAgentIntent {
   readonly requestId: string;
   readonly goal: LaunchGoal;
   readonly workspace: WorkspaceSelection;
-  readonly agent: {
-    readonly kind: string;
+  readonly harness: {
+    readonly id: string;
     readonly name?: string;
     readonly args?: readonly string[];
   };
   readonly prompt?: string;
   readonly agentName?: string;
   readonly mode?: "manual" | "auto" | "hybrid";
+}
+
+export interface ResumeAgentIntent {
+  readonly requestId: string;
+  readonly agentId: AgentId;
+  readonly args?: readonly string[];
+  readonly prompt?: string;
 }
 
 export interface StartAgentResult {
@@ -54,13 +61,46 @@ export interface StartAgentResult {
   readonly warnings?: readonly string[];
 }
 
+export interface LaunchReceipt {
+  readonly requestId: string;
+  readonly intentFingerprint: string;
+  readonly result: StartAgentResult;
+  readonly recovery?: LaunchRecovery;
+}
+
+export interface LaunchRecovery {
+  readonly kind: "start" | "resume";
+  readonly harnessId: string;
+  readonly executionRef: string;
+  readonly nativeConversationRef?: OpaqueNativeConversationRef;
+  readonly goalId?: GoalId;
+  readonly agentId?: AgentId;
+}
+
+export interface LaunchReceiptStore {
+  reserveLaunchReceipt(
+    receipt: LaunchReceipt,
+  ):
+    | { readonly kind: "reserved" }
+    | { readonly kind: "existing"; readonly receipt: LaunchReceipt }
+    | { readonly kind: "conflict" };
+  saveLaunchReceipt(receipt: LaunchReceipt): void;
+}
+
 export interface StartAgentCoordinator {
   start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
+  resume(intent: ResumeAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
+}
+
+export interface AgentHarnessRegistry {
+  agentHarness(harnessId: string): AgentHarness | undefined;
 }
 
 export interface StartAgentCoordinatorOptions {
   readonly universe: Universe;
   readonly host: SessionHost;
+  readonly harnesses: AgentHarnessRegistry;
   readonly workspace: WorkspaceProvider;
-  readonly refresh: Effect.Effect<string, HostError>;
+  readonly receipts?: LaunchReceiptStore;
+  readonly reconcileHost?: (snapshot: HostSnapshot) => ReconciliationResult;
 }

@@ -3,8 +3,7 @@ import { appendFile } from "node:fs/promises";
 import type { Clock } from "../../universe/types.ts";
 import type {
   HostActionResult,
-  HostLaunchOption,
-  HostLaunchRequest,
+  HostExecutionLaunchRequest,
   HostLaunchResult,
   HostAgentObservation,
   HostSnapshot,
@@ -36,6 +35,8 @@ import {
 type RecordValue = JsonRecord;
 type LaunchTraceFields = Readonly<Record<string, string | number | boolean | undefined>>;
 type LaunchTrace = (event: string, fields?: LaunchTraceFields) => Promise<void>;
+
+const HERDR_HOST_INSTANCE_ID = "herdr:local";
 
 const traceExcerpt = (value: string): string => value.trim().slice(0, 500);
 
@@ -98,6 +99,29 @@ const unwrapSnapshot = (value: JsonValue | undefined): RecordValue | undefined =
 const locator = (workspaceId: string, tabId: string, paneId: string, terminalId: string): string =>
   JSON.stringify({ workspaceId, tabId, paneId, terminalId });
 
+const harnessEvidenceFor = (
+  agent: RecordValue,
+  observedAt: number,
+): HostAgentObservation["harnessEvidence"] => {
+  const detectedHarnessId = stringValue(agent, "agent");
+  const session = nonEmptyRecord(agent.agent_session);
+  const sessionHarnessId = stringValue(session, "agent") ?? detectedHarnessId;
+  const kind = stringValue(session, "kind");
+  const value = stringValue(session, "value");
+  const source = stringValue(session, "source");
+  const restored = agent.agent_session_restored;
+  if (!detectedHarnessId && (!sessionHarnessId || !kind || !value)) return undefined;
+  return {
+    detectedHarnessId,
+    nativeConversationRef:
+      sessionHarnessId && kind && value ? { harnessId: sessionHarnessId, kind, value } : undefined,
+    restoreState:
+      restored === true ? "host-restored" : restored === false ? "not-restored" : "unknown",
+    source: source === "hook" ? "hook" : kind && value ? "native-integration" : "process",
+    observedAt,
+  };
+};
+
 export const parseHerdrSnapshot = (
   payload: JsonValue | undefined,
   observedAt: number,
@@ -106,6 +130,7 @@ export const parseHerdrSnapshot = (
   if (!snapshot) {
     return {
       hostKind: "herdr",
+      hostInstanceId: HERDR_HOST_INSTANCE_ID,
       available: false,
       observedAt,
       agents: [],
@@ -120,6 +145,7 @@ export const parseHerdrSnapshot = (
     ];
     return {
       hostKind: "herdr",
+      hostInstanceId: HERDR_HOST_INSTANCE_ID,
       available: false,
       observedAt,
       agents: [],
@@ -174,7 +200,7 @@ export const parseHerdrSnapshot = (
         paneId,
     );
     const repository = stringValue(worktree, "repo_name");
-    const worktreePath = stringValue(worktree, "checkout_path");
+    const worktreePath = stringValue(worktree, "checkout_path") ?? paneWorkingDirectory(pane);
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const executionContainerLabel = stringValue(workspace, "label");
@@ -194,12 +220,15 @@ export const parseHerdrSnapshot = (
     if (branch) Object.assign(observation, { branch });
     if (worktreePath) Object.assign(observation, { worktree: worktreePath });
     if (provider) Object.assign(observation, { provider });
+    const harnessEvidence = harnessEvidenceFor(item, observedAt);
+    if (harnessEvidence) Object.assign(observation, { harnessEvidence });
     observations.push(observation);
   }
   if (!Array.isArray(snapshot.workspaces))
     diagnostics.push("Herdr snapshot omitted its optional workspaces array.");
   return {
     hostKind: "herdr",
+    hostInstanceId: HERDR_HOST_INSTANCE_ID,
     available: true,
     observedAt,
     agents: observations,
@@ -453,61 +482,27 @@ const createdRootPaneId = (payload: JsonValue | undefined): string | undefined =
   return stringValue(rootPane, "pane_id") ?? stringValue(rootPane, "id");
 };
 
-const generatedAgentName = (agentKind: string, requestId: string): string => {
-  const kind =
-    agentKind
-      .toLocaleLowerCase()
-      .replace(/[^a-z0-9_-]/gu, "-")
-      .replace(/^[^a-z]+/u, "") || "agent";
-  const suffix =
-    requestId
-      .toLocaleLowerCase()
-      .replace(/[^a-z0-9_-]/gu, "-")
-      .replace(/^-+|-+$/gu, "")
-      .slice(-24) || "launch";
-  return `${kind.slice(0, Math.max(1, 31 - suffix.length))}-${suffix}`;
+const shellArgument = (value: string): string => `'${value.replace(/'/gu, `'"'"'`)}'`;
+
+const processCommand = (request: HostExecutionLaunchRequest): string | undefined => {
+  const executable = request.processPlan.executable.trim();
+  if (!executable || executable.includes("\0")) return undefined;
+  const environment = Object.entries(request.processPlan.environment ?? {});
+  if (
+    environment.some(
+      ([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || value.includes("\0"),
+    )
+  )
+    return undefined;
+  if (request.processPlan.args.some((argument) => argument.includes("\0"))) return undefined;
+  const assignments = environment.map(([key, value]) => `${key}=${shellArgument(value)}`);
+  return [
+    "exec",
+    ...assignments,
+    shellArgument(executable),
+    ...request.processPlan.args.map(shellArgument),
+  ].join(" ");
 };
-
-const paneBusy = (result: CommandResult): boolean => {
-  return commandErrorCode(result) === "agent_pane_busy";
-};
-
-const startAgentAfter = async (
-  runner: CommandRunner,
-  args: readonly string[],
-  delays: readonly number[],
-  trace: LaunchTrace,
-  paneId: string,
-  attempt: number,
-): Promise<CommandResult> => {
-  await trace("agent.start.attempt", { attempt, paneId });
-  const result = await runner.run(args);
-  await trace("agent.start.result", {
-    attempt,
-    paneId,
-    exitCode: result.exitCode,
-    errorCode: commandErrorCode(result),
-    stderr: traceExcerpt(result.stderr),
-  });
-  const delayMs = delays[0];
-  if (!paneBusy(result) || delayMs === undefined) return result;
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
-  return startAgentAfter(runner, args, delays.slice(1), trace, paneId, attempt + 1);
-};
-
-const startAgent = (
-  runner: CommandRunner,
-  args: readonly string[],
-  trace: LaunchTrace,
-  paneId: string,
-): Promise<CommandResult> =>
-  startAgentAfter(runner, args, [100, 200, 400, 800, 1_200, 1_600, 2_000], trace, paneId, 1);
-
-const HERDR_LAUNCH_OPTIONS: readonly HostLaunchOption[] = [
-  { kind: "claude", label: "Claude Code", description: "Claude Code CLI" },
-  { kind: "codex", label: "Codex", description: "Codex CLI" },
-  { kind: "pi", label: "Pi", description: "Pi coding agent" },
-];
 
 export class HerdrHostAdapter implements SessionHost {
   private readonly runner: CommandRunner;
@@ -539,32 +534,26 @@ export class HerdrHostAdapter implements SessionHost {
     });
   }
 
-  listLaunchOptions(): Effect.Effect<readonly HostLaunchOption[], HostError> {
-    return Effect.succeed(HERDR_LAUNCH_OPTIONS);
-  }
-
-  launch(request: HostLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
+  launchExecution(request: HostExecutionLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
     return Effect.tryPromise({
       try: async () => {
         const trace = createLaunchTrace();
         const workingDirectory = request.workingDirectory.trim();
-        const agentKind = request.agentKind.trim();
+        const harnessId = request.processPlan.harnessId.trim();
+        const command = processCommand(request);
         await trace("launch.begin", {
           requestId: request.requestId,
           workingDirectory,
-          agentKind,
+          harnessId,
           agentName: request.agentName?.trim(),
-          promptProvided: Boolean(request.prompt?.trim()),
+          executable: request.processPlan.executable,
+          argumentCount: request.processPlan.args.length,
         });
         if (!workingDirectory) return { ok: false, message: "A working directory is required." };
-        if (!agentKind) return { ok: false, message: "An agent kind is required." };
-        const before = await this.snapshotInternal();
-        await trace("launch.before-snapshot", {
-          available: before.available,
-          agentCount: before.agents.length,
-          error: before.error,
-        });
-        const workspaceLabel = request.agentName?.trim() || `${agentKind} agent`;
+        if (!harnessId) return { ok: false, message: "A harness id is required." };
+        if (request.processPlan.harnessId !== harnessId || !command)
+          return { ok: false, message: "The process plan is invalid." };
+        const workspaceLabel = request.agentName?.trim() || `${harnessId} agent`;
         const workspace = await this.runner.run([
           "herdr",
           "workspace",
@@ -611,73 +600,80 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "Herdr created the workspace but no interactive shell pane was found.",
           };
-        const name =
-          request.agentName?.trim() || generatedAgentName(agentKind, request.requestId.trim());
-        const args = [
-          "herdr",
-          "agent",
-          "start",
-          name,
-          "--kind",
-          agentKind,
-          "--pane",
+        const started = await this.runner.run(["herdr", "pane", "run", paneId, command]);
+        await trace("process.run.result", {
           paneId,
-          "--timeout",
-          "30000",
-          ...(request.args && request.args.length > 0 ? ["--", ...request.args] : []),
-        ];
-        const started = await startAgent(this.runner, args, trace, paneId);
+          exitCode: started.exitCode,
+          errorCode: commandErrorCode(started),
+        });
         if (started.exitCode !== 0)
           return {
             ok: false,
-            message: commandFailureMessage(started, `Herdr could not start ${agentKind}.`),
+            message: `Herdr could not start ${harnessId}.`,
           };
-        let promptWarning = "";
-        if (request.prompt?.trim()) {
-          const prompted = await this.runner.run([
-            "herdr",
-            "agent",
-            "prompt",
-            paneId,
-            request.prompt.trim(),
-          ]);
-          await trace("agent.prompt.result", {
-            exitCode: prompted.exitCode,
-            errorCode: commandErrorCode(prompted),
-            stderr: traceExcerpt(prompted.stderr),
-            promptProvided: true,
-          });
-          if (prompted.exitCode !== 0)
-            promptWarning = commandFailureMessage(
-              prompted,
-              "Initial prompt could not be delivered.",
-            );
+        const nativeConversationRef = request.processPlan.nativeConversationRef;
+        let after = await this.snapshotInternal();
+        let candidate = after.agents.find((agent) => agent.nativeId === paneId);
+        if (nativeConversationRef && !candidate) {
+          after = await this.waitForAgentObservation(paneId, 20);
+          candidate = after.agents.find((agent) => agent.nativeId === paneId);
         }
-        const after = await this.snapshotInternal();
+        if (
+          nativeConversationRef &&
+          candidate &&
+          ["id", "path"].includes(nativeConversationRef.kind)
+        ) {
+          const referenceArgument =
+            nativeConversationRef.kind === "path" ? "--agent-session-path" : "--agent-session-id";
+          const reported = await this.runner.run([
+            "herdr",
+            "pane",
+            "report-agent-session",
+            paneId,
+            "--source",
+            `herdr:${harnessId}`,
+            "--agent",
+            harnessId,
+            "--seq",
+            (BigInt(this.clock.now()) * 1_000_000n).toString(),
+            referenceArgument,
+            nativeConversationRef.value,
+          ]);
+          await trace("process.session-report.result", {
+            paneId,
+            exitCode: reported.exitCode,
+            errorCode: commandErrorCode(reported),
+          });
+          await Bun.sleep(500);
+          after = await this.snapshotInternal();
+          candidate = after.agents.find((agent) => agent.nativeId === paneId);
+        }
         await trace("launch.after-snapshot", {
           available: after.available,
           agentCount: after.agents.length,
           error: after.error,
         });
-        const beforeIds = new Set(before.agents.map((agent) => agent.nativeId));
-        const candidate = after.agents.find(
-          (agent) =>
-            !beforeIds.has(agent.nativeId) &&
-            (agent.nativeId === paneId ||
-              agent.displayName === name ||
-              agent.worktree === workingDirectory),
-        );
         return {
           ok: true,
-          nativeId: candidate?.nativeId,
+          executionRef: paneId,
           message: candidate
-            ? `Started ${agentKind} in Herdr${promptWarning ? ` · warning: ${promptWarning}` : ""}.`
-            : `Started ${agentKind} in Herdr; waiting for the new agent to appear${promptWarning ? ` · warning: ${promptWarning}` : ""}.`,
+            ? `Started ${harnessId} in Herdr.`
+            : `Started ${harnessId} in Herdr; waiting for the new agent to appear.`,
         };
       },
-      catch: (error) =>
-        hostError("host.launch", error instanceof Error ? error.message : String(error)),
+      catch: () => hostError("host.launch-execution", "Herdr process launch failed unexpectedly."),
     });
+  }
+
+  private async waitForAgentObservation(
+    paneId: string,
+    remainingAttempts: number,
+  ): Promise<HostSnapshot> {
+    const snapshot = await this.snapshotInternal();
+    if (snapshot.agents.some((agent) => agent.nativeId === paneId) || remainingAttempts <= 1)
+      return snapshot;
+    await Bun.sleep(250);
+    return this.waitForAgentObservation(paneId, remainingAttempts - 1);
   }
 
   private async snapshotInternal(): Promise<HostSnapshot> {
@@ -693,6 +689,7 @@ export class HerdrHostAdapter implements SessionHost {
     } catch (error) {
       return {
         hostKind: "herdr",
+        hostInstanceId: HERDR_HOST_INSTANCE_ID,
         available: false,
         observedAt: this.clock.now(),
         agents: [],
@@ -703,6 +700,7 @@ export class HerdrHostAdapter implements SessionHost {
     if (result.exitCode !== 0) {
       return {
         hostKind: "herdr",
+        hostInstanceId: HERDR_HOST_INSTANCE_ID,
         available: false,
         observedAt: this.clock.now(),
         agents: [],
@@ -866,7 +864,26 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr Agent target changed before close; no process was stopped.",
           };
+        const interrupted = await this.runner.run([
+          "herdr",
+          "pane",
+          "send-keys",
+          token,
+          "ctrl+c",
+          "ctrl+c",
+        ]);
+        if (interrupted.exitCode !== 0) {
+          if (commandErrorCode(interrupted) === "pane_not_found")
+            return { ok: true, message: `Herdr agent ${token} had already ended.` };
+          return {
+            ok: false,
+            message: "Herdr could not safely interrupt the Agent process; its pane was preserved.",
+          };
+        }
+        await Bun.sleep(500);
         const result = await this.runner.run(["herdr", "pane", "close", token]);
+        if (result.exitCode !== 0 && commandErrorCode(result) === "pane_not_found")
+          return { ok: true, message: `Closed Herdr agent ${token}.` };
         if (result.exitCode !== 0)
           return {
             ok: false,

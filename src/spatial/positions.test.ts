@@ -3,6 +3,7 @@ import {
   defaultGoalMapPosition,
   goalLayoutFootprint,
   initialGoalMapPosition,
+  repairGoalMapPosition,
   mapInboxAnchor,
   agentSatellitePosition,
   agentSatellitePositions,
@@ -58,6 +59,19 @@ describe("spatial positions", () => {
       Math.abs(second.x - first.x) >= firstFootprint.halfWidth + secondFootprint.halfWidth + 16 ||
         Math.abs(second.y - first.y) >= firstFootprint.halfHeight + secondFootprint.halfHeight + 12,
     ).toBe(true);
+  });
+
+  test("moves only an expanded goal when its satellite footprint starts colliding", () => {
+    const current = { x: 144, y: 0 };
+    const occupied = [
+      { position: { x: 0, y: 0 }, agentCount: 1 },
+      { position: { x: 288, y: 0 }, agentCount: 2 },
+    ];
+    expect(repairGoalMapPosition("goal-b", current, occupied, 0)).toEqual(current);
+
+    const repaired = repairGoalMapPosition("goal-b", current, occupied, 15);
+    expect(repaired).not.toEqual(current);
+    expect(repairGoalMapPosition("goal-b", current, occupied, 15)).toEqual(repaired);
   });
 
   test("keeps the unassigned inbox stable outside the goal row", () => {

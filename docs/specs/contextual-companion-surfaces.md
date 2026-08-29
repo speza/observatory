@@ -101,9 +101,11 @@ contents. If the person starts Claude, Codex, Pi or another supported agent in
 the linked shell, the host's next authoritative snapshot may include that
 execution in `HostSnapshot.agents`.
 
-The same host/native identity is then reconciled as a normal durable Agent. It
-appears as its own selectable map node and may have its own linked executions.
-There is no duplicate durable shell object and no automatic Goal assignment.
+The host execution and any exact provider identity are then reconciled as a
+normal durable Agent candidate. It appears as its own selectable map node only
+after provider proof or explicit human acceptance and may have its own linked
+executions. There is no duplicate durable shell object and no automatic Goal
+assignment.
 
 ## Interaction flow
 

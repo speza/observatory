@@ -66,6 +66,44 @@ const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   })[0];
 };
 
+const lifecycleState = (agent: Agent): AgentView["lifecycleState"] => {
+  if (agent.executionPresence === "conflict" || agent.conflictingExecutions.length > 0)
+    return "conflict";
+  if (agent.providerContinuity === "missing") return "continuity-lost";
+  if (agent.observationHealth === "unavailable") return "unavailable";
+  if (agent.observationHealth === "stale") return "stale-observation";
+  if (agent.executionPresence === "unknown")
+    return agent.providerContinuity === "confirmed" && agent.observationHealth === "fresh"
+      ? "possibly-running"
+      : "unavailable";
+  if (agent.executionPresence === "live")
+    return agent.providerContinuity === "unknown" ? "unidentified-execution" : "running";
+  if (agent.providerContinuity === "confirmed" && agent.executionPresence === "absent")
+    return agent.resumeCapability === "eligible" ? "resumable" : "dormant";
+  return "unavailable";
+};
+
+const agentIsUncertain = (agent: Pick<Agent, "observationHealth" | "executionPresence">): boolean =>
+  agent.observationHealth !== "fresh" ||
+  agent.executionPresence === "unknown" ||
+  agent.executionPresence === "conflict";
+
+const publicAgent = (agent: Agent) => {
+  const {
+    nativeConversationRef: _nativeConversationRef,
+    executionHistory: _executionHistory,
+    conflictingExecutions,
+    ...publicFields
+  } = agent;
+  const state = lifecycleState(agent);
+  return {
+    ...publicFields,
+    lifecycleState: state,
+    executionConflictCount: conflictingExecutions.length,
+    canResume: state === "resumable",
+  };
+};
+
 const projectCommandCentre = (
   state: {
     readonly goals: readonly Goal[];
@@ -85,11 +123,13 @@ const projectCommandCentre = (
   );
   const attention = evaluateAttention(now, state.goals, attentionAgents, state.hosts);
   const attentionByAgent = byAttention(attention.items);
-  const views = projectedAgents.map((agent): AgentView => ({
-    ...agent,
-    goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
-    attention: attentionByAgent.get(agent.id),
-  }));
+  const views = projectedAgents.map((agent): AgentView => {
+    return {
+      ...publicAgent(agent),
+      goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
+      attention: attentionByAgent.get(agent.id),
+    };
+  });
 
   const goalViews = state.goals
     .filter((goal) => includeArchived || goal.status !== "archived")
@@ -99,7 +139,7 @@ const projectCommandCentre = (
         ...goal,
         agents,
         attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
-        staleCount: agents.filter((agent) => agent.hostHealth !== "live").length,
+        staleCount: agents.filter(agentIsUncertain).length,
       };
     })
     .sort((left, right) => {
@@ -128,7 +168,7 @@ const projectCommandCentre = (
       attention: attention.currentCount,
       uncertainty: attention.uncertaintyCount,
       unassigned: unassigned.length,
-      stale: visibleAgents.filter((agent) => agent.hostHealth !== "live").length,
+      stale: visibleAgents.filter(agentIsUncertain).length,
     },
   };
 };
@@ -205,7 +245,7 @@ const projectCodeContexts = (
             .filter((worktree): worktree is string => worktree !== undefined),
         ).size,
         attentionCount: sortedAgents.filter((agent) => agent.attention?.requiresHumanInput).length,
-        staleCount: sortedAgents.filter((agent) => agent.hostHealth !== "live").length,
+        staleCount: sortedAgents.filter(agentIsUncertain).length,
       };
     })
     .sort((left, right) => {
@@ -525,8 +565,8 @@ const projectSearch = (
     const haystack = [
       agent.displayName,
       agent.description,
-      agent.hostKind,
-      agent.nativeId,
+      agent.execution?.hostKind,
+      agent.execution?.nativeId,
       agent.repository,
       agent.branch,
       agent.worktree,
@@ -610,11 +650,13 @@ const agentView = (
   agent: Agent,
   goals: readonly Goal[],
   attention: readonly AttentionItem[],
-): AgentView => ({
-  ...agent,
-  goalTitle: goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
-  attention: attention.find((item) => item.agentId === agent.id),
-});
+): AgentView => {
+  return {
+    ...publicAgent(agent),
+    goalTitle: goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
+    attention: attention.find((item) => item.agentId === agent.id),
+  };
+};
 
 const projectInspector = (
   state: {
@@ -638,7 +680,7 @@ const projectInspector = (
       ...goal,
       agents,
       attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
-      staleCount: agents.filter((agent) => agent.hostHealth !== "live").length,
+      staleCount: agents.filter(agentIsUncertain).length,
     };
     return {
       kind: "goal-inspector",
@@ -656,11 +698,30 @@ const projectInspector = (
   const agent = state.agents.find((candidate) => candidate.id === target.id);
   if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
   const view = agentView(agent, state.goals, attention.items);
+  const providerSession = (() => {
+    const reference = agent.nativeConversationRef;
+    if (!reference) return undefined;
+    const kind = reference.kind.trim();
+    const value = reference.value.trim();
+    if (
+      !kind ||
+      !value ||
+      kind.toLocaleLowerCase().includes("path") ||
+      value.startsWith("/") ||
+      /^[A-Za-z]:[\\/]/u.test(value)
+    )
+      return undefined;
+    return { kind, id: value };
+  })();
   const lines = [
-    `state   ${agent.runtimeState} · ${agent.hostHealth}`,
+    `state   ${view.lifecycleState} · ${agent.runtimeState}`,
     `source  ${agent.runtimeStateSource}`,
-    `host    ${agent.hostKind}`,
-    `native  ${agent.nativeId}`,
+    `host    ${agent.execution?.hostKind ?? "detached"}`,
+    `native  ${agent.execution?.nativeId ?? "none"}`,
+    `harness ${agent.harnessId ?? "unknown"}`,
+    `continuity ${agent.continuity}`,
+    `provider ${agent.providerContinuity} · execution ${agent.executionPresence}`,
+    `resume  ${agent.resumeCapability} · observation ${agent.observationHealth}`,
     `repo    ${agent.repository ?? "unknown"}`,
     `branch  ${agent.branch ?? "unknown"}`,
     `worktree ${agent.worktree ?? "unknown"}`,
@@ -671,7 +732,9 @@ const projectInspector = (
       : []),
     ...(agent.description ? [agent.description] : []),
   ];
-  return { kind: "agent-inspector", agent: view, lines };
+  return providerSession
+    ? { kind: "agent-inspector", agent: view, providerSession, lines }
+    : { kind: "agent-inspector", agent: view, lines };
 };
 
 const projectCloseout = (

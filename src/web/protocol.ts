@@ -1,6 +1,7 @@
 import type { CommandResult } from "../universe/universe.ts";
 import type { Priority } from "../universe/types.ts";
-import type { HostLaunchOption, LinkedExecution } from "../hosts/types.ts";
+import type { LinkedExecution } from "../hosts/types.ts";
+import type { AgentHarnessDescriptor } from "../plugin-sdk/index.ts";
 import type {
   WorkspaceBrowser,
   WorkspaceChoice,
@@ -9,7 +10,10 @@ import type {
 } from "../workspaces/types.ts";
 import type { StartAgentResult } from "../session-launch/types.ts";
 import type { AgentCloseoutBatchResult } from "../agent-closeout/types.ts";
+import type { AgentRepositoryStatusSnapshot } from "../repositories/types.ts";
+import type { PluginStatus } from "../plugins/registry.ts";
 import type { PortfolioResponse } from "./api.ts";
+import type { RecoveredSessionView } from "../provider-sessions/types.ts";
 
 export type WebCommand =
   | {
@@ -25,6 +29,12 @@ export type WebCommand =
       readonly description?: string;
     }
   | { readonly type: "SetGoalPriority"; readonly goalId: string; readonly priority: Priority }
+  | {
+      readonly type: "SetGoalMapPosition";
+      readonly goalId: string;
+      readonly position: { readonly x: number; readonly y: number };
+    }
+  | { readonly type: "ResetGoalMapPosition"; readonly goalId: string }
   | { readonly type: "AssignAgent"; readonly agentId: string; readonly goalId: string }
   | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
@@ -58,7 +68,7 @@ export interface WebLaunchOptionsResponse {
   readonly kind: "launch-options";
   readonly goals: readonly WebLaunchGoal[];
   readonly locations: readonly WorkspaceChoice[];
-  readonly agents: readonly HostLaunchOption[];
+  readonly agents: readonly AgentHarnessDescriptor[];
 }
 
 export interface WebWorkspaceBrowserResponse extends WorkspaceBrowser {
@@ -69,7 +79,7 @@ export interface WebStartAgentRequest {
   readonly requestId: string;
   readonly goalId?: string;
   readonly workspace: WorkspaceSelection;
-  readonly agentKind: string;
+  readonly harnessId: string;
   readonly agentName?: string;
   readonly prompt?: string;
 }
@@ -79,10 +89,36 @@ export interface WebStartAgentResponse {
   readonly portfolio: PortfolioResponse;
 }
 
+export interface WebResumeAgentRequest {
+  readonly requestId: string;
+  readonly agentId: string;
+  readonly prompt?: string;
+}
+
+export type WebResumeAgentResponse = WebStartAgentResponse;
+
 export interface WebWorkingTreeDiffResponse extends WorkspaceDiffSnapshot {
   readonly agentId: string;
   readonly agentName: string;
   readonly goalTitle?: string;
+}
+
+export type WebAgentRepositoryStatusResponse = AgentRepositoryStatusSnapshot;
+
+export interface WebPluginStatusResponse {
+  readonly kind: "plugin-status";
+  readonly plugins: readonly PluginStatus[];
+}
+
+export interface WebRecoveredSessionsResponse {
+  readonly kind: "recovered-sessions";
+  readonly sessions: readonly RecoveredSessionView[];
+}
+
+export interface WebTrackRecoveredSessionResponse {
+  readonly agentId: string;
+  readonly goalId?: string;
+  readonly portfolio: PortfolioResponse;
 }
 
 export interface WebTerminalOpenResponse {

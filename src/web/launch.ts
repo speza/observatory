@@ -1,10 +1,15 @@
 import { Effect, Schema } from "effect";
-import type { SessionHost } from "../hosts/types.ts";
-import type { StartAgentCoordinator, StartAgentIntent } from "../session-launch/types.ts";
+import type { PluginRegistry } from "../plugins/registry.ts";
+import type {
+  ResumeAgentIntent,
+  StartAgentCoordinator,
+  StartAgentIntent,
+} from "../session-launch/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { WorkspaceProvider } from "../workspaces/types.ts";
 import type {
   WebLaunchOptionsResponse,
+  WebResumeAgentRequest,
   WebStartAgentRequest,
   WebWorkspaceBrowserResponse,
 } from "./protocol.ts";
@@ -30,8 +35,14 @@ const WebStartAgentRequestSchema: Schema.Schema<WebStartAgentRequest> = Schema.S
   requestId: Id,
   goalId: Schema.optional(Id),
   workspace: WorkspaceSelectionSchema,
-  agentKind: Id,
+  harnessId: Id,
   agentName: OptionalName,
+  prompt: OptionalPrompt,
+});
+
+const WebResumeAgentRequestSchema: Schema.Schema<WebResumeAgentRequest> = Schema.Struct({
+  requestId: Id,
+  agentId: Id,
   prompt: OptionalPrompt,
 });
 
@@ -54,10 +65,20 @@ const decodeRequest = (encoded: string): WebStartAgentRequest => {
   }
 };
 
+const decodeResumeRequest = (encoded: string): WebResumeAgentRequest => {
+  if (encoded.length > MAX_LAUNCH_BYTES)
+    throw new WebLaunchError("Resume request is too large.", 413);
+  try {
+    return Schema.decodeUnknownSync(Schema.parseJson(WebResumeAgentRequestSchema))(encoded);
+  } catch {
+    throw new WebLaunchError("Resume request does not match the web contract.", 400);
+  }
+};
+
 export class WebLaunchGateway {
   constructor(
     private readonly universe: Universe,
-    private readonly host: SessionHost,
+    private readonly plugins: PluginRegistry,
     private readonly workspace: WorkspaceProvider,
     private readonly coordinator: StartAgentCoordinator,
   ) {}
@@ -66,7 +87,7 @@ export class WebLaunchGateway {
     try {
       const [locations, agents] = await Promise.all([
         Effect.runPromise(this.workspace.listChoices()),
-        Effect.runPromise(this.host.listLaunchOptions()),
+        Effect.runPromise(this.plugins.availableAgentHarnesses()),
       ]);
       return {
         kind: "launch-options",
@@ -104,7 +125,7 @@ export class WebLaunchGateway {
       requestId: request.requestId,
       goal: request.goalId ? { kind: "goal", goalId: request.goalId } : { kind: "inbox" },
       workspace: request.workspace,
-      agent: { kind: request.agentKind },
+      harness: { id: request.harnessId },
       agentName: request.agentName,
       prompt: request.prompt,
       mode: "manual",
@@ -114,6 +135,23 @@ export class WebLaunchGateway {
     } catch (error) {
       throw new WebLaunchError(
         error instanceof Error ? error.message : "Agent launch failed.",
+        409,
+      );
+    }
+  }
+
+  async resume(encoded: string) {
+    const request = decodeResumeRequest(encoded);
+    const intent: ResumeAgentIntent = {
+      requestId: request.requestId,
+      agentId: request.agentId,
+      prompt: request.prompt,
+    };
+    try {
+      return await Effect.runPromise(this.coordinator.resume(intent));
+    } catch (error) {
+      throw new WebLaunchError(
+        error instanceof Error ? error.message : "Agent resume failed.",
         409,
       );
     }

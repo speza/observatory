@@ -35,6 +35,15 @@ required for the first live product slice, but remains behind the generic
 `SessionHost` capability seam. `AO_HOST=mock` exercises the same product path
 without a live Herdr installation.
 
+Claude Code and Codex lifecycle support is supplied by built-in
+`agent-harness` plugins. Observatory constructs new and exact-resume plans;
+Herdr only places the process and owns its terminal execution. The target
+recovery model discovers provider-owned sessions independently from current
+Herdr executions. After a laptop or Herdr restart, a confirmed conversation
+with no process becomes dormant and can be exactly resumed in a new eligible
+Herdr execution. Weak pane or process evidence never inherits its Goal, and a
+remote session is not presented as locally portable without provider proof.
+
 The former OpenTUI client was retired on 2026-08-27. It proved the renderer and
 host boundaries, but maintaining a second client constrained density, review
 workflows and product iteration without strengthening the core hypothesis.
@@ -65,6 +74,13 @@ AO_DB_PATH=/private/tmp/observatory.sqlite bun run start
 
 Open `http://127.0.0.1:4310` after the server starts.
 
+Inspect the redacted local Claude Code and Codex session catalogues without
+starting Herdr or writing Observatory state:
+
+```sh
+bun run sessions:discover
+```
+
 Run the deterministic 12-goal, 75-agent development portfolio:
 
 ```sh
@@ -93,6 +109,11 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 - Atlas and Ledger projections over the same state;
 - actionable Inbox and Closeout workflows;
 - goal editing, agent assignment and host-backed agent launch;
+- provider-independent Claude Code and Codex start/exact-resume plugins;
+- metadata-only Claude Code and Codex discovery, scoped live-execution rebinding,
+  dormant/resumable state and a full-screen Session import catalogue whose
+  primary path adds recovered sessions directly to a Goal;
+- selected-Agent repository and code-host status through contributed plugins;
 - host-synchronised close and archive;
 - host-owned primary and linked terminals rendered with xterm.js; and
 - bounded, read-only working-tree diff review.
@@ -135,5 +156,6 @@ check maintained source. Disposable prototypes are excluded deliberately.
 - [Technical architecture](docs/design/technical-architecture.md)
 - [Technology decisions](docs/design/technology-decisions.md)
 - [Feature roadmap](docs/specs/observatory-feature-roadmap.md)
+- [Provider-session continuity and recovery](docs/specs/provider-session-continuity-and-recovery.md)
 - [Local web walking slice](docs/specs/local-web-observatory-walking-slice.md)
 - [Application review and recommendations](docs/reviews/2026-08-27-application-review.md)

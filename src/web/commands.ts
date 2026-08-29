@@ -8,6 +8,7 @@ const Id = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160));
 const Title = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240));
 const Description = Schema.String.pipe(Schema.maxLength(8_000));
 const Priority = Schema.Literal("P0", "P1", "P2", "P3");
+const MapCoordinate = Schema.Number.pipe(Schema.finite(), Schema.between(-10_000, 10_000));
 
 const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
   Schema.Struct({
@@ -31,6 +32,12 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
     goalId: Id,
     priority: Priority,
   }),
+  Schema.Struct({
+    type: Schema.Literal("SetGoalMapPosition"),
+    goalId: Id,
+    position: Schema.Struct({ x: MapCoordinate, y: MapCoordinate }),
+  }),
+  Schema.Struct({ type: Schema.Literal("ResetGoalMapPosition"), goalId: Id }),
   Schema.Struct({
     type: Schema.Literal("AssignAgent"),
     agentId: Id,

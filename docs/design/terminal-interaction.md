@@ -96,6 +96,16 @@ xterm.js interprets terminal bytes and owns transient browser selection,
 viewport and input presentation. It does not create a PTY, persist scrollback
 or author semantic Observatory state.
 
+Browser key events that traditional terminal encoding cannot distinguish need
+an explicit byte mapping at this presentation boundary. Observatory encodes
+unmodified `Shift+Enter` as CSI-u `ESC [ 13 ; 2 u`, allowing supporting Agent
+applications to distinguish multiline input from ordinary `Enter`. Modified
+keys travel through the generic binary-input capability so no text layer can
+normalise their control bytes. All other keyboard input continues through
+xterm.js as text unchanged. The browser consumes the complete DOM event
+sequence for a mapped key and emits terminal bytes only on `keydown`; allowing
+the follow-up legacy `keypress` through would also emit ordinary `Enter`.
+
 The terminal deck contains a primary `Main` tab and any selected companion
 tabs. Inactive tabs may remain mounted and receive frames; only the active tab
 receives ordinary keyboard input, paste and scroll. Opening, switching or

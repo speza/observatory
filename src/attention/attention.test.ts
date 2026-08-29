@@ -19,8 +19,20 @@ const agent = (
 ): Agent => {
   const result: Agent = {
     id,
-    hostKind: "herdr",
-    nativeId: id,
+    execution: {
+      hostKind: "herdr",
+      hostInstanceId: "herdr:local",
+      nativeId: id,
+      hostLocator: id,
+      observedAt: 10_000,
+    },
+    continuity: "proved",
+    providerContinuity: "confirmed",
+    executionPresence: "live",
+    resumeCapability: "eligible",
+    observationHealth: "fresh",
+    executionHistory: [],
+    conflictingExecutions: [],
     displayName: id,
     displayNameSource: "host",
     primaryGoalId: goalId,
@@ -30,7 +42,6 @@ const agent = (
     lastSeenAt: 10_000,
     lastObservedAt: 10_000,
     lastChangedAt,
-    hostLocator: id,
   };
   if (attentionSince) Object.assign(result, { attentionSince });
   return result;
@@ -58,7 +69,12 @@ describe("attention", () => {
       20_000,
       [goal("p0", "P0")],
       [
-        { ...agent("stale", "blocked", "p0", 5_000), hostHealth: "stale" },
+        {
+          ...agent("stale", "blocked", "p0", 5_000),
+          hostHealth: "stale",
+          executionPresence: "unknown",
+          observationHealth: "stale",
+        },
         agent("current", "blocked", "p0", 15_000),
       ],
     );

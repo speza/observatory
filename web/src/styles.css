@@ -34,6 +34,7 @@ button {
   --hairline: rgba(54, 48, 39, 0.3);
   --faint: rgba(54, 48, 39, 0.11);
   --accent: #a84f35;
+  --good: #3f7650;
   --uncertain: #7e7b70;
   min-height: 100%;
   position: relative;
@@ -67,6 +68,7 @@ button {
   --hairline: rgba(229, 221, 204, 0.25);
   --faint: rgba(229, 221, 204, 0.09);
   --accent: #d68163;
+  --good: #78a985;
   --uncertain: #85867f;
 }
 
@@ -713,6 +715,7 @@ button {
   overflow: auto;
   padding: 8px 20px;
 }
+
 .inbox-panel__item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
@@ -1063,6 +1066,30 @@ button {
   font-size: 12px;
   white-space: nowrap;
 }
+.inspector__identifier {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inspector__identifier code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector__identifier button {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  background: transparent;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
 .inspector footer {
   margin-top: auto;
 }
@@ -1087,6 +1114,244 @@ button {
 .modal-backdrop::backdrop,
 .workspace-review-backdrop::backdrop {
   background: transparent;
+}
+.session-import-backdrop {
+  place-items: stretch;
+  padding: 22px;
+}
+.session-import {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+  border: 1px solid var(--hairline);
+  background: var(--paper-panel);
+  box-shadow:
+    10px 10px 0 var(--faint),
+    0 30px 90px color-mix(in srgb, var(--ink) 20%, transparent);
+}
+.session-import > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 26px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.session-import > header .overline,
+.session-import > header h2,
+.session-import > header p {
+  margin: 0;
+}
+.session-import > header h2 {
+  margin-top: 3px;
+  font-size: 29px;
+  font-weight: 400;
+}
+.session-import > header p:last-child {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.session-import > header > button {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 21px;
+  cursor: pointer;
+}
+.session-import__filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(220px, 1.5fr) minmax(
+      150px,
+      1fr
+    ) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px 26px;
+  border-bottom: 1px solid var(--hairline);
+}
+.session-import__filters label,
+.session-import > footer label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.session-import__filters label > span,
+.session-import > footer label > span {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.session-import__filters input,
+.session-import__filters select,
+.session-import > footer select {
+  min-width: 0;
+  height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  font-size: 12px;
+}
+.session-import button {
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.session-import button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+.session-import__filters > button {
+  height: 36px;
+  padding: 0 14px;
+}
+.session-import__summary {
+  min-height: 39px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 26px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.session-import__summary button {
+  padding: 5px 8px;
+}
+.session-import__summary strong {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 400;
+}
+.session-import__table {
+  min-height: 0;
+  overflow: auto;
+}
+.session-import__row {
+  min-width: 1080px;
+  display: grid;
+  grid-template-columns: 26px minmax(220px, 1.5fr) 120px minmax(220px, 1.3fr) 155px minmax(
+      280px,
+      1fr
+    );
+  gap: 12px;
+  align-items: center;
+  padding: 10px 26px;
+  border-bottom: 1px solid var(--faint);
+  font-size: 12px;
+}
+.session-import__row--heading {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  color: var(--muted);
+  background: var(--paper-panel);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.session-import__row > input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+.session-import__identity,
+.session-import__workspace {
+  min-width: 0;
+}
+.session-import__identity {
+  display: grid;
+  gap: 3px;
+}
+.session-import__identity strong,
+.session-import__identity small,
+.session-import__workspace {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-import__identity strong {
+  font-size: 13px;
+}
+.session-import__identity small,
+.session-import__workspace {
+  color: var(--muted);
+  font-size: 10px;
+}
+.session-import__state {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.session-import__state--running,
+.session-import__state--resumable {
+  color: var(--good);
+}
+.session-import__state--possibly-running {
+  color: var(--accent);
+}
+.session-import__row nav {
+  display: flex;
+  gap: 6px;
+}
+.session-import__row nav button {
+  min-height: 29px;
+  padding: 5px 8px;
+}
+.session-import__row nav button:first-child {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.session-import__empty {
+  margin: 0;
+  padding: 44px 26px;
+  color: var(--muted);
+}
+.session-import > .command-error {
+  margin: 0;
+  padding: 9px 26px;
+}
+.session-import > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: end;
+  padding: 13px 26px;
+  border-top: 1px solid var(--hairline);
+}
+.session-import > footer label {
+  width: min(340px, 40vw);
+  margin-right: auto;
+}
+.session-import > footer button {
+  min-height: 36px;
+  padding: 7px 12px;
+}
+.session-import > footer button:last-child {
+  border-color: var(--accent);
+  color: #fff8ec;
+  background: var(--accent);
 }
 .goal-dialog {
   width: min(460px, calc(100vw - 40px));
@@ -1427,6 +1692,23 @@ button {
   .identity h1 {
     font-size: 20px;
   }
+  .session-import-backdrop {
+    padding: 10px;
+  }
+  .session-import__filters {
+    grid-template-columns: 1fr 1fr;
+  }
+  .session-import__filters label:first-child,
+  .session-import__filters label:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .session-import > footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .session-import > footer label {
+    width: auto;
+  }
   .metrics {
     left: 20px;
     gap: 16px;
@@ -1452,4 +1734,216 @@ button {
     transition-duration: 0.01ms !important;
     animation: none !important;
   }
+}
+.repository-status {
+  border-bottom: 1px solid var(--hairline);
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px 20px;
+}
+
+.repository-status__heading,
+.repository-status__pr > div {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.repository-status__heading h3,
+.repository-status__pr h4,
+.repository-status__pr p,
+.repository-status > p {
+  margin: 0;
+}
+
+.repository-status__refresh,
+.repository-status__review {
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.repository-status__refresh {
+  padding: 6px 8px;
+}
+
+.repository-status__refresh:hover,
+.repository-status__review:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.repository-status__refresh:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.repository-status__identity {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+}
+
+.repository-status__identity > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.repository-status__github-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--ink);
+}
+
+.repository-status__identity span,
+.repository-status__branch > span,
+.repository-status__metadata span {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.repository-status__identity strong {
+  font-size: 14px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.repository-status__summary {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 11px;
+  border: 1px solid var(--hairline);
+  background: var(--faint);
+}
+
+.repository-status__summary > span {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--uncertain);
+}
+
+.repository-status__summary.is-clean > span {
+  background: #4f805e;
+}
+
+.repository-status__summary.is-changed > span {
+  background: var(--accent);
+}
+
+.repository-status__summary strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.repository-status__summary p,
+.repository-status__empty p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.repository-status__branch {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 1px;
+}
+
+.repository-status__branch code {
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.repository-status__metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  border-top: 1px solid var(--faint);
+  border-bottom: 1px solid var(--faint);
+}
+
+.repository-status__metadata > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 1px;
+}
+
+.repository-status__metadata > div + div {
+  padding-left: 12px;
+  border-left: 1px solid var(--faint);
+}
+
+.repository-status__metadata code,
+.repository-status__metadata strong {
+  font-size: 11px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.repository-status__review {
+  width: 100%;
+  padding: 8px 10px;
+}
+
+.repository-status__empty {
+  padding: 10px 11px;
+  border-left: 2px solid var(--hairline);
+  background: color-mix(in srgb, var(--faint) 60%, transparent);
+}
+
+.repository-status__empty strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.repository-status__pr {
+  background: color-mix(in srgb, var(--paper-panel) 72%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem;
+}
+
+.repository-status__signal {
+  border-radius: 999px;
+  font-size: 0.68rem;
+  padding: 0.14rem 0.42rem;
+  text-transform: uppercase;
+}
+
+.repository-status__signal.is-passing {
+  color: #3f7650;
+}
+.repository-status__signal.is-failing,
+.repository-status__signal.is-pending {
+  color: var(--accent);
+}
+
+.repository-status__diagnostic {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.repository-status__cached {
+  color: var(--muted);
+  font-size: 0.7rem;
 }

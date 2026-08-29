@@ -14,6 +14,12 @@ Depends on:
 > persistence and `SessionHost` decisions remain relevant; all native-renderer
 > requirements and controls are historical. The local web GUI is the sole
 > maintained product client.
+>
+> Its `(host_kind, native_id)` identity was also a deliberate V0 constraint and
+> is superseded for managed providers by
+> [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md).
+> Provider sessions now anchor continuity; host IDs identify replaceable
+> executions.
 
 ## Objective
 

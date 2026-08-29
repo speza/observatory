@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "synthetic-code-host",
+  "displayName": "Synthetic code host",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entrypoint": "./plugin.ts",
+  "capabilities": ["code-host"]
+}

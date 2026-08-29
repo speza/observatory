@@ -75,6 +75,7 @@ export const hostSnapshot = (
   observedAt = 1_000_000,
 ): HostSnapshot => ({
   hostKind: "test-host",
+  hostInstanceId: "test-host:default",
   available: true,
   observedAt,
   agents,

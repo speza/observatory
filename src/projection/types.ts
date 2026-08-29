@@ -48,9 +48,26 @@ export type ProjectionQuery =
       };
     };
 
-export interface AgentView extends Agent {
+export type AgentLifecycleState =
+  | "running"
+  | "dormant"
+  | "resumable"
+  | "possibly-running"
+  | "unavailable"
+  | "unidentified-execution"
+  | "continuity-lost"
+  | "stale-observation"
+  | "conflict";
+
+export interface AgentView extends Omit<
+  Agent,
+  "nativeConversationRef" | "executionHistory" | "conflictingExecutions"
+> {
   readonly goalTitle?: string;
   readonly attention?: AttentionItem;
+  readonly canResume: boolean;
+  readonly lifecycleState: AgentLifecycleState;
+  readonly executionConflictCount: number;
 }
 
 export interface GoalView extends Goal {
@@ -238,6 +255,10 @@ export type InspectorProjection =
   | {
       readonly kind: "agent-inspector";
       readonly agent: AgentView;
+      readonly providerSession?: {
+        readonly kind: string;
+        readonly id: string;
+      };
       readonly lines: readonly string[];
     }
   | {

@@ -7,6 +7,8 @@ import type {
   WebLaunchOptionsResponse,
   WebStartAgentRequest,
   WebStartAgentResponse,
+  WebResumeAgentRequest,
+  WebResumeAgentResponse,
   WebWorkspaceBrowserResponse,
   WebWorkingTreeDiffResponse,
   WebTerminalActionResponse,
@@ -15,6 +17,9 @@ import type {
   WebTerminalLinksResponse,
   WebTerminalOpenResponse,
   WebTerminalScrollRequest,
+  WebAgentRepositoryStatusResponse,
+  WebRecoveredSessionsResponse,
+  WebTrackRecoveredSessionResponse,
 } from "../../src/web/protocol.ts";
 import { Schema } from "effect";
 import {
@@ -24,6 +29,7 @@ import {
   StartAgentResponseSchema,
   CloseoutResponseSchema,
   WorkingTreeDiffResponseSchema,
+  AgentRepositoryStatusResponseSchema,
 } from "./apiSchemas.ts";
 
 const TerminalOpenSchema = Schema.Struct({ sessionId: Schema.String, message: Schema.String });
@@ -41,7 +47,7 @@ const WorkspaceChoiceSchema = Schema.Struct({
   available: Schema.Boolean,
 });
 const LaunchOptionSchema = Schema.Struct({
-  kind: Schema.String,
+  harnessId: Schema.String,
   label: Schema.String,
   description: Schema.optional(Schema.String),
 });
@@ -84,6 +90,27 @@ const TerminalEventSchema: Schema.Schema<WebTerminalEvent> = Schema.Union(
   }),
   Schema.Struct({ kind: Schema.Literal("closed"), reason: Schema.optional(Schema.String) }),
 );
+const RecoveredSessionSchema = Schema.Struct({
+  handle: Schema.String,
+  harnessId: Schema.String,
+  providerLabel: Schema.String,
+  title: Schema.String,
+  workspaceRef: Schema.optional(Schema.String),
+  createdAt: Schema.optional(Schema.Number),
+  lastActiveAt: Schema.optional(Schema.Number),
+  resumeEligibility: Schema.Literal("same-site", "provider-account", "blocked", "unknown"),
+  provenance: Schema.Literal("provider-index", "session-header"),
+  executionState: Schema.Literal("exact-live", "possibly-live", "absent", "unknown"),
+});
+const RecoveredSessionsSchema: Schema.Schema<WebRecoveredSessionsResponse> = Schema.Struct({
+  kind: Schema.Literal("recovered-sessions"),
+  sessions: Schema.Array(RecoveredSessionSchema),
+});
+const TrackRecoveredSessionSchema = Schema.Struct({
+  agentId: Schema.String,
+  goalId: Schema.optional(Schema.String),
+  portfolio: PortfolioResponseSchema,
+});
 
 const responseFor = async (path: string, signal?: AbortSignal): Promise<Response> => {
   const response = await fetch(path, { signal });
@@ -94,6 +121,31 @@ const responseFor = async (path: string, signal?: AbortSignal): Promise<Response
 export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioResponse> => {
   const response = await responseFor("/api/portfolio", signal);
   return Schema.decodeUnknownSync(PortfolioResponseSchema)(await response.json());
+};
+
+export const fetchRecoveredSessions = async (options?: {
+  readonly refresh?: boolean;
+  readonly signal?: AbortSignal;
+}): Promise<WebRecoveredSessionsResponse> => {
+  const response = await responseFor(
+    `/api/recovery/sessions${options?.refresh ? "?refresh=1" : ""}`,
+    options?.signal,
+  );
+  return Schema.decodeUnknownSync(RecoveredSessionsSchema)(await response.json());
+};
+
+export const trackRecoveredSession = async (
+  handle: string,
+  goalId?: string,
+): Promise<WebTrackRecoveredSessionResponse> => {
+  const response = await fetch("/api/recovery/track", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ao-command": "1" },
+    body: JSON.stringify({ handle, goalId }),
+  });
+  if (!response.ok)
+    throw new Error(await errorMessage(response, `Session import failed (${response.status}).`));
+  return Schema.decodeUnknownSync(TrackRecoveredSessionSchema)(await response.json());
 };
 
 export const fetchInspector = async (
@@ -115,6 +167,19 @@ export const fetchWorkingTreeDiff = async (
   const response = await responseFor(`/api/diff?agentId=${encodeURIComponent(agentId)}`, signal);
   const body = Schema.decodeUnknownSync(WorkingTreeDiffResponseSchema)(await response.json());
   if (body.agentId !== agentId) throw new Error("Observatory returned an invalid workspace diff.");
+  return body;
+};
+
+export const fetchAgentRepositoryStatus = async (
+  agentId: string,
+  options?: { readonly refresh?: boolean; readonly signal?: AbortSignal },
+): Promise<WebAgentRepositoryStatusResponse> => {
+  const response = await responseFor(
+    `/api/repository?agentId=${encodeURIComponent(agentId)}${options?.refresh ? "&refresh=1" : ""}`,
+    options?.signal,
+  );
+  const body = Schema.decodeUnknownSync(AgentRepositoryStatusResponseSchema)(await response.json());
+  if (body.agentId !== agentId) throw new Error("Observatory returned invalid repository status.");
   return body;
 };
 
@@ -201,6 +266,22 @@ export const startWebAgent = async (
   return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
 };
 
+export const resumeWebAgent = async (
+  request: WebResumeAgentRequest,
+): Promise<WebResumeAgentResponse> => {
+  const response = await fetch("/api/launch/resume", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-ao-command": "1",
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok)
+    throw new Error(await errorMessage(response, `Agent resume failed (${response.status}).`));
+  return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
+};
+
 const terminalMutation = async (path: string, body: string): Promise<Response> => {
   const response = await fetch(path, {
     method: "POST",
@@ -259,6 +340,17 @@ export const sendWebTerminalInput = async (
   const response = await terminalMutation(
     `/api/terminal/${encodeURIComponent(sessionId)}/input`,
     JSON.stringify({ value }),
+  );
+  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
+};
+
+export const sendWebTerminalBytes = async (
+  sessionId: string,
+  bytes: Uint8Array,
+): Promise<WebTerminalActionResponse> => {
+  const response = await terminalMutation(
+    `/api/terminal/${encodeURIComponent(sessionId)}/input`,
+    JSON.stringify({ bytes: Array.from(bytes) }),
   );
   return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
 };

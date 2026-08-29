@@ -5,7 +5,15 @@ import type {
   InspectorProjection,
 } from "../../src/projection/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
-import { closeAndArchiveAgents, executeCommand, fetchInspector } from "./api.ts";
+import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
+import {
+  closeAndArchiveAgents,
+  executeCommand,
+  fetchInspector,
+  fetchRecoveredSessions,
+  resumeWebAgent,
+  trackRecoveredSession,
+} from "./api.ts";
 import { AttentionQueue } from "./AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
 import { CatchUpPanel } from "./CatchUpPanel.tsx";
@@ -16,6 +24,7 @@ import { KeyboardGuide } from "./KeyboardGuide.tsx";
 import { Ledger } from "./Ledger.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { NewGoalDialog } from "./NewGoalDialog.tsx";
+import { SessionImportDialog } from "./SessionImportDialog.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
@@ -61,9 +70,36 @@ export const App = (): React.JSX.Element => {
   const [inspectorRevision, setInspectorRevision] = useState(0);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
   const [newAgentOpen, setNewAgentOpen] = useState(false);
+  const [sessionImportOpen, setSessionImportOpen] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
+  const [recoveredSessions, setRecoveredSessions] = useState<readonly RecoveredSessionView[]>([]);
+
+  useEffect(() => {
+    if (!sessionImportOpen) return;
+    const controller = new AbortController();
+    void fetchRecoveredSessions({ refresh: true, signal: controller.signal })
+      .then((response) => setRecoveredSessions(response.sessions))
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setCommandError(error instanceof Error ? error.message : "Session import unavailable.");
+      });
+    return () => controller.abort();
+  }, [sessionImportOpen]);
+
+  const refreshSessionImport = async (): Promise<void> => {
+    setCommandPending(true);
+    setCommandError(undefined);
+    try {
+      const response = await fetchRecoveredSessions({ refresh: true });
+      setRecoveredSessions(response.sessions);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : "Session import unavailable.");
+    } finally {
+      setCommandPending(false);
+    }
+  };
 
   useEffect(() => {
     if (!selection) {
@@ -143,6 +179,42 @@ export const App = (): React.JSX.Element => {
   const archiveAgents = async (agentIds: readonly string[]): Promise<boolean> =>
     (await runCommand({ type: "ArchiveAgents", agentIds })) !== undefined;
 
+  const trackRecovered = async (
+    handle: string,
+    goalId?: string,
+    resume = false,
+  ): Promise<{ readonly agentId: string } | undefined> => {
+    setCommandPending(true);
+    setCommandError(undefined);
+    try {
+      const tracked = await trackRecoveredSession(handle, goalId);
+      portfolio.accept(tracked.portfolio);
+      setRecoveredSessions((sessions) => sessions.filter((session) => session.handle !== handle));
+      if (resume) {
+        const resumed = await resumeWebAgent({
+          requestId: `web-recovered-resume-${crypto.randomUUID()}`,
+          agentId: tracked.agentId,
+        });
+        portfolio.accept(resumed.portfolio);
+        setLaunchNotice(resumed.result.message);
+      } else {
+        const goal = data?.commandCentre.goals.find((candidate) => candidate.id === goalId);
+        setLaunchNotice(
+          goalId
+            ? `Session imported and added to ${goal?.title ?? "its Goal"}.`
+            : "Session imported without a Goal. Find it in Inbox.",
+        );
+      }
+      setInspectorRevision((value) => value + 1);
+      return { agentId: tracked.agentId };
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : "Session import failed.");
+      return undefined;
+    } finally {
+      setCommandPending(false);
+    }
+  };
+
   const runCloseout = async (agentIds: readonly string[]): Promise<boolean> => {
     setCommandPending(true);
     setCommandError(undefined);
@@ -203,6 +275,24 @@ export const App = (): React.JSX.Element => {
   const openWorkspaceReview = (agent: AgentView): void => {
     setDiffAgent(agent);
     setTerminalAgent(undefined);
+  };
+
+  const resumeAgent = async (agent: AgentView): Promise<void> => {
+    setCommandPending(true);
+    setCommandError(undefined);
+    try {
+      const response = await resumeWebAgent({
+        requestId: `web-resume-${crypto.randomUUID()}`,
+        agentId: agent.id,
+      });
+      portfolio.accept(response.portfolio);
+      setLaunchNotice(response.result.message);
+      setInspectorRevision((value) => value + 1);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : "Agent resume failed.");
+    } finally {
+      setCommandPending(false);
+    }
   };
 
   const jumpToAttention = (): void => {
@@ -410,6 +500,16 @@ export const App = (): React.JSX.Element => {
             New agent
           </button>
           <button
+            onClick={() => {
+              setCommandError(undefined);
+              setSessionImportOpen(true);
+            }}
+            type="button"
+          >
+            Session import
+            {recoveredSessions.length > 0 ? ` (${recoveredSessions.length})` : ""}
+          </button>
+          <button
             onClick={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
             type="button"
           >
@@ -507,6 +607,9 @@ export const App = (): React.JSX.Element => {
         {view === "atlas" ? (
           <Atlas
             cameraCommand={cameraCommand}
+            onMoveGoal={async (goalId, position) => {
+              await runCommand({ type: "SetGoalMapPosition", goalId, position });
+            }}
             onSelect={select}
             onClearSelection={() => {
               setSelection(undefined);
@@ -590,6 +693,7 @@ export const App = (): React.JSX.Element => {
             onOpenTerminal={setTerminalAgent}
             onRetry={() => setInspectorRevision((value) => value + 1)}
             onReviewChanges={openWorkspaceReview}
+            onResume={resumeAgent}
           />
         ) : null}
         <button
@@ -648,6 +752,22 @@ export const App = (): React.JSX.Element => {
               setSelection({ type: "goal", id: response.result.goalId });
             }
           }}
+        />
+      ) : null}
+      {sessionImportOpen ? (
+        <SessionImportDialog
+          error={commandError}
+          goals={data.commandCentre.goals}
+          onClose={() => setSessionImportOpen(false)}
+          onImport={trackRecovered}
+          onImported={(agentId) => {
+            setSessionImportOpen(false);
+            selectAndFocus({ type: "agent", id: agentId });
+            setInspectorRevision((value) => value + 1);
+          }}
+          onRefresh={refreshSessionImport}
+          pending={commandPending}
+          sessions={recoveredSessions}
         />
       ) : null}
     </main>
