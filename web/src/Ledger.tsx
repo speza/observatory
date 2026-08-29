@@ -1,4 +1,5 @@
 import type { CommandCentreProjection, GoalView } from "../../src/projection/types.ts";
+import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
 
 interface LedgerProps {
@@ -36,6 +37,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
                   <span
                     className={`state state--${agent.hostHealth === "live" ? agent.runtimeState : "unknown"}`}
                   />
+                  <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
                   <b>{agent.displayName}</b>
                   <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
                 </button>
@@ -58,6 +60,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
                   <span
                     className={`state state--${agent.hostHealth === "live" ? agent.runtimeState : "unknown"}`}
                   />
+                  <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
                   <b>{agent.displayName}</b>
                   <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
                 </button>

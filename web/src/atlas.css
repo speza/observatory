@@ -234,8 +234,12 @@
   stroke: var(--paper);
   stroke-width: 2;
 }
-.agent__core {
-  fill: var(--paper);
+.agent .agent-logo {
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+  color: var(--paper);
+  pointer-events: none;
 }
 .agent--working {
   color: #78a995;
@@ -248,9 +252,6 @@
 }
 .agent--working .agent__mark {
   fill: #78a995;
-}
-.agent--working .agent__core {
-  fill: #eef4e9;
 }
 .agent--idle {
   color: var(--muted);

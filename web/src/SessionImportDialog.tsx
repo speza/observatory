@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { AgentLogo } from "./AgentLogo.tsx";
 import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
 import type { GoalView } from "../../src/projection/types.ts";
 import { ModalDialog } from "./ModalDialog.tsx";
@@ -264,6 +265,7 @@ export const SessionImportDialog = ({
                     type="checkbox"
                   />
                   <div className="session-import__identity">
+                    <AgentLogo harnessId={session.harnessId} />
                     <strong>{session.title}</strong>
                     <small>{lastActiveLabel(session.lastActiveAt)}</small>
                   </div>

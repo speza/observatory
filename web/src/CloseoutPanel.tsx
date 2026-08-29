@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AgentView, CloseoutProjection } from "../../src/projection/types.ts";
+import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
 
 interface CloseoutPanelProps {
@@ -63,6 +64,7 @@ export const CloseoutPanel = ({
             }
             type="checkbox"
           />
+          <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
           <button
             className="closeout-item__identity"
             onClick={() => onSelect({ type: "agent", id: agent.id })}

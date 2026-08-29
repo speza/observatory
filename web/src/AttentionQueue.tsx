@@ -1,5 +1,6 @@
 import type { AttentionItem } from "../../src/attention/attention.ts";
 import type { AgentView, CommandCentreProjection } from "../../src/projection/types.ts";
+import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
 
 interface AttentionQueueProps {
@@ -13,6 +14,7 @@ const labelForAttention = (item: AttentionItem, agents: readonly AgentView[]) =>
     ? agents.find((candidate) => candidate.id === item.agentId)
     : undefined;
   return {
+    agent,
     title: agent?.displayName ?? item.targetId,
     context: agent?.goalTitle ?? "Host observation",
   };
@@ -50,7 +52,11 @@ export const AttentionQueue = ({
             }}
             type="button"
           >
-            <i aria-hidden="true" />
+            {label.agent ? (
+              <AgentLogo harnessId={label.agent.harnessId} provider={label.agent.provider} />
+            ) : (
+              <i aria-hidden="true" />
+            )}
             <span>
               <strong>{label.title}</strong>
               <small>{item.explanation}</small>

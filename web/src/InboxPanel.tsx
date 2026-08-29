@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CommandCentreProjection } from "../../src/projection/types.ts";
+import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
 
 interface InboxPanelProps {
@@ -81,6 +82,7 @@ export const InboxPanel = ({
                 onChange={() => toggleAgent(agent.id)}
                 type="checkbox"
               />
+              <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
               <button
                 className="inbox-panel__agent"
                 onClick={() => onSelect({ type: "agent", id: agent.id })}

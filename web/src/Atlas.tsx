@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { UniverseMapProjection } from "../../src/projection/types.ts";
+import { AgentLogo } from "./AgentLogo.tsx";
 import {
   agentLinesFor,
   focusedLabelOffsets,
@@ -518,7 +519,7 @@ export const Atlas = ({
                           r={attention ? 20 : 15}
                         />
                         <circle className="agent__mark" fill={palette.mark} r="9" />
-                        <circle className="agent__core" r="3.3" />
+                        <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
                         {attention ? (
                           <g className="agent__review-badge" transform="translate(13 -13)">
                             <circle r="7" />
