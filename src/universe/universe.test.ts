@@ -625,6 +625,18 @@ describe("Universe", () => {
     expect(universe.snapshot().goals).toHaveLength(0);
   });
 
+  test("rolls back reconciliation when persistence fails", () => {
+    const { universe, store } = makeUniverse();
+    const before = universe.snapshot();
+    store.failNextSave = true;
+
+    const result = universe.reconcile(hostSnapshot([observation("pane-1")]));
+
+    expect(result.accepted).toBe(false);
+    expect(result.error).toContain("Reconciliation rolled back");
+    expect(universe.snapshot()).toEqual(before);
+  });
+
   test("records deterministic semantic changes and acknowledges a durable catch-up cursor", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Catch up", priority: "P2" });
