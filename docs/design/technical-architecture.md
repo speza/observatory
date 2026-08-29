@@ -918,6 +918,12 @@ through `Universe.execute`; it never runs for the live Herdr host. The mock
 attachment action is intentionally local and reports simulated focus rather
 than claiming to control a real terminal.
 
+The opt-in `degraded` scenario cycles through a healthy baseline, complete host
+unavailability, recovered observations with a failing action transport, and
+full recovery. It lets the assembled product exercise retained stale state and
+bounded launch, close, handoff and terminal errors without making the default
+portfolio intermittently unusable.
+
 ## Retired native-client evidence
 
 The native terminal client was the first real renderer and established several

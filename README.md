@@ -90,6 +90,13 @@ bun run web:mock
 It uses `${TMPDIR:-/tmp}/ao-web-mock.sqlite`, synthetic host facts and no real
 session content.
 
+Exercise deterministic host loss, degraded host actions and recovery through
+the same product path:
+
+```sh
+AO_MOCK_SCENARIO=degraded bun run web:mock
+```
+
 For frontend development, run these in separate terminals:
 
 ```sh

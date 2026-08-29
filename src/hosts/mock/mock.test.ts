@@ -236,6 +236,87 @@ describe("Mock host adapter", () => {
       },
     );
   });
+
+  test("exercises host loss, degraded actions and recovery", async () => {
+    const clock = new FixedClock(55_000);
+    const scenario = createMockScenario("degraded");
+    const adapter = new MockHostAdapter({ clock, scenario });
+    const { universe } = makeUniverse({ clock });
+
+    const healthy = await Effect.runPromise(adapter.snapshot());
+    expect(healthy.available).toBe(true);
+    expect(universe.reconcile(healthy).accepted).toBe(true);
+    const healthyAccess = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    expect(healthyAccess.supported).toBe(true);
+
+    clock.value += scenario.tickMs;
+    const unavailable = await Effect.runPromise(adapter.snapshot());
+    expect(unavailable).toMatchObject({
+      available: false,
+      agents: [],
+      diagnostics: ["Synthetic mock host connection interrupted."],
+      error: "The synthetic mock host is temporarily unavailable.",
+    });
+    expect(universe.reconcile(unavailable).accepted).toBe(true);
+    expect(
+      universe.snapshot().agents.find((agent) => agent.execution?.nativeId === "mock-p01"),
+    ).toMatchObject({
+      hostHealth: "unavailable",
+      executionPresence: "unknown",
+      observationHealth: "unavailable",
+    });
+    expect(await Effect.runPromise(adapter.activate(healthyAccess))).toMatchObject({ ok: false });
+
+    clock.value += scenario.tickMs;
+    const degraded = await Effect.runPromise(adapter.snapshot());
+    expect(degraded.available).toBe(true);
+    expect(degraded.diagnostics).toEqual(["Synthetic mock action transport is degraded."]);
+    expect(universe.reconcile(degraded).accepted).toBe(true);
+    const degradedAccess = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    const actionFailure = {
+      ok: false,
+      message: "The synthetic mock host cannot perform actions in this frame.",
+    };
+    expect(await Effect.runPromise(adapter.activate(degradedAccess))).toEqual(actionFailure);
+    expect(await Effect.runPromise(adapter.closeAgent(degradedAccess))).toEqual(actionFailure);
+    expect(
+      await Effect.runPromise(adapter.openTerminal(degradedAccess, { columns: 80, rows: 24 })),
+    ).toEqual(actionFailure);
+    expect(
+      await Effect.runPromise(
+        adapter.openLinkedExecutionTerminal(degradedAccess.linkedExecutions[0]!, {
+          columns: 80,
+          rows: 24,
+        }),
+      ),
+    ).toEqual(actionFailure);
+    expect(
+      await Effect.runPromise(
+        adapter.launchExecution({
+          requestId: "degraded-launch",
+          workingDirectory: "/synthetic/project",
+          processPlan: { harnessId: "codex", executable: "codex", args: [] },
+        }),
+      ),
+    ).toEqual(actionFailure);
+
+    clock.value += scenario.tickMs;
+    const recovered = await Effect.runPromise(adapter.snapshot());
+    expect(recovered.available).toBe(true);
+    expect(recovered.diagnostics).toEqual([]);
+    expect(universe.reconcile(recovered).accepted).toBe(true);
+    expect(
+      universe.snapshot().agents.find((agent) => agent.execution?.nativeId === "mock-p01"),
+    ).toMatchObject({ hostHealth: "live", executionPresence: "live", observationHealth: "fresh" });
+    const recoveredAccess = await Effect.runPromise(
+      adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
+    );
+    expect(await Effect.runPromise(adapter.activate(recoveredAccess))).toMatchObject({ ok: true });
+  });
 });
 
 defineSessionHostContractTests("Mock", () => {

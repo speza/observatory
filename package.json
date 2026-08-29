@@ -9,7 +9,7 @@
     "dev:api": "AO_WEB_PORT=4311 bun --watch run src/web/main.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "web": "bun run build:web && bun run src/web/main.ts",
-    "web:mock": "bun run build:web && AO_HOST=mock AO_MOCK_SCENARIO=portfolio AO_MOCK_SEED=portfolio AO_DB_PATH=${TMPDIR:-/tmp}/ao-web-mock.sqlite bun run src/web/main.ts",
+    "web:mock": "bun run build:web && AO_HOST=mock AO_MOCK_SCENARIO=${AO_MOCK_SCENARIO:-portfolio} AO_MOCK_SEED=${AO_MOCK_SEED:-portfolio} AO_DB_PATH=${TMPDIR:-/tmp}/ao-web-mock.sqlite bun run src/web/main.ts",
     "build:web": "vite build --config web/vite.config.ts",
     "start": "bun run web",
     "test": "bun test",

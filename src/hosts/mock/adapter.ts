@@ -18,7 +18,7 @@ import type {
   LinkedExecution,
 } from "../types.ts";
 import { hostError, type HostError } from "../errors.ts";
-import { createMockScenario, type MockScenario } from "./scenarios.ts";
+import { createMockScenario, type MockFrame, type MockScenario } from "./scenarios.ts";
 
 const parseTarget = (target: OpaqueAccessTarget): string | undefined =>
   target.kind === "mock-agent" ? target.token : undefined;
@@ -152,24 +152,35 @@ export class MockHostAdapter implements SessionHost {
     this.startedAt = this.clock.now();
   }
 
+  private currentFrame(): MockFrame {
+    const frameNumber =
+      elapsedFrames(this.clock.now(), this.startedAt, this.scenario.tickMs) %
+      this.scenario.frames.length;
+    const frame = this.scenario.frames[frameNumber];
+    if (!frame) throw new Error("Mock scenario frame disappeared.");
+    return frame;
+  }
+
+  private actionFailure(): HostActionResult | undefined {
+    const message = this.currentFrame().actionError;
+    return message ? { ok: false, message } : undefined;
+  }
+
   snapshot(): Effect.Effect<HostSnapshot, HostError> {
     return Effect.sync(() => {
       this.liveTargets.clear();
       this.liveLinkedExecutionTargets.clear();
       this.liveLinkedExecutions.clear();
       const observedAt = this.clock.now();
-      const frameNumber =
-        elapsedFrames(observedAt, this.startedAt, this.scenario.tickMs) %
-        this.scenario.frames.length;
-      const frame = this.scenario.frames[frameNumber];
-      if (!frame) throw new Error("Mock scenario frame disappeared.");
+      const frame = this.currentFrame();
+      const available = frame.available ?? true;
       const agents = [
         ...frame.agents.map((agent) => ({
           ...agent,
           observedAt,
         })),
         ...Array.from(this.launched.values(), (agent) => ({ ...agent, observedAt })),
-      ].filter((agent) => !this.closed.has(agent.nativeId));
+      ].filter((agent) => available && !this.closed.has(agent.nativeId));
       for (const agent of agents) {
         this.liveTargets.set(agent.nativeId, {
           kind: "mock-agent",
@@ -226,14 +237,16 @@ export class MockHostAdapter implements SessionHost {
           ]);
         }
       }
-      return {
+      const snapshot: HostSnapshot = {
         hostKind: "mock",
         hostInstanceId: "mock:default",
-        available: true,
+        available,
         observedAt,
         agents,
-        diagnostics: [],
-      } satisfies HostSnapshot;
+        diagnostics: frame.diagnostics ?? [],
+      };
+      if (frame.error) Object.assign(snapshot, { error: frame.error });
+      return snapshot;
     }).pipe(
       Effect.catchAllDefect(() =>
         Effect.fail(hostError("host.snapshot", "Mock scenario snapshot failed unexpectedly.")),
@@ -243,6 +256,8 @@ export class MockHostAdapter implements SessionHost {
 
   launchExecution(request: HostExecutionLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
     return Effect.sync(() => {
+      const failure = this.actionFailure();
+      if (failure) return failure;
       const harnessId = request.processPlan.harnessId.trim();
       if (!harnessId)
         return { ok: false, message: "A mock harness id is required." } satisfies HostLaunchResult;
@@ -326,6 +341,8 @@ export class MockHostAdapter implements SessionHost {
 
   activate(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
     return Effect.sync(() => {
+      const failure = this.actionFailure();
+      if (failure) return failure;
       if (!access.supported || !access.target) return { ok: false, message: access.explanation };
       const token = parseTarget(access.target);
       if (!token)
@@ -344,6 +361,8 @@ export class MockHostAdapter implements SessionHost {
 
   closeAgent(access: AgentAccess): Effect.Effect<HostActionResult, HostError> {
     return Effect.sync(() => {
+      const failure = this.actionFailure();
+      if (failure) return failure;
       if (!access.supported || !access.target) return { ok: false, message: access.explanation };
       const token = parseTarget(access.target);
       if (!token)
@@ -369,6 +388,8 @@ export class MockHostAdapter implements SessionHost {
     _options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.sync(() => {
+      const failure = this.actionFailure();
+      if (failure) return failure;
       if (!access.supported || !access.terminalTarget)
         return {
           ok: false,
@@ -403,6 +424,8 @@ export class MockHostAdapter implements SessionHost {
     _options?: TerminalOpenOptions,
   ): Effect.Effect<HostTerminalOpenResult, HostError> {
     return Effect.sync(() => {
+      const failure = this.actionFailure();
+      if (failure) return failure;
       if (!linkedExecution.available || !linkedExecution.target)
         return {
           ok: false,

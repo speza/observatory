@@ -5,6 +5,11 @@ export type MockAgentObservation = Omit<HostAgentObservation, "observedAt">;
 export interface MockFrame {
   readonly label: string;
   readonly agents: readonly MockAgentObservation[];
+  readonly available?: boolean;
+  readonly diagnostics?: readonly string[];
+  readonly error?: string;
+  /** Simulate a host whose observations work while its action transport is degraded. */
+  readonly actionError?: string;
 }
 
 export interface MockScenario {
@@ -179,6 +184,7 @@ const frame = (
   label: string,
   nativeIds: readonly string[],
   overrides: StateOverrides = {},
+  properties: Omit<MockFrame, "label" | "agents"> = {},
 ): MockFrame => ({
   label,
   agents: nativeIds.flatMap((nativeId) => {
@@ -187,6 +193,7 @@ const frame = (
     const runtimeState = overrides[nativeId];
     return [runtimeState === undefined ? definition : { ...definition, runtimeState }];
   }),
+  ...properties,
 });
 
 const firstTwenty = catalog.slice(0, 20).map((item) => item.nativeId);
@@ -254,8 +261,45 @@ const createPortfolioScenario = (): MockScenario => ({
   ],
 });
 
+const createDegradedScenario = (): MockScenario => ({
+  name: "degraded",
+  description:
+    "A deterministic host outage, stale-target window, degraded action transport and recovery.",
+  tickMs: 8_000,
+  frames: [
+    frame("healthy baseline", firstTwenty),
+    frame(
+      "host unavailable",
+      [],
+      {},
+      {
+        available: false,
+        diagnostics: ["Synthetic mock host connection interrupted."],
+        error: "The synthetic mock host is temporarily unavailable.",
+      },
+    ),
+    frame(
+      "observations recovered · actions degraded",
+      firstTwenty.filter((nativeId) => nativeId !== "mock-p17"),
+      { "mock-p03": "working", "mock-p05": "blocked" },
+      {
+        diagnostics: ["Synthetic mock action transport is degraded."],
+        actionError: "The synthetic mock host cannot perform actions in this frame.",
+      },
+    ),
+    frame("full recovery", firstTwentyTwo, {
+      "mock-p03": "done",
+      "mock-p05": "waiting",
+      "mock-p17": "working",
+    }),
+  ],
+});
+
 export const createMockScenario = (name = "orbit"): MockScenario => {
   if (name === "orbit") return createOrbitScenario();
   if (name === "portfolio") return createPortfolioScenario();
-  throw new Error(`Unknown mock scenario ${name}; available scenarios: orbit, portfolio.`);
+  if (name === "degraded") return createDegradedScenario();
+  throw new Error(
+    `Unknown mock scenario ${name}; available scenarios: orbit, portfolio, degraded.`,
+  );
 };
