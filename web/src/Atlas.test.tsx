@@ -7,8 +7,13 @@ import { createMockScenario } from "../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
 import { FixedClock, hostSnapshot, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
-import { Atlas, focusedLabelOffsets } from "./Atlas.tsx";
-import { atlasContentBounds, atlasGoalSpacingScale } from "./atlasGeometry.ts";
+import { Atlas } from "./Atlas.tsx";
+import {
+  AGENT_CARD_HEIGHT,
+  AGENT_CARD_WIDTH,
+  atlasContentBounds,
+  atlasGoalSpacingScale,
+} from "./atlasGeometry.ts";
 
 interface RenderedGoal {
   readonly id: string;
@@ -58,33 +63,6 @@ const renderedAgents = (markup: string): readonly RenderedAgent[] =>
   );
 
 describe("production web Atlas", () => {
-  test("places every focused agent label in collision-free side columns", () => {
-    const candidates = [
-      { id: "left-a", labelOnLeft: true, rect: { left: 0, right: 90, top: 10, bottom: 42 } },
-      { id: "left-b", labelOnLeft: true, rect: { left: 2, right: 92, top: 20, bottom: 52 } },
-      { id: "left-c", labelOnLeft: true, rect: { left: 4, right: 94, top: 30, bottom: 62 } },
-      { id: "right-a", labelOnLeft: false, rect: { left: 200, right: 290, top: 14, bottom: 46 } },
-      { id: "right-b", labelOnLeft: false, rect: { left: 202, right: 292, top: 24, bottom: 56 } },
-    ] as const;
-    const offsets = focusedLabelOffsets(candidates);
-
-    expect(offsets.size).toBe(candidates.length);
-    for (const labelOnLeft of [true, false]) {
-      const column = candidates
-        .filter((candidate) => candidate.labelOnLeft === labelOnLeft)
-        .map((candidate) => ({
-          top: candidate.rect.top + (offsets.get(candidate.id) ?? 0),
-          bottom: candidate.rect.bottom + (offsets.get(candidate.id) ?? 0),
-        }))
-        .sort((left, right) => left.top - right.top);
-      for (let index = 1; index < column.length; index += 1) {
-        expect((column[index]?.top ?? 0) - (column[index - 1]?.bottom ?? 0)).toBeGreaterThanOrEqual(
-          8,
-        );
-      }
-    }
-  });
-
   test("renders a separated 12-goal and 75-agent world with truthful uncertainty", async () => {
     const clock = new FixedClock(50_000);
     const scenario = createMockScenario("portfolio");
@@ -93,7 +71,20 @@ describe("production web Atlas", () => {
     expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
     expect(seedMockPortfolio(universe)).toEqual({ createdGoals: 12, assignedAgents: 71 });
 
-    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const baseProjection = mapProjection(
+      universe.project({ kind: "universe-map", now: clock.now() }),
+    );
+    const projection: UniverseMapProjection = {
+      ...baseProjection,
+      goals: baseProjection.goals.map((goal, goalIndex) => ({
+        ...goal,
+        agents: goal.agents.map((agent, agentIndex) =>
+          goalIndex === 0 && agentIndex === 0
+            ? { ...agent, description: "Maps host facts to semantic state." }
+            : agent,
+        ),
+      })),
+    };
     const markup = renderToStaticMarkup(
       createElement(Atlas, {
         projection,
@@ -111,8 +102,15 @@ describe("production web Atlas", () => {
     expect(markup).toContain("atlas atlas--motion");
     expect(markup).toContain("goal--working");
     expect(markup).toContain("agent--working");
+    expect(markup).toContain("agent__card");
+    expect(markup).toContain("agent__identity");
+    expect(markup).toContain("agent__summary");
+    expect(markup).toContain("agent__provider-mark");
+    expect(markup).toContain("agent__rule");
+    expect(markup).not.toContain("agent__state-rail");
+    expect(markup).toContain("Maps host facts to semantic s…");
     expect(markup).toContain("agent__attention-wave");
-    expect(markup).toContain("agent__working-wave");
+    expect(markup).not.toContain("agent__working-wave");
     expect(markup).not.toContain("goal__halo");
     expect(markup).not.toContain("goal__quiet-field");
     expect(markup).not.toContain("goal__contour");
@@ -137,13 +135,13 @@ describe("production web Atlas", () => {
       const goal = goals.find((candidate) => candidate.id === agent.goalId);
       expect(goal).toBeDefined();
       if (!goal) continue;
-      expect(Math.hypot(agent.x - goal.x, agent.y - goal.y)).toBeGreaterThanOrEqual(
-        goal.radius + 29.9,
-      );
+      const nearestCardX = Math.max(0, Math.abs(agent.x - goal.x) - AGENT_CARD_WIDTH / 2);
+      const nearestCardY = Math.max(0, Math.abs(agent.y - goal.y) - AGENT_CARD_HEIGHT / 2);
+      expect(Math.hypot(nearestCardX, nearestCardY)).toBeGreaterThanOrEqual(goal.radius + 13.9);
       const orbitEquation =
         ((agent.x - goal.x) / agent.orbitRadiusX) ** 2 +
         ((agent.y - goal.y) / agent.orbitRadiusY) ** 2;
-      expect(Math.abs(orbitEquation - 1)).toBeLessThan(0.001);
+      expect(orbitEquation).toBeCloseTo(1, 3);
       const phase = Math.atan2(
         (agent.y - goal.y) / agent.orbitRadiusY,
         (agent.x - goal.x) / agent.orbitRadiusX,
@@ -151,7 +149,19 @@ describe("production web Atlas", () => {
       const distanceFromCaption = Math.abs(
         Math.atan2(Math.sin(phase - Math.PI / 2), Math.cos(phase - Math.PI / 2)),
       );
-      expect(distanceFromCaption).toBeGreaterThanOrEqual(0.819);
+      expect(distanceFromCaption).toBeGreaterThanOrEqual(0.719);
+    }
+    for (let leftIndex = 0; leftIndex < assignedAgents.length; leftIndex += 1) {
+      const left = assignedAgents[leftIndex];
+      if (!left) continue;
+      for (let rightIndex = leftIndex + 1; rightIndex < assignedAgents.length; rightIndex += 1) {
+        const right = assignedAgents[rightIndex];
+        if (!right || left.goalId !== right.goalId) continue;
+        expect(
+          Math.abs(left.x - right.x) >= AGENT_CARD_WIDTH + 13.9 ||
+            Math.abs(left.y - right.y) >= AGENT_CARD_HEIGHT + 9.9,
+        ).toBe(true);
+      }
     }
     for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
       const left = goals[leftIndex];
@@ -275,11 +285,11 @@ describe("production web Atlas", () => {
       const leftAgents = agents.filter((agent) => agent.goalId === left.id);
       const leftWidth = Math.max(
         left.radius,
-        ...leftAgents.map((agent) => agent.orbitRadiusX + 22),
+        ...leftAgents.map((agent) => Math.abs(agent.x - left.x) + AGENT_CARD_WIDTH / 2 + 4),
       );
       const leftHeight = Math.max(
         left.radius,
-        ...leftAgents.map((agent) => agent.orbitRadiusY + 22),
+        ...leftAgents.map((agent) => Math.abs(agent.y - left.y) + AGENT_CARD_HEIGHT / 2 + 4),
       );
       for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
         const right = goals[rightIndex];
@@ -287,11 +297,11 @@ describe("production web Atlas", () => {
         const rightAgents = agents.filter((agent) => agent.goalId === right.id);
         const rightWidth = Math.max(
           right.radius,
-          ...rightAgents.map((agent) => agent.orbitRadiusX + 22),
+          ...rightAgents.map((agent) => Math.abs(agent.x - right.x) + AGENT_CARD_WIDTH / 2 + 4),
         );
         const rightHeight = Math.max(
           right.radius,
-          ...rightAgents.map((agent) => agent.orbitRadiusY + 22),
+          ...rightAgents.map((agent) => Math.abs(agent.y - right.y) + AGENT_CARD_HEIGHT / 2 + 4),
         );
         expect(
           Math.abs(left.x - right.x) >= leftWidth + rightWidth + 15.9 ||

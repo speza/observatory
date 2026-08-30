@@ -11,10 +11,11 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  color: var(--muted);
+  color: var(--ink);
   font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
+  opacity: 0.72;
   text-transform: uppercase;
 }
 .atlas__status-key span {
@@ -224,105 +225,63 @@
   font-weight: 700;
   letter-spacing: 0.05em;
 }
-.agent__field {
-  fill-opacity: 0.13;
-  stroke: currentColor;
-  stroke-width: 0.9;
-  opacity: 0.72;
+.agent__card {
+  fill: var(--paper-panel);
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 2px 3px rgb(24 21 17 / 8%));
+  transition:
+    stroke-width 160ms ease,
+    filter 160ms ease;
 }
-.agent__mark {
-  stroke: var(--paper);
-  stroke-width: 2;
+.agent__state circle {
+  fill: currentColor;
+}
+.agent__rule {
+  stroke: var(--hairline);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
 }
 .agent .agent-logo {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   overflow: visible;
-  color: var(--paper);
+  color: var(--goal-color);
   pointer-events: none;
 }
 .agent--working {
-  color: #78a995;
-}
-.agent--working .agent__field {
-  fill: #78a995;
-  fill-opacity: 0.2;
-  stroke: #78a995;
-  stroke-width: 1.6;
-}
-.agent--working .agent__mark {
-  fill: #78a995;
+  color: #4f7967;
 }
 .agent--idle {
-  color: var(--muted);
-}
-.agent--idle .agent__field {
-  fill: transparent;
-  fill-opacity: 0;
-  stroke: var(--muted);
-  opacity: 0.72;
-}
-.agent--idle .agent__mark {
-  fill: var(--muted);
-  opacity: 0.68;
+  color: var(--ink);
 }
 .agent--waiting,
 .agent--blocked {
   color: var(--accent);
 }
-.agent--waiting .agent__field,
-.agent--blocked .agent__field {
-  fill: var(--accent);
-  fill-opacity: 0.16;
-  stroke: var(--accent);
-  stroke-width: 1.5;
-}
-.agent--waiting .agent__mark,
-.agent--blocked .agent__mark {
-  fill: var(--accent);
-}
-.agent--blocked .agent__field {
-  stroke-dasharray: 3 2;
-}
 .agent--done {
-  color: #82958a;
+  color: #66786e;
 }
-.agent--done .agent__field {
-  fill: #82958a;
-  fill-opacity: 0.08;
-  stroke: #82958a;
-  opacity: 0.56;
-}
-.agent--done .agent__mark {
-  fill: #82958a;
-  opacity: 0.52;
+.agent--done .agent__card {
+  filter: none;
 }
 .agent--unknown,
 .agent--stale,
 .agent--unavailable {
   color: var(--uncertain);
 }
-.agent--unknown .agent__field,
-.agent--stale .agent__field,
-.agent--unavailable .agent__field {
-  fill: transparent;
-  fill-opacity: 0;
-  stroke: var(--uncertain);
+.agent--unknown .agent__card,
+.agent--stale .agent__card,
+.agent--unavailable .agent__card {
   stroke-dasharray: 2 2;
 }
-.agent--unknown .agent__mark,
-.agent--stale .agent__mark,
-.agent--unavailable .agent__mark {
-  fill: var(--uncertain);
+.agent--attention {
+  color: var(--accent);
 }
-.agent--attention .agent__field {
+.agent--attention .agent__card {
   stroke: var(--accent);
-  stroke-width: 1.5;
-  fill: var(--accent);
-  fill-opacity: 0.1;
-}
-.agent--attention .agent__mark {
-  fill: var(--accent);
+  stroke-width: 2;
 }
 .agent__review-badge circle {
   fill: var(--accent);
@@ -337,7 +296,50 @@
   font-weight: 700;
 }
 .agent--uncertain {
-  opacity: 0.62;
+  opacity: 0.78;
+}
+.agent__identity,
+.agent__state text,
+.agent__summary,
+.agent__workspace {
+  font-family: "DM Mono", ui-monospace, monospace;
+}
+.agent__identity {
+  fill: var(--ink);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  opacity: 0.72;
+}
+.agent__state text {
+  fill: currentColor;
+  text-anchor: end;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.agent__name {
+  fill: var(--ink);
+  font-family:
+    Iowan Old Style,
+    Baskerville,
+    Georgia,
+    serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.agent__summary {
+  fill: var(--ink);
+  font-size: 10px;
+  letter-spacing: 0.015em;
+  opacity: 0.72;
+}
+.agent__workspace {
+  fill: var(--ink);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  opacity: 0.58;
 }
 .agent__attention-wave {
   fill: none;
@@ -346,47 +348,12 @@
   transform-box: fill-box;
   transform-origin: center;
 }
-.agent__working-wave {
-  fill: none;
-  stroke: #78a995;
-  stroke-width: 1.1;
-  opacity: 0.72;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.agent:hover .agent__field,
-.agent:focus .agent__field,
-.agent.is-selected .agent__field {
-  stroke: var(--ink);
-  stroke-width: 2.5;
-}
-.agent__label {
-  fill: var(--muted);
-  stroke: var(--paper);
-  stroke-linejoin: round;
-  stroke-width: 3px;
-  vector-effect: non-scaling-stroke;
-  paint-order: stroke fill;
-  font-size: 7px;
-  font-weight: 500;
-}
-.agent__label-leader {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 0.8;
-  vector-effect: non-scaling-stroke;
-}
-.agent__label .agent__name {
-  fill: var(--ink);
-  font-family:
-    Iowan Old Style,
-    Baskerville,
-    Georgia,
-    serif;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  text-transform: none;
+.agent:hover .agent__card,
+.agent:focus .agent__card,
+.agent.is-selected .agent__card {
+  stroke: var(--goal-color);
+  stroke-width: 2;
+  filter: drop-shadow(0 4px 7px rgb(24 21 17 / 14%));
 }
 .zoom-control {
   position: absolute;
@@ -449,14 +416,8 @@
   animation-duration: 18s;
   animation-direction: reverse;
 }
-.atlas--motion .agent--working .agent__field {
+.atlas--motion .agent--working .agent__state circle {
   animation: agent-working 2.4s ease-in-out infinite;
-}
-.atlas--motion .agent--working .agent__working-wave {
-  animation: working-wave 2.8s ease-out infinite;
-}
-.atlas--motion .agent--working .agent__presence {
-  animation: working-drift 6.5s ease-in-out infinite;
 }
 .atlas--motion .agent__attention-wave {
   animation: attention-wave 2.1s ease-out infinite;
@@ -487,28 +448,6 @@
   }
   50% {
     opacity: 1;
-  }
-}
-
-@keyframes working-wave {
-  0% {
-    opacity: 0.58;
-    transform: scale(0.9);
-  }
-  82%,
-  100% {
-    opacity: 0;
-    transform: scale(1.55);
-  }
-}
-
-@keyframes working-drift {
-  0%,
-  100% {
-    transform: translate(-1px, 0);
-  }
-  50% {
-    transform: translate(1px, -1px);
   }
 }
 

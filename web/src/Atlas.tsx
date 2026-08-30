@@ -1,24 +1,39 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { UniverseMapProjection } from "../../src/projection/types.ts";
 import { AgentLogo } from "./AgentLogo.tsx";
 import {
+  AGENT_CARD_HEIGHT,
+  AGENT_CARD_WIDTH,
   agentLinesFor,
-  focusedLabelOffsets,
   goalAgentPoints,
   goalRadius,
   hash,
-  labelRectFor,
-  labelsOverlap,
   linesFor,
   stateLabel,
   type AtlasCameraCommand,
-  type LabelRect,
   type Selection,
 } from "./atlasGeometry.ts";
 import { useAtlasCamera } from "./useAtlasCamera.ts";
 
 export type { AtlasCameraCommand, Selection } from "./atlasGeometry.ts";
-export { focusedLabelOffsets } from "./atlasGeometry.ts";
+
+interface AgentStyle extends CSSProperties {
+  readonly "--goal-color": string;
+}
+
+const concise = (value: string | undefined, maximumCharacters: number): string | undefined => {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= maximumCharacters) return normalized;
+  return `${normalized.slice(0, maximumCharacters - 1).trimEnd()}…`;
+};
+
+const basename = (value: string | undefined): string | undefined => value?.match(/[^\\/]+$/u)?.[0];
 
 interface AtlasProps {
   readonly projection: UniverseMapProjection;
@@ -265,65 +280,6 @@ export const Atlas = ({
             const orbitBands = [
               ...new Map(agentPoints.map((point) => [point.band, point])).values(),
             ];
-            const focusedAgent =
-              selection?.type === "agent" && goal.agents.some((agent) => agent.id === selection.id);
-            const focused = selected || focusedAgent;
-            const labelCandidates = goal.agents
-              .map((agent, index) => {
-                const point = agentPoints[index];
-                if (!point) return undefined;
-                const nearLeftEdge = point.x < reservedLeft + 150;
-                const nearRightEdge = point.x > size.width - reservedRight - 150;
-                const labelOnLeft = nearRightEdge || (!nearLeftEdge && point.x < centre.x);
-                const state = stateLabel(agent);
-                const lines = agentLinesFor(agent.displayName);
-                return {
-                  agent,
-                  attention: agent.attention?.requiresHumanInput === true,
-                  index,
-                  labelOnLeft,
-                  rect: labelRectFor(point, lines, state, labelOnLeft),
-                  selected: selection?.type === "agent" && selection.id === agent.id,
-                };
-              })
-              .filter(
-                (candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined,
-              )
-              .filter(
-                (candidate) => candidate.attention || candidate.selected || focused || focusedGoal,
-              )
-              .sort(
-                (left, right) =>
-                  Number(right.selected) - Number(left.selected) ||
-                  Number(right.attention) - Number(left.attention) ||
-                  left.index - right.index,
-              );
-            const focusedOffsets = focusedGoal
-              ? focusedLabelOffsets(
-                  labelCandidates.map((candidate) => ({
-                    id: candidate.agent.id,
-                    labelOnLeft: candidate.labelOnLeft,
-                    rect: candidate.rect,
-                  })),
-                )
-              : new Map<string, number>();
-            const visibleLabelIds = new Set<string>();
-            const visibleLabelRects: LabelRect[] = [];
-            for (const candidate of labelCandidates) {
-              if (focusedGoal) {
-                visibleLabelIds.add(candidate.agent.id);
-                continue;
-              }
-              const required = candidate.selected || candidate.attention;
-              if (
-                !required &&
-                visibleLabelRects.some((rect) => labelsOverlap(rect, candidate.rect))
-              ) {
-                continue;
-              }
-              visibleLabelIds.add(candidate.agent.id);
-              visibleLabelRects.push(candidate.rect);
-            }
             return (
               <g
                 className={`goal ${goal.status !== "active" ? `goal--${goal.status}` : ""} ${hasWorkingAgent ? "goal--working" : ""} ${goal.attentionCount > 0 ? "goal--attention" : ""} ${hasUncertainAgent ? "goal--uncertain" : ""} ${spotlightActive && focusedGoal ? "goal--spotlight-focus" : ""} ${spotlightActive && !focusedGoal ? "goal--spotlight-dimmed" : ""}`}
@@ -464,14 +420,16 @@ export const Atlas = ({
                     "continuity-lost",
                   ].includes(agent.lifecycleState);
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
-                  const showLabel = visibleLabelIds.has(agent.id);
-                  const nearLeftEdge = point.x < reservedLeft + 150;
-                  const nearRightEdge = point.x > size.width - reservedRight - 150;
-                  const labelOnLeft = nearRightEdge || (!nearLeftEdge && point.x < centre.x);
                   const state = stateLabel(agent);
-                  const labelX = labelOnLeft ? -17 : 17;
                   const nameLines = agentLinesFor(agent.displayName);
-                  const labelOffsetY = focusedOffsets.get(agent.id) ?? 0;
+                  const identity = concise(agent.harnessId ?? agent.provider ?? "session", 16);
+                  const description = concise(agent.description, 30);
+                  const repository = basename(agent.repository) ?? basename(agent.worktree);
+                  const workspace = concise(
+                    [repository, agent.branch].filter(Boolean).join(" / ") || undefined,
+                    30,
+                  );
+                  const style: AgentStyle = { "--goal-color": palette.mark };
                   return (
                     <g
                       className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
@@ -499,9 +457,9 @@ export const Atlas = ({
                           onSelect({ type: "agent", id: agent.id });
                         }
                       }}
-                      aria-label={`${agent.displayName}, ${state}`}
+                      aria-label={`${agent.displayName}, ${state}${description ? `, ${description}` : ""}${workspace ? `, ${workspace}` : ""}`}
                       role="button"
-                      style={{ color: palette.mark }}
+                      style={style}
                       tabIndex={0}
                       transform={`translate(${point.x} ${point.y})`}
                     >
@@ -509,49 +467,64 @@ export const Atlas = ({
                         className="agent__presence"
                         style={{ animationDelay: `${-(hash(agent.id) % 4200)}ms` }}
                       >
-                        {attention ? <circle className="agent__attention-wave" r="20" /> : null}
-                        {state === "working" && !attention ? (
-                          <circle className="agent__working-wave" r="17" />
-                        ) : null}
-                        <circle
-                          className="agent__field"
-                          fill={palette.mark}
-                          r={attention ? 20 : 15}
-                        />
-                        <circle className="agent__mark" fill={palette.mark} r="9" />
-                        <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
                         {attention ? (
-                          <g className="agent__review-badge" transform="translate(13 -13)">
-                            <circle r="7" />
+                          <rect
+                            className="agent__attention-wave"
+                            height={AGENT_CARD_HEIGHT + 8}
+                            rx="7"
+                            width={AGENT_CARD_WIDTH + 8}
+                            x={-AGENT_CARD_WIDTH / 2 - 4}
+                            y={-AGENT_CARD_HEIGHT / 2 - 4}
+                          />
+                        ) : null}
+                        <rect
+                          className="agent__card"
+                          height={AGENT_CARD_HEIGHT}
+                          rx="4"
+                          width={AGENT_CARD_WIDTH}
+                          x={-AGENT_CARD_WIDTH / 2}
+                          y={-AGENT_CARD_HEIGHT / 2}
+                        />
+                        <line className="agent__rule" x1="-76" x2="76" y1="-22" y2="-22" />
+                        <g className="agent__provider-mark" transform="translate(-71 -35)">
+                          <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
+                        </g>
+                        <text className="agent__identity" x="-57" y="-32">
+                          {identity?.toUpperCase()}
+                        </text>
+                        <g className="agent__state" transform="translate(78 -35)">
+                          <circle r="3" />
+                          <text x="-8" y="3">
+                            {state.toUpperCase()}
+                          </text>
+                        </g>
+                        {attention ? (
+                          <g className="agent__review-badge" transform="translate(88 -50)">
+                            <circle r="8" />
                             <text y="3">!</text>
                           </g>
                         ) : null}
-                        {showLabel && focusedGoal && Math.abs(labelOffsetY) > 0.5 ? (
-                          <path
-                            className="agent__label-leader"
-                            d={`M ${labelOnLeft ? -10 : 10} 0 L ${labelX * 0.72} ${labelOffsetY} L ${labelX} ${labelOffsetY}`}
-                          />
-                        ) : null}
-                        {showLabel ? (
-                          <text
-                            className="agent__label"
-                            textAnchor={labelOnLeft ? "end" : "start"}
-                            x={labelX}
-                            y={(nameLines.length > 1 ? -8 : -2) + labelOffsetY}
-                          >
-                            {nameLines.map((line, lineIndex) => (
-                              <tspan
-                                className="agent__name"
-                                dy={lineIndex === 0 ? 0 : 12}
-                                key={`${line}-${lineIndex}`}
-                                x={labelX}
-                              >
-                                {line}
-                              </tspan>
-                            ))}
-                            <tspan dy="11" x={labelX}>
-                              {state.toUpperCase()}
+                        <text className="agent__name" x="-76" y="-5">
+                          {nameLines.map((line, lineIndex) => (
+                            <tspan
+                              dy={lineIndex === 0 ? 0 : 15}
+                              key={`${line}-${lineIndex}`}
+                              x="-76"
+                            >
+                              {line}
                             </tspan>
+                          ))}
+                        </text>
+                        <text
+                          className="agent__summary"
+                          x="-76"
+                          y={nameLines.length > 1 ? "25" : "11"}
+                        >
+                          {description ?? workspace ?? "No session summary"}
+                        </text>
+                        {description && workspace ? (
+                          <text className="agent__workspace" x="-76" y="42">
+                            {workspace}
                           </text>
                         ) : null}
                       </g>

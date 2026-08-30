@@ -29,6 +29,11 @@ const repositoryFor = (nativeId: string): string => {
   return "synthetic/recovery-lab";
 };
 
+const providerFor = (nativeId: string): "claude-mock" | "codex-mock" | "pi-mock" => {
+  const providers = ["claude-mock", "codex-mock", "pi-mock"] as const;
+  return providers[Number(nativeId.slice(-2)) % providers.length] ?? "claude-mock";
+};
+
 const executionContainerFor = (nativeId: string): HostAgentObservation["executionContainer"] => {
   const index = Number(nativeId.slice(-2));
   if ([1, 2, 3, 4, 9, 10, 11, 12, 18, 19].includes(index))
@@ -50,7 +55,7 @@ const agent = (
   repository: repositoryFor(nativeId),
   branch: "mock/live",
   worktree: `/synthetic/worktrees/${nativeId}`,
-  provider: "mock-agent",
+  provider: providerFor(nativeId),
   executionContainer: executionContainerFor(nativeId),
   hostLocator: `mock-agent:${nativeId}`,
 });

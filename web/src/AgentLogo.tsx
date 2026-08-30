@@ -80,11 +80,11 @@ export const AgentLogo = ({
       aria-hidden="true"
       className={`agent-logo agent-logo--${brand} ${className}`.trim()}
       data-agent-brand={brand}
-      height={map ? 12 : 24}
+      height={map ? 16 : 24}
       viewBox={viewBoxFor(brand)}
-      width={map ? 12 : 24}
-      x={map ? -6 : undefined}
-      y={map ? -6 : undefined}
+      width={map ? 16 : 24}
+      x={map ? -8 : undefined}
+      y={map ? -8 : undefined}
     >
       {mark(brand)}
     </svg>

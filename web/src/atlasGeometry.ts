@@ -25,18 +25,12 @@ export interface OrbitPlacement {
   readonly y: number;
 }
 
-export interface LabelRect {
-  readonly left: number;
-  readonly right: number;
-  readonly top: number;
-  readonly bottom: number;
-}
-
-interface FocusedLabelCandidate {
-  readonly id: string;
-  readonly labelOnLeft: boolean;
-  readonly rect: LabelRect;
-}
+export const AGENT_CARD_WIDTH = 180;
+export const AGENT_CARD_HEIGHT = 104;
+const AGENT_CARD_GAP = 14;
+const AGENT_CARD_COLUMN_GAP = 18;
+const AGENT_CARD_ROW_GAP = 10;
+const CAPTION_CLEARANCE = 0.72;
 
 export const hash = (value: string): number => {
   let result = 2166136261;
@@ -61,70 +55,8 @@ const wrappedLines = (
   return lines.slice(0, maximumLines);
 };
 
-export const linesFor = (title: string): readonly string[] => wrappedLines(title, 25, 3);
-export const agentLinesFor = (name: string): readonly string[] => wrappedLines(name, 17, 2);
-
-export const labelRectFor = (
-  point: { readonly x: number; readonly y: number },
-  lines: readonly string[],
-  state: string,
-  labelOnLeft: boolean,
-): LabelRect => {
-  const longestLine = Math.max(0, ...lines.map((line) => line.length));
-  const width = Math.max(46, longestLine * 7.35, state.length * 6.4);
-  const left = labelOnLeft ? point.x - 17 - width : point.x + 17;
-  const top = point.y - (lines.length > 1 ? 21 : 15);
-  const height = lines.length * 12 + 16;
-  return { left, right: left + width, top, bottom: top + height };
-};
-
-export const labelsOverlap = (left: LabelRect, right: LabelRect, gap = 8): boolean =>
-  left.left < right.right + gap &&
-  left.right + gap > right.left &&
-  left.top < right.bottom + gap &&
-  left.bottom + gap > right.top;
-
-export const focusedLabelOffsets = (
-  candidates: readonly FocusedLabelCandidate[],
-  gap = 8,
-): ReadonlyMap<string, number> => {
-  const offsets = new Map<string, number>();
-  for (const labelOnLeft of [true, false]) {
-    const column = candidates
-      .filter((candidate) => candidate.labelOnLeft === labelOnLeft)
-      .sort((left, right) => left.rect.top - right.rect.top || left.id.localeCompare(right.id));
-    if (column.length === 0) continue;
-
-    const placedTops: number[] = [];
-    let nextTop = Number.NEGATIVE_INFINITY;
-    for (const candidate of column) {
-      const top = Math.max(candidate.rect.top, nextTop);
-      placedTops.push(top);
-      nextTop = top + candidate.rect.bottom - candidate.rect.top + gap;
-    }
-
-    const preferredCentre =
-      column.reduce((sum, candidate) => sum + (candidate.rect.top + candidate.rect.bottom) / 2, 0) /
-      column.length;
-    const placedCentre =
-      column.reduce(
-        (sum, candidate, index) =>
-          sum +
-          (placedTops[index] ?? candidate.rect.top) +
-          (candidate.rect.bottom - candidate.rect.top) / 2,
-        0,
-      ) / column.length;
-    const centreCorrection = preferredCentre - placedCentre;
-
-    for (const [index, candidate] of column.entries()) {
-      offsets.set(
-        candidate.id,
-        (placedTops[index] ?? candidate.rect.top) + centreCorrection - candidate.rect.top,
-      );
-    }
-  }
-  return offsets;
-};
+export const linesFor = (title: string): readonly string[] => wrappedLines(title, 16, 3);
+export const agentLinesFor = (name: string): readonly string[] => wrappedLines(name, 21, 2);
 
 export const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
@@ -191,14 +123,19 @@ const orbitPlacement = ({
   };
 };
 
-const distributeOutsideCaption = (
+const distributeAgentCards = (
   placements: readonly OrbitPlacement[],
+  goalBodyRadius: number,
 ): readonly OrbitPlacement[] => {
-  const captionCentre = Math.PI / 2;
-  const captionClearance = 0.82;
-  const availableArc = Math.PI * 2 - captionClearance * 2;
   const result: Array<OrbitPlacement | undefined> = Array.from({ length: placements.length });
-  const bands = [...new Set(placements.map((placement) => placement.band))];
+  const bands = [...new Set(placements.map((placement) => placement.band))].sort(
+    (left, right) => left - right,
+  );
+  const minimumRadius =
+    goalBodyRadius + Math.hypot(AGENT_CARD_WIDTH / 2, AGENT_CARD_HEIGHT / 2) + AGENT_CARD_GAP;
+  const availableArc = Math.PI * 2 - CAPTION_CLEARANCE * 2;
+  let previousRadiusX = minimumRadius - AGENT_CARD_WIDTH - AGENT_CARD_COLUMN_GAP;
+  let previousRadiusY = minimumRadius - AGENT_CARD_HEIGHT - AGENT_CARD_ROW_GAP;
   for (const band of bands) {
     const peers = placements
       .map((placement, index) => ({ index, placement }))
@@ -206,20 +143,70 @@ const distributeOutsideCaption = (
       .sort(
         (left, right) => left.placement.phase - right.placement.phase || left.index - right.index,
       );
+    const phaseStep = availableArc / peers.length;
+    const separation = Math.sin(Math.min(phaseStep, Math.PI / 2));
+    let radiusX = Math.max(
+      minimumRadius,
+      (AGENT_CARD_WIDTH + AGENT_CARD_GAP) / separation,
+      previousRadiusX + AGENT_CARD_WIDTH + AGENT_CARD_COLUMN_GAP,
+    );
+    let radiusY = Math.max(
+      minimumRadius,
+      (AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP) / separation,
+      previousRadiusY + AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP,
+    );
+    const firstPeer = peers[0];
+    if (!firstPeer) continue;
+    const centreX =
+      firstPeer.placement.x - Math.cos(firstPeer.placement.phase) * firstPeer.placement.radiusX;
+    const centreY =
+      firstPeer.placement.y - Math.sin(firstPeer.placement.phase) * firstPeer.placement.radiusY;
+    const phases = peers.map(
+      (_, rank) => Math.PI / 2 + CAPTION_CLEARANCE + (rank + 0.5) * phaseStep,
+    );
+    const overlapsAnotherCard = (): boolean => {
+      const points = phases.map((phase) => ({
+        x: centreX + Math.cos(phase) * radiusX,
+        y: centreY + Math.sin(phase) * radiusY,
+      }));
+      const earlierPoints = result.flatMap((placement) => (placement ? [placement] : []));
+      const allPoints = [...earlierPoints, ...points];
+      for (let leftIndex = 0; leftIndex < allPoints.length; leftIndex += 1) {
+        const left = allPoints[leftIndex];
+        if (!left) continue;
+        for (
+          let rightIndex = Math.max(leftIndex + 1, earlierPoints.length);
+          rightIndex < allPoints.length;
+          rightIndex += 1
+        ) {
+          const right = allPoints[rightIndex];
+          if (
+            right &&
+            Math.abs(left.x - right.x) < AGENT_CARD_WIDTH + AGENT_CARD_GAP &&
+            Math.abs(left.y - right.y) < AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP
+          )
+            return true;
+        }
+      }
+      return false;
+    };
+    while (overlapsAnotherCard()) {
+      radiusX *= 1.08;
+      radiusY *= 1.08;
+    }
     for (const [rank, peer] of peers.entries()) {
-      const fraction = ((rank + 0.5 + band * 0.31) / peers.length) % 1;
-      const phase = captionCentre + captionClearance + fraction * availableArc;
+      const phase = phases[rank] ?? peer.placement.phase;
       result[peer.index] = {
         ...peer.placement,
         phase,
-        x:
-          peer.placement.x +
-          (Math.cos(phase) - Math.cos(peer.placement.phase)) * peer.placement.radiusX,
-        y:
-          peer.placement.y +
-          (Math.sin(phase) - Math.sin(peer.placement.phase)) * peer.placement.radiusY,
+        radiusX,
+        radiusY,
+        x: centreX + Math.cos(phase) * radiusX,
+        y: centreY + Math.sin(phase) * radiusY,
       };
     }
+    previousRadiusX = radiusX;
+    previousRadiusY = radiusY;
   }
   return placements.map((placement, index) => result[index] ?? placement);
 };
@@ -228,7 +215,7 @@ export const goalAgentPoints = (
   goal: MapGoalView,
   centre: { readonly x: number; readonly y: number },
 ): readonly OrbitPlacement[] =>
-  distributeOutsideCaption(
+  distributeAgentCards(
     goal.agents.map((agent) =>
       orbitPlacement({
         id: agent.id,
@@ -243,6 +230,7 @@ export const goalAgentPoints = (
         bandStepY: 24,
       }),
     ),
+    goalRadius(goal),
   );
 
 export interface AtlasContentBounds {
@@ -262,8 +250,10 @@ interface GoalLocalBounds {
 const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
   const radius = goalRadius(goal);
   const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
-  const orbitWidth = Math.max(0, ...orbits.map((orbit) => orbit.radiusX)) + 22;
-  const orbitHeight = Math.max(0, ...orbits.map((orbit) => orbit.radiusY)) + 22;
+  const orbitWidth =
+    Math.max(0, ...orbits.map((orbit) => Math.abs(orbit.x))) + AGENT_CARD_WIDTH / 2 + 4;
+  const orbitHeight =
+    Math.max(0, ...orbits.map((orbit) => Math.abs(orbit.y))) + AGENT_CARD_HEIGHT / 2 + 4;
   const titleLines = linesFor(goal.title);
   const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
   return {
