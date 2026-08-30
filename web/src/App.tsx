@@ -3,6 +3,7 @@ import type {
   AgentView,
   CommandCentreProjection,
   InspectorProjection,
+  SearchResult,
 } from "../../src/projection/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
 import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
@@ -11,6 +12,7 @@ import {
   executeCommand,
   fetchInspector,
   fetchRecoveredSessions,
+  fetchSearch,
   resumeWebAgent,
   trackRecoveredSession,
 } from "./api.ts";
@@ -25,6 +27,7 @@ import { Ledger } from "./Ledger.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { NewGoalDialog } from "./NewGoalDialog.tsx";
 import { SessionImportDialog } from "./SessionImportDialog.tsx";
+import { SearchPalette, searchResultAction } from "./SearchPalette.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
@@ -61,6 +64,11 @@ export const App = (): React.JSX.Element => {
   const [sidePanel, setSidePanel] = useState<SidePanel>();
   const [selection, setSelection] = useState<Selection>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<readonly SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string>();
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
@@ -75,6 +83,32 @@ export const App = (): React.JSX.Element => {
   const [commandError, setCommandError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
   const [recoveredSessions, setRecoveredSessions] = useState<readonly RecoveredSessionView[]>([]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!searchOpen || !query) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    setSearchResults([]);
+    setSearchLoading(true);
+    setSearchError(undefined);
+    void fetchSearch(query, controller.signal)
+      .then((projection) => setSearchResults(projection.results))
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setSearchResults([]);
+          setSearchError(error instanceof Error ? error.message : "Search unavailable.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSearchLoading(false);
+      });
+    return () => controller.abort();
+  }, [searchOpen, searchQuery]);
 
   useEffect(() => {
     if (!sessionImportOpen) return;
@@ -314,8 +348,29 @@ export const App = (): React.JSX.Element => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing) return;
+      const modifiedSearchShortcut =
+        (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLocaleLowerCase() === "k";
+      if (
+        !searchOpen &&
+        ((event.key === "/" && !isEditableTarget(event.target)) || modifiedSearchShortcut) &&
+        !diffAgent &&
+        !newAgentOpen &&
+        !newGoalOpen &&
+        !sessionImportOpen &&
+        !terminalAgent
+      ) {
+        event.preventDefault();
+        setSearchOpen(true);
+        setShortcutsOpen(false);
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
+        if (searchOpen) {
+          setSearchOpen(false);
+          setSearchQuery("");
+          return;
+        }
         if (shortcutsOpen) {
           setShortcutsOpen(false);
           return;
@@ -350,6 +405,8 @@ export const App = (): React.JSX.Element => {
         diffAgent ||
         newAgentOpen ||
         newGoalOpen ||
+        searchOpen ||
+        sessionImportOpen ||
         terminalAgent ||
         shortcutsOpen ||
         (sidePanel && sidePanel !== "inspector")
@@ -441,6 +498,8 @@ export const App = (): React.JSX.Element => {
     diffAgent,
     newGoalOpen,
     newAgentOpen,
+    searchOpen,
+    sessionImportOpen,
     selection,
     selectedAgent,
     sidePanel,
@@ -498,6 +557,17 @@ export const App = (): React.JSX.Element => {
           </button>
           <button onClick={() => setNewAgentOpen(true)} type="button">
             New agent
+          </button>
+          <button
+            aria-haspopup="dialog"
+            onClick={() => {
+              setSearchOpen(true);
+              setShortcutsOpen(false);
+            }}
+            title="Find a Goal or Agent (/ or ⌘K)"
+            type="button"
+          >
+            Find
           </button>
           <button
             onClick={() => {
@@ -621,7 +691,7 @@ export const App = (): React.JSX.Element => {
                 ? 430
                 : 0
             }
-            reservedRight={0}
+            reservedRight={sidePanel === "inspector" ? 416 : 0}
             selection={selection}
             theme={theme}
             motion={motion}
@@ -639,6 +709,7 @@ export const App = (): React.JSX.Element => {
         {sidePanel === "inbox" ? (
           <InboxPanel
             error={commandError}
+            focusedAgentId={selection?.type === "agent" ? selection.id : undefined}
             onAssign={assignInboxAgents}
             onClose={() => setSidePanel(undefined)}
             onSelect={(next) => {
@@ -768,6 +839,32 @@ export const App = (): React.JSX.Element => {
           onRefresh={refreshSessionImport}
           pending={commandPending}
           sessions={recoveredSessions}
+        />
+      ) : null}
+      {searchOpen ? (
+        <SearchPalette
+          error={searchError}
+          loading={searchLoading}
+          onActivate={(result) => {
+            setSearchOpen(false);
+            setSearchQuery("");
+            const next = { type: result.type, id: result.id };
+            const action = searchResultAction(result, data.map);
+            if (action === "focus") selectAndFocus(next);
+            else {
+              setView("atlas");
+              setSelection(next);
+              setSidePanel(action === "inbox" ? "inbox" : "inspector");
+            }
+          }}
+          onClose={() => {
+            setSearchOpen(false);
+            setSearchQuery("");
+          }}
+          onQueryChange={setSearchQuery}
+          projection={data.map}
+          query={searchQuery}
+          results={searchResults}
         />
       ) : null}
     </main>

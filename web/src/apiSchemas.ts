@@ -221,6 +221,21 @@ export const InspectorProjectionSchema = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("empty-inspector"), lines: Schema.Array(Schema.String) }),
 );
 
+export const SearchProjectionSchema = Schema.Struct({
+  kind: Schema.Literal("search"),
+  query: Schema.String,
+  results: Schema.Array(
+    Schema.Struct({
+      type: Schema.Literal("goal", "agent"),
+      id: Schema.String,
+      label: Schema.String,
+      context: Schema.String,
+      status: Schema.String,
+      goalId: Schema.optional(Schema.String),
+    }),
+  ),
+});
+
 const CommandResult = Schema.Struct({
   ok: Schema.Boolean,
   error: Schema.optional(Schema.String),

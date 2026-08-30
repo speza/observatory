@@ -327,6 +327,34 @@ describe("ObservatoryWebApi", () => {
     expect(write.status).toBe(405);
   });
 
+  test("serves bounded metadata search and validates its query", async () => {
+    const fixture = makeUniverse();
+    for (let index = 0; index < 55; index += 1) {
+      expect(
+        fixture.universe.execute({
+          type: "CreateGoal",
+          id: `goal-${index}`,
+          title: `Atlas search target ${index}`,
+          priority: "P1",
+        }).ok,
+      ).toBe(true);
+    }
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock);
+
+    const found = await api.fetch(new Request("http://localhost/api/search?q=%20atlas%20"));
+    const missing = await api.fetch(new Request("http://localhost/api/search?q=%20%20"));
+    const tooLong = await api.fetch(
+      new Request(`http://localhost/api/search?q=${"a".repeat(201)}`),
+    );
+
+    expect(found.status).toBe(200);
+    expect(await found.json()).toMatchObject({ kind: "search", query: "atlas" });
+    const repeated = await api.fetch(new Request("http://localhost/api/search?q=atlas"));
+    expect((await repeated.json()).results).toHaveLength(50);
+    expect(missing.status).toBe(400);
+    expect(tooLong.status).toBe(400);
+  });
+
   test("serves a diff by trusted agent id without accepting a browser path", async () => {
     const fixture = makeUniverse();
     fixture.universe.reconcile(

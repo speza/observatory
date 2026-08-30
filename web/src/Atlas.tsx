@@ -360,6 +360,7 @@ export const Atlas = ({
                     />
                   </g>
                   <circle className="goal__outline" r={radius + 2} stroke={palette.mark} />
+                  <circle className="goal__selection" r={radius + 7} />
                   <text className="goal__priority" y="-14">
                     GOAL / {goal.priority}
                   </text>
@@ -528,6 +529,14 @@ export const Atlas = ({
                           </text>
                         ) : null}
                       </g>
+                      <rect
+                        className="agent__selection"
+                        height={AGENT_CARD_HEIGHT + 8}
+                        rx="7"
+                        width={AGENT_CARD_WIDTH + 8}
+                        x={-AGENT_CARD_WIDTH / 2 - 4}
+                        y={-AGENT_CARD_HEIGHT / 2 - 4}
+                      />
                     </g>
                   );
                 })}

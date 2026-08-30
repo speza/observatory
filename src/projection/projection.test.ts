@@ -290,6 +290,7 @@ describe("projections", () => {
       agentId: "agent-1",
       displayName: "Needle worker",
     });
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-2" });
     universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
     universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
     const projection = universe.project({
@@ -302,6 +303,7 @@ describe("projections", () => {
       "Archive candidate",
       "Needle worker",
     ]);
+    expect(projection.results[1]?.context).toBe("agent · Other");
   });
 
   test("does not surface attention for agents hidden under archived goals", () => {

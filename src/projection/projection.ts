@@ -547,6 +547,7 @@ const projectSearch = (
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return { kind: "search", query, results: [] };
   const results: SearchResult[] = [];
+  const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
   for (const goal of state.goals) {
     const haystack = [goal.title, goal.description, goal.priority, goal.status]
       .map(searchable)
@@ -580,7 +581,9 @@ const projectSearch = (
         type: "agent",
         id: agent.id,
         label: agent.displayName,
-        context: agent.primaryGoalId ? `agent · ${agent.primaryGoalId}` : "unassigned agent",
+        context: agent.primaryGoalId
+          ? `agent · ${goalsById.get(agent.primaryGoalId)?.title ?? "Goal unavailable"}`
+          : "unassigned agent",
         status: agent.archivedAt === undefined ? agent.runtimeState : "archived",
       };
       if (agent.primaryGoalId) Object.assign(result, { goalId: agent.primaryGoalId });

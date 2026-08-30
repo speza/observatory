@@ -39,6 +39,10 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
         <dd>Focus the current selection</dd>
       </div>
       <div>
+        <dt>/ or ⌘/Ctrl+k</dt>
+        <dd>Find a Goal or Agent in the Atlas, Inspector, or Inbox</dd>
+      </div>
+      <div>
         <dt>a / b / c / v / n / N</dt>
         <dd>Attention, inbox, closeout, view, new goal, new agent</dd>
       </div>

@@ -152,10 +152,19 @@
     opacity 180ms ease;
 }
 .goal__body:hover .goal__outline,
-.goal__body:focus .goal__outline,
-.goal__body.is-selected .goal__outline {
+.goal__body:focus .goal__outline {
   stroke-width: 3;
   opacity: 1;
+}
+.goal__selection {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.4;
+  opacity: 0;
+  pointer-events: none;
+}
+.goal__body.is-selected .goal__selection {
+  opacity: 0.9;
 }
 .goal__priority,
 .goal__unit {
@@ -349,11 +358,22 @@
   transform-origin: center;
 }
 .agent:hover .agent__card,
-.agent:focus .agent__card,
-.agent.is-selected .agent__card {
+.agent:focus .agent__card {
   stroke: var(--goal-color);
   stroke-width: 2;
   filter: drop-shadow(0 4px 7px rgb(24 21 17 / 14%));
+}
+.agent__selection {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.agent.is-selected .agent__selection {
+  opacity: 0.95;
+  filter: drop-shadow(0 4px 7px rgb(24 21 17 / 18%));
 }
 .zoom-control {
   position: absolute;

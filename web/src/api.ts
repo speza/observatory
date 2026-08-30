@@ -1,4 +1,4 @@
-import type { InspectorProjection } from "../../src/projection/types.ts";
+import type { InspectorProjection, SearchProjection } from "../../src/projection/types.ts";
 import type { PortfolioResponse } from "../../src/web/api.ts";
 import type {
   WebCommand,
@@ -26,6 +26,7 @@ import {
   CommandResponseSchema,
   InspectorProjectionSchema,
   PortfolioResponseSchema,
+  SearchProjectionSchema,
   StartAgentResponseSchema,
   CloseoutResponseSchema,
   WorkingTreeDiffResponseSchema,
@@ -158,6 +159,14 @@ export const fetchInspector = async (
     signal,
   );
   return Schema.decodeUnknownSync(InspectorProjectionSchema)(await response.json());
+};
+
+export const fetchSearch = async (
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchProjection> => {
+  const response = await responseFor(`/api/search?q=${encodeURIComponent(query)}`, signal);
+  return Schema.decodeUnknownSync(SearchProjectionSchema)(await response.json());
 };
 
 export const fetchWorkingTreeDiff = async (

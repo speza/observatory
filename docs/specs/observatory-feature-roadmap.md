@@ -45,7 +45,8 @@ workflows.
 | Contributed plugins and repository status        | Done       | Done | GitHub is the first code-host plugin |
 | Host-synchronised closeout                       | Done       | Done | Close before semantic archive        |
 | Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
-| Search and related-Agent evidence                | Done       | Next | Immediate discovery slice            |
+| Search                                           | Done       | Done | Bounded type-to-find Atlas palette   |
+| Related-Agent evidence                           | Done       | Next | Immediate discovery slice            |
 | Verification and handoff evidence                | Next       | Next | Major trust gap                      |
 | Rich deterministic attention                     | Next       | Next | Major usefulness gap                 |
 | Typed delegation/result/dependency relationships | Next       | Next | Preserve provenance                  |
@@ -80,12 +81,11 @@ non-goals.
    full-screen Session import lens.
 2. Prove laptop/Herdr restart as `dormant/resumable`, with exact resume into a
    new execution and no automatic continuation.
-3. Expose search and related-Agent projections through the loopback API.
-4. Add a browser command palette with keyboard navigation.
-5. Add related-Agent evidence with explicit adopt and dismiss commands.
-6. Preserve owning Goal, camera context and inspector for every result.
-7. Complete live browser acceptance for terminal return and host loss.
-8. Dogfood repository/code-host status against real Agent pull requests and
+3. Expose related-Agent projections through the loopback API.
+4. Add related-Agent evidence with explicit adopt and dismiss commands.
+5. Preserve owning Goal, camera context and inspector for every related result.
+6. Complete live browser acceptance for terminal return and host loss.
+7. Dogfood repository/code-host status against real Agent pull requests and
    preserve ambiguity when more than one candidate matches.
 
 ### Next — trust and daily operation

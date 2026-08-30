@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
 import { FixedClock, makeUniverse } from "../../src/universe/test-support.ts";
-import { PortfolioResponseSchema } from "./apiSchemas.ts";
+import { PortfolioResponseSchema, SearchProjectionSchema } from "./apiSchemas.ts";
 
 const portfolioAt = (generatedAt: number) => {
   const { universe } = makeUniverse({ clock: new FixedClock(generatedAt) });
@@ -37,5 +37,32 @@ describe("browser API response schemas", () => {
     };
 
     expect(() => decodePortfolioJson(JSON.stringify(malformed))).toThrow();
+  });
+
+  test("decodes search results and rejects invalid target types", () => {
+    const decode = Schema.decodeUnknownSync(SearchProjectionSchema);
+    expect(
+      decode({
+        kind: "search",
+        query: "atlas",
+        results: [
+          {
+            type: "agent",
+            id: "agent-a",
+            label: "Atlas",
+            context: "agent · goal-a",
+            status: "working",
+            goalId: "goal-a",
+          },
+        ],
+      }).results[0]?.goalId,
+    ).toBe("goal-a");
+    expect(() =>
+      decode({
+        kind: "search",
+        query: "atlas",
+        results: [{ type: "workspace", id: "bad", label: "Bad", context: "bad", status: "bad" }],
+      }),
+    ).toThrow();
   });
 });

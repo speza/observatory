@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommandCentreProjection } from "../../src/projection/types.ts";
 import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
@@ -7,6 +7,7 @@ interface InboxPanelProps {
   readonly projection: CommandCentreProjection;
   readonly pending: boolean;
   readonly error?: string;
+  readonly focusedAgentId?: string;
   readonly onAssign: (agentIds: readonly string[], goalId: string) => Promise<boolean>;
   readonly onClose: () => void;
   readonly onSelect: (selection: Selection) => void;
@@ -16,10 +17,12 @@ export const InboxPanel = ({
   projection,
   pending,
   error,
+  focusedAgentId,
   onAssign,
   onClose,
   onSelect,
 }: InboxPanelProps): React.JSX.Element => {
+  const focusedAgentRef = useRef<HTMLDivElement>(null);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [goalId, setGoalId] = useState(
     projection.goals.find((goal) => goal.status === "active")?.id ?? "",
@@ -42,6 +45,10 @@ export const InboxPanel = ({
       setGoalId(activeGoals[0]?.id ?? "");
     }
   }, [activeGoals, goalId, projection.unassigned]);
+
+  useEffect(() => {
+    focusedAgentRef.current?.scrollIntoView({ block: "nearest" });
+  }, [focusedAgentId]);
 
   const toggleAgent = (agentId: string): void => {
     setSelectedIds((current) =>
@@ -75,7 +82,11 @@ export const InboxPanel = ({
           <p className="inbox-panel__empty">No observed agents are waiting for organisation.</p>
         ) : (
           projection.unassigned.map((agent) => (
-            <div className="inbox-panel__item" key={agent.id}>
+            <div
+              className={`inbox-panel__item ${agent.id === focusedAgentId ? "is-focused" : ""}`}
+              key={agent.id}
+              ref={agent.id === focusedAgentId ? focusedAgentRef : undefined}
+            >
               <input
                 aria-label={`Select ${agent.displayName}`}
                 checked={selectedIds.includes(agent.id)}
@@ -84,6 +95,7 @@ export const InboxPanel = ({
               />
               <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
               <button
+                aria-current={agent.id === focusedAgentId ? "true" : undefined}
                 className="inbox-panel__agent"
                 onClick={() => onSelect({ type: "agent", id: agent.id })}
                 type="button"

@@ -4,6 +4,7 @@ import type {
   CatchUpProjection,
   CloseoutProjection,
   Projection,
+  SearchProjection,
   UniverseMapProjection,
 } from "../projection/types.ts";
 import type { SessionHost } from "../hosts/types.ts";
@@ -45,6 +46,9 @@ export interface PortfolioResponse {
 interface ErrorResponse {
   readonly error: string;
 }
+
+const MAXIMUM_SEARCH_QUERY_LENGTH = 200;
+const MAXIMUM_SEARCH_RESULTS = 50;
 
 const RecoveredTrackRequestSchema = Schema.Struct({
   handle: Schema.String,
@@ -178,6 +182,20 @@ export class ObservatoryWebApi {
         target: { type, id },
       });
       return json(projection);
+    }
+
+    if (url.pathname === "/api/search") {
+      const query = url.searchParams.get("q")?.trim();
+      if (!query) return json({ error: "A search query is required." }, 400);
+      if (query.length > MAXIMUM_SEARCH_QUERY_LENGTH)
+        return json({ error: "The search query is too long." }, 400);
+      const projection = this.universe.project({ kind: "search", now, query });
+      if (projection.kind !== "search")
+        return json({ error: "Projection contract mismatch." }, 500);
+      return json({
+        ...projection,
+        results: projection.results.slice(0, MAXIMUM_SEARCH_RESULTS),
+      } satisfies SearchProjection);
     }
 
     if (url.pathname === "/api/plugins") {

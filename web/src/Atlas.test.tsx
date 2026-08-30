@@ -103,6 +103,8 @@ describe("production web Atlas", () => {
     expect(markup).toContain("goal--working");
     expect(markup).toContain("agent--working");
     expect(markup).toContain("agent__card");
+    expect(markup).toContain("agent__selection");
+    expect(markup).toContain("goal__selection");
     expect(markup).toContain("agent__identity");
     expect(markup).toContain("agent__summary");
     expect(markup).toContain("agent__provider-mark");
