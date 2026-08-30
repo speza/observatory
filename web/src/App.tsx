@@ -20,6 +20,7 @@ import { AttentionQueue } from "./AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
 import { CatchUpPanel } from "./CatchUpPanel.tsx";
 import { CloseoutPanel } from "./CloseoutPanel.tsx";
+import { useCloseoutRepositoryEvidence } from "./closeoutRepositoryEvidence.ts";
 import { InboxPanel } from "./InboxPanel.tsx";
 import { Inspector } from "./Inspector.tsx";
 import { KeyboardGuide } from "./KeyboardGuide.tsx";
@@ -170,6 +171,14 @@ export const App = (): React.JSX.Element => {
   };
 
   const data = portfolio.data;
+  const closeoutResultIds = useMemo(
+    () => data?.closeout.results.map((agent) => agent.id) ?? [],
+    [data?.closeout.results],
+  );
+  const closeoutRepositoryEvidence = useCloseoutRepositoryEvidence(
+    closeoutResultIds,
+    sidePanel === "closeout",
+  );
   const working = useMemo(
     () =>
       data
@@ -735,6 +744,7 @@ export const App = (): React.JSX.Element => {
         {sidePanel === "closeout" ? (
           <CloseoutPanel
             error={commandError}
+            repositoryEvidence={closeoutRepositoryEvidence}
             onArchive={archiveAgents}
             onClose={() => setSidePanel(undefined)}
             onCloseAndArchive={runCloseout}

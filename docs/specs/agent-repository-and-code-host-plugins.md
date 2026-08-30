@@ -1,6 +1,6 @@
 # Agent repository status and code-host plugins
 
-Status: selected-Agent vertical slice implemented
+Status: selected-Agent and Closeout trust slices implemented
 
 Date: 2026-08-27
 
@@ -8,7 +8,11 @@ Implementation checkpoint: selected-Agent inspection now resolves the trusted
 observed worktree server-side, reads bounded local Git state, normalizes the push
 remote, queries the contributed code-host capability on demand, caches remote
 facts for 60 seconds, preserves ambiguous associations, and renders Repository
-status in the web inspector. Atlas and Closeout enrichment remain Slice 2.
+status in the web inspector. Closeout now prefetches evidence only for visible
+done Agents with concurrency bounded to four, reuses the 60-second provider
+cache, and renders deterministic integration warnings without changing
+Universe state. Atlas summaries and repository-derived attention remain later
+Slice 2 work.
 
 Depends on:
 
@@ -299,11 +303,14 @@ repository`.
 
 - Add compact Agent and Goal repository summaries without changing Atlas
   topology.
-- Enrich Results to review with deterministic integration warnings.
+- **Implemented:** enrich Results to review with deterministic integration
+  warnings and explicit informational/uncertain states.
 - Promote only failing checks, requested changes, conflicts and unpublished
   done work into explainable attention reasons.
-- Add per-Agent refresh, remote TTL caching and bounded done-Agent prefetch.
-- Exercise the 12-Goal/75-Agent mock portfolio without a GitHub request storm.
+- **Implemented:** per-Agent refresh, 60-second remote TTL caching and bounded
+  done-Agent prefetch.
+- **Implemented for Closeout:** exercise a 75-Agent evidence queue with at most
+  four concurrent requests and cache reuse. Atlas scale coverage remains.
 
 ### Slice 3 — proposals and cross-Agent integration
 

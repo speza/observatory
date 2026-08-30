@@ -42,7 +42,7 @@ workflows.
 | Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |
 | Agent-harness plugins and exact resume           | Done       | Done | Claude and Codex live-validated      |
 | Provider catalogue and dormant-session recovery  | Done       | Done | Scoped rebinding and exact resume    |
-| Contributed plugins and repository status        | Done       | Done | GitHub is the first code-host plugin |
+| Contributed plugins and repository status        | Done       | Done | Inspector and Closeout evidence live |
 | Host-synchronised closeout                       | Done       | Done | Close before semantic archive        |
 | Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
 | Search                                           | Done       | Done | Bounded type-to-find Atlas palette   |

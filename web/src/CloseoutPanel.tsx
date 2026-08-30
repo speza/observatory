@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import type { AgentView, CloseoutProjection } from "../../src/projection/types.ts";
+import { summarizeCloseoutIntegration } from "../../src/repositories/closeout-summary.ts";
 import { AgentLogo } from "./AgentLogo.tsx";
 import type { Selection } from "./Atlas.tsx";
+import type { RepositoryEvidenceState } from "./closeoutRepositoryEvidence.ts";
 
 interface CloseoutPanelProps {
   readonly projection: CloseoutProjection;
+  readonly repositoryEvidence: ReadonlyMap<string, RepositoryEvidenceState>;
   readonly pending: boolean;
   readonly error?: string;
   readonly onArchive: (agentIds: readonly string[]) => Promise<boolean>;
@@ -16,6 +19,7 @@ interface CloseoutPanelProps {
 
 export const CloseoutPanel = ({
   projection,
+  repositoryEvidence,
   pending,
   error,
   onArchive,
@@ -50,48 +54,82 @@ export const CloseoutPanel = ({
       </div>
       <p className="closeout-lane__description">{description}</p>
       {agents.length === 0 ? <p className="queue-empty">Nothing in this lane.</p> : null}
-      {agents.map((agent) => (
-        <article className="closeout-item" key={agent.id}>
-          <input
-            aria-label={`Select ${agent.displayName}`}
-            checked={selected.includes(agent.id)}
-            onChange={() =>
-              setSelected(
-                selected.includes(agent.id)
-                  ? selected.filter((candidate) => candidate !== agent.id)
-                  : [...selected, agent.id],
-              )
-            }
-            type="checkbox"
-          />
-          <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-          <button
-            className="closeout-item__identity"
-            onClick={() => onSelect({ type: "agent", id: agent.id })}
-            type="button"
-          >
-            <strong>{agent.displayName}</strong>
-            <small>{agent.goalTitle ?? "Unassigned"}</small>
-            <em>{kind === "results" ? "reported done" : "ended in host"}</em>
-          </button>
-          <div className="closeout-item__actions">
-            {kind === "results" ? (
-              <button onClick={() => onReview(agent)} type="button">
-                Review
-              </button>
-            ) : null}
+      {agents.map((agent) => {
+        const evidence = kind === "results" ? repositoryEvidence.get(agent.id) : undefined;
+        const summary =
+          evidence?.state === "ready" ? summarizeCloseoutIntegration(evidence.snapshot) : undefined;
+        return (
+          <article className="closeout-item" key={agent.id}>
+            <input
+              aria-label={`Select ${agent.displayName}`}
+              checked={selected.includes(agent.id)}
+              onChange={() =>
+                setSelected(
+                  selected.includes(agent.id)
+                    ? selected.filter((candidate) => candidate !== agent.id)
+                    : [...selected, agent.id],
+                )
+              }
+              type="checkbox"
+            />
+            <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
             <button
-              disabled={pending}
-              onClick={() => {
-                void (kind === "results" ? onCloseAndArchive([agent.id]) : onArchive([agent.id]));
-              }}
+              className="closeout-item__identity"
+              onClick={() => onSelect({ type: "agent", id: agent.id })}
               type="button"
             >
-              {kind === "results" ? "Close & archive" : "Archive"}
+              <strong>{agent.displayName}</strong>
+              <small>{agent.goalTitle ?? "Unassigned"}</small>
+              <em>{kind === "results" ? "reported done" : "ended in host"}</em>
             </button>
-          </div>
-        </article>
-      ))}
+            {kind === "results" ? (
+              <div className="closeout-item__evidence">
+                {!evidence || evidence.state === "loading" ? (
+                  <p role="status">Inspecting repository evidence…</p>
+                ) : null}
+                {evidence?.state === "unavailable" ? (
+                  <p className="is-warning" role="alert">
+                    Repository evidence unavailable: {evidence.message}
+                  </p>
+                ) : null}
+                {summary && summary.warnings.length > 0 ? (
+                  <ul aria-label={`Integration warnings for ${agent.displayName}`}>
+                    {summary.warnings.map((warning) => (
+                      <li className="is-warning" key={`${warning.kind}:${warning.message}`}>
+                        {warning.message}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {summary?.information.map((message) => (
+                  <p className="is-information" key={message}>
+                    {message}
+                  </p>
+                ))}
+                {summary && summary.warnings.length === 0 && summary.information.length === 0 ? (
+                  <p className="is-information">No integration warnings in current evidence.</p>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="closeout-item__actions">
+              {kind === "results" ? (
+                <button onClick={() => onReview(agent)} type="button">
+                  Review
+                </button>
+              ) : null}
+              <button
+                disabled={pending}
+                onClick={() => {
+                  void (kind === "results" ? onCloseAndArchive([agent.id]) : onArchive([agent.id]));
+                }}
+                type="button"
+              >
+                {kind === "results" ? "Close & archive" : "Archive"}
+              </button>
+            </div>
+          </article>
+        );
+      })}
       {selected.length > 0 && confirming !== kind ? (
         <button className="closeout-lane__batch" onClick={() => setConfirming(kind)} type="button">
           {kind === "results"

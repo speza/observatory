@@ -658,6 +658,26 @@ button {
   flex-wrap: wrap;
   gap: 6px;
 }
+.closeout-item__evidence {
+  grid-column: 3;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.closeout-item__evidence p,
+.closeout-item__evidence ul {
+  margin: 0;
+}
+.closeout-item__evidence ul {
+  display: grid;
+  gap: 3px;
+  padding-left: 16px;
+}
+.closeout-item__evidence .is-warning {
+  color: var(--danger);
+}
+.closeout-item__evidence .is-information {
+  color: var(--muted);
+}
 .closeout-item__actions button,
 .closeout-lane__batch {
   padding: 5px 7px;
