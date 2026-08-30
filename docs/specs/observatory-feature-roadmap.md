@@ -31,7 +31,7 @@ workflows.
 
 | Feature                                          | CORE       | WEB  | Note                                 |
 | ------------------------------------------------ | ---------- | ---- | ------------------------------------ |
-| Goal → Agent topology and assignment             | Done       | Done | Durable semantic baseline            |
+| System → Goal → Agent topology and assignment    | Done       | Done | Durable semantic baseline            |
 | Goal lifecycle, priority and accepted position   | Done       | Done | Auto-repair plus drag-to-pin         |
 | SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
 | Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |

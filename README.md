@@ -12,10 +12,10 @@ supervision. The product should answer five questions quickly:
 4. Where is my judgment needed?
 5. Can I trust what says it is finished?
 
-The Atlas is useful only when its stable Goal → Agent geography makes those
-answers easier than reconstructing them from a flat list. Attention, Catch up,
-Ledger, Inbox, inspector, workspace review and hosted terminals are supporting
-lenses over the same trusted state.
+The Atlas is useful only when its stable System → Goal → Agent geography makes
+those answers easier than reconstructing them from a flat list. Attention,
+Catch up, Ledger, Inbox, inspector, workspace review and hosted terminals are
+supporting lenses over the same trusted state.
 
 ## Product shape
 
@@ -108,7 +108,7 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 
 ## Current capabilities
 
-- durable human-owned goals, priority, completion and archive;
+- durable human-owned Systems and Goals, with Goal priority, completion and archive;
 - stable Goal → Agent assignments and accepted goal positions;
 - Herdr snapshot reconciliation with stale and unavailable state preserved;
 - explainable attention for blocked, waiting and uncertain agents;

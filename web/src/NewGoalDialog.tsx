@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Priority } from "../../src/universe/types.ts";
+import type { SystemView } from "../../src/projection/types.ts";
 import type { WebCommand } from "../../src/web/protocol.ts";
 import { ModalDialog } from "./ModalDialog.tsx";
 
@@ -8,6 +9,8 @@ interface NewGoalDialogProps {
   readonly error?: string;
   readonly onCancel: () => void;
   readonly onCreate: (command: WebCommand) => Promise<void>;
+  readonly systems: readonly SystemView[];
+  readonly defaultSystemId?: string;
 }
 
 const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
@@ -17,10 +20,13 @@ export const NewGoalDialog = ({
   error,
   onCancel,
   onCreate,
+  systems,
+  defaultSystemId,
 }: NewGoalDialogProps): React.JSX.Element => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("P2");
+  const [systemId, setSystemId] = useState(defaultSystemId ?? "");
   return (
     <ModalDialog ariaLabelledBy="new-goal-title" className="modal-backdrop" onClose={onCancel}>
       <section className="goal-dialog">
@@ -53,6 +59,17 @@ export const NewGoalDialog = ({
             />
           </label>
           <label>
+            <span>System</span>
+            <select onChange={(event) => setSystemId(event.target.value)} value={systemId}>
+              <option value="">No system</option>
+              {systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>Priority</span>
             <select
               onChange={(event) =>
@@ -77,7 +94,15 @@ export const NewGoalDialog = ({
           </button>
           <button
             disabled={pending || !title.trim()}
-            onClick={() => void onCreate({ type: "CreateGoal", title, description, priority })}
+            onClick={() =>
+              void onCreate({
+                type: "CreateGoal",
+                title,
+                description,
+                priority,
+                systemId: systemId || undefined,
+              })
+            }
             type="button"
           >
             {pending ? "Creating…" : "Create goal"}

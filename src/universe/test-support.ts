@@ -17,9 +17,11 @@ export class FixedClock implements Clock {
 }
 
 export class SequenceIds implements IdGenerator {
+  private system = 0;
   private goal = 0;
   private agent = 0;
-  next(kind: "goal" | "agent"): string {
+  next(kind: "system" | "goal" | "agent"): string {
+    if (kind === "system") return `system-${++this.system}`;
     if (kind === "goal") return `goal-${++this.goal}`;
     return `agent-${++this.agent}`;
   }

@@ -7,6 +7,7 @@ import {
   type Goal,
   type HostHealth,
   type Agent,
+  type System,
   type UniverseState,
   type UniverseStore,
   type UniverseChange,
@@ -22,6 +23,7 @@ import type { ProviderSessionSnapshot } from "../../plugin-sdk/index.ts";
 
 interface GoalRow {
   id: string;
+  system_id: string | null;
   title: string;
   description: string | null;
   priority: string;
@@ -33,6 +35,14 @@ interface GoalRow {
   map_x: number | null;
   map_y: number | null;
   map_pinned: number;
+}
+
+interface SystemRow {
+  id: string;
+  title: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
 }
 
 interface AgentRow {
@@ -231,7 +241,7 @@ const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
     ? value
     : "changed";
 const asChangeTarget = (value: string): UniverseChange["targetType"] =>
-  value === "goal" ? "goal" : "agent";
+  value === "system" || value === "goal" ? value : "agent";
 
 const providerSessionHandle = (
   harnessId: string,
@@ -263,12 +273,23 @@ export class SqliteUniverseStore
   }
 
   load(): UniverseState {
+    const systems = this.db
+      .query<SystemRow, []>("SELECT * FROM systems ORDER BY created_at, id")
+      .all()
+      .map((row): System => ({
+        id: row.id,
+        title: row.title,
+        description: row.description ?? undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
     const goals = this.db
       .query<GoalRow, []>("SELECT * FROM goals ORDER BY created_at, id")
       .all()
       .map((row) => {
         const goal = {
           id: row.id,
+          systemId: row.system_id ?? undefined,
           title: row.title,
           priority: asPriority(row.priority),
           status: asGoalStatus(row.status),
@@ -395,6 +416,7 @@ export class SqliteUniverseStore
       .get();
     return {
       version: 1,
+      systems,
       goals,
       agents,
       hosts,
@@ -409,14 +431,20 @@ export class SqliteUniverseStore
   save(state: UniverseState): void {
     const write = this.db.transaction(() => {
       this.db.exec(
-        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM hosts; DELETE FROM universe_changes; DELETE FROM operator_checkpoint;",
+        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM systems; DELETE FROM hosts; DELETE FROM universe_changes; DELETE FROM operator_checkpoint;",
       );
+      const system = this.db.prepare(
+        "INSERT INTO systems (id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      );
+      for (const row of state.systems)
+        system.run(row.id, row.title, row.description ?? null, row.createdAt, row.updatedAt);
       const goal = this.db.prepare(
-        "INSERT INTO goals (id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO goals (id, system_id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const row of state.goals) {
         goal.run(
           row.id,
+          row.systemId ?? null,
           row.title,
           row.description ?? null,
           row.priority,
@@ -666,6 +694,7 @@ export class SqliteUniverseStore
               ELSE 'unknown'
             END;
         DELETE FROM goals;
+        DELETE FROM systems;
         DELETE FROM hosts;
         DELETE FROM universe_changes;
         DELETE FROM operator_checkpoint;
@@ -688,6 +717,7 @@ export class SqliteUniverseStore
         DELETE FROM related_agent_dismissals;
         DELETE FROM agents;
         DELETE FROM goals;
+        DELETE FROM systems;
         DELETE FROM hosts;
         DELETE FROM universe_changes;
         DELETE FROM operator_checkpoint;
@@ -881,6 +911,29 @@ export class SqliteUniverseStore
     this.migrateProviderSessions();
     this.migrateExecutionContinuity();
     this.migrateHostInstances();
+    this.migrateSystems();
+  }
+
+  private migrateSystems(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS systems (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `);
+    const goalColumns = this.db
+      .query<{ name: string }, []>("PRAGMA table_info(goals)")
+      .all()
+      .map(({ name }) => name);
+    if (!goalColumns.includes("system_id"))
+      this.db.exec("ALTER TABLE goals ADD COLUMN system_id TEXT REFERENCES systems(id)");
+    this.db.exec(`
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (10, unixepoch() * 1000);
+    `);
   }
 
   private migrateHostInstances(): void {

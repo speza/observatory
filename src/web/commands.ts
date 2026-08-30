@@ -12,10 +12,22 @@ const MapCoordinate = Schema.Number.pipe(Schema.finite(), Schema.between(-10_000
 
 const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
   Schema.Struct({
+    type: Schema.Literal("CreateSystem"),
+    title: Title,
+    description: Schema.optional(Description),
+  }),
+  Schema.Struct({ type: Schema.Literal("RenameSystem"), systemId: Id, title: Title }),
+  Schema.Struct({
+    type: Schema.Literal("SetSystemDescription"),
+    systemId: Id,
+    description: Schema.optional(Description),
+  }),
+  Schema.Struct({
     type: Schema.Literal("CreateGoal"),
     title: Title,
     description: Schema.optional(Description),
     priority: Priority,
+    systemId: Schema.optional(Id),
   }),
   Schema.Struct({
     type: Schema.Literal("RenameGoal"),
@@ -38,6 +50,11 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
     position: Schema.Struct({ x: MapCoordinate, y: MapCoordinate }),
   }),
   Schema.Struct({ type: Schema.Literal("ResetGoalMapPosition"), goalId: Id }),
+  Schema.Struct({
+    type: Schema.Literal("AssignGoalToSystem"),
+    goalId: Id,
+    systemId: Schema.optional(Id),
+  }),
   Schema.Struct({
     type: Schema.Literal("AssignAgent"),
     agentId: Id,

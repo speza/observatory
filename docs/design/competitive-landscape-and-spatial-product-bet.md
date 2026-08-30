@@ -16,7 +16,7 @@ This document records the competitive landscape around agent session managers,
 orchestrators and observability products, and evaluates Observatory's central
 product hypothesis:
 
-> Can a stable Goal -> Agent spatial universe materially outperform cards,
+> Can a stable System -> Goal -> Agent spatial universe materially outperform cards,
 > kanban and flat session lists for supervising a large body of concurrent and
 > long-lived agent work?
 
@@ -162,9 +162,9 @@ Observatory should reproduce it.
 ### Remaining opening
 
 None of the reviewed products is primarily organised around a durable,
-cross-repository Goal -> Agent universe that remains independent of the
-session host. Most make a repository, worktree, task card, terminal or runtime
-task graph the primary organising object.
+cross-repository System -> Goal -> Agent universe that remains independent of
+the session host. Most make a repository, worktree, task card, terminal or
+runtime task graph the primary organising object.
 
 The strongest Observatory position is:
 

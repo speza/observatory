@@ -12,6 +12,7 @@ interface MockGoalSeed {
   readonly priority: "P0" | "P1" | "P2";
   readonly nativeIds: readonly string[];
   readonly position?: { readonly x: number; readonly y: number };
+  readonly systemId?: string;
 }
 
 const goals = [
@@ -149,8 +150,32 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
 
   const scaleFixture = universe.snapshot().agents.length >= 70;
   const selectedGoals: readonly MockGoalSeed[] = scaleFixture
-    ? scaleGoals.map((goal) => ({ ...goal, nativeIds: nativeIdsForRange(goal.range) }))
-    : goals;
+    ? scaleGoals.map((goal) => ({
+        ...goal,
+        nativeIds: nativeIdsForRange(goal.range),
+        systemId:
+          goal.id === "mock-goal-career"
+            ? "mock-system-career"
+            : goal.id === "mock-goal-food"
+              ? "mock-system-home"
+              : goal.id === "mock-goal-direction" || goal.id === "mock-goal-frontier"
+                ? "mock-system-experiments"
+                : "mock-system-observatory",
+      }))
+    : goals.map((goal) => ({ ...goal, systemId: "mock-system-observatory" }));
+
+  const systems: readonly (readonly [string, string, string])[] = scaleFixture
+    ? [
+        ["mock-system-observatory", "Observatory", "Supervise concurrent agent work."],
+        ["mock-system-experiments", "Product experiments", "Validate new product directions."],
+        ["mock-system-career", "Career", "Find the right AI-first product role."],
+        ["mock-system-home", "Home", "Automate recurring personal work."],
+      ]
+    : [["mock-system-observatory", "Observatory", "Build the agent observatory."]];
+  for (const [id, title, description] of systems) {
+    const result = universe.execute({ type: "CreateSystem", id, title, description });
+    if (!result.ok) throw new Error(result.error ?? "Could not seed mock system.");
+  }
 
   let createdGoals = 0;
   for (const goal of selectedGoals) {
@@ -160,6 +185,7 @@ export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
       title: goal.title,
       description: goal.description,
       priority: goal.priority,
+      systemId: goal.systemId,
     });
     if (!result.ok) throw new Error(result.error ?? "Could not seed mock goal.");
     if (goal.position) {

@@ -540,17 +540,34 @@ describe("ObservatoryWebApi", () => {
         }),
       );
 
+    const createdSystem = await command({
+      type: "CreateSystem",
+      title: "Observatory",
+      description: "A broad area of work.",
+    });
+    expect(createdSystem.status).toBe(200);
+    const createdSystemBody: WebCommandResponse = await createdSystem.json();
+    const systemId = createdSystemBody.result.systemId;
+    if (!systemId) throw new Error("Expected created system id.");
+
     const created = await command({
       type: "CreateGoal",
       title: "Build the command loop",
       description: "Human-authored control through the Universe.",
       priority: "P1",
+      systemId,
     });
     expect(created.status).toBe(200);
     const createdBody: WebCommandResponse = await created.json();
     const goalId = createdBody.result.goalId;
     if (!goalId) throw new Error("Expected created goal id.");
     expect(createdBody.portfolio.commandCentre.goals[0]?.title).toBe("Build the command loop");
+    expect(createdBody.portfolio.commandCentre.systems[0]?.goals[0]?.id).toBe(goalId);
+
+    expect(
+      (await command({ type: "AssignGoalToSystem", goalId, systemId: undefined })).status,
+    ).toBe(200);
+    expect((await command({ type: "AssignGoalToSystem", goalId, systemId })).status).toBe(200);
 
     expect((await command({ type: "AssignAgents", agentIds: [agentId], goalId })).status).toBe(200);
     expect((await command({ type: "SetGoalPriority", goalId, priority: "P0" })).status).toBe(200);

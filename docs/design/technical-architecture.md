@@ -152,7 +152,9 @@ interface.
 
 Key invariants:
 
-- A goal is the largest durable organisational object.
+- A System is the largest durable organisational object and groups Goals.
+- A Goal belongs to at most one System; an Agent's System is derived through
+  its primary Goal.
 - V1 has no durable organisational object between a goal and its agents.
 - A tracked worker agent has at most one primary goal.
 - An Agent may reference other goals without owning work within them.
@@ -166,11 +168,11 @@ Key invariants:
 - Unknown facts remain unknown; adapters cannot silently convert inference into
   accepted structure.
 
-This is an intentional v1 simplification, not a claim that every goal will
-remain flat forever. Delegation and dependency relationships provide structure
-without another container. If real usage shows that crowded goals need an
-independently named, prioritised and completed intermediate object, revisit
-nested goals, workstreams or derived clusters as a new model decision.
+Systems solve portfolio-scale separation without changing direct Goal → Agent
+accountability. Delegation and dependency relationships provide structure
+inside a Goal without another container. If real usage shows that crowded goals
+need an independently named, prioritised and completed intermediate object,
+revisit nested goals or workstreams as a new model decision.
 
 ### Agent-host module
 
@@ -517,7 +519,9 @@ graph traversal.
 
 Initial projections:
 
-- portfolio: active goals plus one level of children;
+- systems overview: human-authored Systems with rolled-up Goal, Agent,
+  attention and uncertainty counts;
+- portfolio: active goals plus one level of children within a selected System;
 - focused goal: expanded work, agent and Git relationships;
 - attention queue: ordered signals with explanations;
 - code contexts: observed repository/worktree groups with agents;
@@ -594,8 +598,11 @@ Identifiers are AO-generated, stable and unrelated to display names. Native
 identifiers are stored as locators, never used as primary AO identity.
 
 ```text
+System
+  id, title, description?, version
+
 Goal
-  id, title, description?, priority?, lifecycle, acceptance, version
+  id, system_id?, title, description?, priority?, lifecycle, acceptance, version
 
 Agent
   id, primary_goal_id?, host_ref, provider_ref?, display_name,
@@ -664,9 +671,13 @@ The control interface should expose domain commands rather than CRUD over
 tables. Candidate v1 commands are:
 
 ```text
+CreateSystem
+RenameSystem
+SetSystemDescription
 CreateGoal
 RenameGoal
 SetGoalPriority
+AssignGoalToSystem
 CompleteGoal
 ArchiveGoal
 AssignAgent
@@ -932,11 +943,12 @@ of this section records that historical evidence; it is not a maintained-client
 contract. Current behaviour and future work belong to the web GUI and feature
 roadmap.
 
-The default projection is a portfolio map of stable goal bodies and direct
-agent satellites. Goal size communicates agent load, human-set priority has
-a persistent visual treatment, and blocked/waiting attention reaches the owning
-goal even when the satellite is outside the current viewport. Narrow terminals
-use a focused goal/lens fallback rather than compressing the whole universe.
+The default top-level projection is a Systems overview. Selecting a System
+enters a portfolio map of stable goal bodies and direct agent satellites. Goal
+size communicates agent load, human-set priority has a persistent visual
+treatment, and blocked/waiting attention reaches the owning goal even when the
+satellite is outside the current viewport. Narrow terminals use a focused
+goal/lens fallback rather than compressing the whole universe.
 Worktrees, repositories, runtimes and hosts are agent metadata in the
 inspector, not navigation levels or map nodes.
 

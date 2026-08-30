@@ -120,6 +120,27 @@ export const Inspector = ({
           >
             Save goal details
           </button>
+          <label>
+            <span>System</span>
+            <select
+              disabled={commandPending}
+              onChange={(event) =>
+                void onCommand({
+                  type: "AssignGoalToSystem",
+                  goalId: goal.id,
+                  systemId: event.target.value || undefined,
+                })
+              }
+              value={goal.systemId ?? ""}
+            >
+              <option value="">No system</option>
+              {commandCentre.systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <fieldset>
             <legend>Priority</legend>
             <div className="priority-picker">

@@ -17,10 +17,22 @@ import type { RecoveredSessionView } from "../provider-sessions/types.ts";
 
 export type WebCommand =
   | {
+      readonly type: "CreateSystem";
+      readonly title: string;
+      readonly description?: string;
+    }
+  | { readonly type: "RenameSystem"; readonly systemId: string; readonly title: string }
+  | {
+      readonly type: "SetSystemDescription";
+      readonly systemId: string;
+      readonly description?: string;
+    }
+  | {
       readonly type: "CreateGoal";
       readonly title: string;
       readonly description?: string;
       readonly priority: Priority;
+      readonly systemId?: string;
     }
   | { readonly type: "RenameGoal"; readonly goalId: string; readonly title: string }
   | {
@@ -35,6 +47,7 @@ export type WebCommand =
       readonly position: { readonly x: number; readonly y: number };
     }
   | { readonly type: "ResetGoalMapPosition"; readonly goalId: string }
+  | { readonly type: "AssignGoalToSystem"; readonly goalId: string; readonly systemId?: string }
   | { readonly type: "AssignAgent"; readonly agentId: string; readonly goalId: string }
   | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
   | { readonly type: "UnassignAgent"; readonly agentId: string }

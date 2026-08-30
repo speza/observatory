@@ -4,6 +4,7 @@ import {
   type Goal,
   type HostHealth,
   type Agent,
+  type System,
   type UniverseChange,
   type OperatorCheckpoint,
 } from "../universe/types.ts";
@@ -32,6 +33,7 @@ import type {
   CatchUpProjection,
   CloseoutProjection,
   SearchResult,
+  SystemView,
   AgentView,
   UniverseMapProjection,
 } from "./types.ts";
@@ -106,6 +108,7 @@ const publicAgent = (agent: Agent) => {
 
 const projectCommandCentre = (
   state: {
+    readonly systems?: readonly System[];
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
@@ -155,15 +158,37 @@ const projectCommandCentre = (
   const visibleAgents = views.filter(
     (agent) => includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived",
   );
+  const systems = (state.systems ?? [])
+    .map((system): SystemView => {
+      const goals = goalViews.filter((goal) => goal.systemId === system.id);
+      const agents = goals.flatMap((goal) => goal.agents);
+      return {
+        ...system,
+        goals,
+        agentCount: agents.length,
+        workingCount: agents.filter(
+          (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
+        ).length,
+        attentionCount: goals.reduce((total, goal) => total + goal.attentionCount, 0),
+        staleCount: goals.reduce((total, goal) => total + goal.staleCount, 0),
+      };
+    })
+    .sort((left, right) => {
+      if (left.attentionCount !== right.attentionCount)
+        return right.attentionCount - left.attentionCount;
+      return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+    });
   return {
     kind: "command-centre",
     generatedAt: now,
     host: hostFor(state.hosts),
     attention,
+    systems,
     goals: goalViews,
     unassigned,
     counts: {
       goals: goalViews.length,
+      systems: systems.length,
       agents: visibleAgents.length,
       attention: attention.currentCount,
       uncertainty: attention.uncertaintyCount,
@@ -482,6 +507,7 @@ const goalRadius = (agentCount: number): GoalRadius => ({
 
 const projectUniverseMap = (
   state: {
+    readonly systems?: readonly System[];
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];

@@ -104,6 +104,32 @@ describe("projections", () => {
     expect(projection.counts.attention).toBe(1);
   });
 
+  test("rolls goals and agent state up into systems without reassigning agents", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Observatory" });
+    universe.execute({
+      type: "CreateGoal",
+      title: "Ship systems",
+      priority: "P0",
+      systemId: "system-1",
+    });
+    universe.reconcile(hostSnapshot([observation("p1", "working agent", "working")]));
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.systems).toMatchObject([
+      {
+        title: "Observatory",
+        agentCount: 1,
+        workingCount: 1,
+        goals: [{ title: "Ship systems" }],
+      },
+    ]);
+    expect(projection.goals[0]?.agents[0]?.primaryGoalId).toBe("goal-1");
+    expect(projection.counts.systems).toBe(1);
+  });
+
   test("groups agents by observed code context without changing goal assignment", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Cross-repository outcome" });

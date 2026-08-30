@@ -20,10 +20,11 @@ separate mental model of why every agent exists, how the work relates, what is
 blocked, what can be trusted, and where their judgment is needed.
 
 This project explores a provider-independent, goal-centred control plane. Its
-primary proof surface is a stable graphical Atlas of goal bodies and agent
-satellites over the real Goal → Agent topology. Flat attention and grouped-list
-views remain supporting lenses for precise execution; they are not the core
-product proof.
+primary proof surface is a stable graphical Atlas over the real System → Goal →
+Agent topology. The top level summarises Systems; entering one reveals stable
+goal bodies and direct agent satellites. Flat attention and grouped-list views
+remain supporting lenses for precise execution; they are not the core product
+proof.
 
 The visual treatment is not the product by itself. It succeeds only if spatial
 memory and goal/agent geography make supervising agent work materially easier
@@ -176,7 +177,8 @@ The proposed visual language is:
 
 | Concept                | Possible representation                                         |
 | ---------------------- | --------------------------------------------------------------- |
-| Goal or outcome        | Star system, planet or large region                             |
+| System                 | Broad, durable area of work                                     |
+| Goal or outcome        | Named outcome within a System                                   |
 | Agent                  | Moving orb, spacecraft or compact child row                     |
 | Chief-of-staff role    | Agent with visible delegation relationships                     |
 | Child agent            | Satellite linked to its parent                                  |
@@ -218,30 +220,37 @@ Git.
 ## Core information model
 
 ```text
-Goal
-├── Dependencies and decisions
-└── Agent role or agent
-    ├── Parent / children
-    ├── Delegated task and authority
-    ├── Context lineage
-    ├── Runtime state
-    ├── Repository, branch and worktree metadata
-    ├── Commits, changed files and verification artifacts
-    ├── Pull request / integration state
-    └── Result and consumption state
+System
+└── Goal
+    ├── Dependencies and decisions
+    └── Agent role or agent
+        ├── Parent / children
+        ├── Delegated task and authority
+        ├── Context lineage
+        ├── Runtime state
+        ├── Repository, branch and worktree metadata
+        ├── Commits, changed files and verification artifacts
+        ├── Pull request / integration state
+        └── Result and consumption state
 ```
 
 The model must tolerate partial knowledge. Relationships can be detected,
 declared by agents, inferred tentatively, or added manually by the user. The UI
 must distinguish those provenance levels.
 
-### Goals are the primary object
+### Systems scope the universe; goals own the work
 
-Goals are the largest and most durable objects in the universe. They can span
-multiple repositories, worktrees, providers and agents. A goal can be as light
-as a title and optional description; priority, success criteria, constraints and
-decisions are progressive additions rather than required project-management
-ceremony.
+Systems are the largest durable organisational objects in the universe. A
+System is a human-named broad area of work, such as a product, client context or
+long-running endeavour. It contains Goals and may span multiple repositories,
+worktrees, providers and hosts. The name deliberately distinguishes semantic
+organisation from a developer-tool "project" or "workspace", which commonly
+means a directory or checkout.
+
+Goals remain the primary objects for intent, priority and agent accountability.
+A goal can be as light as a title and optional description; priority, success
+criteria, constraints and decisions are progressive additions rather than
+required project-management ceremony.
 
 Agents are assigned directly to goals and can query that shared context. This
 gives independently running agents common intent without making AO responsible
@@ -249,9 +258,10 @@ for storing or replaying their transcripts.
 
 V1 deliberately has no durable organisational layer between a goal and its
 agents. Delegation, dependency, review and Git relationships organise the
-agents without requiring another container. If real goals become too crowded,
-a later version may add nested goals, workstreams or derived clusters based on
-observed need. That shape is not chosen yet.
+agents without requiring another container. Systems group Goals rather than
+assigning Agents independently, so an Agent's System is always derived from its
+primary Goal. Existing or newly observed Goals and Agents may remain unassigned
+until a human accepts their organisation.
 
 The durable record remains the Agent because its host execution can stop,
 resume or be replaced while its history and contribution to the Goal remain
@@ -647,10 +657,12 @@ provider-native initially.
 ## GUI experience
 
 The local GUI is a restrained, keyboard-accessible operational universe using
-native SVG, HTML, typography, colour and limited semantic motion. Its primary
-view is a stable portfolio of goal bodies with direct agent satellites; focused
-goal views expose one body's satellites. Attention, Inbox, inspector and Ledger
-views are supporting lenses, and infrastructure details remain agent metadata.
+native SVG, HTML, typography, colour and limited semantic motion. Its top level
+summarises Systems with rolled-up Goal, Agent, attention and uncertainty counts.
+Selecting a System enters the stable Atlas of goal bodies with direct agent
+satellites; focused goal views expose one body's satellites. Attention, Inbox,
+inspector and Ledger views are supporting lenses, and infrastructure details
+remain agent metadata.
 
 Unassigned agents remain discoverable without becoming map topology: the
 portfolio hides their cards and exposes the Inbox count and lens instead.
@@ -677,7 +689,8 @@ an unassigned agent keeps the supporting Inbox context. Creating a goal selects
 it automatically; assignment remains an explicit inspector action.
 
 Map keyboard navigation follows the visible hierarchy rather than flattening
-it: `j`/`k` or arrow keys move through selectable Goals and Agents, while the
+it. At the top level, activating a System enters its Atlas. Inside that scope,
+`j`/`k` or arrow keys move through selectable Goals and Agents, while the
 supporting Ledger and queue surfaces retain ordered row navigation.
 
 The experience should remain fully keyboard operable. Selecting an item should

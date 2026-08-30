@@ -6,6 +6,7 @@ import type {
   OperatorCheckpoint,
   RelatedAgentDismissal,
   Agent,
+  System,
   UniverseChange,
 } from "../universe/types.ts";
 
@@ -76,15 +77,25 @@ export interface GoalView extends Goal {
   readonly staleCount: number;
 }
 
+export interface SystemView extends System {
+  readonly goals: readonly GoalView[];
+  readonly agentCount: number;
+  readonly workingCount: number;
+  readonly attentionCount: number;
+  readonly staleCount: number;
+}
+
 export interface CommandCentreProjection {
   readonly kind: "command-centre";
   readonly generatedAt: number;
   readonly host: HostHealth | undefined;
   readonly attention: AttentionProjection;
+  readonly systems: readonly SystemView[];
   readonly goals: readonly GoalView[];
   readonly unassigned: readonly AgentView[];
   readonly counts: {
     readonly goals: number;
+    readonly systems: number;
     readonly agents: number;
     readonly attention: number;
     readonly uncertainty: number;
@@ -281,6 +292,7 @@ export interface ProjectionModule {
   project(
     state: {
       readonly goals: readonly Goal[];
+      readonly systems?: readonly System[];
       readonly agents: readonly Agent[];
       readonly hosts: readonly HostHealth[];
       readonly relatedAgentDismissals?: readonly RelatedAgentDismissal[];

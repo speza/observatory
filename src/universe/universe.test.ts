@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { makeUniverse, hostSnapshot } from "./test-support.ts";
+import { createProjectionModule } from "../projection/projection.ts";
+import { createEmptyUniverse } from "./universe.ts";
+import { makeUniverse, hostSnapshot, SequenceIds } from "./test-support.ts";
 
 const observation = (
   nativeId: string,
@@ -35,6 +37,59 @@ const observedConversation = (
 });
 
 describe("Universe", () => {
+  test("preserves a universe that contains systems but no goals or agents", () => {
+    const { universe, store, clock } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Long-running system" });
+    const saves = store.saves;
+
+    const reloaded = createEmptyUniverse(store, clock, new SequenceIds(), createProjectionModule());
+
+    expect(reloaded.snapshot().systems[0]?.title).toBe("Long-running system");
+    expect(store.saves).toBe(saves);
+  });
+
+  test("organises goals into durable human-authored systems", () => {
+    const { universe } = makeUniverse();
+    expect(
+      universe.execute({
+        type: "CreateSystem",
+        title: "  Observatory  ",
+        description: "Agent supervision across repositories.",
+      }),
+    ).toEqual({ ok: true, systemId: "system-1" });
+    expect(
+      universe.execute({
+        type: "CreateGoal",
+        title: "Ship the Atlas",
+        systemId: "system-1",
+      }),
+    ).toEqual({ ok: true, goalId: "goal-1" });
+    expect(
+      universe.execute({
+        type: "CreateGoal",
+        title: "Invalid",
+        systemId: "missing",
+      }),
+    ).toEqual({ ok: false, error: "System not found." });
+    expect(
+      universe.execute({
+        type: "RenameSystem",
+        systemId: "system-1",
+        title: "Observatory product",
+      }).ok,
+    ).toBe(true);
+    expect(
+      universe.execute({
+        type: "AssignGoalToSystem",
+        goalId: "goal-1",
+      }).ok,
+    ).toBe(true);
+
+    const state = universe.snapshot();
+    expect(state.systems[0]?.title).toBe("Observatory product");
+    expect(state.goals[0]?.systemId).toBeUndefined();
+  });
+
   test("enforces goal lifecycle and direct assignment through its interface", () => {
     const { universe, clock } = makeUniverse();
     expect(

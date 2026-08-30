@@ -38,10 +38,12 @@ describe("SQLite persistence", () => {
     const first = new SqliteUniverseStore(databasePath);
     try {
       const setup = makeUniverse({ store: first });
+      setup.universe.execute({ type: "CreateSystem", title: "Persisted system" });
       setup.universe.execute({
         type: "CreateGoal",
         title: "Persisted",
         priority: "P1",
+        systemId: "system-1",
       });
       setup.universe.execute({
         type: "SetGoalMapPosition",
@@ -61,6 +63,8 @@ describe("SQLite persistence", () => {
       });
       const state = first.load();
       expect(state.goals[0]?.title).toBe("Persisted");
+      expect(state.systems[0]?.title).toBe("Persisted system");
+      expect(state.goals[0]?.systemId).toBe("system-1");
       expect(state.goals[0]?.mapPosition).toEqual({ x: 123, y: -45 });
       expect(state.goals[0]?.mapPositionPinned).toBe(true);
       expect(state.agents[0]?.primaryGoalId).toBe("goal-1");
@@ -99,7 +103,7 @@ describe("SQLite persistence", () => {
     const versions = store.db
       .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
-    expect(versions.map((row) => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(versions.map((row) => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(agents)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
@@ -110,6 +114,14 @@ describe("SQLite persistence", () => {
     const goalColumns = store.db.query<{ name: string }, []>("PRAGMA table_info(goals)").all();
     expect(goalColumns.map((column) => column.name)).toContain("map_x");
     expect(goalColumns.map((column) => column.name)).toContain("map_pinned");
+    expect(goalColumns.map((column) => column.name)).toContain("system_id");
+    expect(
+      store.db
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'systems'",
+        )
+        .all(),
+    ).toHaveLength(1);
     const dismissalTables = store.db
       .query<{ name: string }, []>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'related_agent_dismissals'",

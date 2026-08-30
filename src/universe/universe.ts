@@ -11,6 +11,8 @@ import {
   type HostHealth,
   type IdGenerator,
   type Priority,
+  type System,
+  type SystemId,
   type ProviderSessionFact,
   type AgentId,
   type Agent,
@@ -31,10 +33,23 @@ import {
 
 export type UniverseCommand =
   | {
+      readonly type: "CreateSystem";
+      readonly title: string;
+      readonly description?: string;
+      readonly id?: SystemId;
+    }
+  | { readonly type: "RenameSystem"; readonly systemId: SystemId; readonly title: string }
+  | {
+      readonly type: "SetSystemDescription";
+      readonly systemId: SystemId;
+      readonly description?: string;
+    }
+  | {
       readonly type: "CreateGoal";
       readonly title: string;
       readonly description?: string;
       readonly priority?: Priority;
+      readonly systemId?: SystemId;
       readonly id?: GoalId;
     }
   | {
@@ -59,6 +74,11 @@ export type UniverseCommand =
       readonly pinned?: boolean;
     }
   | { readonly type: "ResetGoalMapPosition"; readonly goalId: GoalId }
+  | {
+      readonly type: "AssignGoalToSystem";
+      readonly goalId: GoalId;
+      readonly systemId?: SystemId;
+    }
   | {
       readonly type: "AssignAgent";
       readonly agentId: AgentId;
@@ -115,6 +135,7 @@ export interface CommandResult {
   readonly ok: boolean;
   readonly error?: string;
   readonly goalId?: GoalId;
+  readonly systemId?: SystemId;
   readonly agentId?: AgentId;
   readonly affectedAgentIds?: readonly AgentId[];
   readonly checkpointSequence?: number;
@@ -153,6 +174,8 @@ const dismissalKey = (goalId: GoalId, agentId: AgentId): string => `${goalId}\u0
 
 const findGoal = (state: UniverseState, goalId: GoalId): Goal | undefined =>
   state.goals.find((goal) => goal.id === goalId);
+const findSystem = (state: UniverseState, systemId: SystemId): System | undefined =>
+  state.systems.find((system) => system.id === systemId);
 const findAgent = (state: UniverseState, agentId: AgentId): Agent | undefined =>
   state.agents.find((agent) => agent.id === agentId);
 
@@ -168,6 +191,12 @@ const goalLayoutOccupancy = (state: UniverseState, excludeGoalId?: GoalId): Goal
 
 const replaceGoal = (state: UniverseState, goal: Goal): void => {
   state.goals = state.goals.map((candidate) => (candidate.id === goal.id ? goal : candidate));
+};
+
+const replaceSystem = (state: UniverseState, system: System): void => {
+  state.systems = state.systems.map((candidate) =>
+    candidate.id === system.id ? system : candidate,
+  );
 };
 
 const replaceAgent = (state: UniverseState, agent: Agent): void => {
@@ -241,6 +270,20 @@ const deriveChanges = (
   };
 
   const previousGoals = new Map(previous.goals.map((goal) => [goal.id, goal]));
+  const previousSystems = new Map((previous.systems ?? []).map((system) => [system.id, system]));
+  for (const system of next.systems) {
+    const before = previousSystems.get(system.id);
+    if (!before) {
+      append("new", "system", system.id, `New system · ${system.title}`);
+      continue;
+    }
+    if (before.title !== system.title) {
+      append("changed", "system", system.id, `Renamed system · ${before.title} → ${system.title}`);
+      continue;
+    }
+    if (before.description !== system.description)
+      append("changed", "system", system.id, `Updated system · ${system.title}`);
+  }
   for (const goal of next.goals) {
     const before = previousGoals.get(goal.id);
     if (!before) {
@@ -262,6 +305,19 @@ const deriveChanges = (
         "goal",
         goal.id,
         `Priority changed · ${goal.title} · ${before.priority} → ${goal.priority}`,
+        goal.id,
+      );
+      continue;
+    }
+    if (before.systemId !== goal.systemId) {
+      const destination = goal.systemId
+        ? (next.systems.find((system) => system.id === goal.systemId)?.title ?? "another system")
+        : "no system";
+      append(
+        "changed",
+        "goal",
+        goal.id,
+        `System changed · ${goal.title} → ${destination}`,
         goal.id,
       );
       continue;
@@ -875,15 +931,50 @@ export class Universe {
     let result: CommandResult;
 
     switch (command.type) {
+      case "CreateSystem": {
+        const title = normalizeText(command.title);
+        if (!title) return { ok: false, error: "System title is required." };
+        const id = command.id ?? this.ids.next("system");
+        if (next.systems.some((system) => system.id === id))
+          return { ok: false, error: `System ${id} already exists.` };
+        const description = normalizeText(command.description);
+        const system: System = { id, title, createdAt: now, updatedAt: now };
+        next.systems = [...next.systems, description ? { ...system, description } : system];
+        result = { ok: true, systemId: id };
+        break;
+      }
+      case "RenameSystem": {
+        const title = normalizeText(command.title);
+        const system = findSystem(next, command.systemId);
+        if (!title) return { ok: false, error: "System title is required." };
+        if (!system) return { ok: false, error: "System not found." };
+        replaceSystem(next, { ...system, title, updatedAt: now });
+        result = { ok: true, systemId: system.id };
+        break;
+      }
+      case "SetSystemDescription": {
+        const system = findSystem(next, command.systemId);
+        if (!system) return { ok: false, error: "System not found." };
+        replaceSystem(next, {
+          ...system,
+          description: normalizeText(command.description),
+          updatedAt: now,
+        });
+        result = { ok: true, systemId: system.id };
+        break;
+      }
       case "CreateGoal": {
         const title = normalizeText(command.title);
         if (!title) return { ok: false, error: "Goal title is required." };
         const id = command.id ?? this.ids.next("goal");
         if (next.goals.some((goal) => goal.id === id))
           return { ok: false, error: `Goal ${id} already exists.` };
+        if (command.systemId && !findSystem(next, command.systemId))
+          return { ok: false, error: "System not found." };
         const description = normalizeText(command.description);
         const goal = {
           id,
+          systemId: command.systemId,
           title,
           priority: command.priority ?? "P2",
           status: "active" as const,
@@ -963,6 +1054,15 @@ export class Universe {
           updatedAt: now,
         });
         result = { ok: true, goalId: goal.id };
+        break;
+      }
+      case "AssignGoalToSystem": {
+        const goal = findGoal(next, command.goalId);
+        if (!goal) return { ok: false, error: "Goal not found." };
+        if (command.systemId && !findSystem(next, command.systemId))
+          return { ok: false, error: "System not found." };
+        replaceGoal(next, { ...goal, systemId: command.systemId, updatedAt: now });
+        result = { ok: true, goalId: goal.id, systemId: command.systemId };
         break;
       }
       case "AssignAgent": {
@@ -1306,6 +1406,7 @@ export const createEmptyUniverse = (
   projections: ProjectionModule,
 ): Universe => {
   const state = store.load();
-  if (state.goals.length === 0 && state.agents.length === 0) store.save(emptyUniverseState());
+  if (state.systems.length === 0 && state.goals.length === 0 && state.agents.length === 0)
+    store.save(emptyUniverseState());
   return new Universe(store, clock, ids, projections);
 };

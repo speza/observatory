@@ -8,8 +8,10 @@
   multiplexer.
 - The spatial universe is the primary product hypothesis. Lists, attention
   queues, inboxes and inspectors are supporting lenses.
-- V1's durable topology is `Goal -> Agent`. Repositories, worktrees and Herdr
-  spaces are agent metadata, not organisational nodes.
+- V1's durable topology is `System -> Goal -> Agent`. A System is a
+  human-authored broad area of work that may span repositories, worktrees and
+  hosts. Repositories, worktrees and Herdr spaces remain agent metadata, not
+  organisational nodes.
 - Goal priority, completion and agent/goal archive remain human-controlled
   unless an explicit auto policy says otherwise.
 - Preserve uncertainty. Never convert missing, stale or inferred host facts

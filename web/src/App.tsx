@@ -4,6 +4,8 @@ import type {
   CommandCentreProjection,
   InspectorProjection,
   SearchResult,
+  SystemView,
+  UniverseMapProjection,
 } from "../../src/projection/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
 import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
@@ -30,6 +32,9 @@ import { NewGoalDialog } from "./NewGoalDialog.tsx";
 import { SessionImportDialog } from "./SessionImportDialog.tsx";
 import { SearchPalette, searchResultAction } from "./SearchPalette.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
+import { SystemDialog } from "./SystemDialog.tsx";
+import { SystemsOverview } from "./SystemsOverview.tsx";
+import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
 
@@ -78,6 +83,9 @@ export const App = (): React.JSX.Element => {
   const [inspectorError, setInspectorError] = useState<string>();
   const [inspectorRevision, setInspectorRevision] = useState(0);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
+  const [systemDialogOpen, setSystemDialogOpen] = useState(false);
+  const [editingSystem, setEditingSystem] = useState<SystemView>();
+  const [selectedSystemId, setSelectedSystemId] = useState<string>();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [sessionImportOpen, setSessionImportOpen] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
@@ -160,6 +168,8 @@ export const App = (): React.JSX.Element => {
     try {
       const response = await executeCommand(command);
       portfolio.accept(response.portfolio);
+      if (command.type === "AssignGoalToSystem")
+        setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
       setInspectorRevision((value) => value + 1);
       return response;
     } catch (error) {
@@ -171,6 +181,51 @@ export const App = (): React.JSX.Element => {
   };
 
   const data = portfolio.data;
+  const scopedCommandCentre = useMemo<CommandCentreProjection | undefined>(() => {
+    if (!data || !selectedSystemId) return data?.commandCentre;
+    const goals = data.commandCentre.goals.filter((goal) =>
+      selectedSystemId === NO_SYSTEM_SCOPE
+        ? goal.systemId === undefined
+        : goal.systemId === selectedSystemId,
+    );
+    const goalIds = new Set(goals.map((goal) => goal.id));
+    const agents = goals.flatMap((goal) => goal.agents);
+    const attentionItems = data.commandCentre.attention.items.filter(
+      (item) => item.targetType === "host" || (item.goalId ? goalIds.has(item.goalId) : false),
+    );
+    return {
+      ...data.commandCentre,
+      systems: data.commandCentre.systems.filter((system) => system.id === selectedSystemId),
+      goals,
+      attention: {
+        items: attentionItems,
+        currentCount: attentionItems.filter((item) => item.requiresHumanInput).length,
+        uncertaintyCount: attentionItems.filter((item) => item.reason === "host-stale").length,
+      },
+      counts: {
+        ...data.commandCentre.counts,
+        systems: selectedSystemId === NO_SYSTEM_SCOPE ? 0 : 1,
+        goals: goals.length,
+        agents: agents.length,
+        attention: goals.reduce((total, goal) => total + goal.attentionCount, 0),
+        uncertainty: goals.reduce((total, goal) => total + goal.staleCount, 0),
+        stale: agents.filter((agent) => agent.observationHealth !== "fresh").length,
+      },
+    };
+  }, [data, selectedSystemId]);
+  const scopedMap = useMemo<UniverseMapProjection | undefined>(() => {
+    if (!data || !scopedCommandCentre) return undefined;
+    if (!selectedSystemId) return data.map;
+    return {
+      ...data.map,
+      goals: data.map.goals.filter((goal) =>
+        selectedSystemId === NO_SYSTEM_SCOPE
+          ? goal.systemId === undefined
+          : goal.systemId === selectedSystemId,
+      ),
+      counts: scopedCommandCentre.counts,
+    };
+  }, [data, scopedCommandCentre, selectedSystemId]);
   const closeoutResultIds = useMemo(
     () => data?.closeout.results.map((agent) => agent.id) ?? [],
     [data?.closeout.results],
@@ -181,12 +236,12 @@ export const App = (): React.JSX.Element => {
   );
   const working = useMemo(
     () =>
-      data
-        ? agentsFor(data.commandCentre).filter(
+      scopedCommandCentre
+        ? agentsFor(scopedCommandCentre).filter(
             (agent) => agent.runtimeState === "working" && agent.hostHealth === "live",
           ).length
         : 0,
-    [data],
+    [scopedCommandCentre],
   );
 
   const issueCamera = (type: AtlasCameraCommand["type"], target?: Selection): void => {
@@ -211,6 +266,10 @@ export const App = (): React.JSX.Element => {
   };
 
   const selectAndFocus = (next: Selection): void => {
+    if (data) {
+      const systemScope = systemScopeForSelection(next, data.commandCentre);
+      if (systemScope) setSelectedSystemId(systemScope);
+    }
     setView("atlas");
     select(next);
     issueCamera("focus", next);
@@ -281,12 +340,12 @@ export const App = (): React.JSX.Element => {
   };
 
   const allSelections = useMemo<readonly Selection[]>(() => {
-    if (!data) return [];
+    if (!scopedCommandCentre || (view === "atlas" && !selectedSystemId)) return [];
     return [
-      ...data.commandCentre.goals.map((goal) => ({ type: "goal" as const, id: goal.id })),
-      ...agentsFor(data.commandCentre).map((agent) => ({ type: "agent" as const, id: agent.id })),
+      ...scopedCommandCentre.goals.map((goal) => ({ type: "goal" as const, id: goal.id })),
+      ...agentsFor(scopedCommandCentre).map((agent) => ({ type: "agent" as const, id: agent.id })),
     ];
-  }, [data]);
+  }, [scopedCommandCentre, selectedSystemId, view]);
 
   const moveSelection = (delta: number): void => {
     if (allSelections.length === 0) return;
@@ -340,7 +399,7 @@ export const App = (): React.JSX.Element => {
 
   const jumpToAttention = (): void => {
     if (!data) return;
-    const items = data.commandCentre.attention.items;
+    const items = scopedCommandCentre?.attention.items ?? [];
     if (items.length === 0) return;
     const targets = items.map((item) => ({
       type: item.agentId ? ("agent" as const) : ("goal" as const),
@@ -365,6 +424,7 @@ export const App = (): React.JSX.Element => {
         !diffAgent &&
         !newAgentOpen &&
         !newGoalOpen &&
+        !systemDialogOpen &&
         !sessionImportOpen &&
         !terminalAgent
       ) {
@@ -386,6 +446,12 @@ export const App = (): React.JSX.Element => {
         }
         if (newGoalOpen) {
           setNewGoalOpen(false);
+          setCommandError(undefined);
+          return;
+        }
+        if (systemDialogOpen) {
+          setSystemDialogOpen(false);
+          setEditingSystem(undefined);
           setCommandError(undefined);
           return;
         }
@@ -414,6 +480,7 @@ export const App = (): React.JSX.Element => {
         diffAgent ||
         newAgentOpen ||
         newGoalOpen ||
+        systemDialogOpen ||
         searchOpen ||
         sessionImportOpen ||
         terminalAgent ||
@@ -507,6 +574,7 @@ export const App = (): React.JSX.Element => {
     diffAgent,
     newGoalOpen,
     newAgentOpen,
+    systemDialogOpen,
     searchOpen,
     sessionImportOpen,
     selection,
@@ -541,6 +609,29 @@ export const App = (): React.JSX.Element => {
           <h1>A field guide to work in motion</h1>
         </div>
         <nav aria-label="Portfolio view">
+          <label className="system-scope">
+            <span className="visually-hidden">Current system</span>
+            <select
+              aria-label="Current system"
+              onChange={(event) => {
+                setSelectedSystemId(event.target.value || undefined);
+                setSelection(undefined);
+                setSidePanel(undefined);
+                setCameraCommand(undefined);
+              }}
+              value={selectedSystemId ?? ""}
+            >
+              <option value="">All systems</option>
+              {data.commandCentre.systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
+                </option>
+              ))}
+              {data.commandCentre.goals.some((goal) => !goal.systemId) ? (
+                <option value={NO_SYSTEM_SCOPE}>No system</option>
+              ) : null}
+            </select>
+          </label>
           <button
             aria-pressed={view === "atlas"}
             onClick={() => {
@@ -563,6 +654,15 @@ export const App = (): React.JSX.Element => {
           </button>
           <button onClick={() => setNewGoalOpen(true)} type="button">
             New goal
+          </button>
+          <button
+            onClick={() => {
+              setEditingSystem(undefined);
+              setSystemDialogOpen(true);
+            }}
+            type="button"
+          >
+            New system
           </button>
           <button onClick={() => setNewAgentOpen(true)} type="button">
             New agent
@@ -615,11 +715,11 @@ export const App = (): React.JSX.Element => {
       <section className="work-surface">
         <div className="metrics" aria-label="Portfolio metrics">
           <div>
-            <strong>{String(data.commandCentre.counts.goals).padStart(2, "0")}</strong>
+            <strong>{String(scopedCommandCentre?.counts.goals ?? 0).padStart(2, "0")}</strong>
             <span>Goals</span>
           </div>
           <div>
-            <strong>{String(data.commandCentre.counts.agents).padStart(2, "0")}</strong>
+            <strong>{String(scopedCommandCentre?.counts.agents ?? 0).padStart(2, "0")}</strong>
             <span>Agents</span>
           </div>
           <div>
@@ -633,7 +733,7 @@ export const App = (): React.JSX.Element => {
             }}
             type="button"
           >
-            <strong>{String(data.commandCentre.counts.attention).padStart(2, "0")}</strong>
+            <strong>{String(scopedCommandCentre?.counts.attention ?? 0).padStart(2, "0")}</strong>
             <span>Attention</span>
           </button>
           <button
@@ -683,7 +783,23 @@ export const App = (): React.JSX.Element => {
             {data.catchUp.groups.reduce((total, group) => total + group.items.length, 0)} changes
           </b>
         </button>
-        {view === "atlas" ? (
+        {view === "atlas" && !selectedSystemId ? (
+          <SystemsOverview
+            onCreate={() => {
+              setEditingSystem(undefined);
+              setSystemDialogOpen(true);
+            }}
+            onEdit={(system) => {
+              setEditingSystem(system);
+              setSystemDialogOpen(true);
+            }}
+            onOpen={(systemId) => {
+              setSelectedSystemId(systemId);
+              setCameraCommand(undefined);
+            }}
+            projection={data.commandCentre}
+          />
+        ) : view === "atlas" && scopedMap ? (
           <Atlas
             cameraCommand={cameraCommand}
             onMoveGoal={async (goalId, position) => {
@@ -694,7 +810,7 @@ export const App = (): React.JSX.Element => {
               setSelection(undefined);
               setSidePanel(undefined);
             }}
-            projection={data.map}
+            projection={scopedMap}
             reservedLeft={
               sidePanel === "attention" || sidePanel === "inbox" || sidePanel === "closeout"
                 ? 430
@@ -706,13 +822,13 @@ export const App = (): React.JSX.Element => {
             motion={motion}
           />
         ) : (
-          <Ledger onSelect={select} projection={data.commandCentre} />
+          <Ledger onSelect={select} projection={scopedCommandCentre ?? data.commandCentre} />
         )}
         {sidePanel === "attention" ? (
           <AttentionQueue
             onClose={() => setSidePanel(undefined)}
             onSelect={selectAndFocus}
-            projection={data.commandCentre}
+            projection={scopedCommandCentre ?? data.commandCentre}
           />
         ) : null}
         {sidePanel === "inbox" ? (
@@ -736,6 +852,12 @@ export const App = (): React.JSX.Element => {
               if (response) setSidePanel(undefined);
             }}
             onClose={() => setSidePanel(undefined)}
+            onSelectSystem={(systemId) => {
+              setSelectedSystemId(systemId);
+              setView("atlas");
+              setSelection(undefined);
+              setSidePanel(undefined);
+            }}
             onSelect={selectAndFocus}
             pending={commandPending}
             projection={data.catchUp}
@@ -809,9 +931,31 @@ export const App = (): React.JSX.Element => {
             const goalId = response?.result.goalId;
             if (!goalId) return;
             setNewGoalOpen(false);
+            if (command.type === "CreateGoal")
+              setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
             setSelection({ type: "goal", id: goalId });
           }}
           pending={commandPending}
+          systems={data.commandCentre.systems}
+          defaultSystemId={selectedSystemId === NO_SYSTEM_SCOPE ? undefined : selectedSystemId}
+        />
+      ) : null}
+      {systemDialogOpen ? (
+        <SystemDialog
+          error={commandError}
+          onCancel={() => {
+            setCommandError(undefined);
+            setSystemDialogOpen(false);
+            setEditingSystem(undefined);
+          }}
+          onCommand={runCommand}
+          onSaved={(systemId) => {
+            setSelectedSystemId(systemId);
+            setSystemDialogOpen(false);
+            setEditingSystem(undefined);
+          }}
+          pending={commandPending}
+          system={editingSystem}
         />
       ) : null}
       {newAgentOpen ? (
@@ -859,6 +1003,8 @@ export const App = (): React.JSX.Element => {
             setSearchOpen(false);
             setSearchQuery("");
             const next = { type: result.type, id: result.id };
+            const systemScope = systemScopeForSelection(next, data.commandCentre);
+            if (systemScope) setSelectedSystemId(systemScope);
             const action = searchResultAction(result, data.map);
             if (action === "focus") selectAndFocus(next);
             else {

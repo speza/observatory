@@ -8,6 +8,7 @@ export const RUNTIME_STATES = ["idle", "working", "waiting", "blocked", "done", 
 export type RuntimeState = (typeof RUNTIME_STATES)[number];
 
 export type GoalId = string;
+export type SystemId = string;
 export type AgentId = string;
 export type AgentContinuity = "proved" | "interrupted" | "replaced" | "unknown";
 export type ProviderContinuity = "confirmed" | "missing" | "unknown";
@@ -58,7 +59,7 @@ export interface UniverseChange {
   readonly sequence: number;
   readonly occurredAt: number;
   readonly outcome: UniverseChangeOutcome;
-  readonly targetType: "goal" | "agent";
+  readonly targetType: "system" | "goal" | "agent";
   readonly targetId: string;
   readonly goalId?: GoalId;
   readonly summary: string;
@@ -69,8 +70,17 @@ export interface OperatorCheckpoint {
   readonly acknowledgedAt: number;
 }
 
+export interface System {
+  readonly id: SystemId;
+  readonly title: string;
+  readonly description?: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
 export interface Goal {
   readonly id: GoalId;
+  readonly systemId?: SystemId;
   readonly title: string;
   readonly description?: string;
   readonly priority: Priority;
@@ -136,6 +146,7 @@ export interface ProviderSessionFact {
 
 export interface UniverseState {
   readonly version: 1;
+  systems: System[];
   goals: Goal[];
   agents: Agent[];
   hosts: HostHealth[];
@@ -155,7 +166,7 @@ export interface Clock {
 }
 
 export interface IdGenerator {
-  next(kind: "goal" | "agent"): string;
+  next(kind: "system" | "goal" | "agent"): string;
 }
 
 export const priorityRank = (priority: Priority): number => PRIORITIES.indexOf(priority);
@@ -165,6 +176,7 @@ export const isCurrentAttentionState = (state: RuntimeState): boolean =>
 
 export const emptyUniverseState = (): UniverseState => ({
   version: 1,
+  systems: [],
   goals: [],
   agents: [],
   hosts: [],
@@ -180,6 +192,7 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
   });
   return {
     version: 1,
+    systems: (state.systems ?? []).map((system) => ({ ...system })),
     goals,
     agents: state.agents.map((agent) => ({
       ...agent,

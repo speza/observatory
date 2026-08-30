@@ -31,7 +31,7 @@ a provider-neutral extension. It covers:
 The proposal retains the primary product hypothesis:
 
 ```text
-Goal -> Agent
+System -> Goal -> Agent
 ```
 
 Execution environments, host instances, repositories and worktrees may be

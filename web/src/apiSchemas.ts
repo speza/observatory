@@ -95,6 +95,7 @@ const AgentView = Schema.Struct(AgentFields);
 const MapAgentView = Schema.Struct({ ...AgentFields, mapPosition: MapPosition });
 const GoalFields = {
   id: Schema.String,
+  systemId: Schema.optional(Schema.String),
   title: Schema.String,
   description: Schema.optional(Schema.String),
   priority: Priority,
@@ -112,6 +113,18 @@ const GoalView = Schema.Struct({
   attentionCount: Schema.Number,
   staleCount: Schema.Number,
 });
+const SystemView = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  goals: Schema.Array(GoalView),
+  agentCount: Schema.Number,
+  workingCount: Schema.Number,
+  attentionCount: Schema.Number,
+  staleCount: Schema.Number,
+});
 const MapGoalView = Schema.Struct({
   ...GoalFields,
   mapPosition: MapPosition,
@@ -122,6 +135,7 @@ const MapGoalView = Schema.Struct({
   radiusY: Schema.Number,
 });
 const PortfolioCounts = Schema.Struct({
+  systems: Schema.Number,
   goals: Schema.Number,
   agents: Schema.Number,
   attention: Schema.Number,
@@ -134,6 +148,7 @@ const CommandCentre = Schema.Struct({
   generatedAt: Schema.Number,
   host: OptionalHostHealth,
   attention: AttentionProjection,
+  systems: Schema.Array(SystemView),
   goals: Schema.Array(GoalView),
   unassigned: Schema.Array(AgentView),
   counts: PortfolioCounts,
@@ -152,7 +167,7 @@ const UniverseChange = Schema.Struct({
   sequence: Schema.Number,
   occurredAt: Schema.Number,
   outcome: Schema.Literal("new", "changed", "attention", "finished", "stale"),
-  targetType: Schema.Literal("goal", "agent"),
+  targetType: Schema.Literal("system", "goal", "agent"),
   targetId: Schema.String,
   goalId: Schema.optional(Schema.String),
   summary: Schema.String,
@@ -240,6 +255,7 @@ const CommandResult = Schema.Struct({
   ok: Schema.Boolean,
   error: Schema.optional(Schema.String),
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   agentId: Schema.optional(Schema.String),
   affectedAgentIds: Schema.optional(Schema.Array(Schema.String)),
   checkpointSequence: Schema.optional(Schema.Number),

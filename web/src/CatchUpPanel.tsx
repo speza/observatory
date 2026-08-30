@@ -7,6 +7,7 @@ interface CatchUpPanelProps {
   readonly onAcknowledge: () => Promise<void>;
   readonly onClose: () => void;
   readonly onSelect: (selection: Selection) => void;
+  readonly onSelectSystem: (systemId: string) => void;
 }
 
 export const CatchUpPanel = ({
@@ -15,6 +16,7 @@ export const CatchUpPanel = ({
   onAcknowledge,
   onClose,
   onSelect,
+  onSelectSystem,
 }: CatchUpPanelProps): React.JSX.Element => (
   <aside aria-label="Catch up" className="catch-up-panel">
     <header>
@@ -37,7 +39,11 @@ export const CatchUpPanel = ({
             {group.items.slice(0, 5).map((item) => (
               <button
                 key={item.sequence}
-                onClick={() => onSelect({ type: item.targetType, id: item.targetId })}
+                onClick={() =>
+                  item.targetType === "system"
+                    ? onSelectSystem(item.targetId)
+                    : onSelect({ type: item.targetType, id: item.targetId })
+                }
                 type="button"
               >
                 <span>{item.summary}</span>
