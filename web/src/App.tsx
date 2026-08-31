@@ -30,6 +30,7 @@ import { KeyboardGuide } from "./KeyboardGuide.tsx";
 import { Ledger } from "./Ledger.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { NewGoalDialog } from "./NewGoalDialog.tsx";
+import { PendingLaunches } from "./PendingLaunches.tsx";
 import { PendingLaunchTerminal } from "./PendingLaunchTerminal.tsx";
 import { ConversationHistoryDialog } from "./ConversationHistoryDialog.tsx";
 import { SearchPalette, searchResultAction } from "./SearchPalette.tsx";
@@ -96,6 +97,9 @@ export const App = (): React.JSX.Element => {
   const [commandError, setCommandError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
   const [pendingLaunches, setPendingLaunches] = useState<readonly WebPendingLaunch[]>([]);
+  const [dismissedPendingLaunches, setDismissedPendingLaunches] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [conversationHistory, setConversationHistory] = useState<
     readonly ConversationHistoryView[]
   >([]);
@@ -205,6 +209,10 @@ export const App = (): React.JSX.Element => {
   };
 
   const data = portfolio.data;
+  const visiblePendingLaunches = useMemo(
+    () => pendingLaunches.filter((launch) => !dismissedPendingLaunches.has(launch.requestId)),
+    [dismissedPendingLaunches, pendingLaunches],
+  );
   const scopedCommandCentre = useMemo<CommandCentreProjection | undefined>(() => {
     if (!data || !selectedSystemId) return data?.commandCentre;
     const goals = data.commandCentre.goals.filter((goal) =>
@@ -818,23 +826,17 @@ export const App = (): React.JSX.Element => {
             {launchNotice} <span aria-hidden="true">×</span>
           </button>
         ) : null}
-        {pendingLaunches.length > 0 ? (
-          <div className="pending-launches" aria-label="Pending agent launches">
-            <span>Starting</span>
-            {pendingLaunches.map((launch) => (
-              <button
-                key={launch.requestId}
-                onClick={() => {
-                  setTerminalAgent(undefined);
-                  setTerminalLaunch(launch);
-                }}
-                type="button"
-              >
-                {launch.displayName} · open terminal
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <PendingLaunches
+          launches={visiblePendingLaunches}
+          onDismiss={(requestId) => {
+            setDismissedPendingLaunches((current) => new Set(current).add(requestId));
+            if (terminalLaunch?.requestId === requestId) setTerminalLaunch(undefined);
+          }}
+          onOpen={(launch) => {
+            setTerminalAgent(undefined);
+            setTerminalLaunch(launch);
+          }}
+        />
         <button
           aria-expanded={sidePanel === "catch-up"}
           className={`catch-up-trigger ${data.catchUp.pending ? "is-pending" : ""}`}
@@ -1044,6 +1046,11 @@ export const App = (): React.JSX.Element => {
             setNewAgentOpen(false);
             const pendingLaunch = response.pendingLaunch;
             if (pendingLaunch) {
+              setDismissedPendingLaunches((current) => {
+                const next = new Set(current);
+                next.delete(pendingLaunch.requestId);
+                return next;
+              });
               setPendingLaunches((current) => [
                 pendingLaunch,
                 ...current.filter((launch) => launch.requestId !== pendingLaunch.requestId),

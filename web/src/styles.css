@@ -1827,7 +1827,12 @@ button {
   text-transform: uppercase;
 }
 
-.pending-launches button {
+.pending-launches__item {
+  display: flex;
+  align-items: stretch;
+}
+
+.pending-launches__item button {
   padding: 5px 8px;
   border: 1px solid var(--hairline);
   color: var(--ink);
@@ -1835,6 +1840,17 @@ button {
   cursor: pointer;
   font: inherit;
   font-size: 11px;
+}
+
+.pending-launches__item .pending-launches__dismiss {
+  margin-left: -1px;
+  padding-inline: 7px;
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+}
+
+.pending-launches__item .pending-launches__dismiss:hover {
+  color: var(--accent);
 }
 
 .ledger {
