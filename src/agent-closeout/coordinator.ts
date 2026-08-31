@@ -31,13 +31,7 @@ export const createAgentCloseoutCoordinator = (dependencies: {
         .snapshot()
         .agents.find((candidate) => candidate.id === agentId);
       if (!initial) return rejected(agentId, "Agent not found.");
-      if (initial.archivedAt !== undefined)
-        return {
-          ok: true,
-          agentId,
-          status: "already-archived",
-          message: `${initial.displayName} was already archived.`,
-        } satisfies AgentCloseoutResult;
+      const requestedLiveClose = initial.hostHealth === "live" && initial.execution !== undefined;
 
       const before = yield* dependencies.host.snapshot();
       if (!before.available)
@@ -59,15 +53,20 @@ export const createAgentCloseoutCoordinator = (dependencies: {
         .snapshot()
         .agents.find((candidate) => candidate.id === agentId);
       if (!current) return rejected(agentId, "Agent no longer exists.");
-      if (current.archivedAt !== undefined)
-        return {
-          ok: true,
-          agentId,
-          status: "already-archived",
-          message: `${current.displayName} was already archived.`,
-        } satisfies AgentCloseoutResult;
 
       if (current.hostHealth === "stale") {
+        if (requestedLiveClose)
+          return rejected(
+            agentId,
+            `${current.displayName} was live when close was requested, but the fresh host observation could not resolve that execution. Nothing was closed or archived; refresh and retry.`,
+          );
+        if (current.archivedAt !== undefined)
+          return {
+            ok: true,
+            agentId,
+            status: "already-archived",
+            message: `${current.displayName} was already archived and has no live host execution.`,
+          } satisfies AgentCloseoutResult;
         const archive = dependencies.universe.execute({ type: "ArchiveAgent", agentId });
         return archive.ok
           ? ({
@@ -119,6 +118,13 @@ export const createAgentCloseoutCoordinator = (dependencies: {
       if (!ended) return rejected(agentId, `${closed.message} Agent record no longer exists.`);
       if (ended.hostHealth === "live")
         return rejected(agentId, `${closed.message} The host still reports the Agent as live.`);
+      if (ended.archivedAt !== undefined)
+        return {
+          ok: true,
+          agentId,
+          status: "closed-and-archived",
+          message: `${current.displayName} was closed in the host; its Observatory record was already archived.`,
+        } satisfies AgentCloseoutResult;
 
       const archive = dependencies.universe.execute({ type: "ArchiveAgent", agentId });
       return archive.ok

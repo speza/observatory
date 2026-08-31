@@ -864,6 +864,24 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr Agent target changed before close; no process was stopped.",
           };
+        const verifyClosed = async (): Promise<HostActionResult> => {
+          const after = await this.snapshotInternal();
+          if (!after.available)
+            return {
+              ok: false,
+              message: `Herdr accepted the close for ${token}, but Observatory could not verify that the Agent ended.`,
+            };
+          const remaining = this.liveTargets.get(token);
+          if (remaining)
+            return {
+              ok: false,
+              message:
+                remaining.fingerprint === access.target?.fingerprint
+                  ? `Herdr accepted the close for ${token}, but still reports that Agent as live.`
+                  : `Herdr reused the target ${token} while close was being verified; Observatory did not archive the Agent.`,
+            };
+          return { ok: true, message: `Closed Herdr agent ${token}.` };
+        };
         const interrupted = await this.runner.run([
           "herdr",
           "pane",
@@ -873,8 +891,7 @@ export class HerdrHostAdapter implements SessionHost {
           "ctrl+c",
         ]);
         if (interrupted.exitCode !== 0) {
-          if (commandErrorCode(interrupted) === "pane_not_found")
-            return { ok: true, message: `Herdr agent ${token} had already ended.` };
+          if (commandErrorCode(interrupted) === "pane_not_found") return verifyClosed();
           return {
             ok: false,
             message: "Herdr could not safely interrupt the Agent process; its pane was preserved.",
@@ -883,13 +900,13 @@ export class HerdrHostAdapter implements SessionHost {
         await Bun.sleep(500);
         const result = await this.runner.run(["herdr", "pane", "close", token]);
         if (result.exitCode !== 0 && commandErrorCode(result) === "pane_not_found")
-          return { ok: true, message: `Closed Herdr agent ${token}.` };
+          return verifyClosed();
         if (result.exitCode !== 0)
           return {
             ok: false,
             message: commandFailureMessage(result, `Herdr could not close ${token}.`),
           };
-        return { ok: true, message: `Closed Herdr agent ${token}.` };
+        return verifyClosed();
       },
       catch: (error) =>
         hostError("host.closeAgent", error instanceof Error ? error.message : String(error)),

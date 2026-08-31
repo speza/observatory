@@ -78,8 +78,11 @@ signals or Herdr commands.
 
 The Herdr adapter maps that operation to the host-supported pane close action.
 It resolves and revalidates the opaque Agent target immediately before closing
-so a missing, changed or reused pane fails closed. The mock adapter provides the
-deterministic contract evidence path.
+so a missing, changed or reused pane fails closed. After Herdr accepts the close,
+the adapter takes another host snapshot and only reports success when that exact
+pane is absent. A close acknowledgement without observed absence leaves the
+Observatory Agent active. The mock adapter provides the deterministic contract
+evidence path.
 
 A closeout coordinator owns the cross-module ordering behind one small
 interface:
@@ -106,8 +109,13 @@ host-specific side effects.
   that the host execution stopped.
 - If target revalidation or host close fails, leave the Agent active and report
   the exact host error.
-- If the Agent disappears between selection and close, treat confirmed host
-  absence as `already ended` and continue with local archive.
+- If the host accepts close but still reports the target, or its target identity
+  is reused before verification, leave the Agent active and report that the
+  close was not confirmed.
+- If an Agent that was live when close was requested disappears from the fresh
+  host observation, fail without archiving. A live close request must never
+  downgrade into `Archive only`; the operator can refresh and retry or choose
+  the separate archive-only action explicitly.
 - If host close succeeds but archive persistence fails, reconciliation leaves a
   stale record visible in Closeout so local archive can be retried.
 - If the host is unavailable, fail closed. Host unavailability does not prove

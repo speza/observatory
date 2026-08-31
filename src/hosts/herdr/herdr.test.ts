@@ -19,6 +19,31 @@ const fixture = parseJsonValue(
   readFileSync(new URL("../../../fixtures/herdr/sanitized-snapshot.json", import.meta.url), "utf8"),
 );
 
+const fixtureWithoutPane = (paneId: string): JsonRecord => {
+  if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+  const result = nonEmptyRecord(fixture.result);
+  const snapshot = nonEmptyRecord(result.snapshot);
+  return {
+    ...fixture,
+    result: {
+      ...result,
+      snapshot: {
+        ...snapshot,
+        agents: Array.isArray(snapshot.agents)
+          ? snapshot.agents.filter(
+              (agent) => !isRecord(agent) || stringValue(agent, "pane_id") !== paneId,
+            )
+          : [],
+        panes: Array.isArray(snapshot.panes)
+          ? snapshot.panes.filter(
+              (pane) => !isRecord(pane) || stringValue(pane, "pane_id") !== paneId,
+            )
+          : [],
+      },
+    },
+  };
+};
+
 class FakeRunner implements CommandRunner {
   readonly calls: string[][] = [];
   readonly options: { readonly interactive?: boolean }[] = [];
@@ -28,6 +53,11 @@ class FakeRunner implements CommandRunner {
     readonly stderr: string;
   }[];
   private result: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  };
+  private readonly afterCloseResult?: {
     readonly exitCode: number;
     readonly stdout: string;
     readonly stderr: string;
@@ -43,9 +73,15 @@ class FakeRunner implements CommandRunner {
       readonly stdout: string;
       readonly stderr: string;
     }[] = [],
+    afterCloseResult?: {
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    },
   ) {
     this.result = result;
     this.queuedResults = [...queuedResults];
+    this.afterCloseResult = afterCloseResult;
   }
   setResult(result: {
     readonly exitCode: number;
@@ -57,7 +93,10 @@ class FakeRunner implements CommandRunner {
   async run(argv: readonly string[], options?: { readonly interactive?: boolean }) {
     this.calls.push([...argv]);
     this.options.push(options ?? {});
-    return this.queuedResults.shift() ?? this.result;
+    const result = this.queuedResults.shift() ?? this.result;
+    if (argv[0] === "herdr" && argv[1] === "pane" && argv[2] === "close" && this.afterCloseResult)
+      this.result = this.afterCloseResult;
+    return result;
   }
 }
 
@@ -354,11 +393,24 @@ describe("Herdr adapter", () => {
   });
 
   test("revalidates an opaque Agent target before closing its Herdr pane", async () => {
-    const runner = new FakeRunner({
-      exitCode: 0,
-      stdout: JSON.stringify(fixture),
-      stderr: "",
-    });
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [
+        { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+        { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+        { exitCode: 0, stdout: "", stderr: "" },
+        { exitCode: 0, stdout: "", stderr: "" },
+      ],
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixtureWithoutPane("fixture-w2:p1")),
+        stderr: "",
+      },
+    );
     const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
     await Effect.runPromise(adapter.snapshot());
     const access = await Effect.runPromise(
@@ -377,7 +429,26 @@ describe("Herdr adapter", () => {
       "ctrl+c",
       "ctrl+c",
     ]);
-    expect(runner.calls.at(-1)).toEqual(["herdr", "pane", "close", "fixture-w2:p1"]);
+    expect(runner.calls).toContainEqual(["herdr", "pane", "close", "fixture-w2:p1"]);
+    expect(runner.calls.at(-1)).toEqual(["herdr", "api", "snapshot"]);
+  });
+
+  test("does not report a successful close while Herdr still reports the Agent", async () => {
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+
+    expect(await Effect.runPromise(adapter.closeAgent(access))).toEqual({
+      ok: false,
+      message: "Herdr accepted the close for fixture-w2:p1, but still reports that Agent as live.",
+    });
   });
 
   test("refuses to close a reused Herdr pane identity", async () => {
@@ -1313,11 +1384,19 @@ describe("Herdr adapter", () => {
 
 defineSessionHostContractTests("Herdr", () => ({
   host: new HerdrHostAdapter({
-    runner: new FakeRunner({
-      exitCode: 0,
-      stdout: JSON.stringify(fixture),
-      stderr: "",
-    }),
+    runner: new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [],
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixtureWithoutPane("fixture-w2:p1")),
+        stderr: "",
+      },
+    ),
     terminalRunner: new FakeTerminalRunner([
       { kind: "frame", frame: { bytes: new TextEncoder().encode("contract") } },
       { kind: "closed", reason: "done" },

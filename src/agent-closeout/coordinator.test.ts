@@ -29,6 +29,26 @@ describe("Agent closeout coordinator", () => {
     ).toBe(false);
   });
 
+  test("still closes a live host execution whose Observatory record was already archived", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const agent = fixture.universe.snapshot().agents[0];
+    if (!agent?.execution) throw new Error("Expected a live mock Agent.");
+    expect(fixture.universe.execute({ type: "ArchiveAgent", agentId: agent.id }).ok).toBe(true);
+    const coordinator = createAgentCloseoutCoordinator({ universe: fixture.universe, host });
+
+    const result = await Effect.runPromise(coordinator.closeAndArchive(agent.id));
+
+    expect(result).toMatchObject({ ok: true, status: "closed-and-archived" });
+    expect(result.message).toContain("already archived");
+    expect(
+      (await Effect.runPromise(host.snapshot())).agents.some(
+        (candidate) => candidate.nativeId === agent.execution?.nativeId,
+      ),
+    ).toBe(false);
+  });
+
   test("archives a confirmed stale Agent without requesting another host close", async () => {
     const fixture = makeUniverse();
     const scenario = createMockScenario();
@@ -38,11 +58,28 @@ describe("Agent closeout coordinator", () => {
     if (!agent) throw new Error("Expected a mock Agent.");
     if (!agent.execution) throw new Error("Expected a mock execution.");
     await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent.execution))));
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
     const coordinator = createAgentCloseoutCoordinator({ universe: fixture.universe, host });
 
     const result = await Effect.runPromise(coordinator.closeAndArchive(agent.id));
 
     expect(result).toMatchObject({ ok: true, status: "already-ended-and-archived" });
+  });
+
+  test("does not downgrade a live close request to archive-only when the target disappears", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const agent = fixture.universe.snapshot().agents[0];
+    if (!agent?.execution) throw new Error("Expected a live mock Agent.");
+    await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent.execution))));
+    const coordinator = createAgentCloseoutCoordinator({ universe: fixture.universe, host });
+
+    const result = await Effect.runPromise(coordinator.closeAndArchive(agent.id));
+
+    expect(result).toMatchObject({ ok: false, status: "rejected" });
+    expect(result.message).toContain("Nothing was closed or archived");
+    expect(fixture.universe.snapshot().agents[0]?.archivedAt).toBeUndefined();
   });
 
   test("fails closed while the host is unavailable", async () => {

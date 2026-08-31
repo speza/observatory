@@ -979,8 +979,11 @@ allocation, not a force-directed graph layout.
 
 Agents may be explicitly archived by a human without stopping their host
 execution. The web Closeout surface separately offers `Close & archive` for a
-live Agent and local archive for an Agent confirmed stale. Archive removes the
-agent from active
+live Agent and local archive for an Agent confirmed stale. The host adapter
+must observe the exact revalidated execution disappear before `Close & archive`
+can write the archive. If a previously-live target cannot be resolved during
+revalidation, the operation fails without silently degrading into local
+archive. Archive removes the agent from active
 projections without deleting its identity, assignment or observed history;
 future host reconciliation updates the archived record but does not silently
 restore it.
