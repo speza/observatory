@@ -11,7 +11,7 @@ describe("AgentLogo", () => {
     expect(agentBrandFor("custom", "openai")).toBe("generic");
   });
 
-  test("renders a branded, decorative mark", () => {
+  test("renders branded marks in their source colours", () => {
     const claude = renderToStaticMarkup(<AgentLogo harnessId="claude" />);
     const codex = renderToStaticMarkup(<AgentLogo harnessId="codex" />);
     const pi = renderToStaticMarkup(<AgentLogo harnessId="pi" />);
@@ -22,5 +22,11 @@ describe("AgentLogo", () => {
     expect(pi).toContain('viewBox="140 140 520 520"');
     expect(pi).toContain("517.36");
     expect(claude).toContain('aria-hidden="true"');
+    expect(claude).toContain('fill="#D97757"');
+    expect(codex).toContain('fill="var(--agent-logo-monochrome, #000000)"');
+    expect(pi).toContain('fill="var(--agent-logo-monochrome, #000000)"');
+    expect(claude).not.toContain('fill="currentColor"');
+    expect(codex).not.toContain('fill="currentColor"');
+    expect(pi).not.toContain('fill="currentColor"');
   });
 });

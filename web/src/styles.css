@@ -943,6 +943,8 @@ button {
 }
 
 .agent-logo {
+  --agent-logo-monochrome: #000000;
+
   width: 24px;
   height: 24px;
   display: block;
@@ -950,14 +952,8 @@ button {
   overflow: visible;
   color: var(--muted);
 }
-.agent-logo--claude {
-  color: #d97757;
-}
-.agent-logo--codex {
-  color: var(--ink);
-}
-.agent-logo--pi {
-  color: var(--ink);
+.app--dark .agent-logo {
+  --agent-logo-monochrome: #ffffff;
 }
 
 .inspector__loading {

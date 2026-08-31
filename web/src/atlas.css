@@ -256,7 +256,6 @@
   width: 16px;
   height: 16px;
   overflow: visible;
-  color: var(--goal-color);
   pointer-events: none;
 }
 .agent--working {
