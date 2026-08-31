@@ -259,9 +259,9 @@ button {
 .masthead {
   height: var(--masthead-height);
   display: grid;
-  grid-template-columns: 44px minmax(280px, auto) 1fr auto;
+  grid-template-columns: minmax(300px, auto) minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
   padding: 0 30px;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
@@ -269,6 +269,13 @@ button {
   backdrop-filter: blur(16px);
   position: relative;
   z-index: 20;
+}
+
+.masthead__brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
 
 .brandmark {
@@ -293,12 +300,12 @@ button {
 }
 .identity .overline {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
 }
 .identity h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 400;
   letter-spacing: -0.03em;
 }
@@ -316,43 +323,86 @@ button {
 }
 
 .masthead nav {
-  justify-self: start;
+  min-width: 0;
   display: flex;
-  margin-left: 26px;
+  align-items: center;
+  gap: 12px;
   font-size: 12px;
 }
 .system-scope select {
-  min-width: 150px;
-  max-width: 220px;
-  height: 32px;
+  width: 150px;
+  height: 36px;
   padding: 0 30px 0 10px;
   border: 1px solid var(--hairline);
-  border-right: 0;
   color: var(--ink);
   background: var(--paper-panel);
   font: inherit;
 }
-.masthead nav button {
-  min-height: 32px;
-  padding: 0 14px;
+
+.masthead__view,
+.masthead__actions,
+.masthead__tools,
+.masthead__utility {
+  display: flex;
+  align-items: center;
+}
+
+.masthead__view {
   border: 1px solid var(--hairline);
-  border-right: 0;
+}
+
+.masthead__view button,
+.masthead__actions button,
+.masthead__tools button,
+.masthead__utility button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
   background: transparent;
   cursor: pointer;
 }
-.masthead nav button:last-child {
-  border-right: 1px solid var(--hairline);
-  margin-left: 12px;
+
+.masthead__view button + button {
+  border-left: 1px solid var(--hairline);
 }
-.masthead nav button:nth-last-child(2) {
-  border-right: 1px solid var(--hairline);
+
+.masthead__actions,
+.masthead__tools {
+  padding-left: 4px;
+  border-left: 1px solid var(--hairline);
 }
-.masthead nav button[aria-pressed="true"] {
+
+.masthead__view button[aria-pressed="true"] {
   color: #f4ead8;
   background: var(--accent);
 }
-.masthead nav button:hover {
+
+.masthead nav button:hover,
+.masthead__utility button:hover {
   background: var(--faint);
+}
+
+.masthead__utility {
+  gap: 6px;
+}
+
+.masthead__utility button {
+  width: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+}
+
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.masthead__help {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 13px;
 }
 
 .host-status {
@@ -378,6 +428,44 @@ button {
 }
 .host-status__dot--stale {
   background: #b47b36;
+}
+
+@media (max-width: 1600px) {
+  .masthead {
+    grid-template-columns: minmax(240px, auto) minmax(0, 1fr) auto auto;
+    gap: 12px;
+    padding-inline: 20px;
+  }
+  .masthead__brand {
+    gap: 16px;
+  }
+  .identity h1 {
+    font-size: 18px;
+  }
+  .masthead nav {
+    gap: 6px;
+  }
+  .masthead__view button,
+  .masthead__actions button,
+  .masthead__tools button {
+    padding-inline: 8px;
+  }
+  .host-status {
+    gap: 8px;
+  }
+  .host-status b {
+    padding-left: 8px;
+  }
+}
+
+@media (max-width: 1320px) {
+  .masthead {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .identity h1,
+  .host-status b {
+    display: none;
+  }
 }
 
 .work-surface {
@@ -2044,24 +2132,23 @@ button {
 
 @media (max-width: 900px) {
   .masthead {
-    grid-template-columns: 36px 1fr auto;
+    grid-template-columns: 1fr auto;
     padding: 0 18px;
   }
   .masthead nav {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
-    margin: 0;
   }
-  .masthead nav button {
+  .masthead__view,
+  .masthead__actions,
+  .masthead__tools {
     display: none;
   }
-  .masthead nav button:nth-of-type(3) {
-    display: block;
-    border-right: 1px solid var(--hairline);
-  }
   .system-scope select {
-    min-width: 112px;
-    max-width: 140px;
+    width: 140px;
+  }
+  .masthead__utility {
+    display: none;
   }
   .host-status {
     display: none;

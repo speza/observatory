@@ -36,6 +36,7 @@ import { SearchPalette, searchResultAction } from "./SearchPalette.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
 import { SystemDialog } from "./SystemDialog.tsx";
 import { SystemsOverview } from "./SystemsOverview.tsx";
+import { ThemeToggle } from "./ThemeToggle.tsx";
 import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
@@ -639,14 +640,16 @@ export const App = (): React.JSX.Element => {
   return (
     <main className={`app app--${theme} ${motion ? "app--motion" : "app--still"}`}>
       <header className="masthead">
-        <span className="brandmark" aria-hidden="true">
-          <i />
-        </span>
-        <div className="identity">
-          <p className="overline">OBSERVATORY / ACTIVE WORK ATLAS 01</p>
-          <h1>A field guide to work in motion</h1>
+        <div className="masthead__brand">
+          <span className="brandmark" aria-hidden="true">
+            <i />
+          </span>
+          <div className="identity">
+            <p className="overline">OBSERVATORY / ACTIVE WORK ATLAS 01</p>
+            <h1>A field guide to work in motion</h1>
+          </div>
         </div>
-        <nav aria-label="Portfolio view">
+        <nav aria-label="Portfolio controls">
           <label className="system-scope">
             <span className="visually-hidden">Current system</span>
             <select
@@ -670,78 +673,85 @@ export const App = (): React.JSX.Element => {
               ) : null}
             </select>
           </label>
-          <button
-            aria-pressed={view === "atlas"}
-            onClick={() => {
-              setView("atlas");
-              setCameraCommand(undefined);
-            }}
-            type="button"
-          >
-            Atlas
-          </button>
-          <button
-            aria-pressed={view === "ledger"}
-            onClick={() => {
-              setView("ledger");
-              setCameraCommand(undefined);
-            }}
-            type="button"
-          >
-            Ledger
-          </button>
-          <button onClick={() => setNewGoalOpen(true)} type="button">
-            New goal
-          </button>
-          <button
-            onClick={() => {
-              setEditingSystem(undefined);
-              setSystemDialogOpen(true);
-            }}
-            type="button"
-          >
-            New system
-          </button>
-          <button onClick={() => setNewAgentOpen(true)} type="button">
-            New agent
-          </button>
-          <button
-            aria-haspopup="dialog"
-            onClick={() => {
-              setSearchOpen(true);
-              setShortcutsOpen(false);
-            }}
-            title="Find a Goal or Agent (/ or ⌘K)"
-            type="button"
-          >
-            Find
-          </button>
-          <button
-            onClick={() => {
-              setCommandError(undefined);
-              setConversationHistoryOpen(true);
-            }}
-            type="button"
-          >
-            Conversation history
-            {conversationHistory.length > 0 ? ` (${conversationHistory.length})` : ""}
-          </button>
-          <button
-            onClick={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
-            type="button"
-          >
-            {theme === "light" ? "Night map" : "Day map"}
-          </button>
+          <div className="masthead__view" role="group" aria-label="View">
+            <button
+              aria-pressed={view === "atlas"}
+              onClick={() => {
+                setView("atlas");
+                setCameraCommand(undefined);
+              }}
+              type="button"
+            >
+              Atlas
+            </button>
+            <button
+              aria-pressed={view === "ledger"}
+              onClick={() => {
+                setView("ledger");
+                setCameraCommand(undefined);
+              }}
+              type="button"
+            >
+              Ledger
+            </button>
+          </div>
+          <div className="masthead__actions">
+            <button onClick={() => setNewGoalOpen(true)} type="button">
+              New goal
+            </button>
+            <button
+              onClick={() => {
+                setEditingSystem(undefined);
+                setSystemDialogOpen(true);
+              }}
+              type="button"
+            >
+              New system
+            </button>
+            <button onClick={() => setNewAgentOpen(true)} type="button">
+              New agent
+            </button>
+          </div>
+          <div className="masthead__tools">
+            <button
+              aria-haspopup="dialog"
+              onClick={() => {
+                setSearchOpen(true);
+                setShortcutsOpen(false);
+              }}
+              title="Find a Goal or Agent (/ or ⌘K)"
+              type="button"
+            >
+              Find
+            </button>
+            <button
+              onClick={() => {
+                setCommandError(undefined);
+                setConversationHistoryOpen(true);
+              }}
+              type="button"
+            >
+              Conversation history
+              {conversationHistory.length > 0 ? ` (${conversationHistory.length})` : ""}
+            </button>
+          </div>
+        </nav>
+        <div className="masthead__utility">
+          <ThemeToggle
+            onToggle={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
+            theme={theme}
+          />
           <button
             aria-expanded={shortcutsOpen}
             aria-label="Show keyboard shortcuts"
+            className="masthead__help"
             onClick={() => setShortcutsOpen((value) => !value)}
             title="Keyboard shortcuts (?)"
             type="button"
           >
             ?
           </button>
-        </nav>
+        </div>
         <div className="host-status">
           <i
             className={`host-status__dot host-status__dot--${data.commandCentre.host?.status ?? "unavailable"}`}
