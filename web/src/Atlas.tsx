@@ -24,6 +24,7 @@ export type { AtlasCameraCommand, Selection } from "./atlasGeometry.ts";
 
 interface AgentStyle extends CSSProperties {
   readonly "--goal-color": string;
+  readonly "--agent-phase": string;
 }
 
 const concise = (value: string | undefined, maximumCharacters: number): string | undefined => {
@@ -424,7 +425,10 @@ export const Atlas = ({
                     [repository, agent.branch].filter(Boolean).join(" / ") || undefined,
                     30,
                   );
-                  const style: AgentStyle = { "--goal-color": palette.mark };
+                  const style: AgentStyle = {
+                    "--goal-color": palette.mark,
+                    "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
+                  };
                   return (
                     <g
                       className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
@@ -456,10 +460,7 @@ export const Atlas = ({
                       tabIndex={0}
                       transform={`translate(${point.x} ${point.y})`}
                     >
-                      <g
-                        className="agent__presence"
-                        style={{ animationDelay: `${-(hash(agent.id) % 4200)}ms` }}
-                      >
+                      <g className="agent__presence">
                         {attention ? (
                           <rect
                             className="agent__attention-wave"
@@ -471,7 +472,23 @@ export const Atlas = ({
                           />
                         ) : null}
                         <rect
+                          className="agent__working-aura"
+                          height={AGENT_CARD_HEIGHT + 8}
+                          rx="8"
+                          width={AGENT_CARD_WIDTH + 8}
+                          x={-AGENT_CARD_WIDTH / 2 - 4}
+                          y={-AGENT_CARD_HEIGHT / 2 - 4}
+                        />
+                        <rect
                           className="agent__card"
+                          height={AGENT_CARD_HEIGHT}
+                          rx="4"
+                          width={AGENT_CARD_WIDTH}
+                          x={-AGENT_CARD_WIDTH / 2}
+                          y={-AGENT_CARD_HEIGHT / 2}
+                        />
+                        <rect
+                          className="agent__working-circuit"
                           height={AGENT_CARD_HEIGHT}
                           rx="4"
                           width={AGENT_CARD_WIDTH}
@@ -486,7 +503,8 @@ export const Atlas = ({
                           {identity?.toUpperCase()}
                         </text>
                         <g className="agent__state" transform="translate(78 -35)">
-                          <circle r="3" />
+                          <circle className="agent__state-pulse" r="3" />
+                          <circle className="agent__state-dot" r="3" />
                           <text x="-8" y="3">
                             {state.toUpperCase()}
                           </text>

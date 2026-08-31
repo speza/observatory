@@ -247,6 +247,25 @@
 .agent__state circle {
   fill: currentColor;
 }
+.agent__state-pulse,
+.agent__working-aura,
+.agent__working-circuit {
+  opacity: 0;
+  pointer-events: none;
+}
+.agent__state-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.agent__working-aura {
+  fill: currentColor;
+}
+.agent__working-circuit {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
 .agent__rule {
   stroke: var(--hairline);
   stroke-width: 0.8;
@@ -438,8 +457,25 @@
 .atlas--motion .agent--working .agent__state circle {
   animation: agent-working 2.4s ease-in-out infinite;
 }
+.atlas--motion .agent--working .agent__working-circuit {
+  animation: working-circuit 3.6s linear infinite;
+  animation-delay: var(--agent-phase);
+}
+.atlas--motion .agent--working .agent__working-aura {
+  animation: working-circuit-beacon-glow 3.6s ease-in-out infinite;
+  animation-delay: var(--agent-phase);
+}
+.atlas--motion .agent--working .agent__state-pulse {
+  animation: working-circuit-beacon-pulse 3.6s ease-out infinite;
+  animation-delay: var(--agent-phase);
+}
+.atlas--motion .agent--waiting .agent__state-dot {
+  animation: agent-waiting 1.5s steps(2, end) infinite;
+  animation-delay: var(--agent-phase);
+}
 .atlas--motion .agent__attention-wave {
   animation: attention-wave 2.1s ease-out infinite;
+  animation-delay: var(--agent-phase);
 }
 
 @keyframes orbit-trace {
@@ -466,6 +502,55 @@
     opacity: 0.72;
   }
   50% {
+    opacity: 1;
+  }
+}
+
+@keyframes working-circuit {
+  0% {
+    opacity: 0.18;
+    stroke-dasharray: 26 544;
+    stroke-dashoffset: 0;
+  }
+  55% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0.18;
+    stroke-dasharray: 26 544;
+    stroke-dashoffset: -570;
+  }
+}
+
+@keyframes working-circuit-beacon-glow {
+  0%,
+  100% {
+    opacity: 0.01;
+  }
+  50% {
+    opacity: 0.06;
+  }
+}
+
+@keyframes working-circuit-beacon-pulse {
+  0% {
+    opacity: 0.34;
+    transform: scale(1);
+  }
+  55%,
+  100% {
+    opacity: 0;
+    transform: scale(2.25);
+  }
+}
+
+@keyframes agent-waiting {
+  0%,
+  66% {
+    opacity: 0.35;
+  }
+  67%,
+  100% {
     opacity: 1;
   }
 }

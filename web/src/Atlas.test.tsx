@@ -112,7 +112,8 @@ describe("production web Atlas", () => {
     expect(markup).not.toContain("agent__state-rail");
     expect(markup).toContain("Maps host facts to semantic s…");
     expect(markup).toContain("agent__attention-wave");
-    expect(markup).not.toContain("agent__working-wave");
+    expect(markup).toContain("agent__working-aura");
+    expect(markup).toContain("agent__working-circuit");
     expect(markup).not.toContain("goal__halo");
     expect(markup).not.toContain("goal__quiet-field");
     expect(markup).not.toContain("goal__contour");
