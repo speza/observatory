@@ -8,7 +8,7 @@ import {
 } from "../universe/types.ts";
 import { displayHostKind } from "../hosts/types.ts";
 
-export type AttentionReason = "blocked" | "waiting" | "host-stale";
+export type AttentionReason = "blocked" | "waiting" | "archived-running" | "runtime-unknown";
 
 export interface AttentionItem {
   readonly id: string;
@@ -63,6 +63,26 @@ export const evaluateAttention = (
 
   for (const agent of agents) {
     const priority = priorities.get(agent.primaryGoalId ?? "") ?? "P3";
+    if (agent.archivedAt !== undefined && agent.executionPresence === "live") {
+      const startedAt = agent.lastSeenAt;
+      items.push({
+        id: `${agent.id}:archived-running`,
+        targetType: "agent",
+        targetId: agent.id,
+        agentId: agent.id,
+        goalId: agent.primaryGoalId,
+        reason: "archived-running",
+        requiresHumanInput: true,
+        startedAt,
+        lastChangedAt: agent.lastChangedAt,
+        ageMs: age(now, startedAt),
+        priority,
+        runtimeState: agent.runtimeState,
+        explanation:
+          "This archived conversation has a live execution. Restore it or stop the execution.",
+      });
+      continue;
+    }
     const currentReason =
       agent.executionPresence === "live" ? attentionReason(agent.runtimeState) : undefined;
     if (currentReason) {
@@ -92,12 +112,12 @@ export const evaluateAttention = (
       const sourceLabel = displayHostKind(agent.execution?.hostKind ?? "host");
       const startedAt = agent.lastSeenAt;
       items.push({
-        id: `${agent.id}:host-stale`,
+        id: `${agent.id}:runtime-unknown`,
         targetType: "agent",
         targetId: agent.id,
         agentId: agent.id,
         goalId: agent.primaryGoalId,
-        reason: "host-stale",
+        reason: "runtime-unknown",
         requiresHumanInput: false,
         startedAt,
         lastChangedAt: agent.lastObservedAt,
@@ -116,7 +136,7 @@ export const evaluateAttention = (
         id: `${host.hostKind}:host-unavailable`,
         targetType: "host",
         targetId: host.hostKind,
-        reason: "host-stale",
+        reason: "runtime-unknown",
         requiresHumanInput: false,
         startedAt,
         lastChangedAt: startedAt,

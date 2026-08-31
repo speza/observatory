@@ -47,18 +47,33 @@ const agent = (
   nativeId: string,
   displayName: string,
   runtimeState: RuntimeState = "idle",
-): MockAgentObservation => ({
-  nativeId,
-  displayName,
-  runtimeState,
-  runtimeStateSource: "mock.scenario",
-  repository: repositoryFor(nativeId),
-  branch: "mock/live",
-  worktree: `/synthetic/worktrees/${nativeId}`,
-  provider: providerFor(nativeId),
-  executionContainer: executionContainerFor(nativeId),
-  hostLocator: `mock-agent:${nativeId}`,
-});
+): MockAgentObservation => {
+  const harnessId = providerFor(nativeId);
+  return {
+    nativeId,
+    displayName,
+    runtimeState,
+    runtimeStateSource: "mock.scenario",
+    repository: repositoryFor(nativeId),
+    branch: "mock/live",
+    worktree: `/synthetic/worktrees/${nativeId}`,
+    provider: harnessId,
+    harnessEvidence: {
+      detectedHarnessId: harnessId,
+      nativeConversationRef: {
+        harnessId,
+        continuityScopeId: "mock-provider-instance",
+        kind: "synthetic-conversation",
+        value: nativeId,
+      },
+      restoreState: "not-restored",
+      source: "native-integration",
+      observedAt: 0,
+    },
+    executionContainer: executionContainerFor(nativeId),
+    hostLocator: `mock-agent:${nativeId}`,
+  };
+};
 
 const baseCatalog: readonly MockAgentObservation[] = [
   agent("mock-p01", "API contract mapping", "working"),

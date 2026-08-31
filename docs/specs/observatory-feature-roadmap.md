@@ -35,13 +35,13 @@ workflows.
 | Goal lifecycle, priority and accepted position   | Done       | Done | Auto-repair plus drag-to-pin         |
 | SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
 | Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |
-| Explainable blocked/waiting/stale attention      | Done       | Done | Initial signal vocabulary only       |
+| Explainable blocked/waiting/unknown attention    | Done       | Done | Initial signal vocabulary only       |
 | Catch-up checkpoint and semantic changes         | Done       | Done | Explicit acknowledgement             |
 | Atlas, Ledger, Inbox and Closeout                | Projection | Done | One model, several lenses            |
 | Host-owned terminal and linked executions        | Done       | Done | xterm.js renders host streams        |
 | Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |
 | Agent-harness plugins and exact resume           | Done       | Done | Claude and Codex live-validated      |
-| Provider catalogue and dormant-session recovery  | Done       | Done | Scoped rebinding and exact resume    |
+| Conversation tracking and supporting history     | Done       | Done | Automatic admission and exact resume |
 | Contributed plugins and repository status        | Done       | Done | Inspector and Closeout evidence live |
 | Host-synchronised closeout                       | Done       | Done | Close before semantic archive        |
 | Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
@@ -77,8 +77,8 @@ non-goals.
 
 ### Now — discovery and context
 
-1. Implement metadata-only Claude and Codex provider-session catalogues and a
-   full-screen Session import lens.
+1. Implement metadata-only Claude and Codex conversation catalogues, automatic
+   exact-live/new admission and a supporting Conversation history lens. Done.
 2. Prove laptop/Herdr restart as `dormant/resumable`, with exact resume into a
    new execution and no automatic continuation.
 3. Expose related-Agent projections through the loopback API.

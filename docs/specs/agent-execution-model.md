@@ -5,7 +5,13 @@ Date: 2026-08-24
 Related: [Goal-centred agent orchestration map](../design/agent-orchestration-map.md),
 [Contextual linked execution surfaces](contextual-companion-surfaces.md),
 [Observatory technical architecture](../design/technical-architecture.md),
-[Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+[Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md),
+[Conversation-first Agent tracking](conversation-first-agent-tracking.md)
+
+> Amended by [Conversation-first Agent tracking](conversation-first-agent-tracking.md):
+> a managed Agent requires an exact provider conversation identity. A
+> host-only execution is transient diagnostic evidence, not a durable Agent.
+> The linked-execution model in this document otherwise remains current.
 
 ## Decision
 
@@ -15,7 +21,7 @@ location owned by `SessionHost`; it is not a second product identity.
 ```text
 Goal
 └── Agent*
-    ├── provider session?       durable continuity
+    ├── provider conversation  durable continuity
     ├── current execution?      replaceable host binding
     └── linked executions*      transient supporting surfaces
 ```

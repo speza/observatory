@@ -614,7 +614,7 @@ export class HerdrHostAdapter implements SessionHost {
         const nativeConversationRef = request.processPlan.nativeConversationRef;
         let after = await this.snapshotInternal();
         let candidate = after.agents.find((agent) => agent.nativeId === paneId);
-        if (nativeConversationRef && !candidate) {
+        if (!candidate) {
           after = await this.waitForAgentObservation(paneId, 20);
           candidate = after.agents.find((agent) => agent.nativeId === paneId);
         }

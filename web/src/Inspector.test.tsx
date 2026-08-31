@@ -18,19 +18,20 @@ describe("Inspector", () => {
           branch: "main",
           worktree: "/synthetic/project",
           hostLocator: "opaque:execution-visible",
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            nativeConversationRef: {
+              harnessId: "codex",
+              kind: "session-id",
+              value: "provider-visible",
+            },
+            restoreState: "not-restored",
+            source: "native-integration",
+            observedAt: fixture.clock.now(),
+          },
         },
       ]),
     );
-    fixture.universe.execute({
-      type: "BindAgentIdentity",
-      agentId: "agent-1",
-      harnessId: "codex",
-      nativeConversationRef: {
-        harnessId: "codex",
-        kind: "session-id",
-        value: "provider-visible",
-      },
-    });
     const projection = fixture.universe.project({
       kind: "inspector",
       now: fixture.clock.now(),

@@ -98,12 +98,12 @@ describe("SQLite persistence", () => {
     }
   });
 
-  test("migrations create the complete current schema", () => {
+  test("initializes the complete conversation-first schema", () => {
     const store = new SqliteUniverseStore(":memory:");
     const versions = store.db
       .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
-    expect(versions.map((row) => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(versions.map((row) => row.version)).toEqual([12]);
     const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(agents)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
@@ -139,11 +139,28 @@ describe("SQLite persistence", () => {
     expect(
       store.db
         .query<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_sessions'",
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_conversations'",
         )
         .all(),
     ).toHaveLength(1);
     store.close();
+  });
+
+  test("requires an explicit reset for a pre-conversation-first database", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-old-schema-"));
+    const databasePath = join(directory, "universe.sqlite");
+    try {
+      const legacy = new Database(databasePath, { create: true });
+      legacy.exec(`
+        CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+        INSERT INTO schema_migrations VALUES (11, 1);
+      `);
+      legacy.close();
+
+      expect(() => new SqliteUniverseStore(databasePath)).toThrow("Reset it before starting");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("persists provider and execution lifetimes independently across restart", () => {
@@ -153,7 +170,7 @@ describe("SQLite persistence", () => {
       const first = new SqliteUniverseStore(databasePath);
       const fixture = makeUniverse({ store: first });
       fixture.universe.execute({
-        type: "AdoptProviderSession",
+        type: "AddConversation",
         harnessId: "codex",
         nativeConversationRef: {
           harnessId: "codex",
@@ -193,111 +210,6 @@ describe("SQLite persistence", () => {
         executionHistory: [{ nativeId: "pane-1", hostInstanceId: "test-host:default" }],
       });
       second.close();
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("migrates a version 2 Agent execution identity without treating it as continuity proof", () => {
-    const directory = mkdtempSync(join(tmpdir(), "ao-v2-migration-"));
-    const databasePath = join(directory, "universe.sqlite");
-    try {
-      const legacy = new Database(databasePath, { create: true });
-      legacy.exec(`
-        CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
-        INSERT INTO schema_migrations VALUES (1, 1), (2, 2);
-        CREATE TABLE agents (
-          id TEXT PRIMARY KEY,
-          host_kind TEXT NOT NULL,
-          native_id TEXT NOT NULL,
-          host_locator TEXT NOT NULL,
-          display_name TEXT NOT NULL,
-          display_name_source TEXT NOT NULL,
-          description TEXT,
-          primary_goal_id TEXT,
-          runtime_state TEXT NOT NULL,
-          runtime_state_source TEXT NOT NULL,
-          host_health TEXT NOT NULL,
-          last_seen_at INTEGER NOT NULL,
-          last_observed_at INTEGER NOT NULL,
-          last_changed_at INTEGER NOT NULL,
-          attention_since INTEGER,
-          repository TEXT,
-          branch TEXT,
-          worktree TEXT,
-          provider TEXT,
-          execution_container_id TEXT,
-          execution_container_label TEXT,
-          archived_at INTEGER
-        );
-        INSERT INTO agents VALUES (
-          'legacy-agent', 'herdr', 'pane-1', 'opaque', 'Legacy', 'host', NULL, NULL,
-          'working', 'herdr.agent_status', 'live', 10, 10, 10, NULL,
-          'repo', 'main', '/repo', 'codex', NULL, NULL, NULL
-        );
-      `);
-      legacy.close();
-
-      const migrated = new SqliteUniverseStore(databasePath);
-      const agent = migrated.load().agents[0];
-      expect(agent).toMatchObject({
-        id: "legacy-agent",
-        execution: { hostKind: "herdr", nativeId: "pane-1", hostLocator: "opaque" },
-        continuity: "unknown",
-      });
-      expect(agent?.harnessId).toBeUndefined();
-      expect(agent?.nativeConversationRef).toBeUndefined();
-      migrated.close();
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("migrates version 4 launch receipts to durable recovery without losing deduplication", () => {
-    const directory = mkdtempSync(join(tmpdir(), "ao-v4-launch-migration-"));
-    const databasePath = join(directory, "universe.sqlite");
-    try {
-      const legacy = new Database(databasePath, { create: true });
-      legacy.exec(`
-        CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
-        INSERT INTO schema_migrations VALUES (1, 1), (2, 2), (3, 3), (4, 4);
-        CREATE TABLE launch_receipts (
-          request_id TEXT PRIMARY KEY,
-          intent_fingerprint TEXT NOT NULL,
-          result_json TEXT NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-        INSERT INTO launch_receipts VALUES (
-          'legacy-request',
-          'legacy-fingerprint',
-          '{"status":"pending","message":"Waiting for observation.","requestId":"legacy-request"}',
-          4
-        );
-      `);
-      legacy.close();
-
-      const migrated = new SqliteUniverseStore(databasePath);
-      expect(
-        migrated.db
-          .query<{ name: string }, []>("PRAGMA table_info(launch_receipts)")
-          .all()
-          .map((column) => column.name),
-      ).toContain("recovery_json");
-      expect(
-        migrated.reserveLaunchReceipt({
-          requestId: "legacy-request",
-          intentFingerprint: "legacy-fingerprint",
-          result: {
-            status: "pending",
-            message: "Waiting for observation.",
-            requestId: "legacy-request",
-          },
-        }),
-      ).toMatchObject({
-        kind: "existing",
-        receipt: { recovery: undefined },
-      });
-      migrated.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

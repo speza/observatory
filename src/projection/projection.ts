@@ -71,18 +71,10 @@ const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
 const lifecycleState = (agent: Agent): AgentView["lifecycleState"] => {
   if (agent.executionPresence === "conflict" || agent.conflictingExecutions.length > 0)
     return "conflict";
-  if (agent.providerContinuity === "missing") return "continuity-lost";
-  if (agent.observationHealth === "unavailable") return "unavailable";
-  if (agent.observationHealth === "stale") return "stale-observation";
-  if (agent.executionPresence === "unknown")
-    return agent.providerContinuity === "confirmed" && agent.observationHealth === "fresh"
-      ? "possibly-running"
-      : "unavailable";
-  if (agent.executionPresence === "live")
-    return agent.providerContinuity === "unknown" ? "unidentified-execution" : "running";
-  if (agent.providerContinuity === "confirmed" && agent.executionPresence === "absent")
-    return agent.resumeCapability === "eligible" ? "resumable" : "dormant";
-  return "unavailable";
+  if (agent.providerContinuity === "missing") return "conversation-unavailable";
+  if (agent.executionPresence === "live") return "running";
+  if (agent.executionPresence === "absent") return "dormant";
+  return "runtime-unknown";
 };
 
 const agentIsUncertain = (agent: Pick<Agent, "observationHealth" | "executionPresence">): boolean =>
@@ -102,7 +94,10 @@ const publicAgent = (agent: Agent) => {
     ...publicFields,
     lifecycleState: state,
     executionConflictCount: conflictingExecutions.length,
-    canResume: state === "resumable",
+    canResume:
+      state === "dormant" &&
+      agent.providerContinuity === "confirmed" &&
+      agent.resumeCapability === "eligible",
   };
 };
 
@@ -119,10 +114,11 @@ const projectCommandCentre = (
   const projectedAgents = state.agents.filter(
     (agent) => includeArchived || agent.archivedAt === undefined,
   );
-  const activeAgents = state.agents.filter((agent) => agent.archivedAt === undefined);
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
-  const attentionAgents = activeAgents.filter(
-    (agent) => includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived",
+  const attentionAgents = state.agents.filter(
+    (agent) =>
+      (includeArchived || agent.archivedAt === undefined || agent.executionPresence === "live") &&
+      (includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived"),
   );
   const attention = evaluateAttention(now, state.goals, attentionAgents, state.hosts);
   const attentionByAgent = byAttention(attention.items);
@@ -727,7 +723,7 @@ const projectInspector = (
   const agent = state.agents.find((candidate) => candidate.id === target.id);
   if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
   const view = agentView(agent, state.goals, attention.items);
-  const providerSession = (() => {
+  const conversation = (() => {
     const reference = agent.nativeConversationRef;
     if (!reference) return undefined;
     const kind = reference.kind.trim();
@@ -761,8 +757,8 @@ const projectInspector = (
       : []),
     ...(agent.description ? [agent.description] : []),
   ];
-  return providerSession
-    ? { kind: "agent-inspector", agent: view, providerSession, lines }
+  return conversation
+    ? { kind: "agent-inspector", agent: view, conversation, lines }
     : { kind: "agent-inspector", agent: view, lines };
 };
 

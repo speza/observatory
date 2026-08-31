@@ -1309,11 +1309,11 @@ button {
 .search-palette > footer span:last-child {
   color: var(--ink);
 }
-.session-import-backdrop {
+.conversation-history-backdrop {
   place-items: stretch;
   padding: 22px;
 }
-.session-import {
+.conversation-history {
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -1324,29 +1324,29 @@ button {
     10px 10px 0 var(--faint),
     0 30px 90px color-mix(in srgb, var(--ink) 20%, transparent);
 }
-.session-import > header {
+.conversation-history > header {
   display: flex;
   justify-content: space-between;
   gap: 24px;
   padding: 22px 26px 18px;
   border-bottom: 1px solid var(--hairline);
 }
-.session-import > header .overline,
-.session-import > header h2,
-.session-import > header p {
+.conversation-history > header .overline,
+.conversation-history > header h2,
+.conversation-history > header p {
   margin: 0;
 }
-.session-import > header h2 {
+.conversation-history > header h2 {
   margin-top: 3px;
   font-size: 29px;
   font-weight: 400;
 }
-.session-import > header p:last-child {
+.conversation-history > header p:last-child {
   margin-top: 5px;
   color: var(--muted);
   font-size: 13px;
 }
-.session-import > header > button {
+.conversation-history > header > button {
   align-self: flex-start;
   padding: 0;
   border: 0;
@@ -1355,7 +1355,7 @@ button {
   font-size: 21px;
   cursor: pointer;
 }
-.session-import__filters {
+.conversation-history__filters {
   display: grid;
   grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(220px, 1.5fr) minmax(
       150px,
@@ -1366,23 +1366,23 @@ button {
   padding: 14px 26px;
   border-bottom: 1px solid var(--hairline);
 }
-.session-import__filters label,
-.session-import > footer label {
+.conversation-history__filters label,
+.conversation-history > footer label {
   min-width: 0;
   display: grid;
   gap: 5px;
 }
-.session-import__filters label > span,
-.session-import > footer label > span {
+.conversation-history__filters label > span,
+.conversation-history > footer label > span {
   color: var(--muted);
   font-family: "DM Mono", ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.session-import__filters input,
-.session-import__filters select,
-.session-import > footer select {
+.conversation-history__filters input,
+.conversation-history__filters select,
+.conversation-history > footer select {
   min-width: 0;
   height: 36px;
   padding: 7px 9px;
@@ -1393,7 +1393,7 @@ button {
   font: inherit;
   font-size: 12px;
 }
-.session-import button {
+.conversation-history button {
   border: 1px solid var(--hairline);
   color: var(--ink);
   background: transparent;
@@ -1403,15 +1403,15 @@ button {
   text-transform: uppercase;
   cursor: pointer;
 }
-.session-import button:disabled {
+.conversation-history button:disabled {
   cursor: not-allowed;
   opacity: 0.38;
 }
-.session-import__filters > button {
+.conversation-history__filters > button {
   height: 36px;
   padding: 0 14px;
 }
-.session-import__summary {
+.conversation-history__summary {
   min-height: 39px;
   display: flex;
   align-items: center;
@@ -1424,19 +1424,19 @@ button {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.session-import__summary button {
+.conversation-history__summary button {
   padding: 5px 8px;
 }
-.session-import__summary strong {
+.conversation-history__summary strong {
   margin-left: auto;
   color: var(--accent);
   font-weight: 400;
 }
-.session-import__table {
+.conversation-history__table {
   min-height: 0;
   overflow: auto;
 }
-.session-import__row {
+.conversation-history__row {
   min-width: 1080px;
   display: grid;
   grid-template-columns: 26px minmax(220px, 1.5fr) 120px minmax(220px, 1.3fr) 155px minmax(
@@ -1449,7 +1449,7 @@ button {
   border-bottom: 1px solid var(--faint);
   font-size: 12px;
 }
-.session-import__row--heading {
+.conversation-history__row--heading {
   position: sticky;
   z-index: 1;
   top: 0;
@@ -1463,75 +1463,71 @@ button {
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.session-import__row > input {
+.conversation-history__row > input {
   width: 15px;
   height: 15px;
   accent-color: var(--accent);
 }
-.session-import__identity,
-.session-import__workspace {
+.conversation-history__identity,
+.conversation-history__workspace {
   min-width: 0;
 }
-.session-import__identity {
+.conversation-history__identity {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   column-gap: 8px;
   gap: 3px;
 }
-.session-import__identity .agent-logo {
+.conversation-history__identity .agent-logo {
   grid-row: 1 / 3;
 }
-.session-import__identity strong,
-.session-import__identity small,
-.session-import__workspace {
+.conversation-history__identity strong,
+.conversation-history__identity small,
+.conversation-history__workspace {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-import__identity strong {
+.conversation-history__identity strong {
   font-size: 13px;
 }
-.session-import__identity small,
-.session-import__workspace {
+.conversation-history__identity small,
+.conversation-history__workspace {
   color: var(--muted);
   font-size: 10px;
 }
-.session-import__state {
+.conversation-history__state {
   color: var(--muted);
   font-family: "DM Mono", ui-monospace, monospace;
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.session-import__state--running,
-.session-import__state--resumable {
+.conversation-history__state--resumable {
   color: var(--good);
 }
-.session-import__state--possibly-running {
-  color: var(--accent);
-}
-.session-import__row nav {
+.conversation-history__row nav {
   display: flex;
   gap: 6px;
 }
-.session-import__row nav button {
+.conversation-history__row nav button {
   min-height: 29px;
   padding: 5px 8px;
 }
-.session-import__row nav button:first-child {
+.conversation-history__row nav button:first-child {
   border-color: var(--accent);
   color: var(--accent);
 }
-.session-import__empty {
+.conversation-history__empty {
   margin: 0;
   padding: 44px 26px;
   color: var(--muted);
 }
-.session-import > .command-error {
+.conversation-history > .command-error {
   margin: 0;
   padding: 9px 26px;
 }
-.session-import > footer {
+.conversation-history > footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -1539,15 +1535,15 @@ button {
   padding: 13px 26px;
   border-top: 1px solid var(--hairline);
 }
-.session-import > footer label {
+.conversation-history > footer label {
   width: min(340px, 40vw);
   margin-right: auto;
 }
-.session-import > footer button {
+.conversation-history > footer button {
   min-height: 36px;
   padding: 7px 12px;
 }
-.session-import > footer button:last-child {
+.conversation-history > footer button:last-child {
   border-color: var(--accent);
   color: #fff8ec;
   background: var(--accent);
@@ -1717,6 +1713,40 @@ button {
 .launch-notice span {
   margin-left: 8px;
   color: var(--muted);
+}
+
+.pending-launches {
+  position: absolute;
+  z-index: 17;
+  top: 68px;
+  right: 18px;
+  max-width: min(520px, calc(100vw - 36px));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--hairline));
+  background: var(--paper-panel);
+  box-shadow: 4px 4px 0 var(--faint);
+}
+
+.pending-launches > span {
+  padding: 0 5px;
+  color: var(--accent);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pending-launches button {
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
 }
 
 .ledger {
@@ -2039,21 +2069,21 @@ button {
   .identity h1 {
     font-size: 20px;
   }
-  .session-import-backdrop {
+  .conversation-history-backdrop {
     padding: 10px;
   }
-  .session-import__filters {
+  .conversation-history__filters {
     grid-template-columns: 1fr 1fr;
   }
-  .session-import__filters label:first-child,
-  .session-import__filters label:nth-child(3) {
+  .conversation-history__filters label:first-child,
+  .conversation-history__filters label:nth-child(3) {
     grid-column: 1 / -1;
   }
-  .session-import > footer {
+  .conversation-history > footer {
     align-items: stretch;
     flex-direction: column;
   }
-  .session-import > footer label {
+  .conversation-history > footer label {
     width: auto;
   }
   .metrics {

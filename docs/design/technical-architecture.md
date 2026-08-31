@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
-Status: implemented V1 control plane and web-only local product
-Updated: 2026-08-27
+Status: implemented V1 control plane and web-only local product; conversation-first replacement proposed
+Updated: 2026-08-31
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
@@ -9,6 +9,8 @@ Technology choices: [Observatory technology decisions](technology-decisions.md)
 Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
 Continuity and recovery: [Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md)
+
+Conversation-first replacement: [Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md)
 
 Future distributed execution study:
 [Distributed execution and host aggregation](distributed-execution-and-host-aggregation.md)
@@ -70,6 +72,14 @@ commands, but must not become another interactive renderer.
 AO must make many heterogeneous agents understandable as durable,
 goal-centred work without becoming coupled to a particular agent provider,
 terminal multiplexer or renderer.
+
+The proposed conversation-first replacement sharpens that boundary: for a
+managed harness, an Agent is anchored by one exact provider conversation and
+may have zero or more current execution bindings. `SessionHost` observations
+answer where that conversation is running; they do not create durable Agents.
+Host-only executions remain transient diagnostic evidence until exact provider
+identity arrives. The `Universe` reconciles provider, host and launch
+observations through one order-independent interface.
 
 The architecture must support:
 
@@ -256,8 +266,11 @@ of this seam yet.
 `launchExecution` runs a harness-owned structured process plan but does not
 assign semantic meaning;
 reconciliation must observe the resulting Agent before the coordinator assigns
-it to a Goal. `access` returns the capabilities and opaque attachment targets
-proven for the selected Agent.
+it to a Goal. While identity is pending, the web composition root may resolve a
+persisted launch request to its still-observed execution and ask `access` for a
+terminal capability. That temporary access never creates a Universe Agent and
+does not expose the execution reference to the renderer. `access` returns the
+capabilities and opaque attachment targets proven for the selected execution.
 
 The implemented architecture splits agent-harness lifecycle from execution hosting.
 `AgentHarness` plugins own availability, structured start/resume plans and
@@ -731,9 +744,10 @@ Observations are idempotent and may arrive out of order. Each adapter supplies a
 source-native identity and observed timestamp. Reconciliation must never create
 a trusted goal or relationship from process discovery alone.
 
-Newly discovered Agents are durable host observations in the unassigned inbox;
-they do not receive a Goal assignment without an explicit human command. A
-shell-only pane that is absent from `snapshot.agents` is not reconciled at all.
+Newly discovered exact conversations become durable Agents in the unassigned
+Inbox; they do not receive a Goal assignment without an explicit human
+command. A host execution without exact conversation evidence remains a
+diagnostic and does not create a managed Agent.
 
 ## Persistence
 
@@ -749,7 +763,7 @@ Store responsibilities:
 - latest observations plus enough history for catch-up;
 - attention lifecycle;
 - mutation provenance; and
-- schema migration.
+- an explicit current-schema boundary.
 
 The implemented catch-up slice persists accepted semantic changes with a
 monotonic sequence and one durable operator checkpoint. The projection groups
@@ -1075,19 +1089,15 @@ accounts or proprietary agent transcripts.
   not establish durable continuity.
 - Missing provider session: preserve the Agent and report continuity lost only
   when a complete provider scope proves absence.
-- Current implementation persists provider continuity, execution presence,
-  resume capability and observation health independently. Provider-session
-  recovery scopes exact host evidence before Universe reconciliation; native
-  provider aliases may canonicalise to one session, but cwd, title and recency
-  never do. Execution bindings are keyed by host instance and retained as
-  history when a complete snapshot proves them absent.
-- A same-harness, same-workspace unidentified execution is plausible-live
-  evidence, not identity proof. The Universe projects the provider-backed Agent
-  as `possibly-running`, and the launch coordinator blocks ordinary resume at
-  its existing interface until the ambiguity disappears or exact evidence
-  arrives.
-- Stale agent report: show source and age; a fresher deterministic host fact may
-  supersede runtime state.
+- `ConversationTracker` establishes durable provider catalogue baselines,
+  canonicalises exact provider aliases and submits provider and host facts
+  through `Universe.observe`. Cwd, title and recency never establish identity.
+- An unidentified execution remains diagnostic evidence and does not create a
+  durable Agent. It may conservatively block an exact resume in the same
+  workspace, but it is never joined to a conversation by inference.
+- Runtime evidence is presented as Running, Dormant, Runtime unknown or
+  Conflict. Observation age remains diagnostic detail rather than an Agent
+  identity or headline lifecycle.
 - Launch succeeds but assignment fails: retain the discovered agent in the
   inbox and report the partial result.
 - Assignment succeeds but launch fails: do not leave a phantom live agent;
@@ -1117,7 +1127,8 @@ Use synthetic or sanitised fixtures representing at least:
 - Layout tests assert stability when unrelated nodes arrive.
 - Search tests cover active, provisional and archived metadata.
 - Git tests use disposable repositories and real worktrees.
-- Store tests verify command atomicity, idempotency and migration.
+- Store tests verify command atomicity, idempotency, the current schema and the
+  explicit reset boundary for older experimental databases.
 
 ### Adapter contract tests
 
@@ -1237,8 +1248,8 @@ the active product roadmap; current priorities live in the
   goal context.
 - Agent retries do not duplicate goals, agents or relationships.
 - No transcript contents are required to reconcile the Universe after restart;
-  metadata-only provider catalogues can reconstruct recovery candidates after
-  a database reset.
+  metadata-only provider catalogues rebuild Conversation history and exact live
+  conversations are admitted automatically after a database reset.
 - The live Herdr adapter can disconnect and reconcile without losing accepted
   state.
 - A user can inspect and message one supported agent without leaving the map,

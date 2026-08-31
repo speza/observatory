@@ -22,7 +22,6 @@ import {
   type UniverseState,
   type UniverseStore,
 } from "./types.ts";
-import { isPlausibleUnidentifiedExecution } from "./execution-ambiguity.ts";
 import {
   defaultGoalMapPosition,
   initialGoalMapPosition,
@@ -111,13 +110,7 @@ export type UniverseCommand =
       readonly description?: string;
     }
   | {
-      readonly type: "BindAgentIdentity";
-      readonly agentId: AgentId;
-      readonly harnessId: string;
-      readonly nativeConversationRef?: NativeConversationRef;
-    }
-  | {
-      readonly type: "AdoptProviderSession";
+      readonly type: "AddConversation";
       readonly harnessId: string;
       readonly nativeConversationRef: NativeConversationRef;
       readonly displayName: string;
@@ -149,6 +142,18 @@ export interface ReconciliationResult {
   readonly diagnostics: readonly string[];
   readonly error?: string;
 }
+
+export type UniverseObservation =
+  | { readonly kind: "host-executions"; readonly snapshot: HostSnapshot }
+  | {
+      readonly kind: "provider-catalogue";
+      readonly harnessId: string;
+      readonly continuityScopeId: string;
+      readonly observedAt: number;
+      readonly complete: boolean;
+      readonly sessions: readonly ProviderSessionFact[];
+    }
+  | { readonly kind: "provider-unavailable"; readonly harnessId: string };
 
 const normalizeText = (value: string | undefined): string | undefined => {
   const normalized = value?.trim();
@@ -409,6 +414,16 @@ const isDuplicateObservation = (agents: readonly HostAgentObservation[]): string
 const nativeConversationKey = (reference: NativeConversationRef): string =>
   `${reference.harnessId}\u0000${reference.continuityScopeId ?? "legacy"}\u0000${reference.kind}\u0000${reference.value}`;
 
+const isScopeEnrichment = (
+  current: NativeConversationRef,
+  observed: NativeConversationRef,
+): boolean =>
+  current.continuityScopeId === undefined &&
+  observed.continuityScopeId !== undefined &&
+  current.harnessId === observed.harnessId &&
+  current.kind === observed.kind &&
+  current.value === observed.value;
+
 const nativeConversationFromObservation = (
   observation: HostAgentObservation,
 ): NativeConversationRef | undefined => {
@@ -482,8 +497,8 @@ const agentFromObservation = (
   id: AgentId,
   snapshot: HostSnapshot,
   observation: HostAgentObservation,
+  nativeConversationRef: NativeConversationRef,
 ): Agent => {
-  const nativeConversationRef = nativeConversationFromObservation(observation);
   return {
     id,
     execution: {
@@ -507,7 +522,7 @@ const agentFromObservation = (
     executionHistory: [],
     conflictingExecutions: [],
     displayName: observation.displayName,
-    displayNameSource: "host",
+    displayNameSource: "fallback",
     runtimeState: observation.runtimeState,
     runtimeStateSource: observation.runtimeStateSource,
     hostHealth: "live",
@@ -638,7 +653,8 @@ const reconcileObservation = (
     ((byExecution.nativeConversationRef &&
       observedConversation &&
       nativeConversationKey(byExecution.nativeConversationRef) !==
-        nativeConversationKey(observedConversation)) ||
+        nativeConversationKey(observedConversation) &&
+      !isScopeEnrichment(byExecution.nativeConversationRef, observedConversation)) ||
       (byExecution.runtimeStateSource === "observatory.process-start" &&
         Boolean(byExecution.nativeConversationRef) &&
         !observedConversation))
@@ -654,8 +670,17 @@ const reconcileObservation = (
 
   const existing = byConversation ?? byExecution;
   if (!existing) {
+    if (!observedConversation) {
+      draft.diagnostics.push(
+        `Observed unidentified ${snapshot.hostKind} execution ${observation.nativeId.trim()}; no durable Agent was created.`,
+      );
+      return;
+    }
     const id = ids.next("agent");
-    draft.state.agents = [...draft.state.agents, agentFromObservation(id, snapshot, observation)];
+    draft.state.agents = [
+      ...draft.state.agents,
+      agentFromObservation(id, snapshot, observation, observedConversation),
+    ];
     draft.addedAgentIds.push(id);
     return;
   }
@@ -720,7 +745,7 @@ const reconcileObservation = (
     nativeConversationRef: observedConversation ?? existing.nativeConversationRef,
     continuity: observedConversation ? "proved" : existing.continuity,
     displayName:
-      existing.displayNameSource === "host" ? observation.displayName : existing.displayName,
+      existing.displayNameSource === "fallback" ? observation.displayName : existing.displayName,
     attentionSince: currentAttention
       ? stateChanged
         ? observation.observedAt
@@ -734,43 +759,6 @@ const reconcileObservation = (
   };
   replaceAgent(draft.state, updated);
   draft.updatedAgentIds.push(existing.id);
-};
-
-const refreshProviderExecutionPresence = (
-  draft: ReconciliationDraft,
-  snapshot: HostSnapshot,
-): void => {
-  for (const agent of draft.state.agents) {
-    if (
-      agent.providerContinuity !== "confirmed" ||
-      !agent.nativeConversationRef ||
-      agent.execution ||
-      agent.executionPresence === "conflict" ||
-      agent.conflictingExecutions.length > 0 ||
-      !agent.harnessId ||
-      !agent.worktree
-    )
-      continue;
-    const harnessId = agent.harnessId;
-    const workspaceRef = agent.worktree;
-    const possiblyLive = snapshot.agents.some((observation) =>
-      isPlausibleUnidentifiedExecution({ harnessId, workspaceRef }, observation),
-    );
-    const executionPresence = possiblyLive ? "unknown" : "absent";
-    if (
-      agent.executionPresence === executionPresence &&
-      agent.observationHealth === "fresh" &&
-      agent.executionObservedAt === snapshot.observedAt
-    )
-      continue;
-    replaceAgent(draft.state, {
-      ...agent,
-      executionPresence,
-      observationHealth: "fresh",
-      executionObservedAt: snapshot.observedAt,
-    });
-    if (!draft.updatedAgentIds.includes(agent.id)) draft.updatedAgentIds.push(agent.id);
-  }
 };
 
 const planReconciliation = (
@@ -814,7 +802,6 @@ const planReconciliation = (
   detachMissingExecutions(draft, snapshot);
   for (const observation of snapshot.agents)
     reconcileObservation(draft, snapshot, observation, conversationExecutions, ids);
-  refreshProviderExecutionPresence(draft, snapshot);
   return draft;
 };
 
@@ -836,6 +823,25 @@ export class Universe {
 
   project(query: ProjectionQuery): Projection {
     return this.projections.project(this.state, query);
+  }
+
+  /** The sole production interface for accepting host and provider observations. */
+  observe(observation: UniverseObservation): ReconciliationResult {
+    if (observation.kind === "host-executions") return this.reconcile(observation.snapshot);
+    const before = this.state.agents;
+    if (observation.kind === "provider-unavailable")
+      this.markProviderUnavailable(observation.harnessId);
+    else this.reconcileProviderSessions(observation);
+    const updatedAgentIds = this.state.agents
+      .filter((agent, index) => agent !== before[index])
+      .map((agent) => agent.id);
+    return {
+      accepted: true,
+      addedAgentIds: [],
+      updatedAgentIds,
+      staleAgentIds: [],
+      diagnostics: [],
+    };
   }
 
   /** Discard persisted runtime certainty before the first fresh host observation. */
@@ -870,6 +876,34 @@ export class Universe {
     readonly sessions: readonly ProviderSessionFact[];
   }): void {
     const next = cloneUniverseState(this.state);
+    const canonicalAliases = options.sessions.flatMap((session) =>
+      (session.nativeConversationAliases ?? []).map((alias) => ({
+        alias,
+        canonical: session.nativeConversationRef,
+      })),
+    );
+    next.agents = next.agents.map((agent) => {
+      const reference = agent.nativeConversationRef;
+      if (!reference) return agent;
+      const matches = canonicalAliases.filter(
+        ({ alias }) =>
+          alias.harnessId === reference.harnessId &&
+          alias.kind === reference.kind &&
+          alias.value === reference.value &&
+          (reference.continuityScopeId === undefined ||
+            alias.continuityScopeId === reference.continuityScopeId),
+      );
+      if (matches.length !== 1) return agent;
+      const canonical = matches[0]!.canonical;
+      const canonicalOwned = next.agents.some(
+        (candidate) =>
+          candidate.id !== agent.id &&
+          candidate.nativeConversationRef &&
+          nativeConversationKey(candidate.nativeConversationRef) ===
+            nativeConversationKey(canonical),
+      );
+      return canonicalOwned ? agent : { ...agent, nativeConversationRef: canonical };
+    });
     const observed = new Map(
       options.sessions.map((session) => [
         nativeConversationKey(session.nativeConversationRef),
@@ -904,6 +938,15 @@ export class Universe {
         resumeCapability: eligible ? ("eligible" as const) : ("blocked" as const),
         providerObservedAt: session.observedAt,
         continuity: "proved" as const,
+        displayName:
+          agent.displayNameSource === "fallback" && normalizeText(session.title)
+            ? normalizeText(session.title)!
+            : agent.displayName,
+        displayNameSource:
+          agent.displayNameSource === "fallback" && normalizeText(session.title)
+            ? ("provider" as const)
+            : agent.displayNameSource,
+        worktree: normalizeText(session.workspaceRef) ?? agent.worktree,
       };
     });
     this.store.save(next);
@@ -1203,43 +1246,7 @@ export class Universe {
         result = { ok: true, agentId: agent.id };
         break;
       }
-      case "BindAgentIdentity": {
-        const agent = findAgent(next, command.agentId);
-        const harnessId = normalizeText(command.harnessId);
-        if (!agent) return { ok: false, error: "Agent not found." };
-        if (!harnessId) return { ok: false, error: "Harness id is required." };
-        const nativeConversationRef = command.nativeConversationRef;
-        if (
-          nativeConversationRef &&
-          (nativeConversationRef.harnessId !== harnessId ||
-            !normalizeText(nativeConversationRef.kind) ||
-            !normalizeText(nativeConversationRef.value))
-        )
-          return { ok: false, error: "Native conversation reference is invalid." };
-        const boundConversation = nativeConversationRef
-          ? { ...nativeConversationRef }
-          : agent.nativeConversationRef;
-        if (
-          boundConversation &&
-          next.agents.some(
-            (candidate) =>
-              candidate.id !== agent.id &&
-              candidate.nativeConversationRef &&
-              nativeConversationKey(candidate.nativeConversationRef) ===
-                nativeConversationKey(boundConversation),
-          )
-        )
-          return { ok: false, error: "Native conversation is already bound to another Agent." };
-        replaceAgent(next, {
-          ...agent,
-          harnessId,
-          nativeConversationRef: boundConversation,
-          continuity: boundConversation ? "proved" : agent.continuity,
-        });
-        result = { ok: true, agentId: agent.id };
-        break;
-      }
-      case "AdoptProviderSession": {
+      case "AddConversation": {
         const harnessId = normalizeText(command.harnessId);
         const displayName = normalizeText(command.displayName);
         const reference = command.nativeConversationRef;
@@ -1276,14 +1283,14 @@ export class Universe {
           nativeConversationRef: { ...reference, continuityScopeId },
           continuity: "proved",
           providerContinuity: "confirmed",
-          executionPresence: "absent",
+          executionPresence: "unknown",
           resumeCapability: "eligible",
           observationHealth: "fresh",
           providerObservedAt: command.observedAt,
           executionHistory: [],
           conflictingExecutions: [],
           displayName,
-          displayNameSource: "host",
+          displayNameSource: "provider",
           primaryGoalId: goal?.id,
           runtimeState: "unknown",
           runtimeStateSource: `${harnessId}.provider-catalogue`,

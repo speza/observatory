@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { AgentView } from "../../src/projection/types.ts";
 import {
   boundWebTerminalDimensions,
+  type WebPendingLaunch,
   type WebTerminalLink,
   type WebTerminalScrollRequest,
 } from "../../src/web/protocol.ts";
@@ -21,16 +22,20 @@ import { isModifiedTerminalKey, modifiedTerminalInput } from "./terminalKeyboard
 
 export type TerminalTheme = "light" | "dark";
 
-interface TerminalSurfaceProps {
-  readonly agent: AgentView;
+interface TerminalSurfaceBaseProps {
   readonly active: boolean;
   readonly embedded: boolean;
-  readonly link?: WebTerminalLink;
   readonly onClose: () => void;
   readonly resizeMode?: "fit" | "preserve";
   readonly showHeader?: boolean;
   readonly theme: TerminalTheme;
 }
+
+type TerminalSurfaceProps = TerminalSurfaceBaseProps &
+  (
+    | { readonly agent: AgentView; readonly launch?: never; readonly link?: WebTerminalLink }
+    | { readonly agent?: never; readonly launch: WebPendingLaunch; readonly link?: never }
+  );
 
 const decodeFrame = (value: string): Uint8Array => {
   const binary = window.atob(value);
@@ -51,6 +56,7 @@ const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
 export const TerminalSurface = ({
   active,
   agent,
+  launch,
   embedded,
   link,
   onClose,
@@ -58,13 +64,15 @@ export const TerminalSurface = ({
   showHeader = true,
   theme,
 }: TerminalSurfaceProps): React.JSX.Element => {
+  const label = launch?.displayName ?? agent?.displayName ?? "Starting agent";
+  const target = launch ? { requestId: launch.requestId } : { agentId: agent.id };
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const sessionRef = useRef<string | undefined>(undefined);
   const activeRef = useRef(active);
   const [status, setStatus] = useState(
-    `Opening ${link?.label ?? agent.displayName}${link ? " companion" : " terminal"}…`,
+    `Opening ${link?.label ?? label}${link ? " companion" : " terminal"}…`,
   );
 
   const scrollTerminal = (request: WebTerminalScrollRequest): void => {
@@ -155,7 +163,7 @@ export const TerminalSurface = ({
       return false;
     });
 
-    void openWebTerminal(agent.id, dimensions, { linkId: link?.id, resizeMode })
+    void openWebTerminal(target, dimensions, { linkId: link?.id, resizeMode })
       .then((opened) => {
         if (disposed) {
           void releaseWebTerminal(opened.sessionId);
@@ -209,7 +217,7 @@ export const TerminalSurface = ({
       terminal.dispose();
       if (sessionId) void releaseWebTerminal(sessionId);
     };
-  }, [agent.id, link?.id, resizeMode]);
+  }, [agent?.id, launch?.requestId, link?.id, resizeMode]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -223,8 +231,8 @@ export const TerminalSurface = ({
   return (
     <section
       aria-hidden={!active}
-      aria-label={`${link?.label ?? agent.displayName} terminal`}
-      className={`terminal-surface${embedded ? " terminal-surface--embedded" : ""}${showHeader ? "" : " terminal-surface--compact"}`}
+      aria-label={`${link?.label ?? label} terminal`}
+      className={`terminal-surface${embedded ? " terminal-surface--embedded" : ""}${launch ? " terminal-surface--pending" : ""}${showHeader ? "" : " terminal-surface--compact"}`}
       data-active={active ? "true" : "false"}
     >
       {showHeader ? (
@@ -233,9 +241,11 @@ export const TerminalSurface = ({
             <p className="overline">
               {link
                 ? `COMPANION TERMINAL / ${link.kind}`
-                : `HOST-OWNED TERMINAL / ${agent.execution?.hostKind ?? "detached"}`}
+                : launch
+                  ? `STARTING / ${launch.harnessId}`
+                  : `HOST-OWNED TERMINAL / ${agent?.execution?.hostKind ?? "detached"}`}
             </p>
-            <h2>{link?.label ?? agent.displayName}</h2>
+            <h2>{link?.label ?? label}</h2>
           </div>
           <button aria-label="Close terminal" onClick={onClose} type="button">
             ×

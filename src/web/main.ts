@@ -9,7 +9,7 @@ import { LocalWorkspaceProvider } from "../workspaces/local.ts";
 import { ObservatoryWebApi } from "./api.ts";
 import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry.ts";
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
-import { ProviderSessionRecovery } from "../provider-sessions/recovery.ts";
+import { ConversationTracker } from "../conversations/tracker.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -79,20 +79,29 @@ const program = Effect.scoped(
       workspace,
       plugins,
     );
-    const providerSessions = new ProviderSessionRecovery(plugins, runtime.store, runtime.universe);
+    const conversations = new ConversationTracker(plugins, runtime.store, runtime.universe);
     const startAgent = createStartAgentCoordinator({
       universe: runtime.universe,
       host: runtime.host,
       harnesses: plugins,
       workspace,
       receipts: runtime.store,
-      reconcileHost: providerSessions.reconcileHost.bind(providerSessions),
+      reconcileHost: conversations.observeHost.bind(conversations),
     });
-    const providerRefresh = yield* providerSessions.refresh();
+    const providerRefresh =
+      process.env.AO_HOST === "mock"
+        ? {
+            observedProviders: 0,
+            discoveredConversations: 0,
+            admittedConversations: 0,
+            diagnostics: [],
+          }
+        : yield* conversations.refresh();
     const initialMessage = yield* initializeObservatoryRuntime(
       runtime,
-      providerSessions.reconcileHost.bind(providerSessions),
+      conversations.observeHost.bind(conversations),
     );
+    yield* startAgent.refreshPending();
     const api = new ObservatoryWebApi(
       runtime.universe,
       runtime.clock,
@@ -102,7 +111,7 @@ const program = Effect.scoped(
       { coordinator: startAgent, workspace },
       repositoryStatus,
       plugins,
-      providerSessions,
+      conversations,
     );
     const refreshMs = Number(process.env.AO_WEB_REFRESH_MS ?? 2_000);
     const providerRefreshMs = Number(process.env.AO_PROVIDER_REFRESH_MS ?? 60_000);
@@ -116,25 +125,31 @@ const program = Effect.scoped(
     });
     const refresh = (): void => {
       void Effect.runPromise(runtime.host.snapshot())
-        .then((snapshot) => providerSessions.reconcileHost(snapshot))
+        .then((snapshot) => {
+          conversations.observeHost(snapshot);
+          return Effect.runPromise(startAgent.refreshPending());
+        })
         .catch((error: Error) => {
           console.error(`Observatory refresh failed: ${error.message}`);
         });
     };
     const timer = setInterval(refresh, refreshMs);
-    const providerTimer = setInterval(() => {
-      void Effect.runPromise(providerSessions.refresh()).catch((error: Error) => {
-        console.error(`Provider-session refresh failed: ${error.message}`);
-      });
-    }, providerRefreshMs);
+    const providerTimer =
+      process.env.AO_HOST === "mock"
+        ? undefined
+        : setInterval(() => {
+            void Effect.runPromise(conversations.refresh()).catch((error: Error) => {
+              console.error(`Conversation refresh failed: ${error.message}`);
+            });
+          }, providerRefreshMs);
     console.log(
-      `${initialMessage} · ${providerRefresh.discoveredSessions} provider sessions discovered\nObservatory web · http://${server.hostname}:${server.port}`,
+      `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered\nObservatory web · http://${server.hostname}:${server.port}`,
     );
 
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         clearInterval(timer);
-        clearInterval(providerTimer);
+        if (providerTimer) clearInterval(providerTimer);
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

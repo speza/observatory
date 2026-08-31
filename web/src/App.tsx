@@ -7,16 +7,17 @@ import type {
   SystemView,
   UniverseMapProjection,
 } from "../../src/projection/types.ts";
-import type { WebCommand, WebCommandResponse } from "../../src/web/protocol.ts";
-import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
+import type { WebCommand, WebCommandResponse, WebPendingLaunch } from "../../src/web/protocol.ts";
+import type { ConversationHistoryView } from "../../src/conversations/types.ts";
 import {
   closeAndArchiveAgents,
   executeCommand,
   fetchInspector,
-  fetchRecoveredSessions,
+  fetchConversationHistory,
+  fetchPendingLaunches,
   fetchSearch,
   resumeWebAgent,
-  trackRecoveredSession,
+  addConversation,
 } from "./api.ts";
 import { AttentionQueue } from "./AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
@@ -29,7 +30,8 @@ import { KeyboardGuide } from "./KeyboardGuide.tsx";
 import { Ledger } from "./Ledger.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { NewGoalDialog } from "./NewGoalDialog.tsx";
-import { SessionImportDialog } from "./SessionImportDialog.tsx";
+import { PendingLaunchTerminal } from "./PendingLaunchTerminal.tsx";
+import { ConversationHistoryDialog } from "./ConversationHistoryDialog.tsx";
 import { SearchPalette, searchResultAction } from "./SearchPalette.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
 import { SystemDialog } from "./SystemDialog.tsx";
@@ -78,6 +80,7 @@ export const App = (): React.JSX.Element => {
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
+  const [terminalLaunch, setTerminalLaunch] = useState<WebPendingLaunch>();
   const [diffAgent, setDiffAgent] = useState<AgentView>();
   const [inspector, setInspector] = useState<InspectorProjection>();
   const [inspectorError, setInspectorError] = useState<string>();
@@ -87,11 +90,29 @@ export const App = (): React.JSX.Element => {
   const [editingSystem, setEditingSystem] = useState<SystemView>();
   const [selectedSystemId, setSelectedSystemId] = useState<string>();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
-  const [sessionImportOpen, setSessionImportOpen] = useState(false);
+  const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
-  const [recoveredSessions, setRecoveredSessions] = useState<readonly RecoveredSessionView[]>([]);
+  const [pendingLaunches, setPendingLaunches] = useState<readonly WebPendingLaunch[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<
+    readonly ConversationHistoryView[]
+  >([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = (refresh: boolean): void => {
+      void fetchPendingLaunches({ refresh, signal: controller.signal })
+        .then((response) => setPendingLaunches(response.launches))
+        .catch(() => undefined);
+    };
+    load(true);
+    const timer = window.setInterval(() => load(false), 2_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -120,25 +141,27 @@ export const App = (): React.JSX.Element => {
   }, [searchOpen, searchQuery]);
 
   useEffect(() => {
-    if (!sessionImportOpen) return;
+    if (!conversationHistoryOpen) return;
     const controller = new AbortController();
-    void fetchRecoveredSessions({ refresh: true, signal: controller.signal })
-      .then((response) => setRecoveredSessions(response.sessions))
+    void fetchConversationHistory({ refresh: true, signal: controller.signal })
+      .then((response) => setConversationHistory(response.conversations))
       .catch((error) => {
         if (!controller.signal.aborted)
-          setCommandError(error instanceof Error ? error.message : "Session import unavailable.");
+          setCommandError(
+            error instanceof Error ? error.message : "Conversation history unavailable.",
+          );
       });
     return () => controller.abort();
-  }, [sessionImportOpen]);
+  }, [conversationHistoryOpen]);
 
-  const refreshSessionImport = async (): Promise<void> => {
+  const refreshConversationHistory = async (): Promise<void> => {
     setCommandPending(true);
     setCommandError(undefined);
     try {
-      const response = await fetchRecoveredSessions({ refresh: true });
-      setRecoveredSessions(response.sessions);
+      const response = await fetchConversationHistory({ refresh: true });
+      setConversationHistory(response.conversations);
     } catch (error) {
-      setCommandError(error instanceof Error ? error.message : "Session import unavailable.");
+      setCommandError(error instanceof Error ? error.message : "Conversation history unavailable.");
     } finally {
       setCommandPending(false);
     }
@@ -200,7 +223,7 @@ export const App = (): React.JSX.Element => {
       attention: {
         items: attentionItems,
         currentCount: attentionItems.filter((item) => item.requiresHumanInput).length,
-        uncertaintyCount: attentionItems.filter((item) => item.reason === "host-stale").length,
+        uncertaintyCount: attentionItems.filter((item) => item.reason === "runtime-unknown").length,
       },
       counts: {
         ...data.commandCentre.counts,
@@ -281,7 +304,7 @@ export const App = (): React.JSX.Element => {
   const archiveAgents = async (agentIds: readonly string[]): Promise<boolean> =>
     (await runCommand({ type: "ArchiveAgents", agentIds })) !== undefined;
 
-  const trackRecovered = async (
+  const addHistoricalConversation = async (
     handle: string,
     goalId?: string,
     resume = false,
@@ -289,13 +312,15 @@ export const App = (): React.JSX.Element => {
     setCommandPending(true);
     setCommandError(undefined);
     try {
-      const tracked = await trackRecoveredSession(handle, goalId);
-      portfolio.accept(tracked.portfolio);
-      setRecoveredSessions((sessions) => sessions.filter((session) => session.handle !== handle));
+      const added = await addConversation(handle, goalId);
+      portfolio.accept(added.portfolio);
+      setConversationHistory((conversations) =>
+        conversations.filter((conversation) => conversation.handle !== handle),
+      );
       if (resume) {
         const resumed = await resumeWebAgent({
           requestId: `web-recovered-resume-${crypto.randomUUID()}`,
-          agentId: tracked.agentId,
+          agentId: added.agentId,
         });
         portfolio.accept(resumed.portfolio);
         setLaunchNotice(resumed.result.message);
@@ -303,14 +328,14 @@ export const App = (): React.JSX.Element => {
         const goal = data?.commandCentre.goals.find((candidate) => candidate.id === goalId);
         setLaunchNotice(
           goalId
-            ? `Session imported and added to ${goal?.title ?? "its Goal"}.`
-            : "Session imported without a Goal. Find it in Inbox.",
+            ? `Conversation added to ${goal?.title ?? "its Goal"}.`
+            : "Conversation added without a Goal. Find it in Inbox.",
         );
       }
       setInspectorRevision((value) => value + 1);
-      return { agentId: tracked.agentId };
+      return { agentId: added.agentId };
     } catch (error) {
-      setCommandError(error instanceof Error ? error.message : "Session import failed.");
+      setCommandError(error instanceof Error ? error.message : "Add conversation failed.");
       return undefined;
     } finally {
       setCommandPending(false);
@@ -370,6 +395,7 @@ export const App = (): React.JSX.Element => {
 
   const openSelectedTerminal = (): void => {
     if (!selectedAgent) return;
+    setTerminalLaunch(undefined);
     setTerminalAgent(selectedAgent);
     setSidePanel(undefined);
   };
@@ -377,6 +403,7 @@ export const App = (): React.JSX.Element => {
   const openWorkspaceReview = (agent: AgentView): void => {
     setDiffAgent(agent);
     setTerminalAgent(undefined);
+    setTerminalLaunch(undefined);
   };
 
   const resumeAgent = async (agent: AgentView): Promise<void> => {
@@ -425,8 +452,9 @@ export const App = (): React.JSX.Element => {
         !newAgentOpen &&
         !newGoalOpen &&
         !systemDialogOpen &&
-        !sessionImportOpen &&
-        !terminalAgent
+        !conversationHistoryOpen &&
+        !terminalAgent &&
+        !terminalLaunch
       ) {
         event.preventDefault();
         setSearchOpen(true);
@@ -459,8 +487,16 @@ export const App = (): React.JSX.Element => {
           setNewAgentOpen(false);
           return;
         }
+        if (conversationHistoryOpen) {
+          setConversationHistoryOpen(false);
+          return;
+        }
         if (terminalAgent) {
           setTerminalAgent(undefined);
+          return;
+        }
+        if (terminalLaunch) {
+          setTerminalLaunch(undefined);
           return;
         }
         if (diffAgent) {
@@ -482,8 +518,9 @@ export const App = (): React.JSX.Element => {
         newGoalOpen ||
         systemDialogOpen ||
         searchOpen ||
-        sessionImportOpen ||
+        conversationHistoryOpen ||
         terminalAgent ||
+        terminalLaunch ||
         shortcutsOpen ||
         (sidePanel && sidePanel !== "inspector")
       )
@@ -576,12 +613,13 @@ export const App = (): React.JSX.Element => {
     newAgentOpen,
     systemDialogOpen,
     searchOpen,
-    sessionImportOpen,
+    conversationHistoryOpen,
     selection,
     selectedAgent,
     sidePanel,
     shortcutsOpen,
     terminalAgent,
+    terminalLaunch,
     view,
   ]);
 
@@ -681,12 +719,12 @@ export const App = (): React.JSX.Element => {
           <button
             onClick={() => {
               setCommandError(undefined);
-              setSessionImportOpen(true);
+              setConversationHistoryOpen(true);
             }}
             type="button"
           >
-            Session import
-            {recoveredSessions.length > 0 ? ` (${recoveredSessions.length})` : ""}
+            Conversation history
+            {conversationHistory.length > 0 ? ` (${conversationHistory.length})` : ""}
           </button>
           <button
             onClick={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
@@ -770,6 +808,23 @@ export const App = (): React.JSX.Element => {
             {launchNotice} <span aria-hidden="true">×</span>
           </button>
         ) : null}
+        {pendingLaunches.length > 0 ? (
+          <div className="pending-launches" aria-label="Pending agent launches">
+            <span>Starting</span>
+            {pendingLaunches.map((launch) => (
+              <button
+                key={launch.requestId}
+                onClick={() => {
+                  setTerminalAgent(undefined);
+                  setTerminalLaunch(launch);
+                }}
+                type="button"
+              >
+                {launch.displayName} · open terminal
+              </button>
+            ))}
+          </div>
+        ) : null}
         <button
           aria-expanded={sidePanel === "catch-up"}
           className={`catch-up-trigger ${data.catchUp.pending ? "is-pending" : ""}`}
@@ -816,7 +871,7 @@ export const App = (): React.JSX.Element => {
                 ? 430
                 : 0
             }
-            reservedRight={sidePanel === "inspector" ? 416 : 0}
+            reservedRight={0}
             selection={selection}
             theme={theme}
             motion={motion}
@@ -919,6 +974,14 @@ export const App = (): React.JSX.Element => {
           theme={theme}
         />
       ) : null}
+      {terminalLaunch ? (
+        <PendingLaunchTerminal
+          key={terminalLaunch.requestId}
+          launch={terminalLaunch}
+          onClose={() => setTerminalLaunch(undefined)}
+          theme={theme}
+        />
+      ) : null}
       {newGoalOpen ? (
         <NewGoalDialog
           error={commandError}
@@ -969,7 +1032,15 @@ export const App = (): React.JSX.Element => {
               : response.result.message;
             setLaunchNotice(notice);
             setNewAgentOpen(false);
-            if (response.result.agentId) {
+            const pendingLaunch = response.pendingLaunch;
+            if (pendingLaunch) {
+              setPendingLaunches((current) => [
+                pendingLaunch,
+                ...current.filter((launch) => launch.requestId !== pendingLaunch.requestId),
+              ]);
+              setTerminalAgent(undefined);
+              setTerminalLaunch(pendingLaunch);
+            } else if (response.result.agentId) {
               setSelection({ type: "agent", id: response.result.agentId });
               setSidePanel("inspector");
               setInspectorRevision((value) => value + 1);
@@ -979,20 +1050,20 @@ export const App = (): React.JSX.Element => {
           }}
         />
       ) : null}
-      {sessionImportOpen ? (
-        <SessionImportDialog
+      {conversationHistoryOpen ? (
+        <ConversationHistoryDialog
+          conversations={conversationHistory}
           error={commandError}
           goals={data.commandCentre.goals}
-          onClose={() => setSessionImportOpen(false)}
-          onImport={trackRecovered}
-          onImported={(agentId) => {
-            setSessionImportOpen(false);
+          onAdd={addHistoricalConversation}
+          onAdded={(agentId) => {
+            setConversationHistoryOpen(false);
             selectAndFocus({ type: "agent", id: agentId });
             setInspectorRevision((value) => value + 1);
           }}
-          onRefresh={refreshSessionImport}
+          onClose={() => setConversationHistoryOpen(false)}
+          onRefresh={refreshConversationHistory}
           pending={commandPending}
-          sessions={recoveredSessions}
         />
       ) : null}
       {searchOpen ? (

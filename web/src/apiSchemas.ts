@@ -13,7 +13,7 @@ const AttentionItem = Schema.Struct({
   targetId: Schema.String,
   agentId: Schema.optional(Schema.String),
   goalId: Schema.optional(Schema.String),
-  reason: Schema.Literal("blocked", "waiting", "host-stale"),
+  reason: Schema.Literal("blocked", "waiting", "archived-running", "runtime-unknown"),
   requiresHumanInput: Schema.Boolean,
   startedAt: Schema.Number,
   lastChangedAt: Schema.Number,
@@ -62,17 +62,13 @@ const AgentFields = {
   lifecycleState: Schema.Literal(
     "running",
     "dormant",
-    "resumable",
-    "possibly-running",
-    "unavailable",
-    "unidentified-execution",
-    "continuity-lost",
-    "stale-observation",
+    "runtime-unknown",
+    "conversation-unavailable",
     "conflict",
   ),
   executionConflictCount: Schema.Number,
   displayName: Schema.String,
-  displayNameSource: Schema.Literal("host", "human"),
+  displayNameSource: Schema.Literal("human", "provider", "fallback"),
   description: Schema.optional(Schema.String),
   primaryGoalId: Schema.optional(Schema.String),
   runtimeState: RuntimeState,
@@ -225,7 +221,7 @@ export const InspectorProjectionSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("agent-inspector"),
     agent: AgentView,
-    providerSession: Schema.optional(
+    conversation: Schema.optional(
       Schema.Struct({
         kind: Schema.String,
         id: Schema.String,
@@ -281,9 +277,21 @@ const StartAgentResult = Schema.Struct({
   workspace: Schema.optional(PreparedWorkspace),
   warnings: Schema.optional(Schema.Array(Schema.String)),
 });
+export const PendingLaunchSchema = Schema.Struct({
+  requestId: Schema.String,
+  harnessId: Schema.String,
+  displayName: Schema.String,
+  goalId: Schema.optional(Schema.String),
+  message: Schema.String,
+});
 export const StartAgentResponseSchema = Schema.Struct({
   result: StartAgentResult,
   portfolio: PortfolioResponseSchema,
+  pendingLaunch: Schema.optional(PendingLaunchSchema),
+});
+export const PendingLaunchesResponseSchema = Schema.Struct({
+  kind: Schema.Literal("pending-launches"),
+  launches: Schema.Array(PendingLaunchSchema),
 });
 
 const AgentCloseoutResult = Schema.Struct({

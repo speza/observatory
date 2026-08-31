@@ -485,6 +485,14 @@
   box-shadow: none;
 }
 
+.terminal-surface--pending {
+  position: fixed;
+  z-index: 60;
+  inset: var(--masthead-height) 0 0;
+  border: 0;
+  box-shadow: none;
+}
+
 .workspace-review-backdrop {
   position: fixed;
   z-index: 46;

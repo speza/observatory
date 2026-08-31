@@ -1,11 +1,19 @@
 # Provider-session continuity and execution recovery
 
-Status: Phase 2 implemented; Phase 3 launch acknowledgement remains
+Status: superseded implementation record
 
 Date: 2026-08-28
 
+> Superseded for Agent admission, Session import and host/provider
+> reconciliation by
+> [Conversation-first Agent tracking](conversation-first-agent-tracking.md).
+> The replacement is delivered. This document remains historical evidence only;
+> `ProviderSessionRecovery`, Session import and its web recovery endpoints have
+> been removed.
+
 Depends on:
 
+- [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 - [Agent harness plugins](agent-harness-plugins.md)
 - [Agent launch and workspace preparation](session-launch.md)
 - [Agent and linked execution model](agent-execution-model.md)

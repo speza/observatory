@@ -45,8 +45,8 @@ export const Inspector = ({
 }: InspectorProps): React.JSX.Element => {
   const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
-  const providerSessionId =
-    projection?.kind === "agent-inspector" ? projection.providerSession?.id : undefined;
+  const conversationId =
+    projection?.kind === "agent-inspector" ? projection.conversation?.id : undefined;
   const executionId = agent?.execution?.nativeId;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -209,9 +209,11 @@ export const Inspector = ({
                 Resume exact conversation
               </button>
             ) : null}
-            <button onClick={() => onOpenTerminal(projection.agent)} type="button">
-              Open terminal
-            </button>
+            {projection.agent.executionPresence === "live" ? (
+              <button onClick={() => onOpenTerminal(projection.agent)} type="button">
+                Open terminal
+              </button>
+            ) : null}
             <button onClick={() => onReviewChanges(projection.agent)} type="button">
               Review workspace changes
             </button>
@@ -239,7 +241,7 @@ export const Inspector = ({
                   ))}
               </select>
             </label>
-            {projection.agent.hostHealth === "live" && confirming !== "agent-close" ? (
+            {projection.agent.executionPresence === "live" && confirming !== "agent-close" ? (
               <button onClick={() => setConfirming("agent-close")} type="button">
                 Close & archive…
               </button>
@@ -269,13 +271,13 @@ export const Inspector = ({
             ) : null}
             {confirming !== "agent-archive" ? (
               <button onClick={() => setConfirming("agent-archive")} type="button">
-                {projection.agent.hostHealth === "live" ? "Archive only…" : "Archive Agent…"}
+                {projection.agent.executionPresence === "live" ? "Archive only…" : "Archive Agent…"}
               </button>
             ) : null}
             {confirming === "agent-archive" ? (
               <div className="confirm-action">
                 <p>
-                  {projection.agent.hostHealth === "live"
+                  {projection.agent.executionPresence === "live"
                     ? "Hide this Agent from active Observatory views while leaving its host execution running?"
                     : "Archive this ended or unavailable observation? Its identity and history are retained."}
                 </p>
@@ -298,33 +300,23 @@ export const Inspector = ({
               </div>
             ) : null}
           </div>
+          <h4>Conversation</h4>
           <dl>
             <div>
-              <dt>Lifecycle</dt>
-              <dd>{projection.agent.lifecycleState}</dd>
+              <dt>Provider</dt>
+              <dd>{projection.agent.harnessId ?? projection.agent.provider ?? "Unknown"}</dd>
             </div>
             <div>
-              <dt>Continuity</dt>
-              <dd>
-                {projection.agent.providerContinuity} · {projection.agent.executionPresence}
-              </dd>
+              <dt>Availability</dt>
+              <dd>{projection.agent.providerContinuity}</dd>
             </div>
             <div>
-              <dt>Agent ID</dt>
+              <dt>Conversation ID</dt>
               <dd className="inspector__identifier">
-                <code title={projection.agent.id}>{projection.agent.id}</code>
-                <button onClick={() => copyIdentifier(projection.agent.id)} type="button">
-                  Copy
-                </button>
-              </dd>
-            </div>
-            <div>
-              <dt>Provider session ID</dt>
-              <dd className="inspector__identifier">
-                {providerSessionId ? (
+                {conversationId ? (
                   <>
-                    <code title={providerSessionId}>{providerSessionId}</code>
-                    <button onClick={() => copyIdentifier(providerSessionId)} type="button">
+                    <code title={conversationId}>{conversationId}</code>
+                    <button onClick={() => copyIdentifier(conversationId)} type="button">
                       Copy
                     </button>
                   </>
@@ -332,6 +324,17 @@ export const Inspector = ({
                   "Unavailable"
                 )}
               </dd>
+            </div>
+          </dl>
+          <h4>Runtime</h4>
+          <dl>
+            <div>
+              <dt>State</dt>
+              <dd>{projection.agent.lifecycleState}</dd>
+            </div>
+            <div>
+              <dt>Execution</dt>
+              <dd>{projection.agent.executionPresence}</dd>
             </div>
             <div>
               <dt>Execution ID</dt>
@@ -348,9 +351,21 @@ export const Inspector = ({
                 )}
               </dd>
             </div>
+          </dl>
+          <h4>Context</h4>
+          <dl>
             <div>
               <dt>Workspace</dt>
               <dd title={projection.agent.worktree}>{projection.agent.worktree ?? "Unknown"}</dd>
+            </div>
+            <div>
+              <dt>Agent ID</dt>
+              <dd className="inspector__identifier">
+                <code title={projection.agent.id}>{projection.agent.id}</code>
+                <button onClick={() => copyIdentifier(projection.agent.id)} type="button">
+                  Copy
+                </button>
+              </dd>
             </div>
           </dl>
         </>

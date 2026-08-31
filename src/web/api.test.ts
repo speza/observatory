@@ -12,7 +12,8 @@ import type {
   WorkspaceSelection,
 } from "../workspaces/types.ts";
 import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
-import type { ProviderSessionRecoveryModule } from "../provider-sessions/types.ts";
+import type { ConversationTrackerModule } from "../conversations/types.ts";
+import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import { ObservatoryWebApi, type PortfolioResponse } from "./api.ts";
 import type {
   WebCommand,
@@ -31,6 +32,10 @@ type TerminalTestBody =
       readonly linkId?: string;
       readonly resizeMode?: "fit" | "preserve";
     }
+  | {
+      readonly requestId: string;
+      readonly dimensions: { readonly columns: number; readonly rows: number };
+    }
   | { readonly value: string }
   | { readonly bytes: readonly number[] }
   | {
@@ -43,30 +48,34 @@ type TerminalTestBody =
   | { readonly release?: never };
 
 describe("ObservatoryWebApi", () => {
-  test("serves redacted recovery candidates and tracks by opaque browser handle", async () => {
+  test("serves redacted conversation history and adds by opaque browser handle", async () => {
     const fixture = makeUniverse();
-    const recovery: ProviderSessionRecoveryModule = {
+    const conversations: ConversationTrackerModule = {
       refresh: () =>
-        Effect.succeed({ observedProviders: 1, discoveredSessions: 1, diagnostics: [] }),
-      candidates: () => [
+        Effect.succeed({
+          observedProviders: 1,
+          discoveredConversations: 1,
+          admittedConversations: 0,
+          diagnostics: [],
+        }),
+      history: () => [
         {
           handle: "ps_public-handle",
           harnessId: "codex",
           providerLabel: "Codex",
-          title: "Recovered session",
+          title: "Historical conversation",
           workspaceRef: "/synthetic/project",
           lastActiveAt: fixture.clock.now(),
           resumeEligibility: "same-site",
           provenance: "provider-index",
-          executionState: "unknown",
+          runtimeState: "runtime-unknown",
         },
       ],
-      track: (handle) => {
+      add: (handle) => {
         expect(handle).toBe("ps_public-handle");
-        return { agentId: "agent-recovered" };
+        return { agentId: "agent-history" };
       },
-      reconcileHost: (snapshot) => fixture.universe.reconcile(snapshot),
-      observedExecution: () => undefined,
+      observeHost: (snapshot) => fixture.universe.reconcile(snapshot),
     };
     const api = new ObservatoryWebApi(
       fixture.universe,
@@ -77,17 +86,19 @@ describe("ObservatoryWebApi", () => {
       undefined,
       undefined,
       undefined,
-      recovery,
+      conversations,
     );
 
-    const listed = await api.fetch(new Request("http://localhost/api/recovery/sessions?refresh=1"));
+    const listed = await api.fetch(
+      new Request("http://localhost/api/conversations/history?refresh=1"),
+    );
     expect(listed.status).toBe(200);
     const listedText = await listed.text();
     expect(listedText).toContain("ps_public-handle");
     expect(listedText).not.toContain("nativeConversationRef");
 
-    const tracked = await api.fetch(
-      new Request("http://localhost/api/recovery/track", {
+    const added = await api.fetch(
+      new Request("http://localhost/api/conversations/add", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -97,8 +108,8 @@ describe("ObservatoryWebApi", () => {
         body: JSON.stringify({ handle: "ps_public-handle" }),
       }),
     );
-    expect(tracked.status).toBe(200);
-    expect(await tracked.json()).toMatchObject({ agentId: "agent-recovered" });
+    expect(added.status).toBe(200);
+    expect(await added.json()).toMatchObject({ agentId: "agent-history" });
   });
 
   test("lists launch choices and starts an observed agent through the shared coordinator", async () => {
@@ -218,7 +229,7 @@ describe("ObservatoryWebApi", () => {
     });
     if (resumable.kind !== "command-centre") throw new Error("Expected command centre.");
     expect(resumable.goals[0]?.agents[0]?.canResume).toBe(false);
-    expect(resumable.goals[0]?.agents[0]?.lifecycleState).toBe("stale-observation");
+    expect(resumable.goals[0]?.agents[0]?.lifecycleState).toBe("runtime-unknown");
     const resumedResponse = await api.fetch(
       new Request("http://localhost/api/launch/resume", {
         method: "POST",
@@ -748,6 +759,68 @@ describe("ObservatoryWebApi", () => {
     expect((await mutation(`/api/terminal/${secondNewBody.sessionId}/release`, {})).status).toBe(
       200,
     );
+    await api.close();
+  });
+
+  test("opens a host terminal for a pending blank launch without creating an Agent", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock });
+    const launched = await Effect.runPromise(
+      host.launchExecution({
+        workingDirectory: "/synthetic/project",
+        agentName: "Blank Codex launch",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
+        requestId: "pending-terminal-test",
+      }),
+    );
+    if (!launched.executionRef) throw new Error("Expected a pending host execution.");
+    const coordinator: StartAgentCoordinator = {
+      start: () => Effect.die("not used"),
+      resume: () => Effect.die("not used"),
+      refreshPending: () => Effect.succeed([]),
+      pendingLaunches: () => [
+        {
+          requestId: "pending-terminal-test",
+          harnessId: "codex",
+          executionRef: launched.executionRef!,
+          displayName: "Blank Codex launch",
+          message: "Waiting for the first message.",
+        },
+      ],
+    };
+    const workspace: WorkspaceProvider = {
+      listChoices: () => Effect.succeed([]),
+      prepare: () => Effect.die("not used"),
+    };
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      host,
+      undefined,
+      { coordinator, workspace },
+    );
+
+    const opened = await api.fetch(
+      new Request("http://localhost/api/terminal/open", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          requestId: "pending-terminal-test",
+          dimensions: { columns: 100, rows: 30 },
+        }),
+      }),
+    );
+
+    expect(opened.status).toBe(200);
+    expect(await opened.json()).toMatchObject({
+      message: expect.stringContaining("mock terminal"),
+    });
+    expect(fixture.universe.snapshot().agents).toEqual([]);
     await api.close();
   });
 

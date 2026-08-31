@@ -14,13 +14,14 @@ import type { WorkspaceDiffReader, WorkspaceProvider } from "../workspaces/types
 import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
 import type { PluginRegistry } from "../plugins/registry.ts";
-import type { ProviderSessionRecoveryModule } from "../provider-sessions/types.ts";
+import type { ConversationTrackerModule } from "../conversations/types.ts";
 import { WebCommandError, WebCommandGateway } from "./commands.ts";
 import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
 import type {
   WebCommandResponse,
   WebCloseoutResponse,
   WebLaunchOptionsResponse,
+  WebPendingLaunchesResponse,
   WebStartAgentResponse,
   WebWorkspaceBrowserResponse,
   WebTerminalLinksResponse,
@@ -29,8 +30,8 @@ import type {
   WebTerminalOpenResponse,
   WebAgentRepositoryStatusResponse,
   WebPluginStatusResponse,
-  WebRecoveredSessionsResponse,
-  WebTrackRecoveredSessionResponse,
+  WebConversationHistoryResponse,
+  WebAddConversationResponse,
 } from "./protocol.ts";
 import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
@@ -50,7 +51,7 @@ interface ErrorResponse {
 const MAXIMUM_SEARCH_QUERY_LENGTH = 200;
 const MAXIMUM_SEARCH_RESULTS = 50;
 
-const RecoveredTrackRequestSchema = Schema.Struct({
+const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
 });
@@ -60,6 +61,7 @@ type WebResponse =
   | Projection
   | WebCommandResponse
   | WebLaunchOptionsResponse
+  | WebPendingLaunchesResponse
   | WebStartAgentResponse
   | WebWorkspaceBrowserResponse
   | WebWorkingTreeDiffResponse
@@ -69,8 +71,8 @@ type WebResponse =
   | WebCloseoutResponse
   | WebAgentRepositoryStatusResponse
   | WebPluginStatusResponse
-  | WebRecoveredSessionsResponse
-  | WebTrackRecoveredSessionResponse
+  | WebConversationHistoryResponse
+  | WebAddConversationResponse
   | ErrorResponse;
 
 const json = (body: WebResponse, status = 200): Response =>
@@ -105,10 +107,10 @@ export class ObservatoryWebApi {
     },
     private readonly repositoryStatus?: AgentRepositoryStatusReader,
     private readonly plugins?: PluginRegistry,
-    private readonly providerSessions?: ProviderSessionRecoveryModule,
+    private readonly conversations?: ConversationTrackerModule,
   ) {
     this.commands = new WebCommandGateway(universe);
-    this.terminals = host ? new WebTerminalGateway(universe, host) : undefined;
+    this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
     this.closeout = host
       ? new WebCloseoutGateway(createAgentCloseoutCoordinator({ universe, host }))
       : undefined;
@@ -126,7 +128,8 @@ export class ObservatoryWebApi {
 
     if (url.pathname.startsWith("/api/launch/")) return this.agentLaunch(request, url);
 
-    if (url.pathname.startsWith("/api/recovery/")) return this.providerRecovery(request, url);
+    if (url.pathname.startsWith("/api/conversations/"))
+      return this.conversationHistory(request, url);
 
     if (url.pathname === "/api/closeout/close") {
       if (!this.closeout) return json({ error: "Agent closeout is unavailable." }, 501);
@@ -356,6 +359,10 @@ export class ObservatoryWebApi {
         if (!path) return json({ error: "A workspace path is required." }, 400);
         return json(await this.launch.browse(path));
       }
+      if (url.pathname === "/api/launch/pending") {
+        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+        return json(await this.launch.pending(url.searchParams.get("refresh") === "1"));
+      }
       if (url.pathname === "/api/launch/start") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
         const rejected = this.rejectMutation(request);
@@ -363,7 +370,11 @@ export class ObservatoryWebApi {
         const result = await this.launch.start(await request.text());
         const portfolio = this.portfolio(this.clock.now());
         if (portfolio instanceof Response) return portfolio;
-        return json({ result, portfolio } satisfies WebStartAgentResponse);
+        return json({
+          result,
+          portfolio,
+          pendingLaunch: this.launch.pendingLaunch(result.requestId),
+        } satisfies WebStartAgentResponse);
       }
       if (url.pathname === "/api/launch/resume") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -393,38 +404,36 @@ export class ObservatoryWebApi {
     return undefined;
   }
 
-  private async providerRecovery(request: Request, url: URL): Promise<Response> {
-    if (!this.providerSessions)
-      return json({ error: "Provider-session recovery is unavailable." }, 501);
-    if (url.pathname === "/api/recovery/sessions") {
+  private async conversationHistory(request: Request, url: URL): Promise<Response> {
+    if (!this.conversations) return json({ error: "Conversation history is unavailable." }, 501);
+    if (url.pathname === "/api/conversations/history") {
       if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
       if (url.searchParams.get("refresh") === "1")
-        await Effect.runPromise(this.providerSessions.refresh());
+        await Effect.runPromise(this.conversations.refresh());
       return json({
-        kind: "recovered-sessions",
-        sessions: this.providerSessions.candidates(),
-      } satisfies WebRecoveredSessionsResponse);
+        kind: "conversation-history",
+        conversations: this.conversations.history(),
+      } satisfies WebConversationHistoryResponse);
     }
-    if (url.pathname === "/api/recovery/track") {
+    if (url.pathname === "/api/conversations/add") {
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       const rejected = this.rejectMutation(request);
       if (rejected) return rejected;
       try {
-        const values = Schema.decodeUnknownSync(Schema.parseJson(RecoveredTrackRequestSchema))(
+        const values = Schema.decodeUnknownSync(Schema.parseJson(AddConversationRequestSchema))(
           await request.text(),
         );
         if (!values.handle.trim())
-          return json({ error: "A session-import handle is required." }, 400);
+          return json({ error: "A conversation handle is required." }, 400);
         const goalId = values.goalId?.trim() || undefined;
-        const tracked = this.providerSessions.track(values.handle, goalId);
+        const added = this.conversations.add(values.handle, goalId);
         const portfolio = this.portfolio(this.clock.now());
         if (portfolio instanceof Response) return portfolio;
-        return json({ ...tracked, portfolio } satisfies WebTrackRecoveredSessionResponse);
+        return json({ ...added, portfolio } satisfies WebAddConversationResponse);
       } catch (error) {
         return json(
           {
-            error:
-              error instanceof Error ? error.message : "Provider session could not be imported.",
+            error: error instanceof Error ? error.message : "Conversation could not be added.",
           },
           409,
         );

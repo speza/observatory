@@ -23,7 +23,7 @@ describe("RepositoryStatus", () => {
       lifecycleState: "running",
       executionConflictCount: 0,
       displayName: "Repository agent",
-      displayNameSource: "host",
+      displayNameSource: "fallback",
       runtimeState: "working",
       runtimeStateSource: "test",
       hostHealth: "live",

@@ -1,5 +1,11 @@
 # Session continuity manual test
 
+Status: historical checklist for the superseded recovery/import model
+
+Use [Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md)
+for current acceptance. Session import and host-only managed Agents no longer
+exist.
+
 Started: 2026-08-29
 
 Use this as a running checklist. Mark each step Pass, Fail or Blocked, then add

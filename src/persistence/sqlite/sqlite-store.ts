@@ -18,7 +18,11 @@ import type {
   LaunchReceiptStore,
   StartAgentResult,
 } from "../../session-launch/types.ts";
-import type { ProviderSessionStore, StoredProviderSession } from "../../provider-sessions/types.ts";
+import type {
+  ConversationCatalogueIngestion,
+  ConversationCatalogueStore,
+  StoredConversation,
+} from "../../conversations/types.ts";
 import type { ProviderSessionSnapshot } from "../../plugin-sdk/index.ts";
 
 interface GoalRow {
@@ -121,7 +125,7 @@ interface LaunchReceiptRow {
   recovery_json: string | null;
 }
 
-interface ProviderSessionRow {
+interface ProviderConversationRow {
   handle: string;
   harness_id: string;
   continuity_scope_id: string;
@@ -138,7 +142,7 @@ interface ProviderSessionRow {
   observed_at: number;
 }
 
-interface ProviderSessionAliasRow {
+interface ProviderConversationAliasRow {
   handle: string;
   harness_id: string;
   continuity_scope_id: string;
@@ -192,6 +196,7 @@ const LaunchRecoverySchema: Schema.Schema<LaunchRecovery> = Schema.Struct({
   kind: Schema.Literal("start", "resume"),
   harnessId: Schema.String,
   executionRef: Schema.String,
+  displayName: Schema.optional(Schema.String),
   nativeConversationRef: Schema.optional(NativeConversationRefSchema),
   goalId: Schema.optional(Schema.String),
   agentId: Schema.optional(Schema.String),
@@ -213,7 +218,7 @@ const asRuntimeState = (value: string): Agent["runtimeState"] =>
 const asHealth = (value: string): Agent["hostHealth"] =>
   value === "live" || value === "stale" || value === "unavailable" ? value : "stale";
 const asSource = (value: string): Agent["displayNameSource"] =>
-  value === "human" ? "human" : "host";
+  value === "human" ? "human" : value === "provider" ? "provider" : "fallback";
 const asContinuity = (value: string): Agent["continuity"] =>
   value === "proved" || value === "interrupted" || value === "replaced" ? value : "unknown";
 const asProviderContinuity = (value: string | null): Agent["providerContinuity"] =>
@@ -243,7 +248,7 @@ const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
 const asChangeTarget = (value: string): UniverseChange["targetType"] =>
   value === "system" || value === "goal" ? value : "agent";
 
-const providerSessionHandle = (
+const conversationHandle = (
   harnessId: string,
   continuityScopeId: string,
   kind: string,
@@ -254,14 +259,14 @@ const providerSessionHandle = (
     .digest("hex")
     .slice(0, 24)}`;
 
-const resumeEligibility = (value: string): StoredProviderSession["resumeEligibility"] =>
+const resumeEligibility = (value: string): StoredConversation["resumeEligibility"] =>
   value === "same-site" || value === "provider-account" || value === "blocked" ? value : "unknown";
 
-const sessionProvenance = (value: string): StoredProviderSession["provenance"] =>
+const conversationProvenance = (value: string): StoredConversation["provenance"] =>
   value === "provider-index" ? "provider-index" : "session-header";
 
 export class SqliteUniverseStore
-  implements UniverseStore, LaunchReceiptStore, ProviderSessionStore
+  implements UniverseStore, LaunchReceiptStore, ConversationCatalogueStore
 {
   readonly db: Database;
 
@@ -269,7 +274,7 @@ export class SqliteUniverseStore
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path);
     this.db.exec("PRAGMA foreign_keys = ON");
-    this.migrate();
+    this.initializeSchema();
   }
 
   load(): UniverseState {
@@ -545,14 +550,28 @@ export class SqliteUniverseStore
     this.db.close();
   }
 
-  reconcileProviderSessions(snapshot: ProviderSessionSnapshot): void {
-    const write = this.db.transaction(() => {
+  reconcileProviderCatalogue(snapshot: ProviderSessionSnapshot): ConversationCatalogueIngestion {
+    const write = this.db.transaction((): ConversationCatalogueIngestion => {
+      const baseline = this.db
+        .query<{ provider_instance_id: string }, [string]>(
+          "SELECT provider_instance_id FROM provider_catalogue_baselines WHERE provider_instance_id = ?",
+        )
+        .get(snapshot.providerInstanceId);
+      const knownHandles = new Set(
+        this.db
+          .query<{ handle: string }, [string]>(
+            "SELECT handle FROM provider_conversations WHERE provider_instance_id = ?",
+          )
+          .all(snapshot.providerInstanceId)
+          .map(({ handle }) => handle),
+      );
+      const observedHandles: string[] = [];
       if (snapshot.complete)
         this.db
-          .prepare("DELETE FROM provider_sessions WHERE provider_instance_id = ?")
+          .prepare("DELETE FROM provider_conversations WHERE provider_instance_id = ?")
           .run(snapshot.providerInstanceId);
       const upsert = this.db.prepare(`
-        INSERT INTO provider_sessions (
+        INSERT INTO provider_conversations (
           handle, harness_id, continuity_scope_id, native_kind, native_value,
           provider_instance_id, home_site_ref, created_at, last_active_at, title,
           workspace_ref, resume_eligibility, provenance, observed_at
@@ -560,19 +579,19 @@ export class SqliteUniverseStore
         ON CONFLICT(handle) DO UPDATE SET
           provider_instance_id = excluded.provider_instance_id,
           home_site_ref = excluded.home_site_ref,
-          created_at = COALESCE(excluded.created_at, provider_sessions.created_at),
-          last_active_at = COALESCE(excluded.last_active_at, provider_sessions.last_active_at),
-          title = COALESCE(excluded.title, provider_sessions.title),
-          workspace_ref = COALESCE(excluded.workspace_ref, provider_sessions.workspace_ref),
+          created_at = COALESCE(excluded.created_at, provider_conversations.created_at),
+          last_active_at = COALESCE(excluded.last_active_at, provider_conversations.last_active_at),
+          title = COALESCE(excluded.title, provider_conversations.title),
+          workspace_ref = COALESCE(excluded.workspace_ref, provider_conversations.workspace_ref),
           resume_eligibility = excluded.resume_eligibility,
           provenance = excluded.provenance,
           observed_at = excluded.observed_at
       `);
       const deleteAliases = this.db.prepare(
-        "DELETE FROM provider_session_aliases WHERE handle = ?",
+        "DELETE FROM provider_conversation_aliases WHERE handle = ?",
       );
       const insertAlias = this.db.prepare(
-        "INSERT OR IGNORE INTO provider_session_aliases (handle, harness_id, continuity_scope_id, native_kind, native_value) VALUES (?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO provider_conversation_aliases (handle, harness_id, continuity_scope_id, native_kind, native_value) VALUES (?, ?, ?, ?, ?)",
       );
       for (const session of snapshot.sessions) {
         const reference = session.nativeConversationRef;
@@ -582,12 +601,13 @@ export class SqliteUniverseStore
           session.providerInstanceId !== snapshot.providerInstanceId
         )
           throw new Error("Provider session escaped its declared snapshot scope.");
-        const handle = providerSessionHandle(
+        const handle = conversationHandle(
           reference.harnessId,
           snapshot.continuityScopeId,
           reference.kind,
           reference.value,
         );
+        observedHandles.push(handle);
         upsert.run(
           handle,
           reference.harnessId,
@@ -620,30 +640,50 @@ export class SqliteUniverseStore
           );
         }
       }
+      if (!baseline && snapshot.complete)
+        this.db
+          .prepare(
+            "INSERT INTO provider_catalogue_baselines (provider_instance_id, harness_id, continuity_scope_id, established_at, snapshot_observed_at) VALUES (?, ?, ?, ?, ?)",
+          )
+          .run(
+            snapshot.providerInstanceId,
+            snapshot.harnessId,
+            snapshot.continuityScopeId,
+            Date.now(),
+            snapshot.observedAt,
+          );
+      return {
+        baselineEstablished: Boolean(baseline) || snapshot.complete,
+        newlyObservedHandles: baseline
+          ? observedHandles.filter((handle) => !knownHandles.has(handle))
+          : [],
+      };
     });
-    write();
+    return write();
   }
 
-  providerSessions(): readonly StoredProviderSession[] {
+  conversations(): readonly StoredConversation[] {
     return this.db
-      .query<ProviderSessionRow, []>(
-        "SELECT * FROM provider_sessions ORDER BY COALESCE(last_active_at, created_at, observed_at) DESC, handle",
+      .query<ProviderConversationRow, []>(
+        "SELECT * FROM provider_conversations ORDER BY COALESCE(last_active_at, created_at, observed_at) DESC, handle",
       )
       .all()
-      .map((row) => this.providerSessionFromRow(row));
+      .map((row) => this.conversationFromRow(row));
   }
 
-  providerSession(handle: string): StoredProviderSession | undefined {
+  conversation(handle: string): StoredConversation | undefined {
     const row = this.db
-      .query<ProviderSessionRow, [string]>("SELECT * FROM provider_sessions WHERE handle = ?")
+      .query<ProviderConversationRow, [string]>(
+        "SELECT * FROM provider_conversations WHERE handle = ?",
+      )
       .get(handle);
-    return row ? this.providerSessionFromRow(row) : undefined;
+    return row ? this.conversationFromRow(row) : undefined;
   }
 
-  private providerSessionFromRow(row: ProviderSessionRow): StoredProviderSession {
+  private conversationFromRow(row: ProviderConversationRow): StoredConversation {
     const aliases = this.db
-      .query<ProviderSessionAliasRow, [string]>(
-        "SELECT * FROM provider_session_aliases WHERE handle = ? ORDER BY native_kind, native_value",
+      .query<ProviderConversationAliasRow, [string]>(
+        "SELECT * FROM provider_conversation_aliases WHERE handle = ? ORDER BY native_kind, native_value",
       )
       .all(row.handle)
       .map((alias) => ({
@@ -668,7 +708,7 @@ export class SqliteUniverseStore
       title: row.title ?? undefined,
       workspaceRef: row.workspace_ref ?? undefined,
       resumeEligibility: resumeEligibility(row.resume_eligibility),
-      provenance: sessionProvenance(row.provenance),
+      provenance: conversationProvenance(row.provenance),
       observedAt: row.observed_at,
     };
   }
@@ -699,7 +739,8 @@ export class SqliteUniverseStore
         DELETE FROM universe_changes;
         DELETE FROM operator_checkpoint;
         DELETE FROM launch_receipts;
-        DELETE FROM provider_sessions;
+        DELETE FROM provider_conversations;
+        DELETE FROM provider_catalogue_baselines;
       `);
     })();
     return {
@@ -722,7 +763,8 @@ export class SqliteUniverseStore
         DELETE FROM universe_changes;
         DELETE FROM operator_checkpoint;
         DELETE FROM launch_receipts;
-        DELETE FROM provider_sessions;
+        DELETE FROM provider_conversations;
+        DELETE FROM provider_catalogue_baselines;
       `);
     })();
     return {
@@ -766,6 +808,18 @@ export class SqliteUniverseStore
     };
   }
 
+  launchReceipts(): readonly LaunchReceipt[] {
+    return this.db
+      .query<{ request_id: string }, []>(
+        "SELECT request_id FROM launch_receipts ORDER BY updated_at, request_id",
+      )
+      .all()
+      .flatMap((row) => {
+        const receipt = this.loadLaunchReceipt(row.request_id);
+        return receipt ? [receipt] : [];
+      });
+  }
+
   reserveLaunchReceipt(receipt: LaunchReceipt) {
     const inserted = this.db
       .prepare(
@@ -800,14 +854,40 @@ export class SqliteUniverseStore
       );
   }
 
-  private migrate(): void {
+  private initializeSchema(): void {
+    const existingSchema = this.db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+      )
+      .get();
+    if (existingSchema) {
+      const current = this.db
+        .query<{ found: number }, []>(
+          "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 12",
+        )
+        .get()?.found;
+      if (!current) {
+        this.db.close();
+        throw new Error(
+          "This Observatory database predates conversation-first tracking. Reset it before starting Observatory.",
+        );
+      }
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS systems (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS goals (
         id TEXT PRIMARY KEY,
+        system_id TEXT REFERENCES systems(id),
         title TEXT NOT NULL,
         description TEXT,
         priority TEXT NOT NULL,
@@ -875,8 +955,6 @@ export class SqliteUniverseStore
         FOREIGN KEY(goal_id) REFERENCES goals(id),
         FOREIGN KEY(agent_id) REFERENCES agents(id)
       );
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (1, unixepoch() * 1000);
       CREATE TABLE IF NOT EXISTS universe_changes (
         sequence INTEGER PRIMARY KEY,
         occurred_at INTEGER NOT NULL,
@@ -891,11 +969,6 @@ export class SqliteUniverseStore
         last_sequence INTEGER NOT NULL,
         acknowledged_at INTEGER NOT NULL
       );
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (2, unixepoch() * 1000);
-    `);
-    this.migrateAgentIdentity();
-    this.db.exec(`
       CREATE TABLE IF NOT EXISTS launch_receipts (
         request_id TEXT PRIMARY KEY,
         intent_fingerprint TEXT NOT NULL,
@@ -903,115 +976,7 @@ export class SqliteUniverseStore
         recovery_json TEXT,
         updated_at INTEGER NOT NULL
       );
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (4, unixepoch() * 1000);
-    `);
-    this.migrateLaunchRecovery();
-    this.migrateProviderSessionScope();
-    this.migrateProviderSessions();
-    this.migrateExecutionContinuity();
-    this.migrateHostInstances();
-    this.migrateSystems();
-  }
-
-  private migrateSystems(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS systems (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `);
-    const goalColumns = this.db
-      .query<{ name: string }, []>("PRAGMA table_info(goals)")
-      .all()
-      .map(({ name }) => name);
-    if (!goalColumns.includes("system_id"))
-      this.db.exec("ALTER TABLE goals ADD COLUMN system_id TEXT REFERENCES systems(id)");
-    this.db.exec(`
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (10, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateHostInstances(): void {
-    const columns = this.db
-      .query<{ name: string; pk: number }, []>("PRAGMA table_info(hosts)")
-      .all();
-    if (columns.find(({ name }) => name === "host_instance_id")?.pk !== 1) {
-      this.db.exec(`
-        CREATE TABLE hosts_by_instance (
-          host_kind TEXT NOT NULL,
-          host_instance_id TEXT PRIMARY KEY,
-          status TEXT NOT NULL,
-          last_observed_at INTEGER,
-          last_error TEXT,
-          diagnostic_count INTEGER NOT NULL DEFAULT 0
-        );
-        INSERT INTO hosts_by_instance
-          (host_kind, host_instance_id, status, last_observed_at, last_error, diagnostic_count)
-          SELECT host_kind, COALESCE(host_instance_id, host_kind || ':legacy'), status,
-            last_observed_at, last_error, diagnostic_count FROM hosts;
-        DROP TABLE hosts;
-        ALTER TABLE hosts_by_instance RENAME TO hosts;
-      `);
-    }
-    this.db.exec(`
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (9, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateExecutionContinuity(): void {
-    const agentColumns = new Set(
-      this.db
-        .query<{ name: string }, []>("PRAGMA table_info(agents)")
-        .all()
-        .map(({ name }) => name),
-    );
-    const additions = [
-      ["host_instance_id", "TEXT"],
-      ["execution_observed_at", "INTEGER"],
-      ["provider_continuity", "TEXT NOT NULL DEFAULT 'unknown'"],
-      ["execution_presence", "TEXT NOT NULL DEFAULT 'unknown'"],
-      ["resume_capability", "TEXT NOT NULL DEFAULT 'unknown'"],
-      ["observation_health", "TEXT NOT NULL DEFAULT 'stale'"],
-      ["provider_observed_at", "INTEGER"],
-      ["execution_history_json", "TEXT NOT NULL DEFAULT '[]'"],
-      ["conflicting_executions_json", "TEXT NOT NULL DEFAULT '[]'"],
-    ] as const;
-    for (const [name, definition] of additions)
-      if (!agentColumns.has(name))
-        this.db.exec(`ALTER TABLE agents ADD COLUMN ${name} ${definition}`);
-    const hostColumns = new Set(
-      this.db
-        .query<{ name: string }, []>("PRAGMA table_info(hosts)")
-        .all()
-        .map(({ name }) => name),
-    );
-    if (!hostColumns.has("host_instance_id"))
-      this.db.exec("ALTER TABLE hosts ADD COLUMN host_instance_id TEXT");
-    this.db.exec(`
-      UPDATE agents SET host_instance_id = host_kind || ':legacy'
-        WHERE host_kind IS NOT NULL AND host_instance_id IS NULL;
-      UPDATE agents SET execution_observed_at = last_observed_at
-        WHERE host_kind IS NOT NULL AND execution_observed_at IS NULL;
-      UPDATE hosts SET host_instance_id = host_kind || ':legacy'
-        WHERE host_instance_id IS NULL;
-      DROP INDEX IF EXISTS agents_live_execution_identity;
-      CREATE UNIQUE INDEX agents_live_execution_identity
-        ON agents(host_instance_id, native_id)
-        WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (8, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateProviderSessions(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS provider_sessions (
+      CREATE TABLE IF NOT EXISTS provider_conversations (
         handle TEXT PRIMARY KEY,
         harness_id TEXT NOT NULL,
         continuity_scope_id TEXT NOT NULL,
@@ -1027,124 +992,31 @@ export class SqliteUniverseStore
         provenance TEXT NOT NULL,
         observed_at INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS provider_sessions_instance
-        ON provider_sessions(provider_instance_id);
-      CREATE TABLE IF NOT EXISTS provider_session_aliases (
+      CREATE INDEX IF NOT EXISTS provider_conversations_instance
+        ON provider_conversations(provider_instance_id);
+      CREATE TABLE IF NOT EXISTS provider_conversation_aliases (
         handle TEXT NOT NULL,
         harness_id TEXT NOT NULL,
         continuity_scope_id TEXT NOT NULL,
         native_kind TEXT NOT NULL,
         native_value TEXT NOT NULL,
         PRIMARY KEY(handle, harness_id, continuity_scope_id, native_kind, native_value),
-        FOREIGN KEY(handle) REFERENCES provider_sessions(handle) ON DELETE CASCADE
+        FOREIGN KEY(handle) REFERENCES provider_conversations(handle) ON DELETE CASCADE
       );
-      CREATE INDEX IF NOT EXISTS provider_session_alias_identity
-        ON provider_session_aliases(harness_id, continuity_scope_id, native_kind, native_value);
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (7, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateProviderSessionScope(): void {
-    const columns = this.db
-      .query<{ name: string }, []>("PRAGMA table_info(agents)")
-      .all()
-      .map(({ name }) => name);
-    if (!columns.includes("continuity_scope_id"))
-      this.db.exec("ALTER TABLE agents ADD COLUMN continuity_scope_id TEXT");
-    this.db.exec(`
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (6, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateLaunchRecovery(): void {
-    const columns = this.db
-      .query<{ name: string }, []>("PRAGMA table_info(launch_receipts)")
-      .all()
-      .map(({ name }) => name);
-    if (!columns.includes("recovery_json"))
-      this.db.exec("ALTER TABLE launch_receipts ADD COLUMN recovery_json TEXT");
-    this.db.exec(`
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (5, unixepoch() * 1000);
-    `);
-  }
-
-  private migrateAgentIdentity(): void {
-    const migrated = this.db
-      .query<{ found: number }, []>(
-        "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 3",
-      )
-      .get()?.found;
-    if (migrated) return;
-    const columns = this.db
-      .query<{ name: string }, []>("PRAGMA table_info(agents)")
-      .all()
-      .map(({ name }) => name);
-    if (!columns.includes("continuity")) {
-      this.db.exec("PRAGMA foreign_keys = OFF");
-      try {
-        this.db.transaction(() => {
-          this.db.exec(`
-            CREATE TABLE agents_v3 (
-              id TEXT PRIMARY KEY,
-              host_kind TEXT,
-              native_id TEXT,
-              host_locator TEXT,
-              harness_id TEXT,
-              continuity_scope_id TEXT,
-              native_conversation_kind TEXT,
-              native_conversation_value TEXT,
-              continuity TEXT NOT NULL DEFAULT 'unknown',
-              display_name TEXT NOT NULL,
-              display_name_source TEXT NOT NULL,
-              description TEXT,
-              primary_goal_id TEXT,
-              runtime_state TEXT NOT NULL,
-              runtime_state_source TEXT NOT NULL,
-              host_health TEXT NOT NULL,
-              last_seen_at INTEGER NOT NULL,
-              last_observed_at INTEGER NOT NULL,
-              last_changed_at INTEGER NOT NULL,
-              attention_since INTEGER,
-              repository TEXT,
-              branch TEXT,
-              worktree TEXT,
-              provider TEXT,
-              execution_container_id TEXT,
-              execution_container_label TEXT,
-              archived_at INTEGER,
-              FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
-            );
-            INSERT INTO agents_v3 (
-              id, host_kind, native_id, host_locator, continuity, display_name,
-              display_name_source, description, primary_goal_id, runtime_state,
-              runtime_state_source, host_health, last_seen_at, last_observed_at,
-              last_changed_at, attention_since, repository, branch, worktree,
-              provider, execution_container_id, execution_container_label, archived_at
-            )
-            SELECT
-              id, host_kind, native_id, host_locator, 'unknown', display_name,
-              display_name_source, description, primary_goal_id, runtime_state,
-              runtime_state_source, host_health, last_seen_at, last_observed_at,
-              last_changed_at, attention_since, repository, branch, worktree,
-              provider, execution_container_id, execution_container_label, archived_at
-            FROM agents;
-            DROP TABLE agents;
-            ALTER TABLE agents_v3 RENAME TO agents;
-          `);
-        })();
-      } finally {
-        this.db.exec("PRAGMA foreign_keys = ON");
-      }
-    }
-    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS provider_conversation_alias_identity
+        ON provider_conversation_aliases(harness_id, continuity_scope_id, native_kind, native_value);
+      CREATE TABLE IF NOT EXISTS provider_catalogue_baselines (
+        provider_instance_id TEXT PRIMARY KEY,
+        harness_id TEXT NOT NULL,
+        continuity_scope_id TEXT NOT NULL,
+        established_at INTEGER NOT NULL,
+        snapshot_observed_at INTEGER NOT NULL
+      );
       CREATE UNIQUE INDEX IF NOT EXISTS agents_live_execution_identity
-        ON agents(host_kind, native_id)
-        WHERE host_kind IS NOT NULL AND native_id IS NOT NULL;
-      INSERT INTO schema_migrations (version, applied_at)
-        VALUES (3, unixepoch() * 1000);
+        ON agents(host_instance_id, native_id)
+        WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
+      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (12, unixepoch() * 1000);
     `);
   }
 }

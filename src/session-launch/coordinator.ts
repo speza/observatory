@@ -8,6 +8,7 @@ import type {
   OpaqueNativeConversationRef,
 } from "../plugin-sdk/index.ts";
 import type { Agent, GoalId } from "../universe/types.ts";
+import type { ReconciliationResult } from "../universe/universe.ts";
 import { isPlausibleUnidentifiedExecution } from "../universe/execution-ambiguity.ts";
 import type { WorkspaceError } from "../workspaces/types.ts";
 import {
@@ -16,6 +17,7 @@ import {
   type LaunchReceipt,
   type LaunchRecovery,
   type LaunchReceiptStore,
+  type PendingLaunch,
   type ResumeAgentIntent,
   type StartAgentCoordinator,
   type StartAgentCoordinatorOptions,
@@ -73,6 +75,9 @@ class MemoryLaunchReceiptStore implements LaunchReceiptStore {
   saveLaunchReceipt(receipt: LaunchReceipt): void {
     this.receipts.set(receipt.requestId, receipt);
   }
+  launchReceipts(): readonly LaunchReceipt[] {
+    return [...this.receipts.values()];
+  }
 }
 
 const fingerprint = (
@@ -98,6 +103,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       const harness = yield* this.requireHarness(harnessId);
       yield* this.requireAvailable(harness);
       const goalId = yield* this.resolveGoal(intent);
+      const requestedAgentName = agentName(intent);
       const prepared = yield* this.options.workspace
         .prepare(intent.workspace)
         .pipe(Effect.mapError(mapWorkspaceError));
@@ -112,7 +118,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       const launched = yield* this.options.host
         .launchExecution({
           workingDirectory: prepared.path,
-          agentName: agentName(intent),
+          agentName: requestedAgentName,
           processPlan: plan,
           requestId,
         })
@@ -135,6 +141,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             kind: "start",
             harnessId,
             executionRef: launched.executionRef,
+            displayName: requestedAgentName,
             nativeConversationRef: plan.nativeConversationRef,
             goalId,
           } satisfies LaunchRecovery)
@@ -162,14 +169,20 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           launchExecutionRef: launched.executionRef,
         })
         .pipe(Effect.mapError(mapError("harness.continuity")));
+      const provedReference =
+        plan.nativeConversationRef ??
+        (continuity.kind === "same" ? continuity.nativeConversationRef : undefined);
       const agent =
-        continuity.kind === "same" && launched.executionRef
-          ? this.findAgentByExecution(after.hostInstanceId, launched.executionRef)
+        continuity.kind === "same" && launched.executionRef && provedReference
+          ? yield* this.observeProvenExecution(
+              after,
+              launched.executionRef,
+              harnessId,
+              provedReference,
+            )
           : undefined;
       if (agent) {
-        const provedReference =
-          continuity.kind === "same" ? continuity.nativeConversationRef : undefined;
-        yield* this.bindIdentity(agent, harnessId, plan.nativeConversationRef ?? provedReference);
+        if (requestedAgentName) yield* this.rename(agent, requestedAgentName);
         if (goalId) yield* this.assign(agent, goalId);
       }
       return yield* this.remember(
@@ -257,7 +270,12 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             alreadyLive,
           );
           if (continuity.kind === "same") {
-            const rebound = this.findAgentByExecution(before.hostInstanceId, alreadyLive.nativeId);
+            const rebound = yield* this.observeProvenExecution(
+              before,
+              alreadyLive.nativeId,
+              saved.harnessId,
+              saved.nativeConversationRef,
+            );
             return yield* this.remember(
               {
                 status: "already-observed",
@@ -356,7 +374,12 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         );
         const rebound =
           continuity.kind === "same" && launched.executionRef
-            ? this.findAgentByExecution(after.hostInstanceId, launched.executionRef)
+            ? yield* this.observeProvenExecution(
+                after,
+                launched.executionRef,
+                saved.harnessId,
+                saved.nativeConversationRef,
+              )
             : undefined;
         return yield* this.remember(
           {
@@ -373,6 +396,34 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           recovery,
         );
       }).pipe(Effect.ensuring(Effect.sync(() => this.resumesInFlight.delete(intent.agentId))));
+    });
+  }
+
+  pendingLaunches(): readonly PendingLaunch[] {
+    return this.receipts
+      .launchReceipts()
+      .filter(
+        (receipt): receipt is LaunchReceipt & { readonly recovery: LaunchRecovery } =>
+          receipt.result.status === "pending" &&
+          receipt.recovery?.kind === "start" &&
+          Boolean(receipt.recovery.executionRef),
+      )
+      .map((receipt) => ({
+        requestId: receipt.requestId,
+        harnessId: receipt.recovery.harnessId,
+        executionRef: receipt.recovery.executionRef,
+        displayName: receipt.recovery.displayName?.trim() || `${receipt.recovery.harnessId} agent`,
+        goalId: receipt.recovery.goalId,
+        message: receipt.result.message,
+      }));
+  }
+
+  refreshPending(): Effect.Effect<readonly StartAgentResult[], LaunchError> {
+    const receipts = this.receipts
+      .launchReceipts()
+      .filter((receipt) => receipt.result.status === "pending" && receipt.recovery);
+    return Effect.forEach(receipts, (receipt) => this.recoverReceipt(receipt), {
+      concurrency: 1,
     });
   }
 
@@ -459,6 +510,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         reconciledAgent.nativeConversationRef &&
         sameReference(reconciledAgent.nativeConversationRef, recovery.nativeConversationRef)
       ) {
+        if (recovery.kind === "start" && recovery.displayName)
+          yield* this.rename(reconciledAgent, recovery.displayName);
         if (recovery.kind === "start" && recovery.goalId)
           yield* this.assign(reconciledAgent, recovery.goalId);
         return yield* this.remember(
@@ -483,18 +536,20 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         })
         .pipe(Effect.mapError(mapError("harness.continuity")));
       const agent =
-        continuity.kind === "same"
-          ? this.findAgentByExecution(snapshot.hostInstanceId, recovery.executionRef)
+        continuity.kind === "same" &&
+        (recovery.nativeConversationRef ?? continuity.nativeConversationRef)
+          ? yield* this.observeProvenExecution(
+              snapshot,
+              recovery.executionRef,
+              recovery.harnessId,
+              recovery.nativeConversationRef ?? continuity.nativeConversationRef!,
+            )
           : undefined;
       const expectedAgent =
         recovery.kind === "resume" ? agent?.id === recovery.agentId : Boolean(agent);
       if (agent && expectedAgent) {
-        yield* this.bindIdentity(
-          agent,
-          recovery.harnessId,
-          recovery.nativeConversationRef ??
-            (continuity.kind === "same" ? continuity.nativeConversationRef : undefined),
-        );
+        if (recovery.kind === "start" && recovery.displayName)
+          yield* this.rename(agent, recovery.displayName);
         if (recovery.kind === "start" && recovery.goalId)
           yield* this.assign(agent, recovery.goalId);
         return yield* this.remember(
@@ -546,9 +601,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           return Effect.fail(
             launchError("host.snapshot", snapshot.error ?? "The session host is unavailable."),
           );
-        const reconciled = this.options.reconcileHost
-          ? this.options.reconcileHost(snapshot)
-          : this.options.universe.reconcile(snapshot);
+        const reconciled = this.reconcileSnapshot(snapshot);
         return reconciled.accepted
           ? Effect.succeed(snapshot)
           : Effect.fail(
@@ -559,6 +612,54 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             );
       }),
     );
+  }
+
+  private reconcileSnapshot(snapshot: HostSnapshot): ReconciliationResult {
+    return this.options.reconcileHost
+      ? this.options.reconcileHost(snapshot)
+      : this.options.universe.observe({ kind: "host-executions", snapshot });
+  }
+
+  private observeProvenExecution(
+    snapshot: HostSnapshot,
+    executionRef: string,
+    harnessId: string,
+    nativeConversationRef: OpaqueNativeConversationRef,
+  ): Effect.Effect<Agent | undefined, LaunchError> {
+    return Effect.try({
+      try: () => {
+        const agents = snapshot.agents.map((observation) =>
+          observation.nativeId === executionRef
+            ? {
+                ...observation,
+                harnessEvidence: {
+                  ...observation.harnessEvidence,
+                  detectedHarnessId: harnessId,
+                  nativeConversationRef,
+                  source: observation.harnessEvidence?.source ?? ("native-integration" as const),
+                  observedAt: observation.observedAt,
+                },
+              }
+            : observation,
+        );
+        const result = this.reconcileSnapshot({ ...snapshot, agents });
+        if (!result.accepted) throw new Error(result.error ?? "Conversation observation rejected.");
+        return this.options.universe
+          .snapshot()
+          .agents.find(
+            (agent) =>
+              agent.execution?.hostInstanceId === snapshot.hostInstanceId &&
+              agent.execution.nativeId === executionRef &&
+              agent.nativeConversationRef &&
+              sameReference(agent.nativeConversationRef, nativeConversationRef),
+          );
+      },
+      catch: (error) =>
+        launchError(
+          "launch.identity",
+          error instanceof Error ? error.message : "Conversation identity could not be observed.",
+        ),
+    });
   }
 
   private proveResume(
@@ -576,24 +677,6 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       .pipe(Effect.mapError(mapError("harness.continuity")));
   }
 
-  private bindIdentity(
-    agent: Agent,
-    harnessId: string,
-    nativeConversationRef?: OpaqueNativeConversationRef,
-  ): Effect.Effect<void, LaunchError> {
-    const result = this.options.universe.execute({
-      type: "BindAgentIdentity",
-      agentId: agent.id,
-      harnessId,
-      nativeConversationRef,
-    });
-    return result.ok
-      ? Effect.void
-      : Effect.fail(
-          launchError("launch.identity", result.error ?? "Agent identity could not be bound."),
-        );
-  }
-
   private assign(agent: Agent, goalId: GoalId): Effect.Effect<void, LaunchError> {
     const assigned = this.options.universe.execute({
       type: "AssignAgent",
@@ -607,6 +690,19 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             "launch.assign",
             assigned.error ?? "The launched Agent could not be assigned.",
           ),
+        );
+  }
+
+  private rename(agent: Agent, displayName: string): Effect.Effect<void, LaunchError> {
+    const renamed = this.options.universe.execute({
+      type: "RenameAgent",
+      agentId: agent.id,
+      displayName,
+    });
+    return renamed.ok
+      ? Effect.void
+      : Effect.fail(
+          launchError("launch.rename", renamed.error ?? "The launched Agent could not be named."),
         );
   }
 

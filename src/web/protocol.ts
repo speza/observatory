@@ -13,7 +13,7 @@ import type { AgentCloseoutBatchResult } from "../agent-closeout/types.ts";
 import type { AgentRepositoryStatusSnapshot } from "../repositories/types.ts";
 import type { PluginStatus } from "../plugins/registry.ts";
 import type { PortfolioResponse } from "./api.ts";
-import type { RecoveredSessionView } from "../provider-sessions/types.ts";
+import type { ConversationHistoryView } from "../conversations/types.ts";
 
 export type WebCommand =
   | {
@@ -100,6 +100,20 @@ export interface WebStartAgentRequest {
 export interface WebStartAgentResponse {
   readonly result: StartAgentResult;
   readonly portfolio: PortfolioResponse;
+  readonly pendingLaunch?: WebPendingLaunch;
+}
+
+export interface WebPendingLaunch {
+  readonly requestId: string;
+  readonly harnessId: string;
+  readonly displayName: string;
+  readonly goalId?: string;
+  readonly message: string;
+}
+
+export interface WebPendingLaunchesResponse {
+  readonly kind: "pending-launches";
+  readonly launches: readonly WebPendingLaunch[];
 }
 
 export interface WebResumeAgentRequest {
@@ -123,12 +137,12 @@ export interface WebPluginStatusResponse {
   readonly plugins: readonly PluginStatus[];
 }
 
-export interface WebRecoveredSessionsResponse {
-  readonly kind: "recovered-sessions";
-  readonly sessions: readonly RecoveredSessionView[];
+export interface WebConversationHistoryResponse {
+  readonly kind: "conversation-history";
+  readonly conversations: readonly ConversationHistoryView[];
 }
 
-export interface WebTrackRecoveredSessionResponse {
+export interface WebAddConversationResponse {
   readonly agentId: string;
   readonly goalId?: string;
   readonly portfolio: PortfolioResponse;

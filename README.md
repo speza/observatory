@@ -72,6 +72,13 @@ The default database is `data/ao.sqlite`. Use another path when needed:
 AO_DB_PATH=/private/tmp/observatory.sqlite bun run start
 ```
 
+The conversation-first schema intentionally does not migrate the earlier
+experimental host-first database. Back it up and replace it once with:
+
+```sh
+bun run db:reset:all
+```
+
 Open `http://127.0.0.1:4310` after the server starts.
 
 Inspect the redacted local Claude Code and Codex session catalogues without
@@ -110,16 +117,18 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 
 - durable human-owned Systems and Goals, with Goal priority, completion and archive;
 - stable Goal → Agent assignments and accepted goal positions;
-- Herdr snapshot reconciliation with stale and unavailable state preserved;
+- conversation-first Agent tracking with Herdr represented as an optional runtime;
 - explainable attention for blocked, waiting and uncertain agents;
 - durable semantic Catch up since the last explicit acknowledgement;
 - Atlas and Ledger projections over the same state;
 - actionable Inbox and Closeout workflows;
 - goal editing, agent assignment and host-backed agent launch;
+- visible blank-prompt launches with an immediate Observatory terminal until
+  the provider creates and identifies the durable conversation;
 - provider-independent Claude Code and Codex start/exact-resume plugins;
-- metadata-only Claude Code and Codex discovery, scoped live-execution rebinding,
-  dormant/resumable state and a full-screen Session import catalogue whose
-  primary path adds recovered sessions directly to a Goal;
+- automatic Claude Code and Codex admission for exact-live and newly observed
+  conversations, exact execution rebinding, dormant/runtime-unknown states and
+  searchable Conversation history for older work;
 - selected-Agent repository and code-host status through contributed plugins;
 - host-synchronised close and archive;
 - host-owned primary and linked terminals rendered with xterm.js; and

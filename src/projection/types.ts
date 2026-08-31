@@ -52,12 +52,8 @@ export type ProjectionQuery =
 export type AgentLifecycleState =
   | "running"
   | "dormant"
-  | "resumable"
-  | "possibly-running"
-  | "unavailable"
-  | "unidentified-execution"
-  | "continuity-lost"
-  | "stale-observation"
+  | "runtime-unknown"
+  | "conversation-unavailable"
   | "conflict";
 
 export interface AgentView extends Omit<
@@ -266,7 +262,7 @@ export type InspectorProjection =
   | {
       readonly kind: "agent-inspector";
       readonly agent: AgentView;
-      readonly providerSession?: {
+      readonly conversation?: {
         readonly kind: string;
         readonly id: string;
       };

@@ -2,7 +2,13 @@
 
 Status: web launch slice implemented; native-client passages are historical
 Date: 2026-08-23
-Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md), [provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md), [provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md), [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
+
+> Implemented amendment from [Conversation-first Agent tracking](conversation-first-agent-tracking.md):
+> a launch operation may show `Starting`, but it does not create a managed
+> host-only Agent. The Agent is created or resolved only when the exact durable
+> conversation identity is acknowledged. Workspace preparation and host launch
+> coordination in this document remain current.
 
 > The OpenTUI client described in parts of this implementation record was
 > retired on 2026-08-27. The coordinator, workspace provider and `SessionHost`
@@ -75,7 +81,10 @@ until a human or an explicit link operation assigns it.
    Codex are the first target adapters; users do not need to remember provider
    command names. Other host-discovered agents remain observable but are not
    managed launch choices without a matching harness plugin.
-5. **Prompt** — optional initial instruction and optional agent name.
+5. **Prompt** — optional initial instruction and optional agent name. A blank
+   prompt deliberately opens the pending host terminal so richer interactive
+   input, including terminal-native attachment workflows, can happen before
+   the provider conversation exists.
 
 The wizard should make the common path one or two selections rather than
 forcing a full configuration form. The maintained web slice is intentionally
@@ -165,6 +174,8 @@ goal assignment so callers do not repeat those steps.
 
 ```text
 start(intent) -> Effect<StartAgentResult, LaunchError>
+pendingLaunches() -> PendingLaunch[]
+refreshPending() -> Effect<StartAgentResult[], LaunchError>
 ```
 
 It must:
@@ -181,6 +192,9 @@ It must:
 9. return a receipt containing the Observatory Agent id when available.
 
 The renderer never runs `git`, `herdr`, a shell command or a provider binary.
+Pending launch projections expose only the request id and presentation facts.
+The execution reference stays server-side and is resolved through the same
+`SessionHost.access` capability used for admitted Agents.
 
 A new provider conversation identifier is not a launch input. Claude Code,
 Codex and similar systems generate their own identifier and expose it through a
@@ -262,6 +276,9 @@ The host launch is not itself a trusted Observatory agent record. The
 coordinator only assigns an agent after reconciliation observes it. If the
 host launch succeeds but reconciliation is delayed, the result is `pending`
 and the UI shows a launch diagnostic; it does not create a phantom map node.
+An explicit `agentName` becomes the reconciled Agent's human-authored display
+name and is retained in pending launch recovery, so later host terminal-title
+observations cannot replace it with a repository or process default.
 
 Goal creation and host launch are not one distributed transaction. If a caller
 asks for a new goal and the host launch fails, the goal may remain as an

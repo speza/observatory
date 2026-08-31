@@ -1,163 +1,157 @@
 import { useMemo, useState } from "react";
 import { AgentLogo } from "./AgentLogo.tsx";
-import type { RecoveredSessionView } from "../../src/provider-sessions/types.ts";
+import type { ConversationHistoryView } from "../../src/conversations/types.ts";
 import type { GoalView } from "../../src/projection/types.ts";
 import { ModalDialog } from "./ModalDialog.tsx";
 
-interface SessionImportDialogProps {
-  readonly sessions: readonly RecoveredSessionView[];
+interface ConversationHistoryDialogProps {
+  readonly conversations: readonly ConversationHistoryView[];
   readonly goals: readonly GoalView[];
   readonly pending: boolean;
   readonly error?: string;
   readonly onClose: () => void;
   readonly onRefresh: () => Promise<void>;
-  readonly onImport: (
+  readonly onAdd: (
     handle: string,
     goalId?: string,
     resume?: boolean,
   ) => Promise<{ readonly agentId: string } | undefined>;
-  readonly onImported: (agentId: string) => void;
+  readonly onAdded: (agentId: string) => void;
 }
 
-type SessionFilter =
-  | "all"
-  | "running"
-  | "possibly-running"
-  | "resumable"
-  | "unavailable"
-  | "import-only";
+type ConversationFilter = "all" | "resumable" | "dormant" | "runtime-unknown";
 
-const isSessionFilter = (value: string): value is SessionFilter =>
-  ["all", "running", "possibly-running", "resumable", "unavailable", "import-only"].includes(value);
+const isConversationFilter = (value: string): value is ConversationFilter =>
+  ["all", "resumable", "dormant", "runtime-unknown"].includes(value);
 
-const stateFor = (session: RecoveredSessionView): Exclude<SessionFilter, "all"> => {
-  if (session.executionState === "exact-live") return "running";
-  if (session.executionState === "possibly-live") return "possibly-running";
-  if (session.executionState === "unknown") return "unavailable";
-  return session.workspaceRef &&
-    ["same-site", "provider-account"].includes(session.resumeEligibility)
-    ? "resumable"
-    : "import-only";
+const stateFor = (conversation: ConversationHistoryView): Exclude<ConversationFilter, "all"> => {
+  if (
+    conversation.runtimeState === "dormant" &&
+    conversation.workspaceRef &&
+    ["same-site", "provider-account"].includes(conversation.resumeEligibility)
+  )
+    return "resumable";
+  return conversation.runtimeState;
 };
 
-const stateLabel = (state: Exclude<SessionFilter, "all">): string =>
+const stateLabel = (state: Exclude<ConversationFilter, "all">): string =>
   ({
-    running: "Running · exact match",
-    "possibly-running": "Possibly running",
     resumable: "Dormant · resumable",
-    unavailable: "Host state unknown",
-    "import-only": "Import only",
+    dormant: "Dormant",
+    "runtime-unknown": "Runtime unknown",
   })[state];
 
 const lastActiveLabel = (value: number | undefined): string =>
   value === undefined ? "Activity unknown" : new Date(value).toLocaleString();
 
-export const SessionImportDialog = ({
-  sessions,
+export const ConversationHistoryDialog = ({
+  conversations,
   goals,
   pending,
   error,
   onClose,
   onRefresh,
-  onImport,
-  onImported,
-}: SessionImportDialogProps): React.JSX.Element => {
+  onAdd,
+  onAdded,
+}: ConversationHistoryDialogProps): React.JSX.Element => {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("all");
   const [workspace, setWorkspace] = useState("all");
-  const [state, setState] = useState<SessionFilter>("all");
+  const [state, setState] = useState<ConversationFilter>("all");
   const [goalId, setGoalId] = useState("");
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [notice, setNotice] = useState<string>();
 
   const providers = useMemo(
-    () => [...new Set(sessions.map((session) => session.providerLabel))].sort(),
-    [sessions],
+    () => [...new Set(conversations.map((conversation) => conversation.providerLabel))].sort(),
+    [conversations],
   );
   const workspaces = useMemo(
     () =>
       [
         ...new Set(
-          sessions.flatMap((session) => (session.workspaceRef ? [session.workspaceRef] : [])),
+          conversations.flatMap((conversation) =>
+            conversation.workspaceRef ? [conversation.workspaceRef] : [],
+          ),
         ),
       ].sort(),
-    [sessions],
+    [conversations],
   );
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    return sessions.filter((session) => {
-      const sessionState = stateFor(session);
+    return conversations.filter((conversation) => {
+      const conversationState = stateFor(conversation);
       return (
-        (provider === "all" || session.providerLabel === provider) &&
-        (workspace === "all" || session.workspaceRef === workspace) &&
-        (state === "all" || sessionState === state) &&
+        (provider === "all" || conversation.providerLabel === provider) &&
+        (workspace === "all" || conversation.workspaceRef === workspace) &&
+        (state === "all" || conversationState === state) &&
         (!needle ||
-          [session.title, session.providerLabel, session.workspaceRef]
+          [conversation.title, conversation.providerLabel, conversation.workspaceRef]
             .filter(Boolean)
             .some((value) => value!.toLocaleLowerCase().includes(needle)))
       );
     });
-  }, [provider, query, sessions, state, workspace]);
-  const filteredHandles = filtered.map((session) => session.handle);
+  }, [conversations, provider, query, state, workspace]);
+  const filteredHandles = filtered.map((conversation) => conversation.handle);
   const allFilteredSelected =
     filteredHandles.length > 0 && filteredHandles.every((handle) => selected.includes(handle));
 
-  const performImport = async (
-    session: RecoveredSessionView,
+  const performAdd = async (
+    conversation: ConversationHistoryView,
     selectedGoalId?: string,
     resume = false,
     revealInAtlas = true,
   ): Promise<boolean> => {
-    const result = await onImport(session.handle, selectedGoalId, resume);
+    const result = await onAdd(conversation.handle, selectedGoalId, resume);
     if (!result) return false;
-    setSelected((current) => current.filter((handle) => handle !== session.handle));
+    setSelected((current) => current.filter((handle) => handle !== conversation.handle));
     setNotice(
       resume
-        ? `${session.title} added to its Goal and resumed.`
+        ? `${conversation.title} added to its Goal and resumed.`
         : selectedGoalId
-          ? `${session.title} added to its Goal.`
-          : `${session.title} imported without a Goal. Find it in Inbox.`,
+          ? `${conversation.title} added to its Goal.`
+          : `${conversation.title} added without a Goal. Find it in Inbox.`,
     );
-    if (selectedGoalId && revealInAtlas) onImported(result.agentId);
+    if (selectedGoalId && revealInAtlas) onAdded(result.agentId);
     return true;
   };
 
-  const performBulkImport = async (selectedGoalId?: string): Promise<void> => {
-    const chosen = sessions.filter((session) => selected.includes(session.handle));
-    const imported = await chosen.reduce(
-      (result, session) =>
+  const performBulkAdd = async (selectedGoalId?: string): Promise<void> => {
+    const chosen = conversations.filter((conversation) => selected.includes(conversation.handle));
+    const added = await chosen.reduce(
+      (result, conversation) =>
         result.then(async (count) =>
-          (await performImport(session, selectedGoalId, false, false)) ? count + 1 : count,
+          (await performAdd(conversation, selectedGoalId, false, false)) ? count + 1 : count,
         ),
       Promise.resolve(0),
     );
-    if (imported > 0)
+    if (added > 0)
       setNotice(
         selectedGoalId
-          ? `${imported} session${imported === 1 ? "" : "s"} added to the selected Goal.`
-          : `${imported} session${imported === 1 ? "" : "s"} imported without a Goal. Find ${imported === 1 ? "it" : "them"} in Inbox.`,
+          ? `${added} conversation${added === 1 ? "" : "s"} added to the selected Goal.`
+          : `${added} conversation${added === 1 ? "" : "s"} added without a Goal. Find ${added === 1 ? "it" : "them"} in Inbox.`,
       );
   };
 
   return (
     <ModalDialog
-      ariaLabelledBy="session-import-title"
-      className="modal-backdrop session-import-backdrop"
+      ariaLabelledBy="conversation-history-title"
+      className="modal-backdrop conversation-history-backdrop"
       onClose={onClose}
     >
-      <section className="session-import">
+      <section className="conversation-history">
         <header>
           <div>
             <p className="overline">PROVIDER CONVERSATIONS</p>
-            <h2 id="session-import-title">Session import</h2>
-            <p>Choose a destination Goal, then add provider-owned conversations to Observatory.</p>
+            <h2 id="conversation-history-title">Conversation history</h2>
+            <p>Find older dormant conversations and bring selected work into Observatory.</p>
           </div>
-          <button aria-label="Close Session import" onClick={onClose} type="button">
+          <button aria-label="Close Conversation history" onClick={onClose} type="button">
             ×
           </button>
         </header>
 
-        <div className="session-import__filters">
+        <div className="conversation-history__filters">
           <label>
             <span>Search</span>
             <input
@@ -194,16 +188,14 @@ export const SessionImportDialog = ({
             <span>State</span>
             <select
               onChange={(event) => {
-                if (isSessionFilter(event.target.value)) setState(event.target.value);
+                if (isConversationFilter(event.target.value)) setState(event.target.value);
               }}
               value={state}
             >
               <option value="all">All states</option>
-              <option value="running">Running</option>
-              <option value="possibly-running">Possibly running</option>
               <option value="resumable">Resumable</option>
-              <option value="unavailable">Host state unknown</option>
-              <option value="import-only">Import only</option>
+              <option value="dormant">Dormant</option>
+              <option value="runtime-unknown">Runtime unknown</option>
             </select>
           </label>
           <button disabled={pending} onClick={() => void onRefresh()} type="button">
@@ -211,7 +203,7 @@ export const SessionImportDialog = ({
           </button>
         </div>
 
-        <div className="session-import__summary">
+        <div className="conversation-history__summary">
           <button
             disabled={filteredHandles.length === 0}
             onClick={() =>
@@ -232,11 +224,11 @@ export const SessionImportDialog = ({
         </div>
 
         <div
-          className="session-import__table"
+          className="conversation-history__table"
           role="table"
-          aria-label="Sessions available to import"
+          aria-label="Older provider conversations"
         >
-          <div className="session-import__row session-import__row--heading" role="row">
+          <div className="conversation-history__row conversation-history__row--heading" role="row">
             <span />
             <span>Conversation</span>
             <span>Provider</span>
@@ -245,63 +237,59 @@ export const SessionImportDialog = ({
             <span>Actions</span>
           </div>
           {filtered.length === 0 ? (
-            <p className="session-import__empty">No provider sessions match these filters.</p>
+            <p className="conversation-history__empty">No conversations match these filters.</p>
           ) : (
-            filtered.map((session) => {
-              const sessionState = stateFor(session);
-              const canResume = sessionState === "resumable";
+            filtered.map((conversation) => {
+              const conversationState = stateFor(conversation);
+              const canResume = conversationState === "resumable";
               return (
-                <article className="session-import__row" key={session.handle} role="row">
+                <article className="conversation-history__row" key={conversation.handle} role="row">
                   <input
-                    aria-label={`Select ${session.title}`}
-                    checked={selected.includes(session.handle)}
+                    aria-label={`Select ${conversation.title}`}
+                    checked={selected.includes(conversation.handle)}
                     onChange={() =>
                       setSelected((current) =>
-                        current.includes(session.handle)
-                          ? current.filter((handle) => handle !== session.handle)
-                          : [...current, session.handle],
+                        current.includes(conversation.handle)
+                          ? current.filter((handle) => handle !== conversation.handle)
+                          : [...current, conversation.handle],
                       )
                     }
                     type="checkbox"
                   />
-                  <div className="session-import__identity">
-                    <AgentLogo harnessId={session.harnessId} />
-                    <strong>{session.title}</strong>
-                    <small>{lastActiveLabel(session.lastActiveAt)}</small>
+                  <div className="conversation-history__identity">
+                    <AgentLogo harnessId={conversation.harnessId} />
+                    <strong>{conversation.title}</strong>
+                    <small>{lastActiveLabel(conversation.lastActiveAt)}</small>
                   </div>
-                  <span>{session.providerLabel}</span>
-                  <span className="session-import__workspace">
-                    {session.workspaceRef ?? "Unknown workspace"}
+                  <span>{conversation.providerLabel}</span>
+                  <span className="conversation-history__workspace">
+                    {conversation.workspaceRef ?? "Unknown workspace"}
                   </span>
-                  <span className={`session-import__state session-import__state--${sessionState}`}>
-                    {stateLabel(sessionState)}
+                  <span
+                    className={`conversation-history__state conversation-history__state--${conversationState}`}
+                  >
+                    {stateLabel(conversationState)}
                   </span>
-                  <nav aria-label={`Import actions for ${session.title}`}>
+                  <nav aria-label={`Actions for ${conversation.title}`}>
                     <button
                       disabled={pending || !goalId}
-                      onClick={() => void performImport(session, goalId)}
+                      onClick={() => void performAdd(conversation, goalId)}
                       type="button"
                     >
                       Add to goal
                     </button>
                     <button
                       disabled={pending}
-                      onClick={() => void performImport(session)}
-                      title="Import without a Goal. The Agent will appear in Inbox."
+                      onClick={() => void performAdd(conversation)}
+                      title="Add without a Goal. The Agent will appear in Inbox."
                       type="button"
                     >
-                      Import unassigned
+                      Add unassigned
                     </button>
                     <button
                       disabled={pending || !canResume || !goalId}
-                      onClick={() => void performImport(session, goalId, true)}
-                      title={
-                        sessionState === "possibly-running"
-                          ? "A plausible live execution must be resolved before resuming."
-                          : !goalId
-                            ? "Choose a destination Goal before resuming."
-                            : undefined
-                      }
+                      onClick={() => void performAdd(conversation, goalId, true)}
+                      title={!goalId ? "Choose a destination Goal before resuming." : undefined}
                       type="button"
                     >
                       Add & resume
@@ -330,15 +318,15 @@ export const SessionImportDialog = ({
           </label>
           <button
             disabled={pending || selected.length === 0}
-            onClick={() => void performBulkImport()}
-            title="Import without a Goal. The Agents will appear in Inbox."
+            onClick={() => void performBulkAdd()}
+            title="Add without a Goal. The Agents will appear in Inbox."
             type="button"
           >
-            Import unassigned
+            Add unassigned
           </button>
           <button
             disabled={pending || selected.length === 0 || !goalId}
-            onClick={() => void performBulkImport(goalId)}
+            onClick={() => void performBulkAdd(goalId)}
             type="button"
           >
             Add selected to goal

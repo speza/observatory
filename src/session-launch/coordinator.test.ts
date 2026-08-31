@@ -93,6 +93,10 @@ describe("agent launch coordinator", () => {
     expect(
       universe.snapshot().agents.find((agent) => agent.id === first.agentId)?.primaryGoalId,
     ).toBe(goal.goalId);
+    expect(universe.snapshot().agents.find((agent) => agent.id === first.agentId)).toMatchObject({
+      displayName: "coordinator agent",
+      displayNameSource: "human",
+    });
     const second = await Effect.runPromise(coordinator.start(intent));
     expect(second.status).toBe("already-observed");
     expect(universe.snapshot().agents.filter((agent) => agent.provider === "codex")).toHaveLength(
@@ -139,18 +143,29 @@ describe("agent launch coordinator", () => {
         harness: { id: "codex" },
       }),
     );
-    expect(started.status).toBe("started");
-    expect(universe.snapshot().agents.find((agent) => agent.id === started.agentId)).toMatchObject({
-      harnessId: "codex",
-      nativeConversationRef: undefined,
-      continuity: "unknown",
-      primaryGoalId: goal.goalId,
-    });
+    expect(started.status).toBe("pending");
+    expect(started.agentId).toBeUndefined();
+    expect(
+      universe
+        .snapshot()
+        .agents.filter((agent) => agent.execution?.nativeId.startsWith("mock-launch-")),
+    ).toEqual([]);
 
     hideProviderIdentity = false;
     clock.value += 1;
     universe.reconcile(await Effect.runPromise(host.snapshot()));
-    expect(universe.snapshot().agents.find((agent) => agent.id === started.agentId)).toMatchObject({
+    const recovered = await Effect.runPromise(
+      coordinator.start({
+        requestId: "provider-owned-identity",
+        goal: { kind: "goal", goalId: goal.goalId! },
+        workspace: { kind: "existing", path: "/synthetic/project" },
+        harness: { id: "codex" },
+      }),
+    );
+    expect(recovered.status).toBe("started");
+    expect(
+      universe.snapshot().agents.find((agent) => agent.id === recovered.agentId),
+    ).toMatchObject({
       nativeConversationRef: {
         harnessId: "codex",
         kind: "session-id",
@@ -226,6 +241,7 @@ describe("agent launch coordinator", () => {
       goal: { kind: "goal", goalId: goal.goalId! } as const,
       workspace: { kind: "existing", path: "/synthetic/project" } as const,
       harness: { id: "codex" },
+      agentName: "Durable delayed name",
     };
     const options = {
       universe,
@@ -235,14 +251,30 @@ describe("agent launch coordinator", () => {
       receipts: store,
     };
     const before = (await Effect.runPromise(host.snapshot())).agents.length;
-    const pending = await Effect.runPromise(createStartAgentCoordinator(options).start(intent));
+    const coordinator = createStartAgentCoordinator(options);
+    const pending = await Effect.runPromise(coordinator.start(intent));
     expect(pending.status).toBe("pending");
+    expect(coordinator.pendingLaunches()).toMatchObject([
+      {
+        requestId: "delayed-durable-launch",
+        harnessId: "codex",
+        displayName: "Durable delayed name",
+        goalId: goal.goalId,
+      },
+    ]);
 
-    const recovered = await Effect.runPromise(createStartAgentCoordinator(options).start(intent));
+    const recoveredCoordinator = createStartAgentCoordinator(options);
+    expect(recoveredCoordinator.pendingLaunches()).toHaveLength(1);
+    const recovered = (await Effect.runPromise(recoveredCoordinator.refreshPending()))[0]!;
     expect(recovered).toMatchObject({ status: "started", goalId: goal.goalId });
+    expect(recoveredCoordinator.pendingLaunches()).toEqual([]);
     expect(
-      universe.snapshot().agents.find((agent) => agent.id === recovered.agentId)?.primaryGoalId,
-    ).toBe(goal.goalId);
+      universe.snapshot().agents.find((agent) => agent.id === recovered.agentId),
+    ).toMatchObject({
+      displayName: "Durable delayed name",
+      displayNameSource: "human",
+      primaryGoalId: goal.goalId,
+    });
     expect((await Effect.runPromise(host.snapshot())).agents).toHaveLength(before + 1);
     store.close();
   });
@@ -353,7 +385,7 @@ describe("agent launch coordinator", () => {
       },
     });
     const adopted = universe.execute({
-      type: "AdoptProviderSession",
+      type: "AddConversation",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",
@@ -375,7 +407,7 @@ describe("agent launch coordinator", () => {
     const projected = universe.project({ kind: "command-centre", now: clock.now() });
     if (projected.kind !== "command-centre") throw new Error("Expected command centre.");
     expect(projected.unassigned.find((agent) => agent.id === adopted.agentId)).toMatchObject({
-      lifecycleState: "possibly-running",
+      lifecycleState: "runtime-unknown",
       canResume: false,
     });
     clock.value = 91_000;
@@ -390,6 +422,6 @@ describe("agent launch coordinator", () => {
     );
     expect(Exit.isFailure(result)).toBe(true);
     expect(JSON.stringify(result)).toContain("prevent a duplicate");
-    expect(universe.snapshot().agents).toHaveLength(2);
+    expect(universe.snapshot().agents).toHaveLength(1);
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { Agent } from "../universe/types.ts";
+import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import {
   WEB_TERMINAL_DIMENSION_LIMITS,
   type WebTerminalActionResponse,
@@ -40,7 +41,8 @@ const Dimensions = Schema.Struct({
   ),
 });
 const OpenRequest = Schema.Struct({
-  agentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
+  agentId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160))),
+  requestId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))),
   dimensions: Dimensions,
   resizeMode: Schema.optional(Schema.Literal("fit", "preserve")),
   linkId: Schema.optional(LinkId),
@@ -107,6 +109,7 @@ export class WebTerminalGateway {
   constructor(
     private readonly universe: Universe,
     private readonly host: SessionHost,
+    private readonly launches?: StartAgentCoordinator,
   ) {}
 
   async linkedExecutions(agentId: string): Promise<WebTerminalLinksResponse> {
@@ -169,15 +172,22 @@ export class WebTerminalGateway {
 
   async open(body: string): Promise<WebTerminalOpenResponse> {
     const request = decode(OpenRequest, body);
-    const agent = this.activeAgent(request.agentId);
-    if (!agent.execution) throw new WebTerminalError("Agent has no current host execution.", 409);
+    if (Boolean(request.agentId) === Boolean(request.requestId))
+      throw new WebTerminalError("Choose exactly one Agent or pending launch terminal.", 400);
     try {
-      const access = await Effect.runPromise(this.host.access(agent.execution));
+      const agent = request.agentId ? this.activeAgent(request.agentId) : undefined;
+      if (agent && !agent.execution)
+        throw new WebTerminalError("Agent has no current host execution.", 409);
+      const access = agent
+        ? await Effect.runPromise(this.host.access(agent.execution!))
+        : await this.pendingLaunchAccess(request.requestId!);
       const options: TerminalOpenOptions | undefined = request.resizeMode
         ? { resizeMode: request.resizeMode }
         : undefined;
+      if (request.linkId && !agent)
+        throw new WebTerminalError("Pending launches do not have companion terminals.", 409);
       const opened = request.linkId
-        ? await this.openLinkedTerminal(request.linkId, agent, access, request.dimensions, options)
+        ? await this.openLinkedTerminal(request.linkId, agent!, access, request.dimensions, options)
         : await this.openPrimaryTerminal(access, request.dimensions, options);
       if (!opened.ok || !opened.terminal) throw new WebTerminalError(opened.message, 409);
       const sessionId = crypto.randomUUID();
@@ -194,6 +204,21 @@ export class WebTerminalGateway {
       if (error instanceof WebTerminalError) throw error;
       throw new WebTerminalError("The host could not open this terminal.", 502);
     }
+  }
+
+  private async pendingLaunchAccess(requestId: string): Promise<AgentAccess> {
+    const launch = this.launches
+      ?.pendingLaunches()
+      .find((candidate) => candidate.requestId === requestId);
+    if (!launch) throw new WebTerminalError("Pending launch not found.", 404);
+    const snapshot = await Effect.runPromise(this.host.snapshot());
+    if (!snapshot.available)
+      throw new WebTerminalError(snapshot.error ?? "The session host is unavailable.", 409);
+    if (!snapshot.agents.some((observation) => observation.nativeId === launch.executionRef))
+      throw new WebTerminalError("The pending launch execution is no longer visible.", 409);
+    return Effect.runPromise(
+      this.host.access({ hostKind: snapshot.hostKind, nativeId: launch.executionRef }),
+    );
   }
 
   events(rawSessionId: string): Response {

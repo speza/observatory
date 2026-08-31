@@ -264,13 +264,9 @@ export const Atlas = ({
               (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
             );
             const hasUncertainAgent = goal.agents.some((agent) =>
-              [
-                "possibly-running",
-                "unavailable",
-                "stale-observation",
-                "conflict",
-                "continuity-lost",
-              ].includes(agent.lifecycleState),
+              ["runtime-unknown", "conversation-unavailable", "conflict"].includes(
+                agent.lifecycleState,
+              ),
             );
             const resultCount = goal.agents.filter(
               (agent) => agent.hostHealth === "live" && agent.runtimeState === "done",
@@ -414,11 +410,9 @@ export const Atlas = ({
                   if (!point) return null;
                   const attention = agent.attention?.requiresHumanInput === true;
                   const uncertain = [
-                    "possibly-running",
-                    "unavailable",
-                    "stale-observation",
+                    "runtime-unknown",
+                    "conversation-unavailable",
                     "conflict",
-                    "continuity-lost",
                   ].includes(agent.lifecycleState);
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
                   const state = stateLabel(agent);
@@ -442,9 +436,7 @@ export const Atlas = ({
                       data-orbit-ry={point.radiusY}
                       key={agent.id}
                       onClick={() => {
-                        const next = { type: "agent" as const, id: agent.id };
-                        onSelect(next);
-                        if (!focusedGoal) focusPoint(centre, { type: "goal", id: goal.id });
+                        onSelect({ type: "agent", id: agent.id });
                       }}
                       onDoubleClick={(event) => {
                         event.stopPropagation();

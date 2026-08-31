@@ -10,7 +10,7 @@ Depends on:
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Agent launch and workspace preparation](session-launch.md)
 - [Agent and linked execution model](agent-execution-model.md)
-- [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+- [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 
 ## Why
 
@@ -28,13 +28,11 @@ plan.
 
 ## Decision
 
-> **Continuity amendment, 2026-08-28:** the implemented harness baseline below
-> separates provider command construction from Herdr, but its host-first
-> discovery and cold-restart passages are transitional. Supported providers
-> will expose an independently discoverable session catalogue; provider
-> sessions will anchor continuity and host observations will become replaceable
-> execution bindings. The normative recovery model is
-> [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md).
+> **Conversation-first amendment, 2026-08-31:** harness provider conversations
+> now anchor durable Agent identity. Host observations are optional execution
+> bindings and cannot create a managed Agent without exact conversation
+> evidence. The normative model is
+> [Conversation-first Agent tracking](conversation-first-agent-tracking.md).
 
 Add an `agent-harness` capability to the contributed plugin system. A harness
 plugin is the authority for one coding-agent CLI's lifecycle semantics. It
@@ -272,22 +270,20 @@ contract.
 
 ## Discovery and progressive support
 
-Discovery has two independent inventories. Harness plugins discover
-provider-owned sessions, including dormant sessions with no process. Session
-hosts discover current executions. Exact scoped evidence joins them; neither
-inventory silently defines the other.
+Harness plugins discover provider-owned conversations, including dormant
+conversations with no process. Session hosts discover current executions.
+`ConversationTracker` canonicalises exact provider aliases and submits both
+observation kinds through the one Universe observation interface.
 
-Directly launched Herdr executions remain observable when Observatory has no
-matching harness plugin. They retain terminal access, but they enter the
-unidentified-execution path and report durable managed lifecycle as
-unsupported. A human can explicitly track one as a degraded host-bound Agent.
+Directly launched executions without exact provider conversation identity
+remain diagnostic host evidence. They are not durable managed Agents and
+cannot be manually promoted through cwd, title or recency.
 
-When a matching plugin is enabled, provider catalogue observations create
-Session import candidates without filling the Atlas with every historical session.
-Importing, assigning or resuming a candidate accepts it as an Agent. Provider
-facts from hooks or local storage remain observations with provenance. They
-never overwrite human-authored Goal assignment, priority, completion or archive
-state.
+On first connection, older dormant provider conversations remain in
+Conversation history. Exact-live conversations and conversations first
+observed after the durable provider baseline become Agents automatically.
+Provider facts never overwrite human-authored Goal assignment, priority,
+completion, archive or naming.
 
 Harness plugins do not receive concrete Herdr payloads. `SessionHost` exposes
 only generic execution observations and opaque provider/session evidence it can

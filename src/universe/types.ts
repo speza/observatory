@@ -109,7 +109,7 @@ export interface Agent {
   readonly executionHistory: readonly AgentExecutionBinding[];
   readonly conflictingExecutions: readonly AgentExecutionBinding[];
   readonly displayName: string;
-  readonly displayNameSource: "host" | "human";
+  readonly displayNameSource: "human" | "provider" | "fallback";
   readonly description?: string;
   readonly primaryGoalId?: GoalId;
   readonly runtimeState: RuntimeState;
@@ -140,8 +140,11 @@ export interface HostHealth {
 
 export interface ProviderSessionFact {
   readonly nativeConversationRef: NativeConversationRef;
+  readonly nativeConversationAliases?: readonly NativeConversationRef[];
   readonly observedAt: number;
   readonly resumeEligibility: "same-site" | "provider-account" | "blocked" | "unknown";
+  readonly title?: string;
+  readonly workspaceRef?: string;
 }
 
 export interface UniverseState {

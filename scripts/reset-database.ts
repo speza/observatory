@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
+import { Database } from "bun:sqlite";
 import { SqliteUniverseStore } from "../src/persistence/sqlite/sqlite-store.ts";
 
 const cliArguments = process.argv.slice(2);
@@ -18,22 +19,68 @@ if (!existsSync(databasePath))
 
 const backupSuffix = new Date().toISOString().replaceAll(/[-:.]/gu, "");
 const backupPath = `${databasePath}.backup-${backupSuffix}`;
-const store = new SqliteUniverseStore(databasePath);
-try {
-  store.backupTo(backupPath);
-  const summary = fullReset ? store.resetAllState() : store.resetSemanticState();
+const database = new Database(databasePath);
+const hasSchemaTable = Boolean(
+  database
+    .query<{ found: number }, []>(
+      "SELECT COUNT(*) AS found FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+    )
+    .get()?.found,
+);
+const currentSchema =
+  hasSchemaTable &&
+  Boolean(
+    database
+      .query<{ found: number }, []>(
+        "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 12",
+      )
+      .get()?.found,
+  );
+
+if (!currentSchema && !fullReset) {
+  database.close();
+  throw new Error(
+    "This database predates conversation-first tracking. Use `bun run db:reset:all` to back it up and replace it.",
+  );
+}
+
+database.prepare("VACUUM INTO ?").run(backupPath);
+database.close();
+
+if (!currentSchema) {
+  for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`])
+    if (existsSync(path)) unlinkSync(path);
+  const fresh = new SqliteUniverseStore(databasePath);
+  fresh.close();
   console.log(
     JSON.stringify(
       {
-        mode: fullReset ? "all" : "semantics",
+        mode: "all",
         databasePath,
         backupPath,
-        ...summary,
+        replacedLegacySchema: true,
       },
       null,
       2,
     ),
   );
-} finally {
-  store.close();
+} else {
+  const store = new SqliteUniverseStore(databasePath);
+  try {
+    const summary = fullReset ? store.resetAllState() : store.resetSemanticState();
+    console.log(
+      JSON.stringify(
+        {
+          mode: fullReset ? "all" : "semantics",
+          databasePath,
+          backupPath,
+          ...summary,
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    store.close();
+  }
 }

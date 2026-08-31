@@ -666,7 +666,59 @@ describe("Herdr adapter", () => {
       "exec 'codex'",
     ]);
     expect(result.executionRef).toBe("created-workspace:p1");
-    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(1);
+    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(21);
+  });
+
+  test("waits for a newly started agent to enter the host inventory", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    const panes = Array.isArray(snapshot.panes) ? snapshot.panes.filter(isRecord) : [];
+    const launchedPane = panes.find((pane) => stringValue(pane, "pane_id") === "fixture-w1:p2");
+    if (!launchedPane) throw new Error("Sanitized Herdr launch pane is missing.");
+    const observedFixture = {
+      ...fixture,
+      result: {
+        ...result,
+        snapshot: {
+          ...snapshot,
+          agents: [
+            ...(Array.isArray(snapshot.agents) ? snapshot.agents : []),
+            { ...launchedPane, agent: "codex", agent_status: "working" },
+          ],
+        },
+      },
+    };
+    const success = { exitCode: 0, stdout: "", stderr: "" };
+    const runner = new FakeRunner(
+      { exitCode: 0, stdout: JSON.stringify(observedFixture), stderr: "" },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ result: { root_pane: { pane_id: "fixture-w1:p2" } } }),
+          stderr: "",
+        },
+        success,
+        { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+        { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" },
+      ],
+    );
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+
+    const launched = await Effect.runPromise(
+      adapter.launchExecution({
+        requestId: "delayed-agent-observation",
+        workingDirectory: "/sandbox/alpha",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
+      }),
+    );
+
+    expect(launched).toEqual({
+      ok: true,
+      executionRef: "fixture-w1:p2",
+      message: "Started codex in Herdr.",
+    });
+    expect(runner.calls.filter((call) => call.join(" ") === "herdr api snapshot")).toHaveLength(3);
   });
 
   test("does not claim access for unavailable or unknown agents", async () => {

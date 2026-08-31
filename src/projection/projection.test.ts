@@ -25,19 +25,24 @@ const observation = (
 describe("projections", () => {
   test("exposes an ID-backed provider session only in its explicit inspector projection", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane", "private session")]));
-    expect(
-      universe.execute({
-        type: "BindAgentIdentity",
-        agentId: "agent-1",
-        harnessId: "codex",
-        nativeConversationRef: {
-          harnessId: "codex",
-          kind: "session-id",
-          value: "sensitive-native-reference",
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("pane", "private session"),
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            nativeConversationRef: {
+              harnessId: "codex",
+              kind: "session-id",
+              value: "sensitive-native-reference",
+            },
+            restoreState: "not-restored",
+            source: "native-integration",
+            observedAt: clock.now(),
+          },
         },
-      }).ok,
-    ).toBe(true);
+      ]),
+    );
 
     const commandCentre = universe.project({ kind: "command-centre", now: clock.now() });
     const inspector = universe.project({
@@ -48,7 +53,7 @@ describe("projections", () => {
     expect(JSON.stringify(commandCentre)).not.toContain("sensitive-native-reference");
     expect(inspector).toMatchObject({
       kind: "agent-inspector",
-      providerSession: { kind: "session-id", id: "sensitive-native-reference" },
+      conversation: { kind: "session-id", id: "sensitive-native-reference" },
     });
     if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
     expect(commandCentre.unassigned[0]?.canResume).toBe(false);
@@ -56,19 +61,24 @@ describe("projections", () => {
 
   test("never exposes a provider transcript path through the inspector", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane", "private session")]));
-    expect(
-      universe.execute({
-        type: "BindAgentIdentity",
-        agentId: "agent-1",
-        harnessId: "codex",
-        nativeConversationRef: {
-          harnessId: "codex",
-          kind: "path",
-          value: "/private/provider/transcript.jsonl",
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("pane", "private session"),
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            nativeConversationRef: {
+              harnessId: "codex",
+              kind: "path",
+              value: "/private/provider/transcript.jsonl",
+            },
+            restoreState: "not-restored",
+            source: "native-integration",
+            observedAt: clock.now(),
+          },
         },
-      }).ok,
-    ).toBe(true);
+      ]),
+    );
 
     const inspector = universe.project({
       kind: "inspector",
@@ -76,7 +86,7 @@ describe("projections", () => {
       target: { type: "agent", id: "agent-1" },
     });
     expect(JSON.stringify(inspector)).not.toContain("/private/provider/transcript.jsonl");
-    expect(inspector).not.toHaveProperty("providerSession");
+    expect(inspector).not.toHaveProperty("conversation");
   });
   test("keeps the command centre goal-centred and exposes the inbox", () => {
     const { universe } = makeUniverse();
@@ -349,6 +359,21 @@ describe("projections", () => {
     expect(projection.attention.items).toHaveLength(0);
   });
 
+  test("surfaces a live archived Agent as attention without restoring it", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(hostSnapshot([observation("pane", "archived worker", "working")]));
+    universe.execute({ type: "ArchiveAgent", agentId: "agent-1" });
+
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.unassigned).toHaveLength(0);
+    expect(projection.counts.agents).toBe(0);
+    expect(projection.attention.items).toMatchObject([
+      { agentId: "agent-1", reason: "archived-running", requiresHumanInput: true },
+    ]);
+    expect(universe.snapshot().agents[0]?.archivedAt).toBeDefined();
+  });
+
   test("inspector reports host facts without making infrastructure nodes", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });
@@ -419,7 +444,7 @@ describe("projections", () => {
     expect(first.unassigned[0]?.goalTitle).toBeUndefined();
   });
 
-  test("preserves confirmed-absent unassigned host-only Agents without false stale attention", () => {
+  test("preserves a confirmed-absent unassigned conversation without false attention", () => {
     const { universe } = makeUniverse();
     universe.reconcile(
       hostSnapshot([observation("live", "live agent"), observation("missing", "stale agent")]),

@@ -9,6 +9,8 @@ import type { Universe } from "../universe/universe.ts";
 import type { WorkspaceProvider } from "../workspaces/types.ts";
 import type {
   WebLaunchOptionsResponse,
+  WebPendingLaunch,
+  WebPendingLaunchesResponse,
   WebResumeAgentRequest,
   WebStartAgentRequest,
   WebWorkspaceBrowserResponse,
@@ -119,6 +121,21 @@ export class WebLaunchGateway {
     }
   }
 
+  async pending(refresh = false): Promise<WebPendingLaunchesResponse> {
+    if (refresh) await Effect.runPromise(this.coordinator.refreshPending());
+    return {
+      kind: "pending-launches",
+      launches: this.coordinator.pendingLaunches().map(this.pendingView),
+    };
+  }
+
+  pendingLaunch(requestId: string): WebPendingLaunch | undefined {
+    const launch = this.coordinator
+      .pendingLaunches()
+      .find((candidate) => candidate.requestId === requestId);
+    return launch ? this.pendingView(launch) : undefined;
+  }
+
   async start(encoded: string) {
     const request = decodeRequest(encoded);
     const intent: StartAgentIntent = {
@@ -156,4 +173,14 @@ export class WebLaunchGateway {
       );
     }
   }
+
+  private readonly pendingView = (
+    launch: ReturnType<StartAgentCoordinator["pendingLaunches"]>[number],
+  ): WebPendingLaunch => ({
+    requestId: launch.requestId,
+    harnessId: launch.harnessId,
+    displayName: launch.displayName,
+    goalId: launch.goalId,
+    message: launch.message,
+  });
 }

@@ -34,7 +34,7 @@ const agent = (
     executionHistory: [],
     conflictingExecutions: [],
     displayName: id,
-    displayNameSource: "host",
+    displayNameSource: "fallback",
     primaryGoalId: goalId,
     runtimeState: state,
     runtimeStateSource: "herdr.agent_status",
@@ -80,7 +80,19 @@ describe("attention", () => {
     );
     expect(projection.currentCount).toBe(1);
     expect(projection.uncertaintyCount).toBe(1);
-    expect(projection.items[1]?.reason).toBe("host-stale");
+    expect(projection.items[1]?.reason).toBe("runtime-unknown");
     expect(projection.items[1]?.explanation).toContain("not current");
+  });
+
+  test("surfaces a live archived conversation without treating it as active work", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [goal("p0", "P0")],
+      [{ ...agent("archived", "working", "p0", 0), archivedAt: 5_000 }],
+    );
+
+    expect(projection.currentCount).toBe(1);
+    expect(projection.items[0]?.reason).toBe("archived-running");
+    expect(projection.items[0]?.explanation).toContain("archived conversation");
   });
 });

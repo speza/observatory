@@ -72,12 +72,14 @@ export interface LaunchRecovery {
   readonly kind: "start" | "resume";
   readonly harnessId: string;
   readonly executionRef: string;
+  readonly displayName?: string;
   readonly nativeConversationRef?: OpaqueNativeConversationRef;
   readonly goalId?: GoalId;
   readonly agentId?: AgentId;
 }
 
 export interface LaunchReceiptStore {
+  launchReceipts(): readonly LaunchReceipt[];
   reserveLaunchReceipt(
     receipt: LaunchReceipt,
   ):
@@ -87,9 +89,20 @@ export interface LaunchReceiptStore {
   saveLaunchReceipt(receipt: LaunchReceipt): void;
 }
 
+export interface PendingLaunch {
+  readonly requestId: string;
+  readonly harnessId: string;
+  readonly executionRef: string;
+  readonly displayName: string;
+  readonly goalId?: GoalId;
+  readonly message: string;
+}
+
 export interface StartAgentCoordinator {
   start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
   resume(intent: ResumeAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
+  pendingLaunches(): readonly PendingLaunch[];
+  refreshPending(): Effect.Effect<readonly StartAgentResult[], LaunchError>;
 }
 
 export interface AgentHarnessRegistry {

@@ -5,6 +5,7 @@ import type {
   WebCommandResponse,
   WebCloseoutResponse,
   WebLaunchOptionsResponse,
+  WebPendingLaunchesResponse,
   WebStartAgentRequest,
   WebStartAgentResponse,
   WebResumeAgentRequest,
@@ -18,8 +19,8 @@ import type {
   WebTerminalOpenResponse,
   WebTerminalScrollRequest,
   WebAgentRepositoryStatusResponse,
-  WebRecoveredSessionsResponse,
-  WebTrackRecoveredSessionResponse,
+  WebConversationHistoryResponse,
+  WebAddConversationResponse,
 } from "../../src/web/protocol.ts";
 import { Schema } from "effect";
 import {
@@ -28,6 +29,7 @@ import {
   PortfolioResponseSchema,
   SearchProjectionSchema,
   StartAgentResponseSchema,
+  PendingLaunchesResponseSchema,
   CloseoutResponseSchema,
   WorkingTreeDiffResponseSchema,
   AgentRepositoryStatusResponseSchema,
@@ -91,7 +93,7 @@ const TerminalEventSchema: Schema.Schema<WebTerminalEvent> = Schema.Union(
   }),
   Schema.Struct({ kind: Schema.Literal("closed"), reason: Schema.optional(Schema.String) }),
 );
-const RecoveredSessionSchema = Schema.Struct({
+const ConversationHistoryItemSchema = Schema.Struct({
   handle: Schema.String,
   harnessId: Schema.String,
   providerLabel: Schema.String,
@@ -101,13 +103,13 @@ const RecoveredSessionSchema = Schema.Struct({
   lastActiveAt: Schema.optional(Schema.Number),
   resumeEligibility: Schema.Literal("same-site", "provider-account", "blocked", "unknown"),
   provenance: Schema.Literal("provider-index", "session-header"),
-  executionState: Schema.Literal("exact-live", "possibly-live", "absent", "unknown"),
+  runtimeState: Schema.Literal("dormant", "runtime-unknown"),
 });
-const RecoveredSessionsSchema: Schema.Schema<WebRecoveredSessionsResponse> = Schema.Struct({
-  kind: Schema.Literal("recovered-sessions"),
-  sessions: Schema.Array(RecoveredSessionSchema),
+const ConversationHistorySchema: Schema.Schema<WebConversationHistoryResponse> = Schema.Struct({
+  kind: Schema.Literal("conversation-history"),
+  conversations: Schema.Array(ConversationHistoryItemSchema),
 });
-const TrackRecoveredSessionSchema = Schema.Struct({
+const AddConversationSchema = Schema.Struct({
   agentId: Schema.String,
   goalId: Schema.optional(Schema.String),
   portfolio: PortfolioResponseSchema,
@@ -124,29 +126,29 @@ export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioRes
   return Schema.decodeUnknownSync(PortfolioResponseSchema)(await response.json());
 };
 
-export const fetchRecoveredSessions = async (options?: {
+export const fetchConversationHistory = async (options?: {
   readonly refresh?: boolean;
   readonly signal?: AbortSignal;
-}): Promise<WebRecoveredSessionsResponse> => {
+}): Promise<WebConversationHistoryResponse> => {
   const response = await responseFor(
-    `/api/recovery/sessions${options?.refresh ? "?refresh=1" : ""}`,
+    `/api/conversations/history${options?.refresh ? "?refresh=1" : ""}`,
     options?.signal,
   );
-  return Schema.decodeUnknownSync(RecoveredSessionsSchema)(await response.json());
+  return Schema.decodeUnknownSync(ConversationHistorySchema)(await response.json());
 };
 
-export const trackRecoveredSession = async (
+export const addConversation = async (
   handle: string,
   goalId?: string,
-): Promise<WebTrackRecoveredSessionResponse> => {
-  const response = await fetch("/api/recovery/track", {
+): Promise<WebAddConversationResponse> => {
+  const response = await fetch("/api/conversations/add", {
     method: "POST",
     headers: { "content-type": "application/json", "x-ao-command": "1" },
     body: JSON.stringify({ handle, goalId }),
   });
   if (!response.ok)
-    throw new Error(await errorMessage(response, `Session import failed (${response.status}).`));
-  return Schema.decodeUnknownSync(TrackRecoveredSessionSchema)(await response.json());
+    throw new Error(await errorMessage(response, `Add conversation failed (${response.status}).`));
+  return Schema.decodeUnknownSync(AddConversationSchema)(await response.json());
 };
 
 export const fetchInspector = async (
@@ -275,6 +277,17 @@ export const startWebAgent = async (
   return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
 };
 
+export const fetchPendingLaunches = async (options?: {
+  readonly refresh?: boolean;
+  readonly signal?: AbortSignal;
+}): Promise<WebPendingLaunchesResponse> => {
+  const response = await responseFor(
+    `/api/launch/pending${options?.refresh ? "?refresh=1" : ""}`,
+    options?.signal,
+  );
+  return Schema.decodeUnknownSync(PendingLaunchesResponseSchema)(await response.json());
+};
+
 export const resumeWebAgent = async (
   request: WebResumeAgentRequest,
 ): Promise<WebResumeAgentResponse> => {
@@ -317,7 +330,7 @@ const terminalMutation = async (path: string, body: string): Promise<Response> =
 };
 
 export const openWebTerminal = async (
-  agentId: string,
+  target: { readonly agentId: string } | { readonly requestId: string },
   dimensions: { readonly columns: number; readonly rows: number },
   options?: {
     readonly linkId?: string;
@@ -326,7 +339,7 @@ export const openWebTerminal = async (
 ): Promise<WebTerminalOpenResponse> => {
   const response = await terminalMutation(
     "/api/terminal/open",
-    JSON.stringify({ agentId, dimensions, ...options }),
+    JSON.stringify({ ...target, dimensions, ...options }),
   );
   return Schema.decodeUnknownSync(TerminalOpenSchema)(await response.json());
 };

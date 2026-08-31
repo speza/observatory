@@ -45,7 +45,10 @@ export const createAgentCloseoutCoordinator = (dependencies: {
           agentId,
           before.error ?? "The session host is unavailable; Agent lifecycle is uncertain.",
         );
-      const beforeReconciliation = dependencies.universe.reconcile(before);
+      const beforeReconciliation = dependencies.universe.observe({
+        kind: "host-executions",
+        snapshot: before,
+      });
       if (!beforeReconciliation.accepted)
         return rejected(
           agentId,
@@ -101,7 +104,10 @@ export const createAgentCloseoutCoordinator = (dependencies: {
           agentId,
           `${closed.message} Observatory could not confirm the resulting host state.`,
         );
-      const afterReconciliation = dependencies.universe.reconcile(after);
+      const afterReconciliation = dependencies.universe.observe({
+        kind: "host-executions",
+        snapshot: after,
+      });
       if (!afterReconciliation.accepted)
         return rejected(
           agentId,

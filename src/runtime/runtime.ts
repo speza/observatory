@@ -38,9 +38,8 @@ export interface ObservatoryRuntime {
 const createReconcile = (
   host: SessionHost,
   universe: Universe,
-  reconcileSnapshot: (snapshot: HostSnapshot) => ReconciliationResult = universe.reconcile.bind(
-    universe,
-  ),
+  reconcileSnapshot: (snapshot: HostSnapshot) => ReconciliationResult = (snapshot) =>
+    universe.observe({ kind: "host-executions", snapshot }),
 ) =>
   Effect.gen(function* () {
     const snapshot = yield* host.snapshot();

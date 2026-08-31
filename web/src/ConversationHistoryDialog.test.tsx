@@ -1,19 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionImportDialog } from "./SessionImportDialog.tsx";
+import { ConversationHistoryDialog } from "./ConversationHistoryDialog.tsx";
 
-describe("SessionImportDialog", () => {
-  test("presents a compact import catalogue and blocks ambiguous resume", () => {
+describe("ConversationHistoryDialog", () => {
+  test("presents a compact dormant-conversation catalogue", () => {
     const markup = renderToStaticMarkup(
-      <SessionImportDialog
-        error={undefined}
-        goals={[]}
-        onClose={() => {}}
-        onImport={async () => ({ agentId: "agent-1" })}
-        onImported={() => {}}
-        onRefresh={async () => {}}
-        pending={false}
-        sessions={[
+      <ConversationHistoryDialog
+        conversations={[
           {
             handle: "opaque-handle",
             harnessId: "codex",
@@ -22,22 +15,28 @@ describe("SessionImportDialog", () => {
             workspaceRef: "/synthetic/project",
             resumeEligibility: "same-site",
             provenance: "provider-index",
-            executionState: "possibly-live",
+            runtimeState: "dormant",
           },
         ]}
+        error={undefined}
+        goals={[]}
+        onAdd={async () => ({ agentId: "agent-1" })}
+        onAdded={() => {}}
+        onClose={() => {}}
+        onRefresh={async () => {}}
+        pending={false}
       />,
     );
 
-    expect(markup).toContain("Session import");
+    expect(markup).toContain("Conversation history");
     expect(markup).toContain("Regression work");
-    expect(markup).toContain("Possibly running");
+    expect(markup).toContain("Dormant · resumable");
     expect(markup).toContain("Search");
     expect(markup).toContain("All providers");
     expect(markup).toContain("Destination Goal");
     expect(markup).toContain("Add to goal");
-    expect(markup).toContain("Import unassigned");
+    expect(markup).toContain("Add unassigned");
     expect(markup).toContain("The Agent will appear in Inbox.");
-    expect(markup).toContain("A plausible live execution must be resolved before resuming.");
     expect(markup).not.toContain("opaque-handle");
   });
 });

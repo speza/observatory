@@ -80,6 +80,24 @@ export const hostSnapshot = (
   hostInstanceId: "test-host:default",
   available: true,
   observedAt,
-  agents,
+  agents: agents.map((agent) =>
+    agent.harnessEvidence
+      ? agent
+      : {
+          ...agent,
+          harnessEvidence: {
+            detectedHarnessId: "test-harness",
+            nativeConversationRef: {
+              harnessId: "test-harness",
+              continuityScopeId: "test-scope",
+              kind: "conversation-id",
+              value: agent.nativeId.trim(),
+            },
+            restoreState: "not-restored",
+            source: "native-integration",
+            observedAt: agent.observedAt,
+          },
+        },
+  ),
   diagnostics: [],
 });
