@@ -292,4 +292,53 @@ describe("conversation tracker", () => {
     });
     fixture.store.close();
   });
+
+  test("rejects an ambiguous unscoped host identity instead of choosing a provider scope", () => {
+    const fixture = trackerFixture();
+    const other = {
+      ...conversation(),
+      nativeConversationRef: {
+        ...conversation().nativeConversationRef,
+        continuityScopeId: "scope-other",
+      },
+      nativeConversationAliases: conversation().nativeConversationAliases.map((alias) => ({
+        ...alias,
+        continuityScopeId: "scope-other",
+      })),
+      providerInstanceId: "codex-other-test",
+    };
+    fixture.store.reconcileProviderCatalogue(providerSnapshot());
+    fixture.store.reconcileProviderCatalogue({
+      ...providerSnapshot([other]),
+      providerInstanceId: "codex-other-test",
+      continuityScopeId: "scope-other",
+    });
+    const scopedExecution = liveProviderExecution("pane-live");
+    fixture.universe.reconcile(
+      hostSnapshot([
+        {
+          ...scopedExecution,
+          harnessEvidence: {
+            ...scopedExecution.harnessEvidence,
+            nativeConversationRef: {
+              ...scopedExecution.harnessEvidence.nativeConversationRef,
+              continuityScopeId: "scope-test",
+            },
+          },
+        },
+      ]),
+    );
+
+    const result = fixture.tracker.observeHost(
+      hostSnapshot([liveProviderExecution("pane-live")], 1_001_000),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.error).toContain("cannot replace its scoped conversation");
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]?.nativeConversationRef).toMatchObject({
+      continuityScopeId: "scope-test",
+    });
+    fixture.store.close();
+  });
 });

@@ -79,6 +79,7 @@ export const hostSnapshot = (
   hostKind: "test-host",
   hostInstanceId: "test-host:default",
   available: true,
+  complete: true,
   observedAt,
   agents: agents.map((agent) =>
     agent.harnessEvidence

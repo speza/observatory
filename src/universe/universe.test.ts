@@ -369,6 +369,26 @@ describe("Universe", () => {
     });
   });
 
+  test("does not infer execution absence from an incomplete host inventory", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(hostSnapshot([observation("pane-1")]));
+
+    clock.value += 1_000;
+    const result = universe.reconcile({
+      ...hostSnapshot([], clock.now()),
+      complete: false,
+      diagnostics: ["Synthetic inventory record was skipped."],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("did not prove any execution absent");
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      hostHealth: "live",
+      executionPresence: "live",
+      execution: { nativeId: "pane-1" },
+    });
+  });
+
   test("only reconciles a shell as an Agent after the host recognises it", () => {
     const { universe } = makeUniverse();
     expect(universe.reconcile(hostSnapshot([])).accepted).toBe(true);
@@ -424,6 +444,7 @@ describe("Universe", () => {
       hostKind: "test-host",
       hostInstanceId: "test-host:default",
       available: false,
+      complete: false,
       observedAt: 1_010_000,
       agents: [],
       diagnostics: [],
@@ -680,6 +701,97 @@ describe("Universe", () => {
       displayName: "Human name",
       primaryGoalId: "goal-1",
       nativeConversationRef: { value: "conversation-a", continuityScopeId: "scope-test" },
+      execution: { nativeId: "pane-1" },
+    });
+  });
+
+  test("rejects an unscoped observation that would downgrade a scoped execution", () => {
+    const { universe, clock } = makeUniverse();
+    const scoped = observedConversation("pane-1", "conversation-a");
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...scoped,
+          harnessEvidence: {
+            ...scoped.harnessEvidence,
+            nativeConversationRef: {
+              ...scoped.harnessEvidence.nativeConversationRef,
+              continuityScopeId: "scope-test",
+            },
+          },
+        },
+      ]),
+    );
+
+    clock.value += 1_000;
+    const result = universe.reconcile(
+      hostSnapshot([observedConversation("pane-1", "conversation-a", clock.now())], clock.now()),
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.error).toContain("cannot replace its scoped conversation");
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      continuity: "proved",
+      nativeConversationRef: {
+        value: "conversation-a",
+        continuityScopeId: "scope-test",
+      },
+      execution: { nativeId: "pane-1" },
+    });
+  });
+
+  test("consolidates a persisted legacy duplicate into its scoped Agent", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Preserved assignment" });
+    universe.execute({
+      type: "AddConversation",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "session-id",
+        value: "conversation-a",
+      },
+      displayName: "Provider name",
+      observedAt: clock.now(),
+    });
+    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    universe.execute({ type: "AssignAgent", agentId: "agent-2", goalId: "goal-1" });
+    universe.execute({ type: "RenameAgent", agentId: "agent-2", displayName: "Human name" });
+
+    clock.value += 1_000;
+    const scoped = observedConversation("pane-1", "conversation-a", clock.now());
+    const result = universe.reconcile(
+      hostSnapshot(
+        [
+          {
+            ...scoped,
+            harnessEvidence: {
+              ...scoped.harnessEvidence,
+              nativeConversationRef: {
+                ...scoped.harnessEvidence.nativeConversationRef,
+                continuityScopeId: "scope-test",
+              },
+            },
+          },
+        ],
+        clock.now(),
+      ),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("Consolidated legacy duplicate Agent");
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      id: "agent-1",
+      displayName: "Human name",
+      displayNameSource: "human",
+      primaryGoalId: "goal-1",
+      nativeConversationRef: {
+        value: "conversation-a",
+        continuityScopeId: "scope-test",
+      },
       execution: { nativeId: "pane-1" },
     });
   });

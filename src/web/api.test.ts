@@ -827,12 +827,40 @@ describe("ObservatoryWebApi", () => {
   test("closes host Agents before archiving them through the closeout endpoint", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
+    let canonicalHostObservations = 0;
+    const conversations: ConversationTrackerModule = {
+      refresh: () =>
+        Effect.succeed({
+          observedProviders: 0,
+          discoveredConversations: 0,
+          admittedConversations: 0,
+          diagnostics: [],
+        }),
+      history: () => [],
+      add: () => {
+        throw new Error("Conversation add is not used by closeout.");
+      },
+      observeHost: (snapshot) => {
+        canonicalHostObservations += 1;
+        return fixture.universe.reconcile(snapshot);
+      },
+    };
     fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
     const agent = fixture.universe
       .snapshot()
       .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
     if (!agent) throw new Error("Expected the deterministic mock Agent.");
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+    const api = new ObservatoryWebApi(
+      fixture.universe,
+      fixture.clock,
+      "http://localhost",
+      host,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      conversations,
+    );
 
     const response = await api.fetch(
       new Request("http://localhost/api/closeout/close", {
@@ -852,6 +880,7 @@ describe("ObservatoryWebApi", () => {
       ok: true,
       results: [{ agentId: agent.id, status: "closed-and-archived" }],
     });
+    expect(canonicalHostObservations).toBe(2);
     expect(body.portfolio.commandCentre.counts.agents).toBe(19);
     expect(
       fixture.universe.snapshot().agents.find((candidate) => candidate.id === agent.id),
@@ -893,5 +922,26 @@ describe("ObservatoryWebApi", () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  test("does not enable closeout without the canonical conversation observer", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock });
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+
+    const response = await api.fetch(
+      new Request("http://localhost/api/closeout/close", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({ agentIds: ["agent-1"] }),
+      }),
+    );
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: "Agent closeout is unavailable." });
   });
 });

@@ -40,6 +40,8 @@ export interface HostSnapshot {
   /** Stable identity of this concrete host instance within its site. */
   readonly hostInstanceId: string;
   readonly available: boolean;
+  /** Whether this snapshot is authoritative for execution absence within this host instance. */
+  readonly complete: boolean;
   readonly observedAt: number;
   readonly agents: readonly HostAgentObservation[];
   readonly diagnostics: readonly string[];

@@ -75,6 +75,12 @@
       "agents": [
         {
           "agent": "codex",
+          "agent_session": {
+            "source": "herdr-integration",
+            "agent": "codex",
+            "kind": "id",
+            "value": "synthetic-codex-alpha"
+          },
           "display_agent": "codex",
           "agent_status": "working",
           "name": "alpha-builder",
@@ -95,6 +101,12 @@
         },
         {
           "agent": "claude",
+          "agent_session": {
+            "source": "herdr-integration",
+            "agent": "claude",
+            "kind": "id",
+            "value": "synthetic-claude-beta"
+          },
           "display_agent": "claude",
           "agent_status": "blocked",
           "name": "beta-reviewer",
@@ -115,6 +127,12 @@
         },
         {
           "agent": "codex",
+          "agent_session": {
+            "source": "herdr-integration",
+            "agent": "codex",
+            "kind": "id",
+            "value": "synthetic-codex-release"
+          },
           "display_agent": "codex",
           "agent_status": "idle",
           "name": "release-check",

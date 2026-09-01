@@ -275,6 +275,7 @@ describe("Herdr adapter", () => {
       99,
     );
     expect(snapshot.available).toBe(true);
+    expect(snapshot.complete).toBe(false);
     expect(snapshot.agents).toHaveLength(1);
     expect(snapshot.diagnostics).toHaveLength(1);
   });
@@ -478,6 +479,58 @@ describe("Herdr adapter", () => {
                   if (!isRecord(pane) || stringValue(pane, "pane_id") !== "fixture-w2:p1")
                     return pane;
                   return { ...pane, terminal_id: "replacement-terminal" };
+                })
+              : [],
+          },
+        },
+      }),
+      stderr: "",
+    });
+
+    const closed = await Effect.runPromise(adapter.closeAgent(access));
+
+    expect(closed.ok).toBe(false);
+    expect(closed.message).toContain("target changed");
+    expect(runner.calls.some((call) => call.slice(0, 3).join(" ") === "herdr pane close")).toBe(
+      false,
+    );
+  });
+
+  test("refuses to close a replacement conversation in the same Herdr pane", async () => {
+    if (!isRecord(fixture)) throw new Error("Sanitized Herdr fixture is not a record.");
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(fixture),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+    const access = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    const result = nonEmptyRecord(fixture.result);
+    const snapshot = nonEmptyRecord(result.snapshot);
+    runner.setResult({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ...fixture,
+        result: {
+          ...result,
+          snapshot: {
+            ...snapshot,
+            agents: Array.isArray(snapshot.agents)
+              ? snapshot.agents.map((agent) => {
+                  if (!isRecord(agent) || stringValue(agent, "pane_id") !== "fixture-w2:p1")
+                    return agent;
+                  return {
+                    ...agent,
+                    agent_session: {
+                      source: "herdr-integration",
+                      agent: "claude",
+                      kind: "id",
+                      value: "synthetic-claude-replacement",
+                    },
+                  };
                 })
               : [],
           },

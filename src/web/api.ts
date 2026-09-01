@@ -111,9 +111,16 @@ export class ObservatoryWebApi {
   ) {
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
-    this.closeout = host
-      ? new WebCloseoutGateway(createAgentCloseoutCoordinator({ universe, host }))
-      : undefined;
+    this.closeout =
+      host && conversations
+        ? new WebCloseoutGateway(
+            createAgentCloseoutCoordinator({
+              universe,
+              host,
+              observeHost: conversations.observeHost.bind(conversations),
+            }),
+          )
+        : undefined;
     this.launch =
       host && launch && plugins
         ? new WebLaunchGateway(universe, plugins, launch.workspace, launch.coordinator)

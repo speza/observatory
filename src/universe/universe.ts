@@ -424,6 +424,31 @@ const isScopeEnrichment = (
   current.kind === observed.kind &&
   current.value === observed.value;
 
+const sameConversationWithoutScope = (
+  current: NativeConversationRef,
+  observed: NativeConversationRef,
+): boolean =>
+  current.harnessId === observed.harnessId &&
+  current.kind === observed.kind &&
+  current.value === observed.value;
+
+const appendDistinctExecutions = (
+  left: readonly NonNullable<Agent["execution"]>[],
+  right: readonly NonNullable<Agent["execution"]>[],
+): Agent["executionHistory"] => {
+  const executions = [...left];
+  for (const execution of right)
+    if (
+      !executions.some(
+        (candidate) =>
+          candidate.hostInstanceId === execution.hostInstanceId &&
+          candidate.nativeId === execution.nativeId,
+      )
+    )
+      executions.push(execution);
+  return executions;
+};
+
 const nativeConversationFromObservation = (
   observation: HostAgentObservation,
 ): NativeConversationRef | undefined => {
@@ -623,6 +648,79 @@ const detachReplacedExecution = (
   if (!draft.staleAgentIds.includes(agent.id)) draft.staleAgentIds.push(agent.id);
 };
 
+const displayNameRank = (source: Agent["displayNameSource"]): number =>
+  source === "human" ? 2 : source === "provider" ? 1 : 0;
+
+const consolidateLegacyConversationVariants = (
+  draft: ReconciliationDraft,
+  canonical: Agent,
+): Agent => {
+  const reference = canonical.nativeConversationRef;
+  if (!reference?.continuityScopeId) return canonical;
+  const legacy = draft.state.agents.filter(
+    (candidate) =>
+      candidate.id !== canonical.id &&
+      candidate.nativeConversationRef !== undefined &&
+      candidate.nativeConversationRef.continuityScopeId === undefined &&
+      sameConversationWithoutScope(candidate.nativeConversationRef, reference),
+  );
+  if (legacy.length === 0) return canonical;
+
+  let merged = canonical;
+  for (const duplicate of legacy) {
+    if (
+      merged.primaryGoalId &&
+      duplicate.primaryGoalId &&
+      merged.primaryGoalId !== duplicate.primaryGoalId
+    )
+      draft.diagnostics.push(
+        `Consolidated duplicate Agent ${duplicate.id} into ${merged.id}; retained the canonical Goal assignment.`,
+      );
+    const duplicateNameWins =
+      displayNameRank(duplicate.displayNameSource) > displayNameRank(merged.displayNameSource);
+    merged = Object.assign({}, merged, {
+      displayName: duplicateNameWins ? duplicate.displayName : merged.displayName,
+      displayNameSource: duplicateNameWins ? duplicate.displayNameSource : merged.displayNameSource,
+      description: merged.description ?? duplicate.description,
+      primaryGoalId: merged.primaryGoalId ?? duplicate.primaryGoalId,
+      executionHistory: appendDistinctExecutions(
+        merged.executionHistory,
+        duplicate.executionHistory,
+      ),
+      lastSeenAt: Math.max(merged.lastSeenAt, duplicate.lastSeenAt),
+      lastObservedAt: Math.max(merged.lastObservedAt, duplicate.lastObservedAt),
+      lastChangedAt: Math.max(merged.lastChangedAt, duplicate.lastChangedAt),
+      repository: merged.repository ?? duplicate.repository,
+      branch: merged.branch ?? duplicate.branch,
+      worktree: merged.worktree ?? duplicate.worktree,
+      provider: merged.provider ?? duplicate.provider,
+      archivedAt:
+        merged.archivedAt === undefined
+          ? duplicate.archivedAt
+          : duplicate.archivedAt === undefined
+            ? merged.archivedAt
+            : Math.min(merged.archivedAt, duplicate.archivedAt),
+    });
+    draft.state.agents = draft.state.agents.filter((candidate) => candidate.id !== duplicate.id);
+    const dismissals = new Map<string, (typeof draft.state.relatedAgentDismissals)[number]>();
+    for (const dismissal of draft.state.relatedAgentDismissals) {
+      const normalized =
+        dismissal.agentId === duplicate.id ? { ...dismissal, agentId: merged.id } : dismissal;
+      const key = dismissalKey(normalized.goalId, normalized.agentId);
+      const previous = dismissals.get(key);
+      if (!previous || normalized.dismissedAt < previous.dismissedAt)
+        dismissals.set(key, normalized);
+    }
+    draft.state.relatedAgentDismissals = [...dismissals.values()];
+    draft.diagnostics.push(
+      `Consolidated legacy duplicate Agent ${duplicate.id} into scoped Agent ${merged.id}.`,
+    );
+  }
+  replaceAgent(draft.state, merged);
+  if (!draft.updatedAgentIds.includes(merged.id)) draft.updatedAgentIds.push(merged.id);
+  return merged;
+};
+
 const reconcileObservation = (
   draft: ReconciliationDraft,
   snapshot: HostSnapshot,
@@ -668,7 +766,7 @@ const reconcileObservation = (
     byExecution = undefined;
   }
 
-  const existing = byConversation ?? byExecution;
+  let existing = byConversation ?? byExecution;
   if (!existing) {
     if (!observedConversation) {
       draft.diagnostics.push(
@@ -684,6 +782,8 @@ const reconcileObservation = (
     draft.addedAgentIds.push(id);
     return;
   }
+
+  existing = consolidateLegacyConversationVariants(draft, existing);
 
   const conflicts = observedConversation
     ? (conversationExecutions.get(nativeConversationKey(observedConversation)) ?? [])
@@ -781,6 +881,20 @@ const planReconciliation = (
     return rejectedReconciliation(error, diagnostics);
   }
 
+  const scopeDowngrade = snapshot.agents.find((observation) => {
+    const observed = nativeConversationFromObservation(observation);
+    if (!observed || observed.continuityScopeId !== undefined) return false;
+    const current = previous.agents.find((agent) =>
+      executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
+    )?.nativeConversationRef;
+    return Boolean(current?.continuityScopeId && sameConversationWithoutScope(current, observed));
+  });
+  if (scopeDowngrade)
+    return rejectedReconciliation(
+      `Unscoped provider identity for ${scopeDowngrade.nativeId.trim()} cannot replace its scoped conversation without canonical evidence.`,
+      diagnostics,
+    );
+
   const draft: ReconciliationDraft = {
     state: cloneUniverseState(previous),
     diagnostics,
@@ -799,7 +913,11 @@ const planReconciliation = (
   }
 
   const conversationExecutions = indexConversationExecutions(snapshot);
-  detachMissingExecutions(draft, snapshot);
+  if (snapshot.complete) detachMissingExecutions(draft, snapshot);
+  else
+    draft.diagnostics.push(
+      `Incomplete ${snapshot.hostKind} snapshot did not prove any execution absent.`,
+    );
   for (const observation of snapshot.agents)
     reconcileObservation(draft, snapshot, observation, conversationExecutions, ids);
   return draft;

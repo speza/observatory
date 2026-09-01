@@ -984,7 +984,15 @@ live Agent and local archive for an Agent confirmed stale. The host adapter
 must observe the exact revalidated execution disappear before `Close & archive`
 can write the archive. If a previously-live target cannot be resolved during
 revalidation, the operation fails without silently degrading into local
-archive. Archive removes the agent from active
+archive. Closeout submits host snapshots through the same provider-aware
+canonical observation port as periodic reconciliation; sending raw adapter
+observations directly to Universe can split one provider conversation into
+scoped and legacy Agent records. Closeout is disabled if the canonical observer
+is not present. A complete host inventory is required to prove absence, and an
+ambiguous or conflicted identity fails closed. A uniquely scoped observation
+consolidates legacy duplicates while retaining human metadata. The host close
+target fingerprints both its opaque terminal container and provider conversation,
+so replacing the process inside one pane invalidates the target. Archive removes the agent from active
 projections without deleting its identity, assignment or observed history;
 future host reconciliation updates the archived record but does not silently
 restore it.

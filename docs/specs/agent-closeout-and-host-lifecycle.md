@@ -78,14 +78,19 @@ signals or Herdr commands.
 
 The Herdr adapter maps that operation to the host-supported pane close action.
 It resolves and revalidates the opaque Agent target immediately before closing
-so a missing, changed or reused pane fails closed. After Herdr accepts the close,
+so a missing, changed or reused pane fails closed. Revalidation binds both the
+terminal container and the opaque provider conversation occupying it; a new
+conversation in the same pane is a changed target. After Herdr accepts the close,
 the adapter takes another host snapshot and only reports success when that exact
 pane is absent. A close acknowledgement without observed absence leaves the
 Observatory Agent active. The mock adapter provides the deterministic contract
 evidence path.
 
 A closeout coordinator owns the cross-module ordering behind one small
-interface:
+interface. Both pre-close and post-close snapshots go through the composition
+root's canonical host-observation path before reaching Universe. Closeout must
+not bypass provider identity enrichment by writing a raw host snapshot directly.
+If that canonical observer is unavailable, closeout itself is unavailable:
 
 ```text
 Web action
@@ -93,7 +98,7 @@ Web action
       -> resolve current Agent
       -> request fresh SessionHost access
       -> close host execution
-      -> reconcile a fresh host snapshot
+      -> canonically reconcile a fresh host snapshot
       -> submit ArchiveAgent to Universe
   -> refreshed projection
 ```
@@ -109,6 +114,10 @@ host-specific side effects.
   that the host execution stopped.
 - If target revalidation or host close fails, leave the Agent active and report
   the exact host error.
+- If multiple executions claim the Agent, reject closeout without choosing or
+  archiving any execution.
+- If the host inventory is partial, it cannot prove execution absence and
+  closeout fails without mutation.
 - If the host accepts close but still reports the target, or its target identity
   is reused before verification, leave the Agent active and report that the
   close was not confirmed.
@@ -122,6 +131,10 @@ host-specific side effects.
   that a particular Agent ended.
 - Repeated close requests must be safe: an already-ended execution can converge
   on the same archived Observatory state.
+- A uniquely scoped provider observation may consolidate a persisted unscoped
+  duplicate created by an older Observatory bug. Consolidation retains the
+  scoped Agent identity and preserves human metadata and assignment. An
+  unscoped observation never downgrades an existing scoped identity.
 
 ## Delivery status
 

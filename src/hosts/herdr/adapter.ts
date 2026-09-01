@@ -132,6 +132,7 @@ export const parseHerdrSnapshot = (
       hostKind: "herdr",
       hostInstanceId: HERDR_HOST_INSTANCE_ID,
       available: false,
+      complete: false,
       observedAt,
       agents: [],
       diagnostics: ["Herdr snapshot did not contain an agent inventory result."],
@@ -147,6 +148,7 @@ export const parseHerdrSnapshot = (
       hostKind: "herdr",
       hostInstanceId: HERDR_HOST_INSTANCE_ID,
       available: false,
+      complete: false,
       observedAt,
       agents: [],
       diagnostics: [`Herdr snapshot omitted required ${missing.join(" and ")} array(s).`],
@@ -230,6 +232,7 @@ export const parseHerdrSnapshot = (
     hostKind: "herdr",
     hostInstanceId: HERDR_HOST_INSTANCE_ID,
     available: true,
+    complete: diagnostics.every((diagnostic) => !diagnostic.startsWith("Skipped a ")),
     observedAt,
     agents: observations,
     diagnostics,
@@ -251,6 +254,21 @@ const terminalFingerprintForPane = (pane: RecordValue): string | undefined => {
   const terminalId = stringValue(pane, "terminal_id");
   if (!workspaceId || !tabId || !paneId || !terminalId) return undefined;
   return JSON.stringify({ workspaceId, tabId, paneId, terminalId });
+};
+
+const agentFingerprintForObservation = (
+  observation: HostAgentObservation,
+  terminalFingerprint: string,
+): string | undefined => {
+  const reference = observation.harnessEvidence?.nativeConversationRef;
+  if (!reference) return undefined;
+  return JSON.stringify({
+    terminalFingerprint,
+    harnessId: reference.harnessId,
+    continuityScopeId: reference.continuityScopeId,
+    kind: reference.kind,
+    value: reference.value,
+  });
 };
 
 const herdrTarget = (
@@ -385,7 +403,10 @@ const linkedExecutionsFor = (
     const workspaceId = agentPane ? stringValue(agentPane, "workspace_id") : undefined;
     const workingDirectory =
       agent.worktree ?? (agentPane ? paneWorkingDirectory(agentPane) : undefined);
-    const ownerFingerprint = agentPane ? terminalFingerprintForPane(agentPane) : undefined;
+    const ownerTerminalFingerprint = agentPane ? terminalFingerprintForPane(agentPane) : undefined;
+    const ownerFingerprint = ownerTerminalFingerprint
+      ? agentFingerprintForObservation(agent, ownerTerminalFingerprint)
+      : undefined;
     const wanted = workingDirectory ? normalizedPath(workingDirectory) : undefined;
     const observed = panes
       .filter((pane) => {
@@ -691,6 +712,7 @@ export class HerdrHostAdapter implements SessionHost {
         hostKind: "herdr",
         hostInstanceId: HERDR_HOST_INSTANCE_ID,
         available: false,
+        complete: false,
         observedAt: this.clock.now(),
         agents: [],
         diagnostics: [],
@@ -702,6 +724,7 @@ export class HerdrHostAdapter implements SessionHost {
         hostKind: "herdr",
         hostInstanceId: HERDR_HOST_INSTANCE_ID,
         available: false,
+        complete: false,
         observedAt: this.clock.now(),
         agents: [],
         diagnostics: [],
@@ -727,7 +750,10 @@ export class HerdrHostAdapter implements SessionHost {
     });
     if (!ambiguous)
       for (const agent of snapshot.agents) {
-        const fingerprint = this.liveTerminalFingerprints.get(agent.nativeId);
+        const terminalFingerprint = this.liveTerminalFingerprints.get(agent.nativeId);
+        const fingerprint = terminalFingerprint
+          ? agentFingerprintForObservation(agent, terminalFingerprint)
+          : undefined;
         if (fingerprint) this.liveAgentFingerprints.set(agent.nativeId, fingerprint);
         this.liveTargets.set(
           agent.nativeId,
@@ -761,21 +787,26 @@ export class HerdrHostAdapter implements SessionHost {
           explanation: "The agent is not present in the latest Herdr snapshot.",
         } satisfies AgentAccess;
       const linkedExecutions = this.liveLinkedExecutions.get(agentRef.nativeId) ?? [];
-      const fingerprint = this.liveAgentFingerprints.get(agentRef.nativeId);
+      const agentFingerprint = this.liveAgentFingerprints.get(agentRef.nativeId);
+      const terminalFingerprint = this.liveTerminalFingerprints.get(agentRef.nativeId);
       return {
         supported: true,
         capabilities: [
-          ...(fingerprint ? ["embedded-terminal" as const] : []),
+          ...(terminalFingerprint ? ["embedded-terminal" as const] : []),
           "native-handoff",
-          ...(fingerprint ? ["close-agent" as const] : []),
+          ...(agentFingerprint ? ["close-agent" as const] : []),
           ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
             ? ["linked-terminal" as const]
             : []),
         ],
         mode: "attach",
         target,
-        terminalTarget: fingerprint
-          ? { kind: "herdr-terminal-control", token: agentRef.nativeId, fingerprint }
+        terminalTarget: terminalFingerprint
+          ? {
+              kind: "herdr-terminal-control",
+              token: agentRef.nativeId,
+              fingerprint: terminalFingerprint,
+            }
           : undefined,
         linkedExecutions,
         explanation: "Attach directly or open an embedded terminal for the running Herdr agent.",
@@ -852,10 +883,12 @@ export class HerdrHostAdapter implements SessionHost {
         if (!token || !access.target.fingerprint)
           return { ok: false, message: "The Herdr close target is invalid or unsupported." };
         const snapshot = await this.snapshotInternal();
-        if (!snapshot.available)
+        if (!snapshot.available || !snapshot.complete)
           return {
             ok: false,
-            message: snapshot.error ?? "Herdr is unavailable; the Agent lifecycle is uncertain.",
+            message:
+              snapshot.error ??
+              "Herdr did not provide a complete Agent inventory; the lifecycle is uncertain.",
           };
         const current = this.liveTargets.get(token);
         if (!current) return { ok: true, message: `Herdr agent ${token} had already ended.` };
@@ -866,7 +899,7 @@ export class HerdrHostAdapter implements SessionHost {
           };
         const verifyClosed = async (): Promise<HostActionResult> => {
           const after = await this.snapshotInternal();
-          if (!after.available)
+          if (!after.available || !after.complete)
             return {
               ok: false,
               message: `Herdr accepted the close for ${token}, but Observatory could not verify that the Agent ended.`,

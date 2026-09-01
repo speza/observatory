@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { hasAgentCapability, type SessionHost } from "../hosts/types.ts";
-import type { Universe } from "../universe/universe.ts";
+import { hasAgentCapability, type HostSnapshot, type SessionHost } from "../hosts/types.ts";
+import type { ReconciliationResult, Universe } from "../universe/universe.ts";
 import type {
   AgentCloseoutBatchResult,
   AgentCloseoutCoordinator,
@@ -21,6 +21,7 @@ const rejected = (agentId: string, message: string): AgentCloseoutResult => ({
 export const createAgentCloseoutCoordinator = (dependencies: {
   readonly universe: Universe;
   readonly host: SessionHost;
+  readonly observeHost: (snapshot: HostSnapshot) => ReconciliationResult;
 }): AgentCloseoutCoordinator => {
   const closeAndArchive = (agentIdValue: string) =>
     Effect.gen(function* () {
@@ -39,10 +40,12 @@ export const createAgentCloseoutCoordinator = (dependencies: {
           agentId,
           before.error ?? "The session host is unavailable; Agent lifecycle is uncertain.",
         );
-      const beforeReconciliation = dependencies.universe.observe({
-        kind: "host-executions",
-        snapshot: before,
-      });
+      if (!before.complete)
+        return rejected(
+          agentId,
+          "The fresh host inventory was incomplete; no execution was closed or archived.",
+        );
+      const beforeReconciliation = dependencies.observeHost(before);
       if (!beforeReconciliation.accepted)
         return rejected(
           agentId,
@@ -53,6 +56,11 @@ export const createAgentCloseoutCoordinator = (dependencies: {
         .snapshot()
         .agents.find((candidate) => candidate.id === agentId);
       if (!current) return rejected(agentId, "Agent no longer exists.");
+      if (current.executionPresence === "conflict" || current.conflictingExecutions.length > 0)
+        return rejected(
+          agentId,
+          `${current.displayName} has multiple possible live executions; resolve the conflict before closing it.`,
+        );
 
       if (current.hostHealth === "stale") {
         if (requestedLiveClose)
@@ -103,10 +111,12 @@ export const createAgentCloseoutCoordinator = (dependencies: {
           agentId,
           `${closed.message} Observatory could not confirm the resulting host state.`,
         );
-      const afterReconciliation = dependencies.universe.observe({
-        kind: "host-executions",
-        snapshot: after,
-      });
+      if (!after.complete)
+        return rejected(
+          agentId,
+          `${closed.message} Observatory received an incomplete host inventory and could not confirm the resulting state.`,
+        );
+      const afterReconciliation = dependencies.observeHost(after);
       if (!afterReconciliation.accepted)
         return rejected(
           agentId,

@@ -241,6 +241,7 @@ export class MockHostAdapter implements SessionHost {
         hostKind: "mock",
         hostInstanceId: "mock:default",
         available,
+        complete: available,
         observedAt,
         agents,
         diagnostics: frame.diagnostics ?? [],
