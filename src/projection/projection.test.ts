@@ -4,7 +4,7 @@ import { makeUniverse, hostSnapshot } from "../universe/test-support.ts";
 const observation = (
   nativeId: string,
   displayName: string,
-  runtimeState: "idle" | "working" | "blocked" | "done" = "idle",
+  runtimeState: "idle" | "working" | "waiting" | "blocked" | "done" = "idle",
   repository = "repo",
   worktree = "/sandbox/tree",
   executionContainer?: { readonly id: string; readonly label?: string },
@@ -466,6 +466,7 @@ describe("projections", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Catch-up goal" });
     universe.reconcile(hostSnapshot([observation("pane", "worker", "working")]));
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.execute({ type: "AcknowledgeCatchUp" });
 
     clock.value += 1_000;
@@ -476,11 +477,48 @@ describe("projections", () => {
 
     expect(projection.pending).toBe(true);
     expect(projection.transitionCount).toBe(2);
-    expect(projection.groups.map((group) => group.outcome)).toEqual(["finished", "changed"]);
+    expect(projection.subjects).toHaveLength(1);
+    expect(projection.subjects[0]).toMatchObject({
+      subjectType: "goal",
+      subjectId: "goal-1",
+      title: "Catch-up goal",
+      affectedTargetCount: 2,
+      transitionCount: 2,
+      summaries: [
+        { kind: "finished", count: 1, label: "1 Agent finished" },
+        { kind: "changed", count: 1, label: "1 Goal changed" },
+      ],
+    });
     expect(projection.counts.finished).toBe(1);
     expect(projection.counts.changed).toBe(1);
-    expect(projection.groups.flatMap((group) => group.items).map((item) => item.sequence)).toEqual([
-      4, 3,
+    expect(projection.subjects[0]?.transitions.map((item) => item.outcome)).toEqual([
+      "finished",
+      "changed",
     ]);
+  });
+
+  test("synthesises resolved attention from one Agent trajectory", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Resolve operator input" });
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "working")]));
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    universe.execute({ type: "AcknowledgeCatchUp" });
+
+    clock.value += 1_000;
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "waiting")], clock.now()));
+    clock.value += 1_000;
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "idle")], clock.now()));
+
+    const projection = universe.project({ kind: "catch-up", now: clock.now() });
+    if (projection.kind !== "catch-up") throw new Error("wrong projection");
+    expect(projection.subjects).toHaveLength(1);
+    expect(projection.subjects[0]?.summaries).toEqual([
+      {
+        kind: "attention-resolved",
+        count: 1,
+        label: "1 Agent no longer needs judgment",
+      },
+    ]);
+    expect(projection.subjects[0]?.transitionCount).toBe(2);
   });
 });

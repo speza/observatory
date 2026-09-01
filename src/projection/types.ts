@@ -253,10 +253,36 @@ export interface SearchProjection {
   readonly results: readonly SearchResult[];
 }
 
-export interface CatchUpGroup {
-  readonly outcome: UniverseChange["outcome"];
+export type CatchUpSubjectType = "system" | "goal" | "unassigned";
+export type CatchUpSummaryKind =
+  | "attention"
+  | "attention-resolved"
+  | "finished"
+  | "new"
+  | "changed"
+  | "stale"
+  | "stale-resolved";
+
+export interface CatchUpSummary {
+  readonly kind: CatchUpSummaryKind;
+  readonly count: number;
   readonly label: string;
-  readonly items: readonly UniverseChange[];
+}
+
+export interface CatchUpSubject {
+  readonly id: string;
+  readonly subjectType: CatchUpSubjectType;
+  readonly subjectId?: string;
+  readonly title: string;
+  readonly occurredAt: number;
+  readonly sequence: number;
+  readonly outcome: UniverseChange["outcome"];
+  readonly affectedTargetCount: number;
+  readonly transitionCount: number;
+  readonly summaries: readonly CatchUpSummary[];
+  readonly transitions: readonly UniverseChange[];
+  readonly evidenceTransitionCount?: number;
+  readonly evidenceGroups?: readonly EvidenceCatchUpGroup[];
 }
 
 export interface CatchUpProjection {
@@ -266,10 +292,9 @@ export interface CatchUpProjection {
   readonly throughSequence: number;
   readonly transitionCount: number;
   readonly pending: boolean;
-  readonly groups: readonly CatchUpGroup[];
+  readonly subjects: readonly CatchUpSubject[];
   readonly counts: Record<UniverseChange["outcome"], number>;
   readonly evidenceTransitionCount?: number;
-  readonly evidenceGroups?: readonly EvidenceCatchUpGroup[];
 }
 
 export interface EvidenceCatchUpItem {

@@ -1,5 +1,9 @@
-import type { CatchUpProjection, EvidenceCatchUpItem } from "../../src/projection/types.ts";
-import type { UniverseChange, UniverseChangeOutcome } from "../../src/universe/types.ts";
+import type {
+  CatchUpProjection,
+  CatchUpSubject,
+  EvidenceCatchUpItem,
+} from "../../src/projection/types.ts";
+import type { UniverseChange } from "../../src/universe/types.ts";
 import type { Selection } from "./Atlas.tsx";
 
 interface CatchUpPanelProps {
@@ -7,17 +11,10 @@ interface CatchUpPanelProps {
   readonly pending: boolean;
   readonly onAcknowledge: () => Promise<void>;
   readonly onClose: () => void;
+  readonly onOpenInbox: () => void;
   readonly onSelect: (selection: Selection) => void;
   readonly onSelectSystem: (systemId: string) => void;
 }
-
-const outcomeLabels = {
-  attention: "Needs you",
-  finished: "Finished",
-  new: "New",
-  changed: "Changed",
-  stale: "Uncertain",
-} satisfies Record<UniverseChangeOutcome, string>;
 
 const time = (occurredAt: number): string =>
   new Date(occurredAt).toLocaleTimeString([], {
@@ -25,29 +22,15 @@ const time = (occurredAt: number): string =>
     minute: "2-digit",
   });
 
-const byMostRecent = <T extends { readonly occurredAt: number; readonly sequence: number }>(
-  left: T,
-  right: T,
-): number => right.occurredAt - left.occurredAt || right.sequence - left.sequence;
-
 export const CatchUpPanel = ({
   projection,
   pending,
   onAcknowledge,
   onClose,
+  onOpenInbox,
   onSelect,
   onSelectSystem,
 }: CatchUpPanelProps): React.JSX.Element => {
-  const acceptedChanges = projection.groups.flatMap((group) => group.items).sort(byMostRecent);
-  const evidenceGroups = projection.evidenceGroups ?? [];
-  const providerSignals = evidenceGroups
-    .filter((group) => group.kind !== "activity")
-    .flatMap((group) => group.items.map((item) => ({ ...item, label: group.label })))
-    .sort(byMostRecent);
-  const activity = evidenceGroups
-    .filter((group) => group.kind === "activity")
-    .flatMap((group) => group.items)
-    .sort(byMostRecent);
   const since = projection.sinceAt
     ? new Date(projection.sinceAt).toLocaleString([], {
         day: "numeric",
@@ -60,6 +43,13 @@ export const CatchUpPanel = ({
   const selectChange = (item: UniverseChange): void => {
     if (item.targetType === "system") onSelectSystem(item.targetId);
     else onSelect({ type: item.targetType, id: item.targetId });
+  };
+
+  const selectSubject = (subject: CatchUpSubject): void => {
+    if (subject.subjectType === "system" && subject.subjectId) onSelectSystem(subject.subjectId);
+    else if (subject.subjectType === "goal" && subject.subjectId)
+      onSelect({ type: "goal", id: subject.subjectId });
+    else onOpenInbox();
   };
 
   const evidenceItem = (item: EvidenceCatchUpItem, label?: string): React.JSX.Element => (
@@ -86,8 +76,8 @@ export const CatchUpPanel = ({
           <h2>{projection.pending ? "Here’s what changed" : "You’re caught up"}</h2>
           {projection.pending ? (
             <p className="catch-up-panel__intro">
-              Start with accepted changes. Provider signals are supporting evidence until you
-              inspect them.
+              Changes are grouped by Goal. Provider observations remain supporting evidence until
+              you inspect them.
             </p>
           ) : null}
         </div>
@@ -117,61 +107,88 @@ export const CatchUpPanel = ({
         </div>
       ) : null}
 
-      {acceptedChanges.length > 0 || providerSignals.length > 0 || activity.length > 0 ? (
-        <div className="catch-up-panel__body">
-          <section className="catch-up-panel__primary">
-            <div className="catch-up-section-title">
-              <div>
-                <h3>Accepted changes</h3>
-                <p>Durable changes Observatory has reconciled.</p>
-              </div>
-              <b>{acceptedChanges.length}</b>
+      {projection.subjects.length > 0 ? (
+        <div className="catch-up-panel__subjects">
+          <div className="catch-up-section-title">
+            <div>
+              <h3>Changes by Goal</h3>
+              <p>One summary for each affected area of work.</p>
             </div>
-            {acceptedChanges.length > 0 ? (
-              <div className="catch-up-events">
-                {acceptedChanges.map((item) => (
+            <b>{projection.subjects.length}</b>
+          </div>
+          <div className="catch-up-subjects">
+            {projection.subjects.map((subject) => {
+              const evidenceGroups = subject.evidenceGroups ?? [];
+              const providerSignals = evidenceGroups.filter((group) => group.kind !== "activity");
+              const activity = evidenceGroups
+                .filter((group) => group.kind === "activity")
+                .flatMap((group) => group.items);
+              return (
+                <article className="catch-up-subject" key={subject.id}>
                   <button
-                    className="catch-up-event"
-                    key={item.sequence}
-                    onClick={() => selectChange(item)}
+                    className="catch-up-subject__heading"
+                    onClick={() => selectSubject(subject)}
                     type="button"
                   >
-                    <span className={`catch-up-event__marker is-${item.outcome}`} />
-                    <span className="catch-up-event__content">
-                      <small>{outcomeLabels[item.outcome]}</small>
-                      <strong>{item.summary}</strong>
+                    <span className={`catch-up-event__marker is-${subject.outcome}`} />
+                    <span>
+                      <small>{subject.subjectType}</small>
+                      <strong>{subject.title}</strong>
                     </span>
-                    <time>{time(item.occurredAt)}</time>
+                    <time>{time(subject.occurredAt)}</time>
                   </button>
-                ))}
-              </div>
-            ) : (
-              <p className="catch-up-section-empty">No accepted changes.</p>
-            )}
-          </section>
-
-          <aside className="catch-up-panel__evidence" aria-label="Provider signals">
-            <div className="catch-up-section-title">
-              <div>
-                <h3>Provider signals</h3>
-                <p>Requests and outcomes reported by agent providers.</p>
-              </div>
-              <b>{providerSignals.length}</b>
-            </div>
-            {providerSignals.length > 0 ? (
-              <div className="catch-up-events">
-                {providerSignals.map((item) => evidenceItem(item, item.label))}
-              </div>
-            ) : (
-              <p className="catch-up-section-empty">No provider requests or outcomes.</p>
-            )}
-            {activity.length > 0 ? (
-              <details className="catch-up-activity">
-                <summary>{activity.length} routine activity transitions</summary>
-                <div className="catch-up-events">{activity.map((item) => evidenceItem(item))}</div>
-              </details>
-            ) : null}
-          </aside>
+                  {subject.summaries.length > 0 ? (
+                    <ul className="catch-up-subject__summaries">
+                      {subject.summaries.map((summary) => (
+                        <li
+                          className={`is-${summary.kind}`}
+                          key={`${summary.kind}:${summary.label}`}
+                        >
+                          {summary.label}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {providerSignals.length > 0 ? (
+                    <div className="catch-up-subject__evidence">
+                      {providerSignals.flatMap((group) =>
+                        group.items.map((item) => evidenceItem(item, group.label)),
+                      )}
+                    </div>
+                  ) : null}
+                  {subject.transitionCount > 0 || activity.length > 0 ? (
+                    <details className="catch-up-activity">
+                      <summary>
+                        {subject.transitionCount} accepted transition
+                        {subject.transitionCount === 1 ? "" : "s"}
+                        {activity.length > 0
+                          ? ` · ${activity.length} routine provider transition${activity.length === 1 ? "" : "s"}`
+                          : ""}
+                      </summary>
+                      <div className="catch-up-events">
+                        {subject.transitions.map((item) => (
+                          <button
+                            className="catch-up-event"
+                            key={`accepted:${item.sequence}`}
+                            onClick={() => selectChange(item)}
+                            type="button"
+                          >
+                            <span className={`catch-up-event__marker is-${item.outcome}`} />
+                            <span className="catch-up-event__content">
+                              <small>Accepted transition</small>
+                              <strong>{item.summary}</strong>
+                            </span>
+                            <time>{time(item.occurredAt)}</time>
+                          </button>
+                        ))}
+                        {activity.map((item) => evidenceItem(item))}
+                      </div>
+                    </details>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <p className="catch-up-panel__empty">Nothing has changed since this checkpoint.</p>
@@ -179,8 +196,8 @@ export const CatchUpPanel = ({
 
       <footer>
         <span>
-          {acceptedChanges.length} accepted summaries · {projection.transitionCount} transitions ·{" "}
-          {projection.evidenceTransitionCount ?? 0} observed provider events
+          {projection.subjects.length} affected areas · {projection.transitionCount} accepted
+          transitions · {projection.evidenceTransitionCount ?? 0} provider transitions
         </span>
         {projection.pending ? (
           <button disabled={pending} onClick={() => void onAcknowledge()} type="button">

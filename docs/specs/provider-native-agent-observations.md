@@ -377,16 +377,19 @@ projection calculations remain Effect-free.
 
 V1 deterministic signals are:
 
-| Evidence                                    | Signal                     |
-| ------------------------------------------- | -------------------------- |
-| fresh open permission/question/plan request | human input required       |
-| fresh provider turn failure                 | provider failure           |
-| fresh response-completed                    | provider review candidate  |
-| context band elevated/critical              | context pressure           |
-| cross-axis conflict or expired open request | observation conflict/stale |
+| Evidence                                               | Signal                     |
+| ------------------------------------------------------ | -------------------------- |
+| fresh open permission/question/plan request            | human input required       |
+| fresh provider turn failure                            | provider failure           |
+| fresh response-completed, not superseded by newer work | provider review candidate  |
+| context band elevated/critical                         | context pressure           |
+| cross-axis conflict or expired open request            | observation conflict/stale |
 
 Severity and ordering are kernel rules. Provider extensions cannot create
-signals. Host `waiting` may corroborate an input request but is not required;
+signals. A turn outcome describes one response, not Agent lifecycle: newer
+provider activity or a newer fresh host observation of `working` supersedes an
+older response-completed review candidate. The historical outcome remains in
+Catch Up. Host `waiting` may corroborate an input request but is not required;
 host and provider conflicts remain visible. All current claims for one Agent
 compose into one operator-facing decision with supporting explanations, so
 counts describe affected Agents rather than evidence volume.

@@ -318,10 +318,11 @@ export class ObservatoryWebApi {
       return json({ error: "Projection contract mismatch." }, 500);
     if (!this.agentObservations) return { map, commandCentre, catchUp };
     const evidence = this.agentObservations.snapshot();
+    const enrichedCommandCentre = enrichCommandCentre(commandCentre, evidence);
     return {
       map: enrichMap(map, evidence),
-      commandCentre: enrichCommandCentre(commandCentre, evidence),
-      catchUp: enrichCatchUp(catchUp, evidence),
+      commandCentre: enrichedCommandCentre,
+      catchUp: enrichCatchUp(catchUp, evidence, enrichedCommandCentre),
     };
   }
 

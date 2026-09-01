@@ -233,10 +233,46 @@ const UniverseChange = Schema.Struct({
   goalId: Schema.optional(Schema.String),
   summary: Schema.String,
 });
-const CatchUpGroup = Schema.Struct({
-  outcome: Schema.Literal("new", "changed", "attention", "finished", "stale"),
+const EvidenceCatchUpGroup = Schema.Struct({
+  kind: Schema.Literal("activity", "human-input-request", "turn-outcome", "context-pressure"),
   label: Schema.String,
-  items: Schema.Array(UniverseChange),
+  items: Schema.Array(
+    Schema.Struct({
+      sequence: Schema.Number,
+      agentId: Schema.String,
+      occurredAt: Schema.Number,
+      summary: Schema.String,
+    }),
+  ),
+});
+const CatchUpSubject = Schema.Struct({
+  id: Schema.String,
+  subjectType: Schema.Literal("system", "goal", "unassigned"),
+  subjectId: Schema.optional(Schema.String),
+  title: Schema.String,
+  occurredAt: Schema.Number,
+  sequence: Schema.Number,
+  outcome: Schema.Literal("new", "changed", "attention", "finished", "stale"),
+  affectedTargetCount: Schema.Number,
+  transitionCount: Schema.Number,
+  summaries: Schema.Array(
+    Schema.Struct({
+      kind: Schema.Literal(
+        "attention",
+        "attention-resolved",
+        "finished",
+        "new",
+        "changed",
+        "stale",
+        "stale-resolved",
+      ),
+      count: Schema.Number,
+      label: Schema.String,
+    }),
+  ),
+  transitions: Schema.Array(UniverseChange),
+  evidenceTransitionCount: Schema.optional(Schema.Number),
+  evidenceGroups: Schema.optional(Schema.Array(EvidenceCatchUpGroup)),
 });
 const CatchUp = Schema.Struct({
   kind: Schema.Literal("catch-up"),
@@ -245,28 +281,12 @@ const CatchUp = Schema.Struct({
   throughSequence: Schema.Number,
   transitionCount: Schema.Number,
   pending: Schema.Boolean,
-  groups: Schema.Array(CatchUpGroup),
+  subjects: Schema.Array(CatchUpSubject),
   counts: Schema.Record({
     key: Schema.Literal("new", "changed", "attention", "finished", "stale"),
     value: Schema.Number,
   }),
   evidenceTransitionCount: Schema.optional(Schema.Number),
-  evidenceGroups: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        kind: Schema.Literal("activity", "human-input-request", "turn-outcome", "context-pressure"),
-        label: Schema.String,
-        items: Schema.Array(
-          Schema.Struct({
-            sequence: Schema.Number,
-            agentId: Schema.String,
-            occurredAt: Schema.Number,
-            summary: Schema.String,
-          }),
-        ),
-      }),
-    ),
-  ),
 });
 export const PortfolioResponseSchema = Schema.Struct({
   map: UniverseMap,

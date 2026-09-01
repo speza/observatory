@@ -55,7 +55,17 @@ const evidenceView = (
   const current = { ...evidence, current: items };
   const activity = latest(current, "activity");
   const request = latest(current, "human-input-request");
-  const outcome = latest(current, "turn-outcome");
+  const retainedOutcome = latest(current, "turn-outcome");
+  const outcomeSuperseded =
+    retainedOutcome?.kind === "turn-outcome" &&
+    ((activity?.kind === "activity" &&
+      activity.observedAt > retainedOutcome.observedAt &&
+      activity.payload.phase !== "idle") ||
+      (agent?.hostHealth === "live" &&
+        agent.observationHealth === "fresh" &&
+        agent.runtimeState === "working" &&
+        agent.lastObservedAt > retainedOutcome.observedAt));
+  const outcome = outcomeSuperseded ? undefined : retainedOutcome;
   const context = latest(current, "context-pressure");
   const conflictingActivity =
     evidence.health === "healthy" &&
@@ -383,6 +393,25 @@ export const enrichMap = (
   };
 };
 
+const evidenceCatchUpOutcome = (
+  observation: StoredAgentObservation,
+): CatchUpProjection["subjects"][number]["outcome"] => {
+  if (observation.kind === "human-input-request")
+    return observation.payload.state === "open" ? "attention" : "changed";
+  if (observation.kind === "turn-outcome")
+    return observation.payload.outcome === "failed"
+      ? "attention"
+      : observation.payload.outcome === "response-completed"
+        ? "finished"
+        : "changed";
+  if (observation.kind === "context-pressure")
+    return observation.payload.compaction === "started" ||
+      (observation.payload.usedRatio ?? 0) >= 0.75
+      ? "stale"
+      : "changed";
+  return "changed";
+};
+
 const transitionSummary = (observation: StoredAgentObservation, provider: string): string => {
   if (observation.kind === "human-input-request")
     return `${provider} ${observation.payload.requestKind.replace("-", " ")} request ${observation.payload.state}.`;
@@ -398,6 +427,7 @@ const transitionSummary = (observation: StoredAgentObservation, provider: string
 export const enrichCatchUp = (
   projection: CatchUpProjection,
   snapshot: AgentEvidenceSnapshot,
+  commandCentre?: CommandCentreProjection,
 ): CatchUpProjection => {
   const providers = new Map(snapshot.agents.map((item) => [item.agentId, item.providerLabel]));
   const labels = {
@@ -412,7 +442,37 @@ export const enrichCatchUp = (
     "context-pressure",
     "activity",
   ];
-  const evidenceGroups = order.flatMap((kind) => {
+  const agents = commandCentre
+    ? [...commandCentre.goals.flatMap((goal) => goal.agents), ...commandCentre.unassigned]
+    : [];
+  const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+  const subjects = new Map(
+    projection.subjects.map((subject) => [
+      subject.id,
+      {
+        ...subject,
+        evidenceGroups: [...(subject.evidenceGroups ?? [])],
+        agentIds: new Set(
+          subject.transitions
+            .filter((item) => item.targetType === "agent")
+            .map((item) => item.targetId),
+        ),
+      },
+    ]),
+  );
+  const subjectForAgent = (agentId: string) => {
+    const agent = agentsById.get(agentId);
+    const goalId = agent?.primaryGoalId;
+    return goalId
+      ? {
+          id: `goal:${goalId}`,
+          subjectType: "goal" as const,
+          subjectId: goalId,
+          title: agent.goalTitle ?? "Goal no longer available",
+        }
+      : { id: "unassigned", subjectType: "unassigned" as const, title: "Unassigned work" };
+  };
+  for (const kind of order) {
     const matching = snapshot.transitions.filter((item) => item.observation.kind === kind);
     const transitions =
       kind === "activity"
@@ -425,10 +485,20 @@ export const enrichCatchUp = (
             ).values(),
           ]
         : matching;
-    const items = transitions
+    const grouped = new Map<string, typeof transitions>();
+    for (const item of transitions
       .sort((left, right) => right.sequence - left.sequence)
-      .slice(0, 20)
-      .map((item) => ({
+      .slice(0, 20)) {
+      const key = subjectForAgent(item.agentId).id;
+      const existing = grouped.get(key);
+      if (existing) existing.push(item);
+      else grouped.set(key, [item]);
+    }
+    for (const [subjectId, items] of grouped) {
+      const subjectScope = subjectForAgent(items[0]?.agentId ?? "");
+      const newest = items[0];
+      if (!newest) continue;
+      const evidenceItems = items.map((item) => ({
         sequence: item.sequence,
         agentId: item.agentId,
         occurredAt: item.observation.observedAt,
@@ -437,13 +507,54 @@ export const enrichCatchUp = (
           providers.get(item.agentId) ?? item.observation.nativeConversationRef.harnessId,
         ),
       }));
-    return items.length ? [{ kind, label: labels[kind], items }] : [];
-  });
+      const existing = subjects.get(subjectId) ?? {
+        ...subjectScope,
+        occurredAt: newest.observation.observedAt,
+        sequence: newest.sequence,
+        outcome: evidenceCatchUpOutcome(newest.observation),
+        affectedTargetCount: 0,
+        transitionCount: 0,
+        summaries: [],
+        transitions: [],
+        evidenceGroups: [],
+        agentIds: new Set<string>(),
+      };
+      for (const item of items) existing.agentIds.add(item.agentId);
+      const rank = { attention: 0, finished: 1, stale: 2, new: 3, changed: 4 } as const;
+      const observedOutcome =
+        items
+          .map((item) => evidenceCatchUpOutcome(item.observation))
+          .sort((left, right) => rank[left] - rank[right])[0] ?? "changed";
+      subjects.set(subjectId, {
+        ...existing,
+        occurredAt: Math.max(existing.occurredAt, newest.observation.observedAt),
+        sequence: Math.max(existing.sequence, newest.sequence),
+        outcome:
+          rank[observedOutcome] < rank[existing.outcome] ? observedOutcome : existing.outcome,
+        affectedTargetCount: Math.max(existing.affectedTargetCount, existing.agentIds.size),
+        evidenceTransitionCount: (existing.evidenceTransitionCount ?? 0) + items.length,
+        evidenceGroups: [
+          ...existing.evidenceGroups.filter((group) => group.kind !== kind),
+          { kind, label: labels[kind], items: evidenceItems },
+        ],
+      });
+    }
+  }
+
   return {
     ...projection,
     pending: projection.pending || snapshot.transitions.length > 0,
     evidenceTransitionCount: snapshot.transitions.length,
-    evidenceGroups,
+    subjects: [...subjects.values()]
+      .map(({ agentIds: _agentIds, ...subject }) => subject)
+      .sort((left, right) => {
+        const rank = { attention: 0, finished: 1, stale: 2, new: 3, changed: 4 } as const;
+        return (
+          rank[left.outcome] - rank[right.outcome] ||
+          right.occurredAt - left.occurredAt ||
+          left.title.localeCompare(right.title)
+        );
+      }),
   };
 };
 

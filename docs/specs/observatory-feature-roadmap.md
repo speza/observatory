@@ -37,7 +37,7 @@ workflows.
 | SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
 | Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |
 | Composed Needs-you decisions                     | Done       | Done | One subject over independent claims  |
-| Catch-up checkpoint and semantic changes         | Done       | Done | Explicit acknowledgement             |
+| Goal-level Catch Up synthesis                    | Done       | Done | Explicit acknowledgement             |
 | Atlas, Ledger, Needs you and Inbox               | Projection | Done | One model, several lenses            |
 | Host-owned terminal and linked executions        | Done       | Done | xterm.js renders host streams        |
 | Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |

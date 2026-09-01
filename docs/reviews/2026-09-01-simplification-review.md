@@ -1,6 +1,6 @@
 # Observatory simplification review
 
-Status: accepted; decision-composition, Inspector routing and Atlas/Ledger alignment implemented
+Status: implemented; decision composition, Inspector routing, Atlas/Ledger alignment and Goal-level Catch Up complete
 
 Date: 2026-09-01
 
@@ -425,8 +425,10 @@ The first implementation pass completed Slices A–C:
 - routine cards no longer repeat `No current activity observed`.
 
 The mock portfolio now establishes its synthetic setup as the initial Catch Up
-baseline, and Catch Up distinguishes summarized subjects from raw transitions.
-Goal-level Catch Up synthesis remains the next separate product slice.
+baseline. Catch Up groups Agent trajectories under their owning Goal, synthesises
+attention resolution and uncertainty recovery from typed outcomes, places
+correlated provider observations inside the same subject, and keeps raw
+transitions in an explicitly labelled collapsed disclosure.
 
 ## Explicit non-goals for the simplification pass
 

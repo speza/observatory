@@ -31,6 +31,8 @@ import type {
   RelatedAgentsProjection,
   SearchProjection,
   CatchUpProjection,
+  CatchUpSubject,
+  CatchUpSummaryKind,
   SearchResult,
   SystemView,
   AgentView,
@@ -609,24 +611,92 @@ const projectSearch = (
   return { kind: "search", query, results };
 };
 
-const catchUpLabels = {
-  attention: "Needs judgment",
-  finished: "Finished",
-  new: "New",
-  changed: "Changed",
-  stale: "Uncertain",
-} satisfies Record<UniverseChange["outcome"], string>;
-
-const catchUpOrder: readonly UniverseChange["outcome"][] = [
+const catchUpSummaryOrder: readonly CatchUpSummaryKind[] = [
   "attention",
   "finished",
+  "stale",
+  "attention-resolved",
+  "stale-resolved",
   "new",
   "changed",
-  "stale",
 ];
+
+const catchUpOutcomeRank = {
+  attention: 0,
+  finished: 1,
+  stale: 2,
+  new: 3,
+  changed: 4,
+} satisfies Record<UniverseChange["outcome"], number>;
+
+const catchUpSummaryKind = (changes: readonly UniverseChange[]): CatchUpSummaryKind => {
+  const latest = changes.at(-1);
+  if (!latest) return "changed";
+  if (latest.outcome !== "changed") return latest.outcome;
+  if (changes.slice(0, -1).some((item) => item.outcome === "attention"))
+    return "attention-resolved";
+  if (changes.slice(0, -1).some((item) => item.outcome === "stale")) return "stale-resolved";
+  return "changed";
+};
+
+const catchUpNoun = (targetType: UniverseChange["targetType"], count: number): string => {
+  const noun = targetType === "agent" ? "Agent" : targetType === "goal" ? "Goal" : "System";
+  return count === 1 ? noun : `${noun}s`;
+};
+
+const catchUpSummaryLabel = (
+  kind: CatchUpSummaryKind,
+  targetType: UniverseChange["targetType"],
+  count: number,
+): string => {
+  const noun = catchUpNoun(targetType, count);
+  switch (kind) {
+    case "attention":
+      return `${count} ${noun} ${count === 1 ? "needs" : "need"} judgment`;
+    case "attention-resolved":
+      return `${count} ${noun} no longer ${count === 1 ? "needs" : "need"} judgment`;
+    case "finished":
+      return `${count} ${noun} finished`;
+    case "new":
+      return `${count} new ${noun}`;
+    case "stale":
+      return `${count} ${noun} became uncertain`;
+    case "stale-resolved":
+      return `${count} ${noun} returned from uncertainty`;
+    case "changed":
+      return `${count} ${noun} changed`;
+  }
+};
+
+const catchUpSubjectFor = (
+  item: UniverseChange,
+  goals: ReadonlyMap<string, Goal>,
+  systems: ReadonlyMap<string, System>,
+): Pick<CatchUpSubject, "id" | "subjectType" | "subjectId" | "title"> => {
+  const goalId = item.goalId ?? (item.targetType === "goal" ? item.targetId : undefined);
+  if (goalId) {
+    return {
+      id: `goal:${goalId}`,
+      subjectType: "goal",
+      subjectId: goalId,
+      title: goals.get(goalId)?.title ?? "Goal no longer available",
+    };
+  }
+  if (item.targetType === "system") {
+    return {
+      id: `system:${item.targetId}`,
+      subjectType: "system",
+      subjectId: item.targetId,
+      title: systems.get(item.targetId)?.title ?? "System no longer available",
+    };
+  }
+  return { id: "unassigned", subjectType: "unassigned", title: "Unassigned work" };
+};
 
 const projectCatchUp = (
   state: {
+    readonly systems?: readonly System[];
+    readonly goals: readonly Goal[];
     readonly changes: readonly UniverseChange[];
     readonly operatorCheckpoint?: OperatorCheckpoint;
   },
@@ -636,7 +706,6 @@ const projectCatchUp = (
   const unread = state.changes.filter((item) => item.sequence > lastSequence);
   const latestByTarget = new Map<string, UniverseChange>();
   for (const item of unread) latestByTarget.set(`${item.targetType}:${item.targetId}`, item);
-  const summaries = [...latestByTarget.values()];
   const counts: CatchUpProjection["counts"] = {
     new: 0,
     changed: 0,
@@ -644,20 +713,90 @@ const projectCatchUp = (
     finished: 0,
     stale: 0,
   };
-  for (const item of summaries) counts[item.outcome] += 1;
-  const groups = catchUpOrder.flatMap((outcome) => {
-    const items = summaries
-      .filter((item) => item.outcome === outcome)
-      .sort((left, right) => right.occurredAt - left.occurredAt || right.sequence - left.sequence);
-    return items.length > 0 ? [{ outcome, label: catchUpLabels[outcome], items }] : [];
-  });
+  for (const item of latestByTarget.values()) counts[item.outcome] += 1;
+
+  const goals = new Map(state.goals.map((goal) => [goal.id, goal]));
+  const systems = new Map((state.systems ?? []).map((system) => [system.id, system]));
+  const grouped = new Map<
+    string,
+    { subject: ReturnType<typeof catchUpSubjectFor>; items: UniverseChange[] }
+  >();
+  for (const item of unread) {
+    const subject = catchUpSubjectFor(item, goals, systems);
+    const existing = grouped.get(subject.id);
+    if (existing) existing.items.push(item);
+    else grouped.set(subject.id, { subject, items: [item] });
+  }
+
+  const subjects = [...grouped.values()]
+    .map(({ subject, items }): CatchUpSubject => {
+      const trajectories = new Map<string, UniverseChange[]>();
+      for (const item of items) {
+        const key = `${item.targetType}:${item.targetId}`;
+        const existing = trajectories.get(key);
+        if (existing) existing.push(item);
+        else trajectories.set(key, [item]);
+      }
+      const summaryCounts = new Map<
+        string,
+        { kind: CatchUpSummaryKind; targetType: UniverseChange["targetType"]; count: number }
+      >();
+      for (const trajectory of trajectories.values()) {
+        const latest = trajectory.at(-1);
+        if (!latest) continue;
+        const kind = catchUpSummaryKind(trajectory);
+        const key = `${kind}:${latest.targetType}`;
+        const existing = summaryCounts.get(key);
+        if (existing) existing.count += 1;
+        else summaryCounts.set(key, { kind, targetType: latest.targetType, count: 1 });
+      }
+      const summaries = [...summaryCounts.values()]
+        .sort(
+          (left, right) =>
+            catchUpSummaryOrder.indexOf(left.kind) - catchUpSummaryOrder.indexOf(right.kind) ||
+            left.targetType.localeCompare(right.targetType),
+        )
+        .map((summary) => ({
+          kind: summary.kind,
+          count: summary.count,
+          label: catchUpSummaryLabel(summary.kind, summary.targetType, summary.count),
+        }));
+      const latest = [...trajectories.values()]
+        .flatMap((trajectory) => trajectory.at(-1) ?? [])
+        .sort(
+          (left, right) =>
+            catchUpOutcomeRank[left.outcome] - catchUpOutcomeRank[right.outcome] ||
+            right.occurredAt - left.occurredAt ||
+            right.sequence - left.sequence,
+        )[0];
+      const newest = items.at(-1);
+      return {
+        ...subject,
+        occurredAt: newest?.occurredAt ?? now,
+        sequence: newest?.sequence ?? 0,
+        outcome: latest?.outcome ?? "changed",
+        affectedTargetCount: trajectories.size,
+        transitionCount: items.length,
+        summaries,
+        transitions: [...items].sort(
+          (left, right) => right.occurredAt - left.occurredAt || right.sequence - left.sequence,
+        ),
+      };
+    })
+    .sort(
+      (left, right) =>
+        catchUpOutcomeRank[left.outcome] - catchUpOutcomeRank[right.outcome] ||
+        right.occurredAt - left.occurredAt ||
+        right.sequence - left.sequence ||
+        left.title.localeCompare(right.title),
+    );
   const projection: CatchUpProjection = {
     kind: "catch-up",
     generatedAt: now,
     throughSequence: state.changes.at(-1)?.sequence ?? 0,
     transitionCount: unread.length,
     pending: unread.length > 0,
-    groups,
+    subjects,
     counts,
   };
   if (state.operatorCheckpoint)

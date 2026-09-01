@@ -769,10 +769,13 @@ Store responsibilities:
 
 The implemented catch-up slice persists accepted semantic changes with a
 monotonic sequence and one durable operator checkpoint. The projection groups
-post-checkpoint records into new, changed, attention, finished and stale
-outcomes. The operator lens coalesces those records to the latest outcome per
-affected Goal or Agent while retaining the underlying transition count.
-Reading or polling does not advance the cursor; only the explicit
+post-checkpoint Agent trajectories under their owning Goal, with separate
+System and unassigned-work subjects when no Goal applies. It synthesises
+started and resolved attention, completion, uncertainty, new work and routine
+change counts from typed outcomes while retaining the underlying accepted
+transitions in a collapsed disclosure. Correlated provider requests and outcomes
+appear as supporting evidence inside the same subject rather than a parallel
+feed. Reading or polling does not advance the cursor; only the explicit
 `AcknowledgeCatchUp` Universe command does. This bounded semantic vocabulary is
 for operator resumption and is not a transcript, event-sourcing model or
 general audit log.

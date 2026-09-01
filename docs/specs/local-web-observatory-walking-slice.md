@@ -44,8 +44,8 @@ another writable Observatory process.
 - agent assignment and unassignment through the selected agent inspector; and
 - explicit goal completion plus confirmed archive for completed goals and
   stale or unavailable agents;
-- a durable catch-up checkpoint with semantic changes grouped into new,
-  changed, attention, finished and stale outcomes; and
+- a durable catch-up checkpoint with Agent trajectories synthesised under their
+  owning Goal, and raw accepted transitions retained in a collapsed disclosure; and
 - a transient xterm.js surface over a host-owned terminal session, with the
   selected Agent and map state left intact beneath the overlay.
 - host-owned terminal scrolling from web wheel and PageUp/PageDown gestures;
@@ -101,12 +101,15 @@ make Observatory a remotely accessible or multi-user service.
 
 The catch-up history belongs to the core. `Universe` records accepted semantic
 transitions with a monotonically increasing sequence and persists one operator
-checkpoint. `CatchUpProjection` groups only records after that checkpoint and
-shows the latest outcome per affected Goal or Agent while retaining the raw
-accepted-transition count. Repeated runtime movement therefore does not turn
-the headline into an unusable event total. Acknowledgement is an explicit Universe command; polling or opening the lens
-never advances the checkpoint. This is an operator catch-up record, not a
-general audit log or transcript store.
+checkpoint. `CatchUpProjection` groups only records after that checkpoint,
+collects Agent trajectories under their owning Goal and synthesises the changes
+that altered operator understanding. System and unassigned-work changes remain
+explicit subjects when no Goal applies. Correlated provider observations appear
+inside the same subject as supporting evidence. Raw accepted and routine
+provider transitions remain available only through a labelled collapsed
+disclosure. Acknowledgement is an explicit Universe command; polling or opening
+the lens never advances the checkpoint. This is an operator catch-up record,
+not a general audit log or transcript store.
 
 ## Explicit exclusions
 

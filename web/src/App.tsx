@@ -818,7 +818,7 @@ export const App = (): React.JSX.Element => {
         >
           <span>{data.catchUp.pending ? "Catch up" : "Caught up"}</span>
           <b>
-            {data.catchUp.groups.reduce((total, group) => total + group.items.length, 0)} updates
+            {data.catchUp.subjects.length} {data.catchUp.subjects.length === 1 ? "area" : "areas"}
           </b>
         </button>
         {view === "atlas" && !selectedSystemId ? (
@@ -886,6 +886,10 @@ export const App = (): React.JSX.Element => {
               if (response) setSidePanel(undefined);
             }}
             onClose={() => setSidePanel(undefined)}
+            onOpenInbox={() => {
+              setSelection(undefined);
+              setSidePanel("inbox");
+            }}
             onSelectSystem={(systemId) => {
               setSelectedSystemId(systemId);
               setView("atlas");

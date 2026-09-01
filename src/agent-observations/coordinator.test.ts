@@ -158,9 +158,11 @@ describe("agent observation coordination", () => {
     expect(enriched.systems[0]).toMatchObject({ attentionCount: 1 });
     expect(enriched.counts.attention).toBe(1);
     expect(enrichMap(map, evidence).goals[0]).toMatchObject({ attentionCount: 1 });
-    expect(enrichCatchUp(catchUp, evidence).evidenceGroups?.[0]?.items[0]?.summary).toContain(
-      "permission request open",
-    );
+    expect(
+      enrichCatchUp(catchUp, evidence, enriched)
+        .subjects.flatMap((subject) => subject.evidenceGroups ?? [])
+        .flatMap((group) => group.items)[0]?.summary,
+    ).toContain("permission request open");
     expect(enrichInspector(inspector, evidence)).toMatchObject({
       kind: "agent-inspector",
       agent: { providerEvidence: { request: { kind: "permission", state: "open" } } },
@@ -279,6 +281,39 @@ describe("agent observation coordination", () => {
         hostConflict: { hostState: "waiting", providerActivity: "using-tool" },
       },
     });
+
+    fixture.universe.reconcile(
+      hostSnapshot(
+        [
+          {
+            nativeId: "pane-1",
+            displayName: "Conflicting Codex",
+            runtimeState: "working",
+            runtimeStateSource: "test-host",
+            observedAt: observedAt + 1_000,
+            hostLocator: "opaque:pane-1",
+            harnessEvidence: {
+              detectedHarnessId: "codex",
+              nativeConversationRef: reference,
+              restoreState: "host-restored",
+              source: "native-integration",
+              observedAt: observedAt + 1_000,
+            },
+          },
+        ],
+        observedAt + 1_000,
+      ),
+    );
+    const resumed = fixture.universe.project({
+      kind: "command-centre",
+      now: observedAt + 1_000,
+    });
+    if (resumed.kind !== "command-centre") throw new Error("Unexpected projection.");
+    const resumedEvidence = { ...coordinator.snapshot(), generatedAt: observedAt + 1_000 };
+    expect(enrichCommandCentre(resumed, resumedEvidence).attention.items).toEqual([]);
+    expect(
+      enrichCommandCentre(resumed, resumedEvidence).unassigned[0]?.providerEvidence?.outcome,
+    ).toBeUndefined();
   });
 
   test("rejects unbounded snapshots and non-namespaced extension claims", async () => {
@@ -465,7 +500,7 @@ describe("agent observation coordination", () => {
         throughSequence: 0,
         transitionCount: 0,
         pending: false,
-        groups: [],
+        subjects: [],
         counts: { new: 0, changed: 0, attention: 0, finished: 0, stale: 0 },
       },
       {
@@ -476,6 +511,8 @@ describe("agent observation coordination", () => {
     );
 
     expect(projection.evidenceTransitionCount).toBe(3);
-    expect(projection.evidenceGroups?.[0]?.items.map(({ sequence }) => sequence)).toEqual([3, 2]);
+    expect(
+      projection.subjects[0]?.evidenceGroups?.[0]?.items.map(({ sequence }) => sequence),
+    ).toEqual([3, 2]);
   });
 });
