@@ -1,6 +1,7 @@
-import type { Effect } from "effect";
+import { Schema, type Effect } from "effect";
 
 export const OBSERVATORY_PLUGIN_API_VERSION = 2 as const;
+export const AGENT_OBSERVATION_SNAPSHOT_LIMIT = 500;
 
 export type PluginCapability = "agent-harness" | "code-host";
 
@@ -119,6 +120,87 @@ export type AgentObservation = AgentObservationEnvelope &
         };
       }
   );
+
+const AgentToolCategorySchema = Schema.Literal(
+  "read",
+  "write",
+  "execute",
+  "search",
+  "network",
+  "delegate",
+  "other",
+);
+const AgentObservationEnvelopeSchema = {
+  schemaVersion: Schema.Literal(1),
+  observationId: Schema.String,
+  revision: Schema.optional(Schema.Number),
+  nativeConversationRef: Schema.Struct({
+    harnessId: Schema.String,
+    continuityScopeId: Schema.optional(Schema.String),
+    kind: Schema.String,
+    value: Schema.String,
+  }),
+  providerInstanceId: Schema.String,
+  observedAt: Schema.Number,
+  source: Schema.Struct({
+    mechanism: Schema.Literal("hook", "structured-api", "metadata"),
+    providerVersion: Schema.optional(Schema.String),
+  }),
+  extensions: Schema.optional(
+    Schema.Record({
+      key: Schema.String,
+      value: Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Null),
+    }),
+  ),
+} as const;
+
+export const AgentObservationSchema: Schema.Schema<AgentObservation> = Schema.Union(
+  Schema.Struct({
+    ...AgentObservationEnvelopeSchema,
+    kind: Schema.Literal("activity"),
+    payload: Schema.Struct({
+      phase: Schema.Literal("responding", "using-tool", "compacting", "idle"),
+      toolCategory: Schema.optional(AgentToolCategorySchema),
+    }),
+  }),
+  Schema.Struct({
+    ...AgentObservationEnvelopeSchema,
+    kind: Schema.Literal("human-input-request"),
+    payload: Schema.Struct({
+      requestId: Schema.String,
+      requestKind: Schema.Literal("permission", "question", "plan-approval", "other"),
+      state: Schema.Literal("open", "resolved", "withdrawn"),
+      toolCategory: Schema.optional(AgentToolCategorySchema),
+    }),
+  }),
+  Schema.Struct({
+    ...AgentObservationEnvelopeSchema,
+    kind: Schema.Literal("turn-outcome"),
+    payload: Schema.Struct({
+      turnId: Schema.optional(Schema.String),
+      outcome: Schema.Literal("response-completed", "failed", "interrupted"),
+      failureCategory: Schema.optional(
+        Schema.Literal(
+          "rate-limit",
+          "authentication",
+          "billing",
+          "provider-overloaded",
+          "context-limit",
+          "tool",
+          "unknown",
+        ),
+      ),
+    }),
+  }),
+  Schema.Struct({
+    ...AgentObservationEnvelopeSchema,
+    kind: Schema.Literal("context-pressure"),
+    payload: Schema.Struct({
+      usedRatio: Schema.optional(Schema.Number),
+      compaction: Schema.optional(Schema.Literal("started", "completed")),
+    }),
+  }),
+);
 
 export interface AgentObservationCapability {
   readonly kinds: readonly AgentObservationKind[];

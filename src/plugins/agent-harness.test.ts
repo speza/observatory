@@ -78,20 +78,15 @@ const writeObservation = async (
 };
 
 describe("agent harness plugins", () => {
-  test("loads Claude Code and Codex through the contributed registry", async () => {
+  test("loads Claude Code, Codex and Pi through the contributed registry", async () => {
     const harnesses = await loadHarnesses();
 
-    expect(harnesses.map(({ harnessId }) => harnessId)).toEqual(["claude", "codex"]);
-    expect(harnesses.map((harness) => harness.describe().label)).toEqual(["Claude Code", "Codex"]);
-    expect(harnesses.map((harness) => harness.observationSource?.describe().configured)).toEqual([
-      false,
-      false,
+    expect(harnesses.map(({ harnessId }) => harnessId)).toEqual(["claude", "codex", "pi"]);
+    expect(harnesses.map((harness) => harness.describe().label)).toEqual([
+      "Claude Code",
+      "Codex",
+      "Pi",
     ]);
-    expect(
-      await Effect.runPromise(
-        harnesses[0]!.observationSource!.snapshot({ providerInstanceId: "", limit: 10 }),
-      ),
-    ).toMatchObject({ health: { state: "not-configured" }, current: [], transitions: [] });
   });
 
   test("discovers Claude and Codex from provider metadata without retaining transcript fields", async () => {
@@ -225,15 +220,56 @@ describe("agent harness plugins", () => {
     });
   });
 
+  test("discovers and resumes an exact Pi session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ao-pi-catalogue-"));
+    const sessions = join(root, "sessions", "synthetic-project");
+    await mkdir(sessions, { recursive: true });
+    await writeFile(
+      join(sessions, "session.jsonl"),
+      `${JSON.stringify({
+        type: "session",
+        id: "pi-session",
+        timestamp: "2026-08-28T09:00:00.000Z",
+        cwd: "/synthetic/pi",
+        prompt: "SECRET_PROMPT",
+      })}\n`,
+    );
+    try {
+      const pi = (await loadHarnesses(runner(), { piRoot: root })).find(
+        ({ harnessId }) => harnessId === "pi",
+      )!;
+      const snapshot = await Effect.runPromise(pi.snapshotSessions());
+      expect(snapshot.sessions[0]).toMatchObject({
+        nativeConversationRef: { value: "pi-session" },
+        workspaceRef: "/synthetic/pi",
+      });
+      expect(JSON.stringify(snapshot)).not.toContain("SECRET_PROMPT");
+      expect(
+        await Effect.runPromise(
+          pi.planResume({
+            workingDirectory: "/synthetic/pi",
+            nativeConversationRef: sessionRef("pi", "pi-session"),
+          }),
+        ),
+      ).toMatchObject({ executable: "pi", args: ["--session", "pi-session"] });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("plans genuinely new sessions without shell command strings", async () => {
     const harnesses = await loadHarnesses();
     const claude = harnesses[0]!;
     const codex = harnesses[1]!;
+    const pi = harnesses[2]!;
     const claudePlan = await Effect.runPromise(
       claude.planStart({ workingDirectory: "/repo", prompt: "Do the work" }),
     );
     const codexPlan = await Effect.runPromise(
       codex.planStart({ workingDirectory: "/repo", prompt: "Do the work" }),
+    );
+    const piPlan = await Effect.runPromise(
+      pi.planStart({ workingDirectory: "/repo", prompt: "Do the work" }),
     );
 
     expect(claudePlan.executable).toBe("claude");
@@ -245,6 +281,8 @@ describe("agent harness plugins", () => {
     expect(claudePlan.args.at(-1)).toBe("Do the work");
     expect(codexPlan).toMatchObject({ executable: "codex", args: ["Do the work"] });
     expect(codexPlan.nativeConversationRef).toBeUndefined();
+    expect(piPlan).toMatchObject({ executable: "pi", args: ["Do the work"] });
+    expect(piPlan.nativeConversationRef).toBeUndefined();
     expect(
       (
         await Effect.runPromiseExit(

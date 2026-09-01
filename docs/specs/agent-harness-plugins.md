@@ -413,13 +413,13 @@ replacement or ambiguous observation cannot inherit that Goal.
 
 ### Phase 4: implement the first real harnesses
 
-- Add built-in Claude Code and Codex plugins with availability, new-session,
+- Add built-in Claude Code, Codex and Pi plugins with availability, new-session,
   exact-resume and continuity implementations.
 - Encode executable/version differences inside each adapter, not in callers.
 - Use Herdr evidence when present; remain correct when only the process plan and
   later observation are available.
-- Add Pi only after the first two adapters prove the interface; change the
-  contract first if Pi exposes a real incompatibility.
+- Add Pi after the first two adapters prove the interface; keep its TypeScript
+  extension and session-file catalogue behind the same harness contract.
 
 Gate: each real adapter passes the shared harness contract with sanitised
 fixtures, including invalid references and exact-resume failure.

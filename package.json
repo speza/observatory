@@ -16,6 +16,8 @@
     "test:herdr": "bun test src/hosts/herdr/herdr.test.ts",
     "smoke:herdr-harness": "AO_LIVE_HARNESS_SMOKE=1 bun run scripts/live-agent-harness-smoke.ts",
     "sessions:discover": "bun run scripts/discover-provider-sessions.ts",
+    "observations:install": "bun run scripts/install-provider-observation-hooks.ts",
+    "observations:doctor": "bun run scripts/doctor-provider-observations.ts",
     "db:reset": "bun run scripts/reset-database.ts",
     "db:reset:all": "bun run scripts/reset-database.ts --all",
     "test:all": "bun test",

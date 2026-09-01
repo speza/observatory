@@ -1,6 +1,6 @@
 # Provider-native Agent observations
 
-Status: accepted design; first end-to-end kernel/outbox slice implemented
+Status: accepted design; local Claude Code, Codex and Pi reference reporters implemented
 
 Date: 2026-08-30
 
@@ -475,9 +475,9 @@ Capability discovery distinguishes:
 `AgentHarness.availability` and plugin status include bounded setup diagnostics;
 the observation descriptor carries kind-level support. A doctor/setup flow may
 show the exact reviewed provider hook entry, required minimum version,
-transport reachability and last safe receipt. It may offer an explicit install
-or repair action later, but V1 never installs hooks, edits settings or bypasses
-provider trust without confirmation.
+transport reachability and last safe receipt. V1 changes provider settings only
+through the explicit operator-run installer and never bypasses provider trust
+or managed policy.
 
 Activation remains transactional. The source starts and stops with normal
 plugin activation/disposal. A source failure degrades only provider enrichment,
@@ -586,13 +586,12 @@ uses the release documentation and never parses transcripts.
 ### Implemented first pass
 
 The first implementation covers the deterministic Slice 1 path and the safe
-acquisition boundary needed to dogfood two providers:
+acquisition boundary needed to dogfood three providers:
 
-- `AgentHarness.observationSource` is available for both built-in Claude Code
-  and Codex harnesses;
-- each source reads an explicitly configured, bounded JSONL outbox of already
-  normalised records (`claudeObservationOutbox` or
-  `codexObservationOutbox`) and otherwise reports `not-configured`;
+- `AgentHarness.observationSource` is available for the built-in Claude Code,
+  Codex and Pi harnesses;
+- each source reads a configured, bounded JSONL journal of already normalised
+  records and otherwise reports `not-configured`;
 - the kernel validates, deduplicates, correlates and stores current claims,
   transitions, source health and cursors in the operational SQLite cache;
 - attention, catch-up and inspector projections fuse an immutable evidence
@@ -607,12 +606,15 @@ canonical attention ordering and recomputes nested Goal/System counts from the
 fused Agent views. Removing a source marks its saved evidence unavailable.
 Repeated activity transitions are coalesced in catch-up.
 
-The outbox is an integration boundary, not a claim that live Claude or Codex
-hook installation is complete. A hook writer must emit only the documented
-normalised envelope with the exact continuity scope and provider instance from
-the harness. Provider-specific hook setup, authentication and missed-event
-repair remain the Slice 2/3 work below. Observatory does not create or edit
-provider hook settings in this pass.
+The journal is the retained integration boundary. Provider-specific hook
+adapters translate raw Claude Code, Codex and Pi event names into one private
+lifecycle vocabulary; the journal owns schema decoding, exact harness and
+continuity-scope validation, monotonic sequencing, bounded retention,
+ownership-safe locking and atomic compaction. The explicit operator-run
+installer composes with existing provider settings and publishes
+content-addressed bundles; it never replaces unrelated hooks, packages or
+extensions. Missed-event repair beyond retained current state remains future
+work.
 
 An `AO_PLUGIN_CONFIG` entry for the built-in harness package replaces its
 unconfigured default activation, so `claudeObservationOutbox` and
@@ -647,7 +649,7 @@ provider brand switch in coordinator, persistence or projections.
 Gate: synthetic observations enrich every target projection without changing
 an Agent/Goal record or the `System -> Goal -> Agent` topology.
 
-### Slice 2 — Claude Code reference source
+### Slice 2 — Claude Code reference source (implemented locally)
 
 - Add an explicit reviewed local reporter and bounded authenticated sink.
 - Translate only the verified event matrix; add status-line context pressure
@@ -657,7 +659,7 @@ an Agent/Goal record or the `System -> Goal -> Agent` topology.
 Gate: a real Claude session opens a permission signal, reports response stop
 and recovers after Observatory restart with no transcript or raw payload stored.
 
-### Slice 3 — Codex reference source
+### Slice 3 — Codex reference source (implemented locally)
 
 - Implement the same contract from supported Codex hooks.
 - Leave unsupported failure/context claims explicit.
@@ -667,6 +669,11 @@ and recovers after Observatory restart with no transcript or raw payload stored.
 
 Gate: adding Codex changes only its harness package, configuration and fixtures;
 core vocabulary, storage, attention and renderer code require no provider edit.
+
+Pi reuses the same outbox and vocabulary through its extension lifecycle. It
+also supplies a provider-owned session catalogue and exact start/resume plans
+through the existing harness seam; no Pi brand enters the coordinator,
+persistence or projections.
 
 ### Slice 4 — measured additions
 

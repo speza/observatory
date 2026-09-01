@@ -35,7 +35,7 @@ required for the first live product slice, but remains behind the generic
 `SessionHost` capability seam. `AO_HOST=mock` exercises the same product path
 without a live Herdr installation.
 
-Claude Code and Codex lifecycle support is supplied by built-in
+Claude Code, Codex and Pi lifecycle support is supplied by built-in
 `agent-harness` plugins. Observatory constructs new and exact-resume plans;
 Herdr only places the process and owns its terminal execution. The target
 recovery model discovers provider-owned sessions independently from current
@@ -87,6 +87,21 @@ starting Herdr or writing Observatory state:
 ```sh
 bun run sessions:discover
 ```
+
+Install the local metadata-only observation hooks and Pi extension with:
+
+```sh
+bun run observations:install
+```
+
+Check the installed bundles and journal health without modifying them:
+
+```sh
+bun run observations:doctor
+```
+
+See [Provider observation hooks](docs/guides/provider-observation-hooks.md) for
+the retained fields, coexistence and removal boundaries.
 
 Run the deterministic 12-goal, 75-agent development portfolio:
 
