@@ -22,6 +22,8 @@ another writable Observatory process.
 - attention queue and Ledger rendered from `CommandCentreProjection`;
 - selection card rendered from `InspectorProjection`;
 - browser-local pan, zoom, theme, motion preference, selection and active lens;
+  theme, motion preference and Atlas/Ledger view survive refresh in one versioned,
+  validated browser-settings record, while transient map and selection state stays in memory;
 - clipped Carbon Survey surfaces, responsive SVG detail and state-driven
   motion: working orbit traces advance, attention pulses, and uncertain or
   inactive work remains visually quiet;
@@ -155,7 +157,8 @@ not a general audit log or transcript store.
   intersections, and it follows the same pan and zoom transform as accepted
   goal positions.
 - Motion can be disabled explicitly and also honours the operating system's
-  reduced-motion preference.
+  reduced-motion preference. Theme, motion and Atlas/Ledger choices survive refresh;
+  malformed, unsupported or unavailable browser storage falls back safely to current defaults.
 - A live Herdr smoke on 2026-08-25 reconciled 14 agents and returned both
   universe-map and command-centre projections through the same loopback path.
 - A disposable live-Herdr command smoke on 2026-08-25 created one goal, assigned

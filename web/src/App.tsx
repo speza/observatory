@@ -37,12 +37,11 @@ import { TerminalDeck } from "./TerminalDeck.tsx";
 import { SystemDialog } from "./SystemDialog.tsx";
 import { SystemsOverview } from "./SystemsOverview.tsx";
 import { ThemeToggle } from "./ThemeToggle.tsx";
+import { useBrowserSettings } from "./browserSettings.ts";
 import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
 
-type Theme = "light" | "dark";
-type View = "atlas" | "ledger";
 type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
@@ -63,13 +62,8 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 
 export const App = (): React.JSX.Element => {
   const portfolio = usePortfolio();
-  const [view, setView] = useState<View>("atlas");
-  const [theme, setTheme] = useState<Theme>(() =>
-    window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
-  );
-  const [motion, setMotion] = useState(
-    () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  const { settings, setSetting, updateSetting } = useBrowserSettings();
+  const { motion, theme, view } = settings;
   const [sidePanel, setSidePanel] = useState<SidePanel>();
   const [selection, setSelection] = useState<Selection>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -293,7 +287,7 @@ export const App = (): React.JSX.Element => {
       const systemScope = systemScopeForSelection(next, data.commandCentre);
       if (systemScope) setSelectedSystemId(systemScope);
     }
-    setView("atlas");
+    setSetting("view", "atlas");
     select(next);
     issueCamera("focus", next);
   };
@@ -571,7 +565,7 @@ export const App = (): React.JSX.Element => {
         setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
       } else if (key === "v") {
         event.preventDefault();
-        setView((value) => (value === "atlas" ? "ledger" : "atlas"));
+        updateSetting("view", (current) => (current === "atlas" ? "ledger" : "atlas"));
         setCameraCommand(undefined);
       } else if (key === "n") {
         event.preventDefault();
@@ -591,7 +585,7 @@ export const App = (): React.JSX.Element => {
         openSelectedTerminal();
       } else if (key === "m") {
         event.preventDefault();
-        setMotion((value) => !value);
+        updateSetting("motion", (current) => !current);
       } else if (key === "?") {
         event.preventDefault();
         setShortcutsOpen((value) => !value);
@@ -610,10 +604,12 @@ export const App = (): React.JSX.Element => {
     conversationHistoryOpen,
     selection,
     selectedAgent,
+    setSetting,
     sidePanel,
     shortcutsOpen,
     terminalAgent,
     terminalLaunch,
+    updateSetting,
     view,
   ]);
 
@@ -666,7 +662,7 @@ export const App = (): React.JSX.Element => {
             <button
               aria-pressed={view === "atlas"}
               onClick={() => {
-                setView("atlas");
+                setSetting("view", "atlas");
                 setCameraCommand(undefined);
               }}
               type="button"
@@ -676,7 +672,7 @@ export const App = (): React.JSX.Element => {
             <button
               aria-pressed={view === "ledger"}
               onClick={() => {
-                setView("ledger");
+                setSetting("view", "ledger");
                 setCameraCommand(undefined);
               }}
               type="button"
@@ -727,7 +723,9 @@ export const App = (): React.JSX.Element => {
         </nav>
         <div className="masthead__utility">
           <ThemeToggle
-            onToggle={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
+            onToggle={() =>
+              updateSetting("theme", (current) => (current === "light" ? "dark" : "light"))
+            }
             theme={theme}
           />
           <button
@@ -777,7 +775,7 @@ export const App = (): React.JSX.Element => {
             aria-expanded={sidePanel === "inbox"}
             onClick={() => {
               setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
-              setView("atlas");
+              setSetting("view", "atlas");
             }}
             type="button"
           >
@@ -899,7 +897,7 @@ export const App = (): React.JSX.Element => {
             }}
             onSelectSystem={(systemId) => {
               setSelectedSystemId(systemId);
-              setView("atlas");
+              setSetting("view", "atlas");
               setSelection(undefined);
               setSidePanel(undefined);
             }}
@@ -928,7 +926,7 @@ export const App = (): React.JSX.Element => {
         <button
           aria-pressed={motion}
           className="motion-control"
-          onClick={() => setMotion((value) => !value)}
+          onClick={() => updateSetting("motion", (current) => !current)}
           type="button"
         >
           Motion {motion ? "on" : "off"}
@@ -1055,7 +1053,7 @@ export const App = (): React.JSX.Element => {
             const action = searchResultAction(result, data.map);
             if (action === "focus") selectAndFocus(next);
             else {
-              setView("atlas");
+              setSetting("view", "atlas");
               setSelection(next);
               setSidePanel(action === "inbox" ? "inbox" : "inspector");
             }
