@@ -36,15 +36,15 @@ workflows.
 | Goal lifecycle, priority and accepted position   | Done       | Done | Auto-repair plus drag-to-pin         |
 | SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
 | Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |
-| Explainable blocked/waiting/unknown attention    | Done       | Done | Initial signal vocabulary only       |
+| Composed Needs-you decisions                     | Done       | Done | One subject over independent claims  |
 | Catch-up checkpoint and semantic changes         | Done       | Done | Explicit acknowledgement             |
-| Atlas, Ledger, Inbox and Closeout                | Projection | Done | One model, several lenses            |
+| Atlas, Ledger, Needs you and Inbox               | Projection | Done | One model, several lenses            |
 | Host-owned terminal and linked executions        | Done       | Done | xterm.js renders host streams        |
 | Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |
 | Agent-harness plugins and exact resume           | Done       | Done | Claude and Codex live-validated      |
 | Conversation tracking and supporting history     | Done       | Done | Automatic admission and exact resume |
-| Contributed plugins and repository status        | Done       | Done | Inspector and Closeout evidence live |
-| Host-synchronised closeout                       | Done       | Done | Close before semantic archive        |
+| Contributed plugins and repository status        | Done       | Done | Inspector evidence live              |
+| Host-synchronised close and archive              | Done       | Done | Inspector uses close before archive  |
 | Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
 | Search                                           | Done       | Done | Bounded type-to-find Atlas palette   |
 | Related-Agent evidence                           | Done       | Next | Immediate discovery slice            |
@@ -59,8 +59,9 @@ workflows.
 1. **Verification is thin.** Runtime `done`, local repository state and bounded
    pull-request/check facts are visible, but trustworthy result and handoff
    evidence remains incomplete.
-2. **Attention is narrow.** Returned results, downstream blockers, failed
-   checks, stalled work and context pressure do not yet form a complete model.
+2. **Needs-you coverage is narrow.** Result, input, lifecycle and uncertainty
+   claims now compose per subject, but downstream blockers, failed checks and
+   stalled work do not yet form a complete model.
 3. **Atlas geography is stable but not sufficiently semantic.** Goal membership
    is clear; delegation, dependency, handoff and integration relationships are
    not yet represented truthfully enough to prove that space beats a strong
@@ -100,8 +101,8 @@ non-goals.
    unsupported, stale and unavailable states and no transcript ingestion.
 4. Add deterministic returned-result, stalled, failed-check and downstream
    blocker attention signals.
-5. Make completion a coherent flow: reported done → inspect evidence → review
-   diff/checks → accept, revise, close or archive.
+5. Deepen the implemented result flow: reported done → Needs you → inspect
+   evidence → review diff/checks → accept, revise, close or archive.
 6. Harden terminal tabs, resize, release and host-loss recovery from real use.
 7. Add explicit semantic-density controls.
 

@@ -59,6 +59,32 @@ describe("Inspector", () => {
           ...projection,
           agent: {
             ...projection.agent,
+            attention: {
+              id: "agent-1:provider-complete",
+              targetType: "agent",
+              targetId: "agent-1",
+              agentId: "agent-1",
+              reason: "provider-complete",
+              action: "review",
+              requiresHumanInput: true,
+              startedAt: fixture.clock.now(),
+              lastChangedAt: fixture.clock.now(),
+              ageMs: 0,
+              priority: "P3",
+              runtimeState: "idle",
+              explanation: "Codex reports the response complete. Review code evidence.",
+              supportingSignals: [
+                {
+                  id: "agent-1:runtime-complete",
+                  reason: "runtime-complete",
+                  action: "review",
+                  startedAt: fixture.clock.now(),
+                  lastChangedAt: fixture.clock.now(),
+                  ageMs: 0,
+                  explanation: "The host also reports done.",
+                },
+              ],
+            },
             providerEvidence: {
               providerLabel: "Codex",
               mechanism: "hook",
@@ -82,6 +108,9 @@ describe("Inspector", () => {
       />,
     );
 
+    expect(markup).toContain("Review result");
+    expect(markup).toContain("Codex reports the response complete. Review code evidence.");
+    expect(markup).toContain("Also observed: The host also reports done.");
     expect(markup).toContain("Agent ID");
     expect(markup).toContain("provider-visible");
     expect(markup).toContain("execution-visible");

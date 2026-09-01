@@ -320,8 +320,8 @@ belongs to Observatory, not Herdr: Herdr reports where the execution runs,
 while the repository-status module combines Git with contributed code-host
 plugins. GitHub is the first built-in plugin; GitLab and Bitbucket can be
 contributed through the same versioned capability. Agent cards and Goals receive
-compact summaries; the full Repository status stays in the inspector, Closeout
-and a later optional Git lens. A same-named branch is never sufficient to claim
+compact summaries; the full Repository status stays in the Inspector and a
+later optional Git lens. A same-named branch is never sufficient to claim
 a pull-request association. See
 [Agent repository status and code-host plugins](../specs/agent-repository-and-code-host-plugins.md).
 
@@ -499,20 +499,21 @@ On return, AO restores the complete local navigation state. Attaching should
 feel like descending into a node and returning to the same place, not reopening
 the application from scratch.
 
-### Closeout and host lifecycle
+### Result review and host lifecycle
 
-The web Closeout surface reduces lifecycle housekeeping without weakening the
-distinction between observation and accepted truth. Runtime `done` enters a
-results-to-review lane; host absence enters an ended-externally lane and never
-becomes completion. Stale Agents may be shelved from the active Atlas as a
-reversible projection choice before the human archives them.
+Needs you composes runtime `done`, provider-reported response completion, host
+absence and other evidence into one decision per Agent. The operator does not
+choose a workflow based on which source emitted the claim. Selecting a result
+or lifecycle decision opens the Inspector, where repository evidence, review,
+terminal and valid lifecycle actions retain their independent provenance.
+Runtime or provider completion never becomes accepted Goal completion.
 
 For a live Agent, `Close & archive` first asks the generic session host to close
 the revalidated opaque execution and only then archives Observatory's semantic
 record. `Archive only` remains an explicit secondary action when the operator
 wants the execution to continue. Host-specific stop mechanics stay inside the
 adapter, and automatic host termination requires a later explicit policy. The
-delivery and failure plan is specified in
+host-safe implementation and failure plan are specified in
 [Agent closeout and host lifecycle](../specs/agent-closeout-and-host-lifecycle.md).
 
 Candidate input semantics are:
@@ -529,18 +530,20 @@ Persisted goal movement remains the next position-editing slice rather than a
 current browser gesture. The exact keys remain configurable. Mouse gestures
 must have keyboard equivalents.
 
-### Attention queue
+### Needs-you queue
 
 Retain a precise, keyboard-friendly list alongside the spatial view. The map is
 for orientation and relationships; the queue is for rapid execution. Both are
 projections of the same underlying state.
 
-Attention is ordered first by whether human intervention is required. For V0,
-items requiring intervention are ordered by human-set goal priority, longest
-current wait and most recent host observation as the final tie-breaker.
-Intervention type and downstream work blocked remain future candidates, not
-additional V0 ordering rules. Strategically important but healthy work remains
-visible without competing with an item that needs action.
+Host and provider evidence remain independent claims, but claims for one Agent
+compose into one operator-facing decision with supporting explanations. The
+queue groups response, review, lifecycle-resolution and monitoring decisions;
+its count is affected subjects rather than claim volume. Items requiring
+intervention are ordered by human-set Goal priority, decision type, longest
+current wait and most recent observation as the final tie-breaker. Strategically
+important but healthy work remains visible without competing with an item that
+needs action.
 
 ### V0 attention-first navigation and semantic zoom
 

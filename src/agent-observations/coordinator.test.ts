@@ -230,6 +230,16 @@ describe("agent observation coordination", () => {
       source: { mechanism: "hook" as const },
       payload: { phase: "using-tool" as const, toolCategory: "execute" as const },
     };
+    const outcome = {
+      schemaVersion: 1 as const,
+      observationId: "response-completed",
+      nativeConversationRef: reference,
+      providerInstanceId: "codex-local-test",
+      kind: "turn-outcome" as const,
+      observedAt,
+      source: { mechanism: "hook" as const },
+      payload: { outcome: "response-completed" as const },
+    };
     const coordinator = new AgentObservationCoordinator(
       {
         agentHarnesses: () => [
@@ -240,8 +250,8 @@ describe("agent observation coordination", () => {
             continuityScopeId: "scope-test",
             capturedAt: observedAt,
             complete: true,
-            current: [activity],
-            transitions: [activity],
+            current: [activity, outcome],
+            transitions: [activity, outcome],
             health: { state: "healthy", diagnostics: [] },
           }),
         ],
@@ -255,12 +265,16 @@ describe("agent observation coordination", () => {
     if (base.kind !== "command-centre") throw new Error("Unexpected projection.");
     const enriched = enrichCommandCentre(base, coordinator.snapshot());
 
-    expect(enriched.attention.items.map(({ reason }) => reason)).toEqual([
-      "waiting",
-      "provider-conflict",
-    ]);
+    expect(enriched.attention.items).toHaveLength(1);
+    expect(enriched.attention.items[0]).toMatchObject({
+      reason: "waiting",
+      supportingSignals: [{ reason: "provider-complete" }, { reason: "provider-conflict" }],
+    });
     expect(enriched.unassigned[0]).toMatchObject({
-      attention: { reason: "waiting" },
+      attention: {
+        reason: "waiting",
+        supportingSignals: [{ reason: "provider-complete" }, { reason: "provider-conflict" }],
+      },
       providerEvidence: {
         hostConflict: { hostState: "waiting", providerActivity: "using-tool" },
       },

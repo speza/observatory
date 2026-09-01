@@ -7,24 +7,38 @@ const ExecutionContainer = Schema.Struct({
   id: Schema.String,
   label: Schema.optional(Schema.String),
 });
+const AttentionReason = Schema.Literal(
+  "blocked",
+  "waiting",
+  "archived-running",
+  "runtime-complete",
+  "ended-externally",
+  "runtime-unknown",
+  "provider-input",
+  "provider-failure",
+  "provider-complete",
+  "context-pressure",
+  "provider-stale",
+  "provider-conflict",
+);
+const AttentionAction = Schema.Literal("respond", "review", "resolve", "monitor");
+const SupportingAttentionSignal = Schema.Struct({
+  id: Schema.String,
+  reason: AttentionReason,
+  action: AttentionAction,
+  startedAt: Schema.Number,
+  lastChangedAt: Schema.Number,
+  ageMs: Schema.Number,
+  explanation: Schema.String,
+});
 const AttentionItem = Schema.Struct({
   id: Schema.String,
   targetType: Schema.Literal("agent", "host"),
   targetId: Schema.String,
   agentId: Schema.optional(Schema.String),
   goalId: Schema.optional(Schema.String),
-  reason: Schema.Literal(
-    "blocked",
-    "waiting",
-    "archived-running",
-    "runtime-unknown",
-    "provider-input",
-    "provider-failure",
-    "provider-complete",
-    "context-pressure",
-    "provider-stale",
-    "provider-conflict",
-  ),
+  reason: AttentionReason,
+  action: AttentionAction,
   requiresHumanInput: Schema.Boolean,
   startedAt: Schema.Number,
   lastChangedAt: Schema.Number,
@@ -32,6 +46,7 @@ const AttentionItem = Schema.Struct({
   priority: Priority,
   runtimeState: RuntimeState,
   explanation: Schema.String,
+  supportingSignals: Schema.optional(Schema.Array(SupportingAttentionSignal)),
 });
 const AttentionProjection = Schema.Struct({
   items: Schema.Array(AttentionItem),
@@ -253,30 +268,10 @@ const CatchUp = Schema.Struct({
     ),
   ),
 });
-const CloseoutGoalCount = Schema.Struct({
-  goalId: Schema.optional(Schema.String),
-  goalTitle: Schema.String,
-  results: Schema.Number,
-  ended: Schema.Number,
-});
-const Closeout = Schema.Struct({
-  kind: Schema.Literal("closeout"),
-  generatedAt: Schema.Number,
-  results: Schema.Array(AgentView),
-  ended: Schema.Array(AgentView),
-  goals: Schema.Array(CloseoutGoalCount),
-  counts: Schema.Struct({
-    results: Schema.Number,
-    ended: Schema.Number,
-    total: Schema.Number,
-  }),
-});
-
 export const PortfolioResponseSchema = Schema.Struct({
   map: UniverseMap,
   commandCentre: CommandCentre,
   catchUp: CatchUp,
-  closeout: Closeout,
 });
 
 export const InspectorProjectionSchema = Schema.Union(

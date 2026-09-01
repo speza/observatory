@@ -43,8 +43,8 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
         <dd>Find a Goal or Agent in the Atlas, Inspector, or Inbox</dd>
       </div>
       <div>
-        <dt>a / b / c / v / n / N</dt>
-        <dd>Attention, inbox, closeout, view, new goal, new agent</dd>
+        <dt>a / b / v / n / N</dt>
+        <dd>Needs you, inbox, view, new goal, new agent</dd>
       </div>
       <div>
         <dt>i / ? / Esc</dt>

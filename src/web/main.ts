@@ -116,6 +116,13 @@ const program = Effect.scoped(
       runtime,
       conversations.observeHost.bind(conversations),
     );
+    if (runtime.useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
+      const catchUp = runtime.universe.project({ kind: "catch-up", now: runtime.clock.now() });
+      if (catchUp.kind === "catch-up" && catchUp.sinceAt === undefined) {
+        runtime.universe.execute({ type: "AcknowledgeCatchUp" });
+        agentObservations.acknowledge(runtime.clock.now());
+      }
+    }
     yield* startAgent.refreshPending();
     const api = new ObservatoryWebApi(
       runtime.universe,

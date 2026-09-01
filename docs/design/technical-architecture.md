@@ -302,13 +302,15 @@ result.
 Do not expose Herdr workspaces, tabs and panes as universal domain concepts.
 They remain adapter details referenced through opaque native identifiers.
 
-The implemented web closeout slice adds one generic per-Agent close capability
+The implemented web lifecycle slice adds one generic per-Agent close capability
 to this existing seam. It does not make Observatory the process owner: the host
 continues to decide how a recognised Agent execution is closed. A closeout
 coordinator obtains fresh access, asks the adapter to close the opaque target,
 reconciles the resulting host snapshot and only then submits `ArchiveAgent` to
-the Universe. The Herdr adapter may translate this to a pane-close operation,
-but that command and pane identity remain private to the adapter. See
+the Universe. The Agent Inspector exposes that operation after composed
+Needs-you evidence routes the operator to one subject. The Herdr adapter may
+translate close to a pane operation, but that command and pane identity remain
+private to the adapter. See
 [Agent closeout and host lifecycle](../specs/agent-closeout-and-host-lifecycle.md).
 
 Closing and archiving remain distinct operations. Host failure must leave the
@@ -479,7 +481,7 @@ out of scope.
 evaluate(UniverseSnapshot, now) -> AttentionProjection
 ```
 
-Each signal contains:
+Each evidence claim contains:
 
 - type;
 - target;
@@ -489,7 +491,9 @@ Each signal contains:
 - source facts; and
 - a human-readable explanation.
 
-Default ordering is:
+Claims for the same Agent compose into one operator-facing decision while
+retaining supporting and conflicting explanations. Counts refer to affected
+subjects, never claim volume. Default ordering between subjects is:
 
 1. human intervention required;
 2. human-set work priority;
@@ -790,10 +794,10 @@ concurrent-client needs.
 The first production web slice uses an in-process loopback HTTP adapter. The
 `web` composition root owns one `Universe`, reconciles one selected
 `SessionHost`, serves the static browser client, and exposes JSON for the
-existing universe-map, command-centre, catch-up, closeout and inspector
-projections. A narrow web command gateway accepts only goal editing, single or
-atomic batch assignment, completion and archive commands and delegates their
-invariants and persistence to `Universe`. A separate bounded closeout gateway
+existing universe-map, command-centre, catch-up and inspector projections. A
+narrow web command gateway accepts only goal editing, single or atomic batch
+assignment, completion and archive commands and delegates their invariants and
+persistence to `Universe`. A separate bounded closeout gateway
 coordinates fresh host access, close, reconciliation and semantic archive. It is
 not CRUD and does not expose the full internal command union. It binds to
 `127.0.0.1`; mutations require an exact loopback Origin, JSON content type and
@@ -976,8 +980,10 @@ identity-derived, collision-aware perimeter slots. This is deterministic slot
 allocation, not a force-directed graph layout.
 
 Agents may be explicitly archived by a human without stopping their host
-execution. The web Closeout surface separately offers `Close & archive` for a
-live Agent and local archive for an Agent confirmed stale. The host adapter
+execution. The Agent Inspector offers `Close & archive` for a live Agent and
+local archive for an Agent with no current execution. Runtime-done and
+provider-complete claims route into the same Needs-you decision workflow; there
+is no separate renderer Closeout surface. The host adapter
 must observe the exact revalidated execution disappear before `Close & archive`
 can write the archive. If a previously-live target cannot be resolved during
 revalidation, the operation fails without silently degrading into local

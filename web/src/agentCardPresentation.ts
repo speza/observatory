@@ -1,5 +1,5 @@
 import { formatAge } from "../../src/attention/attention.ts";
-import type { MapAgentView, ProviderEvidenceView } from "../../src/projection/types.ts";
+import type { AgentView, ProviderEvidenceView } from "../../src/projection/types.ts";
 
 const TITLE_LINE_LENGTH = 26;
 const DETAIL_LENGTH = 38;
@@ -82,13 +82,15 @@ const activityLabel = (evidence: ProviderEvidenceView): string | undefined => {
   return undefined;
 };
 
-const attentionLabel = (agent: MapAgentView): string | undefined => {
+const attentionLabel = (agent: AgentView): string | undefined => {
   const attention = agent.attention;
   if (!attention) return undefined;
   const label = {
     blocked: "Blocked · may need input",
     waiting: "Waiting for human input",
     "archived-running": "Archived while still running",
+    "runtime-complete": "Result ready for review",
+    "ended-externally": "Execution ended · resolve Agent",
     "runtime-unknown": "Runtime state uncertain",
     "provider-input": undefined,
     "provider-failure": "Response failed · review needed",
@@ -105,24 +107,21 @@ const basename = (value: string | undefined): string | undefined => value?.match
 export interface AgentCardPresentation {
   readonly identity: string;
   readonly titleLines: readonly string[];
-  readonly detail: string;
+  readonly detail?: string;
   readonly context?: string;
 }
 
-export const presentAgentCard = (agent: MapAgentView): AgentCardPresentation => {
+export const presentAgentCard = (agent: AgentView): AgentCardPresentation => {
   const evidenceDetail = agent.providerEvidence ? activityLabel(agent.providerEvidence) : undefined;
   const detail =
-    attentionLabel(agent) ??
-    evidenceDetail ??
-    concise(agent.description, DETAIL_LENGTH) ??
-    "No current activity observed";
+    attentionLabel(agent) ?? evidenceDetail ?? concise(agent.description, DETAIL_LENGTH);
   const repository = basename(agent.repository) ?? basename(agent.worktree);
   const context = concise([repository, agent.branch].filter(Boolean).join(" · "), CONTEXT_LENGTH);
   return {
     identity:
       concise(agent.harnessId ?? agent.provider ?? "session", 16)?.toUpperCase() ?? "SESSION",
     titleLines: agentTitleLines(agent.displayName),
-    detail: concise(detail, DETAIL_LENGTH) ?? detail,
+    detail: concise(detail, DETAIL_LENGTH),
     context,
   };
 };

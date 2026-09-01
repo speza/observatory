@@ -94,8 +94,9 @@ projections, not a fixture tree or a second semantic model. Neutral carbon and
 bone tones own structure, green denotes healthy working state, and vermilion is
 reserved for attention and intervention. Its world-anchored logical grid pans
 and scales with the Atlas, and dragged Goals snap to the same visible grid
-intersections. Atlas, Ledger, Attention, Catch up, Inbox and Closeout remain
-complementary lenses over the same accepted state.
+intersections. Atlas, Ledger, Needs you, Catch up and Inbox remain
+complementary lenses over the same accepted state; result and lifecycle actions
+converge in the Inspector.
 
 ## Host and terminal integration
 

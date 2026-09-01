@@ -387,7 +387,9 @@ V1 deterministic signals are:
 
 Severity and ordering are kernel rules. Provider extensions cannot create
 signals. Host `waiting` may corroborate an input request but is not required;
-host and provider conflicts remain visible.
+host and provider conflicts remain visible. All current claims for one Agent
+compose into one operator-facing decision with supporting explanations, so
+counts describe affected Agents rather than evidence volume.
 
 ### Catch-up
 

@@ -25,6 +25,13 @@ interface InspectorProps {
 
 const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
 
+const decisionTitle = {
+  respond: "Response needed",
+  review: "Review result",
+  resolve: "Resolve lifecycle",
+  monitor: "Monitor uncertainty",
+} as const;
+
 const copyIdentifier = (value: string): void => {
   void navigator.clipboard.writeText(value);
 };
@@ -198,6 +205,20 @@ export const Inspector = ({
       ) : null}
       {projection?.kind === "agent-inspector" ? (
         <>
+          {projection.agent.attention ? (
+            <section className="inspector__decision" aria-label="Current decision">
+              <p className="overline">{decisionTitle[projection.agent.attention.action]}</p>
+              <h3>{projection.agent.attention.explanation}</h3>
+              {(projection.agent.attention.supportingSignals?.length ?? 0) > 0 ? (
+                <ul>
+                  {projection.agent.attention.supportingSignals?.map((signal) => (
+                    <li key={signal.id}>Also observed: {signal.explanation}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <p>Evidence is not accepted completion.</p>
+            </section>
+          ) : null}
           <section className="inspector__agent-summary" aria-label="Agent summary and actions">
             <div className="inspector__status-line">
               <span className={`is-${projection.agent.runtimeState}`} aria-hidden="true" />
@@ -243,14 +264,24 @@ export const Inspector = ({
               ) : null}
               {projection.agent.executionPresence === "live" ? (
                 <button
-                  className={projection.agent.canResume ? undefined : "is-primary"}
+                  className={
+                    projection.agent.canResume || projection.agent.attention?.action === "review"
+                      ? undefined
+                      : "is-primary"
+                  }
                   onClick={() => onOpenTerminal(projection.agent)}
                   type="button"
                 >
                   Open terminal
                 </button>
               ) : null}
-              <button onClick={() => onReviewChanges(projection.agent)} type="button">
+              <button
+                className={
+                  projection.agent.attention?.action === "review" ? "is-primary" : undefined
+                }
+                onClick={() => onReviewChanges(projection.agent)}
+                type="button"
+              >
                 Review changes
               </button>
             </nav>

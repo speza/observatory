@@ -1,11 +1,36 @@
-import type { CommandCentreProjection, GoalView } from "../../src/projection/types.ts";
+import type { AgentView, CommandCentreProjection, GoalView } from "../../src/projection/types.ts";
 import { AgentLogo } from "./AgentLogo.tsx";
+import { presentAgentCard } from "./agentCardPresentation.ts";
 import type { Selection } from "./Atlas.tsx";
 
 interface LedgerProps {
   readonly projection: CommandCentreProjection;
   readonly onSelect: (selection: Selection) => void;
 }
+
+const AgentRow = ({
+  agent,
+  onSelect,
+}: {
+  readonly agent: AgentView;
+  readonly onSelect: (selection: Selection) => void;
+}): React.JSX.Element => {
+  const presentation = presentAgentCard(agent);
+  const state = agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
+  return (
+    <li>
+      <button onClick={() => onSelect({ type: "agent", id: agent.id })} type="button">
+        <span className={`state state--${state}`} />
+        <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
+        <span className="ledger__agent-copy">
+          <b>{agent.displayName}</b>
+          {presentation.detail ? <small>{presentation.detail}</small> : null}
+        </span>
+        <em>{state}</em>
+      </button>
+    </li>
+  );
+};
 
 const GoalCard = ({
   goal,
@@ -19,28 +44,12 @@ const GoalCard = ({
       <span className="ledger__priority">{goal.priority}</span>
       <strong>{goal.title}</strong>
       <small>
-        {goal.agents.length} agents · {goal.attentionCount} attention · {goal.staleCount} uncertain
-        ·{" "}
-        {
-          goal.agents.filter(
-            (agent) => agent.runtimeState === "done" && agent.hostHealth === "live",
-          ).length
-        }{" "}
-        results
+        {goal.agents.length} agents · {goal.attentionCount} need you · {goal.staleCount} monitor
       </small>
     </button>
     <ul>
       {goal.agents.map((agent) => (
-        <li key={agent.id}>
-          <button onClick={() => onSelect({ type: "agent", id: agent.id })} type="button">
-            <span
-              className={`state state--${agent.hostHealth === "live" ? agent.runtimeState : "unknown"}`}
-            />
-            <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-            <b>{agent.displayName}</b>
-            <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
-          </button>
-        </li>
+        <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
       ))}
     </ul>
   </article>
@@ -99,16 +108,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
               </div>
               <ul>
                 {projection.unassigned.map((agent) => (
-                  <li key={agent.id}>
-                    <button onClick={() => onSelect({ type: "agent", id: agent.id })} type="button">
-                      <span
-                        className={`state state--${agent.hostHealth === "live" ? agent.runtimeState : "unknown"}`}
-                      />
-                      <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-                      <b>{agent.displayName}</b>
-                      <em>{agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth}</em>
-                    </button>
-                  </li>
+                  <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
                 ))}
               </ul>
             </article>

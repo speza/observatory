@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRepositoryStatusSnapshot, AssociatedPullRequest } from "./types.ts";
-import { NO_PULL_REQUEST_DIAGNOSTIC, summarizeCloseoutIntegration } from "./closeout-summary.ts";
+import { NO_PULL_REQUEST_DIAGNOSTIC, summarizeIntegrationReadiness } from "./review-summary.ts";
 
 const pullRequest = (overrides: Partial<AssociatedPullRequest> = {}): AssociatedPullRequest => ({
   providerId: "synthetic",
@@ -54,13 +54,13 @@ const snapshot = (
 });
 
 const kinds = (value: AgentRepositoryStatusSnapshot): readonly string[] =>
-  summarizeCloseoutIntegration(value).warnings.map((warning) => warning.kind);
+  summarizeIntegrationReadiness(value).warnings.map((warning) => warning.kind);
 
-describe("Closeout repository summary", () => {
+describe("integration review summary", () => {
   test("reports dirty and untracked work", () => {
     const base = snapshot();
     expect(
-      summarizeCloseoutIntegration(
+      summarizeIntegrationReadiness(
         snapshot({
           git: base.git && {
             ...base.git,
@@ -121,19 +121,19 @@ describe("Closeout repository summary", () => {
 
   test("makes unavailable and provider failures explicit", () => {
     expect(
-      summarizeCloseoutIntegration(
+      summarizeIntegrationReadiness(
         snapshot({ status: "unavailable", git: undefined, diagnostics: ["Worktree is missing."] }),
       ).warnings[0]?.message,
     ).toBe("Repository integration evidence is unavailable: Worktree is missing.");
     expect(
-      summarizeCloseoutIntegration(
+      summarizeIntegrationReadiness(
         snapshot({ status: "partial", diagnostics: ["GitHub request failed."] }),
       ).warnings[0]?.message,
     ).toBe("Repository integration evidence is unavailable: GitHub request failed.");
   });
 
   test("keeps no pull request informational rather than warning", () => {
-    const result = summarizeCloseoutIntegration(
+    const result = summarizeIntegrationReadiness(
       snapshot({ pullRequests: [], diagnostics: [NO_PULL_REQUEST_DIAGNOSTIC] }),
     );
     expect(result.warnings).toEqual([]);

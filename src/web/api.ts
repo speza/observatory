@@ -2,7 +2,6 @@ import { Effect, Schema } from "effect";
 import type {
   CommandCentreProjection,
   CatchUpProjection,
-  CloseoutProjection,
   InspectorProjection,
   Projection,
   SearchProjection,
@@ -49,7 +48,6 @@ export interface PortfolioResponse {
   readonly map: UniverseMapProjection;
   readonly commandCentre: CommandCentreProjection;
   readonly catchUp: CatchUpProjection;
-  readonly closeout: CloseoutProjection;
 }
 
 interface ErrorResponse {
@@ -312,21 +310,18 @@ export class ObservatoryWebApi {
     const map = this.universe.project({ kind: "universe-map", now });
     const commandCentre = this.universe.project({ kind: "command-centre", now });
     const catchUp = this.universe.project({ kind: "catch-up", now });
-    const closeout = this.universe.project({ kind: "closeout", now });
     if (
       map.kind !== "universe-map" ||
       commandCentre.kind !== "command-centre" ||
-      catchUp.kind !== "catch-up" ||
-      closeout.kind !== "closeout"
+      catchUp.kind !== "catch-up"
     )
       return json({ error: "Projection contract mismatch." }, 500);
-    if (!this.agentObservations) return { map, commandCentre, catchUp, closeout };
+    if (!this.agentObservations) return { map, commandCentre, catchUp };
     const evidence = this.agentObservations.snapshot();
     return {
       map: enrichMap(map, evidence),
       commandCentre: enrichCommandCentre(commandCentre, evidence),
       catchUp: enrichCatchUp(catchUp, evidence),
-      closeout,
     };
   }
 

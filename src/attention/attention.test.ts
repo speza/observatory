@@ -95,4 +95,33 @@ describe("attention", () => {
     expect(projection.items[0]?.reason).toBe("archived-running");
     expect(projection.items[0]?.explanation).toContain("archived conversation");
   });
+
+  test("routes runtime results and confirmed ended work into one decision queue", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [goal("p1", "P1")],
+      [
+        agent("result", "done", "p1", 12_000),
+        {
+          ...agent("ended", "idle", "p1", 0),
+          execution: undefined,
+          executionPresence: "absent",
+          hostHealth: "stale",
+        },
+        {
+          ...agent("unassigned-ended", "idle", "", 0),
+          execution: undefined,
+          executionPresence: "absent",
+          hostHealth: "stale",
+          primaryGoalId: undefined,
+        },
+      ],
+    );
+
+    expect(projection.items.map(({ agentId, action }) => [agentId, action])).toEqual([
+      ["result", "review"],
+      ["ended", "resolve"],
+    ]);
+    expect(projection.currentCount).toBe(2);
+  });
 });

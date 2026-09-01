@@ -1,4 +1,4 @@
-import { compareAttention, type AttentionItem } from "../attention/attention.ts";
+import { compareAttention, composeAttention, type AttentionItem } from "../attention/attention.ts";
 import type { AgentObservationKind } from "../plugin-sdk/index.ts";
 import { priorityRank, type Priority } from "../universe/types.ts";
 import type {
@@ -127,21 +127,17 @@ const providerAttention = (
   };
   if (evidence.request?.state === "open") {
     const stale = evidence.health !== "healthy" || evidence.request === undefined;
-    const hostCorroboration =
-      agent.hostHealth === "live" &&
-      (agent.runtimeState === "waiting" || agent.runtimeState === "blocked")
-        ? ` The host also reports ${agent.runtimeState}.`
-        : "";
     return [
       {
         ...base,
         id: `${agent.id}:provider-input`,
         reason: stale ? "provider-stale" : "provider-input",
+        action: stale ? "monitor" : "respond",
         requiresHumanInput: !stale,
         startedAt: evidence.observedAt ?? now,
         explanation: stale
           ? `${evidence.providerLabel} last reported an unresolved ${evidence.request.kind} request, but the observation is stale.`
-          : `${evidence.providerLabel} requests ${evidence.request.kind.replace("-", " ")} input.${hostCorroboration} Open the agent terminal to respond.`,
+          : `${evidence.providerLabel} requests ${evidence.request.kind.replace("-", " ")} input. Open the agent terminal to respond.`,
       },
     ];
   }
@@ -151,6 +147,7 @@ const providerAttention = (
         ...base,
         id: `${agent.id}:provider-failure`,
         reason: "provider-failure",
+        action: "respond",
         requiresHumanInput: true,
         startedAt: evidence.observedAt ?? now,
         explanation: `${evidence.providerLabel} reports that the response failed${evidence.failureCategory ? ` (${evidence.failureCategory})` : ""}.`,
@@ -162,6 +159,7 @@ const providerAttention = (
         ...base,
         id: `${agent.id}:provider-complete`,
         reason: "provider-complete",
+        action: "review",
         requiresHumanInput: true,
         startedAt: evidence.observedAt ?? now,
         explanation: `${evidence.providerLabel} reports the response complete. Review code evidence before accepting completion.`,
@@ -173,6 +171,7 @@ const providerAttention = (
         ...base,
         id: `${agent.id}:context-pressure`,
         reason: "context-pressure",
+        action: "monitor",
         requiresHumanInput: false,
         startedAt: evidence.observedAt ?? now,
         explanation: `${evidence.providerLabel} reports ${evidence.contextBand} context pressure.`,
@@ -196,6 +195,7 @@ const providerSignals = (
       agentId: agent.id,
       goalId: agent.primaryGoalId,
       reason: "provider-conflict",
+      action: "monitor",
       requiresHumanInput: false,
       startedAt: evidence.observedAt ?? now,
       lastChangedAt: evidence.observedAt ?? now,
@@ -256,6 +256,18 @@ const compareSystems = (left: SystemView, right: SystemView): number =>
   left.title.localeCompare(right.title) ||
   left.id.localeCompare(right.id);
 
+const expandAttention = (items: readonly AttentionItem[]): readonly AttentionItem[] =>
+  items.flatMap((item): readonly AttentionItem[] => {
+    const { supportingSignals, ...primary } = item;
+    return [
+      primary,
+      ...(supportingSignals ?? []).map((signal) => ({
+        ...primary,
+        ...signal,
+      })),
+    ];
+  });
+
 const fuseAgents = (
   goals: readonly GoalView[],
   unassigned: readonly AgentView[],
@@ -276,20 +288,7 @@ const fuseAgents = (
         )
       : [];
   });
-  const corroboratedAgents = new Set(
-    providerItems.flatMap((item) =>
-      item.reason === "provider-input" && item.agentId ? [item.agentId] : [],
-    ),
-  );
-  const independentBaseAttention = baseAttention.filter(
-    (item) =>
-      !(
-        item.agentId &&
-        corroboratedAgents.has(item.agentId) &&
-        (item.reason === "waiting" || item.reason === "blocked")
-      ),
-  );
-  const items = [...providerItems, ...independentBaseAttention].sort(compareAttention);
+  const items = composeAttention([...providerItems, ...expandAttention(baseAttention)]).items;
   const primaryByAgent = new Map<string, AttentionItem>();
   for (const item of items)
     if (item.agentId && !primaryByAgent.has(item.agentId)) primaryByAgent.set(item.agentId, item);
@@ -456,10 +455,10 @@ export const enrichInspector = (
   const evidence = snapshot.agents.find((item) => item.agentId === projection.agent.id);
   if (!evidence) return projection;
   const view = evidenceView(evidence, snapshot.generatedAt, projection.agent);
-  const attention = [
+  const attention = composeAttention([
     ...providerSignals(projection.agent, view, snapshot.generatedAt, "P3"),
-    ...(projection.agent.attention ? [projection.agent.attention] : []),
-  ].sort(compareAttention)[0];
+    ...expandAttention(projection.agent.attention ? [projection.agent.attention] : []),
+  ]).items[0];
   return {
     ...projection,
     agent: enrichAgent(projection.agent, evidence, snapshot.generatedAt, attention),

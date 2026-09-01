@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentView } from "../../src/projection/types.ts";
 import type { WebAgentRepositoryStatusResponse } from "../../src/web/protocol.ts";
+import { summarizeIntegrationReadiness } from "../../src/repositories/review-summary.ts";
 import { fetchAgentRepositoryStatus } from "./api.ts";
 import { GitHubMark } from "./GitHubMark.tsx";
 
@@ -87,6 +88,7 @@ export const RepositoryStatus = ({
 
   const pullRequest = snapshot?.pullRequests.length === 1 ? snapshot.pullRequests[0] : undefined;
   const checkout = snapshot ? checkoutSummary(snapshot) : undefined;
+  const integration = snapshot ? summarizeIntegrationReadiness(snapshot) : undefined;
   const noPullRequest = snapshot?.diagnostics.includes(NO_PULL_REQUEST);
   const otherDiagnostics = snapshot?.diagnostics.filter(
     (diagnostic) => diagnostic !== NO_PULL_REQUEST,
@@ -181,6 +183,13 @@ export const RepositoryStatus = ({
             </div>
           </div>
         </>
+      ) : null}
+      {(integration?.warnings.length ?? 0) > 0 ? (
+        <ul className="repository-status__warnings" aria-label="Integration warnings">
+          {integration?.warnings.map((warning) => (
+            <li key={`${warning.kind}:${warning.message}`}>{warning.message}</li>
+          ))}
+        </ul>
       ) : null}
       {snapshot?.git?.diff.status === "changed" ? (
         <button

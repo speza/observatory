@@ -8,15 +8,13 @@ const portfolioAt = (generatedAt: number) => {
   const map = universe.project({ kind: "universe-map", now: generatedAt });
   const commandCentre = universe.project({ kind: "command-centre", now: generatedAt });
   const catchUp = universe.project({ kind: "catch-up", now: generatedAt });
-  const closeout = universe.project({ kind: "closeout", now: generatedAt });
   if (
     map.kind !== "universe-map" ||
     commandCentre.kind !== "command-centre" ||
-    catchUp.kind !== "catch-up" ||
-    closeout.kind !== "closeout"
+    catchUp.kind !== "catch-up"
   )
     throw new Error("Expected portfolio projections.");
-  return { map, commandCentre, catchUp, closeout };
+  return { map, commandCentre, catchUp };
 };
 
 const decodePortfolioJson = Schema.decodeUnknownSync(Schema.parseJson(PortfolioResponseSchema));

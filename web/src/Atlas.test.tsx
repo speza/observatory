@@ -119,7 +119,7 @@ describe("production web Atlas", () => {
     expect(markup).not.toContain("goal__contour");
     expect(markup).not.toContain("goal-fill-");
     expect(markup).toContain("goal-clip-");
-    expect(markup).toContain("ATTN</text>");
+    expect(markup).toContain("NEED</text>");
     expect(markup).toContain('aria-label="Fit map to screen"');
     const cameraZoom = Number(markup.match(/data-camera-zoom="([^"]+)"/u)?.[1]);
     expect(cameraZoom).toBeGreaterThan(0);

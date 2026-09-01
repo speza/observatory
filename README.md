@@ -13,7 +13,7 @@ supervision. The product should answer five questions quickly:
 5. Can I trust what says it is finished?
 
 The Atlas is useful only when its stable System → Goal → Agent geography makes
-those answers easier than reconstructing them from a flat list. Attention,
+those answers easier than reconstructing them from a flat list. Needs you,
 Catch up, Ledger, Inbox, inspector, workspace review and hosted terminals are
 supporting lenses over the same trusted state.
 
@@ -118,10 +118,10 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 - durable human-owned Systems and Goals, with Goal priority, completion and archive;
 - stable Goal → Agent assignments and accepted goal positions;
 - conversation-first Agent tracking with Herdr represented as an optional runtime;
-- explainable attention for blocked, waiting and uncertain agents;
+- one-subject Needs-you decisions composed from blocked, waiting, result and uncertain evidence;
 - durable semantic Catch up since the last explicit acknowledgement;
 - Atlas and Ledger projections over the same state;
-- actionable Inbox and Closeout workflows;
+- a narrow Inbox for work awaiting accepted organisation;
 - goal editing, agent assignment and host-backed agent launch;
 - visible blank-prompt launches with an immediate Observatory terminal until
   the provider creates and identifies the durable conversation;
@@ -145,8 +145,8 @@ expose the control plane remotely.
 - `j`/`k` or arrow keys move selection.
 - `Enter` focuses a goal or opens the selected Agent terminal.
 - `Space`/`f` focuses; `0` resets the camera.
-- `a` opens Attention; `g` jumps to the next signal.
-- `v` switches Atlas and Ledger; `b` opens Inbox; `c` opens Closeout.
+- `a` opens Needs you; `g` jumps to the next decision.
+- `v` switches Atlas and Ledger; `b` opens Inbox.
 - `n` creates a goal; `N` starts an Agent.
 - `i` toggles the inspector; `t` opens the selected terminal.
 - `Esc` closes the topmost surface; `?` opens the complete guide.

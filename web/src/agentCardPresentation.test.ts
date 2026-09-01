@@ -107,6 +107,7 @@ describe("agent card presentation", () => {
             targetId: "agent-1",
             agentId: "agent-1",
             reason: "blocked",
+            action: "respond",
             requiresHumanInput: true,
             startedAt: 1_000,
             lastChangedAt: 1_000,

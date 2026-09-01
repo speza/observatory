@@ -290,10 +290,6 @@ export const Atlas = ({
                 agent.lifecycleState,
               ),
             );
-            const resultCount = goal.agents.filter(
-              (agent) => agent.hostHealth === "live" && agent.runtimeState === "done",
-            ).length;
-            const endedCount = goal.agents.filter((agent) => agent.hostHealth === "stale").length;
             const agentPoints = goalAgentPoints(goal, centre);
             const orbitBands = [
               ...new Map(agentPoints.map((point) => [point.band, point])).values(),
@@ -327,7 +323,7 @@ export const Atlas = ({
                   ))}
                 </g>
                 <g
-                  aria-label={`${goal.title}, ${goal.agents.length} agents, priority ${goal.priority}, ${resultCount} results to review, ${endedCount} ended`}
+                  aria-label={`${goal.title}, ${goal.agents.length} agents, priority ${goal.priority}, ${goal.attentionCount} need you, ${goal.staleCount} monitor`}
                   className={`goal__body ${selected ? "is-selected" : ""}`}
                   data-goal-id={goal.id}
                   data-radius={radius}
@@ -410,18 +406,7 @@ export const Atlas = ({
                       transform={`translate(${radius * 0.46} ${-radius * 0.58})`}
                     >
                       <rect height="22" rx="11" width="48" x="-24" y="-11" />
-                      <text y="3">{goal.attentionCount} ATTN</text>
-                    </g>
-                  ) : null}
-                  {resultCount + endedCount > 0 ? (
-                    <g
-                      className="goal__closeout"
-                      transform={`translate(${radius * -0.46} ${-radius * 0.58})`}
-                    >
-                      <rect height="22" rx="11" width="56" x="-28" y="-11" />
-                      <text y="3">
-                        {resultCount}R · {endedCount}E
-                      </text>
+                      <text y="3">{goal.attentionCount} NEED</text>
                     </g>
                   ) : null}
                 </g>
@@ -484,7 +469,7 @@ export const Atlas = ({
                           onSelect({ type: "agent", id: agent.id });
                         }
                       }}
-                      aria-label={`${agent.displayName}, ${state}, ${card.detail}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
+                      aria-label={`${agent.displayName}, ${state}${card.detail ? `, ${card.detail}` : ""}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
                       role="button"
                       style={style}
                       tabIndex={0}
@@ -556,13 +541,15 @@ export const Atlas = ({
                             </tspan>
                           ))}
                         </text>
-                        <text
-                          className="agent__activity"
-                          x="-96"
-                          y={card.titleLines.length > 1 ? "25" : "11"}
-                        >
-                          {card.detail}
-                        </text>
+                        {card.detail ? (
+                          <text
+                            className="agent__activity"
+                            x="-96"
+                            y={card.titleLines.length > 1 ? "25" : "11"}
+                          >
+                            {card.detail}
+                          </text>
+                        ) : null}
                         {card.context ? (
                           <text className="agent__context" x="-96" y="42">
                             {card.context}

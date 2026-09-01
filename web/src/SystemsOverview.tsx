@@ -34,11 +34,11 @@ const SystemCard = ({
           <dd>{system.workingCount}</dd>
         </div>
         <div className={system.attentionCount > 0 ? "is-attention" : ""}>
-          <dt>Attention</dt>
+          <dt>Needs you</dt>
           <dd>{system.attentionCount}</dd>
         </div>
         <div>
-          <dt>Uncertain</dt>
+          <dt>Monitor</dt>
           <dd>{system.staleCount}</dd>
         </div>
       </dl>
@@ -67,7 +67,7 @@ const UnassignedGoalsCard = ({
           <dd>{goals.reduce((total, goal) => total + goal.agents.length, 0)}</dd>
         </div>
         <div className={goals.some((goal) => goal.attentionCount > 0) ? "is-attention" : ""}>
-          <dt>Attention</dt>
+          <dt>Needs you</dt>
           <dd>{goals.reduce((total, goal) => total + goal.attentionCount, 0)}</dd>
         </div>
       </dl>

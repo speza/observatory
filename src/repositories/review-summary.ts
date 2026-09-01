@@ -1,6 +1,6 @@
 import type { AgentRepositoryStatusSnapshot } from "./types.ts";
 
-export type CloseoutIntegrationWarningKind =
+export type IntegrationWarningKind =
   | "dirty-worktree"
   | "local-ahead"
   | "failing-checks"
@@ -9,22 +9,22 @@ export type CloseoutIntegrationWarningKind =
   | "ambiguous-association"
   | "unavailable";
 
-export interface CloseoutIntegrationWarning {
-  readonly kind: CloseoutIntegrationWarningKind;
+export interface IntegrationWarning {
+  readonly kind: IntegrationWarningKind;
   readonly message: string;
 }
 
-export interface CloseoutIntegrationSummary {
-  readonly warnings: readonly CloseoutIntegrationWarning[];
+export interface IntegrationReviewSummary {
+  readonly warnings: readonly IntegrationWarning[];
   readonly information: readonly string[];
 }
 
 export const NO_PULL_REQUEST_DIAGNOSTIC = "No pull request found for this repository and branch.";
 
-export const summarizeCloseoutIntegration = (
+export const summarizeIntegrationReadiness = (
   snapshot: AgentRepositoryStatusSnapshot,
-): CloseoutIntegrationSummary => {
-  const warnings: CloseoutIntegrationWarning[] = [];
+): IntegrationReviewSummary => {
+  const warnings: IntegrationWarning[] = [];
   const information: string[] = [];
   const diff = snapshot.git?.diff;
 

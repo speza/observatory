@@ -87,6 +87,7 @@ describe("CatchUpPanel", () => {
     expect(markup).toContain("Accepted changes");
     expect(markup).toContain("Provider signals");
     expect(markup).toContain("1 routine activity transitions");
+    expect(markup).toContain("2 accepted summaries · 7 transitions");
     expect(markup).toContain("<details");
     expect(markup).not.toContain("<details open");
     expect(markup.indexOf("Agent needs input")).toBeLessThan(

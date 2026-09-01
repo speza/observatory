@@ -1,8 +1,15 @@
 # Agent closeout and host lifecycle
 
-Status: implemented web closeout slice; policy automation deferred
+Status: host-safe coordinator retained; standalone Closeout surface superseded
 
 Date: 2026-08-27
+
+> **Workflow amendment, 2026-09-01:** Closeout is no longer a standalone web
+> surface. Runtime-done, provider-complete and confirmed-absence claims compose
+> into one Needs-you decision per Agent and route through the Inspector. The
+> generic close capability, failure semantics, closeout coordinator and guarded
+> loopback endpoint remain unchanged. This removes an evidence-source-specific
+> workflow without weakening close-before-archive safety.
 
 Depends on:
 
@@ -149,7 +156,7 @@ host-specific side effects.
 - Exercise the adapter against a disposable live Herdr Agent; existing user
   sessions must never be used as closeout test targets.
 
-### Slice 2 — closeout inbox (implemented)
+### Slice 2 — closeout inbox (implemented, renderer superseded)
 
 - Add a deterministic closeout projection for results awaiting review and
   Agents ended externally.

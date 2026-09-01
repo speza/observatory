@@ -22,8 +22,6 @@ import {
 import { AttentionQueue } from "./AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand, type Selection } from "./Atlas.tsx";
 import { CatchUpPanel } from "./CatchUpPanel.tsx";
-import { CloseoutPanel } from "./CloseoutPanel.tsx";
-import { useCloseoutRepositoryEvidence } from "./closeoutRepositoryEvidence.ts";
 import { InboxPanel } from "./InboxPanel.tsx";
 import { Inspector } from "./Inspector.tsx";
 import { KeyboardGuide } from "./KeyboardGuide.tsx";
@@ -45,7 +43,7 @@ import { WorkspaceReview } from "./WorkspaceReview.tsx";
 
 type Theme = "light" | "dark";
 type View = "atlas" | "ledger";
-type SidePanel = "attention" | "inbox" | "catch-up" | "closeout" | "inspector";
+type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
   ...projection.goals.flatMap((goal) => goal.agents),
@@ -259,14 +257,6 @@ export const App = (): React.JSX.Element => {
       counts: scopedCommandCentre.counts,
     };
   }, [data, scopedCommandCentre, selectedSystemId]);
-  const closeoutResultIds = useMemo(
-    () => data?.closeout.results.map((agent) => agent.id) ?? [],
-    [data?.closeout.results],
-  );
-  const closeoutRepositoryEvidence = useCloseoutRepositoryEvidence(
-    closeoutResultIds,
-    sidePanel === "closeout",
-  );
   const working = useMemo(
     () =>
       scopedCommandCentre
@@ -310,9 +300,6 @@ export const App = (): React.JSX.Element => {
 
   const assignInboxAgents = async (agentIds: readonly string[], goalId: string): Promise<boolean> =>
     (await runCommand({ type: "AssignAgents", agentIds, goalId })) !== undefined;
-
-  const archiveAgents = async (agentIds: readonly string[]): Promise<boolean> =>
-    (await runCommand({ type: "ArchiveAgents", agentIds })) !== undefined;
 
   const addHistoricalConversation = async (
     handle: string,
@@ -582,9 +569,6 @@ export const App = (): React.JSX.Element => {
       } else if (key === "b") {
         event.preventDefault();
         setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
-      } else if (key === "c") {
-        event.preventDefault();
-        setSidePanel((value) => (value === "closeout" ? undefined : "closeout"));
       } else if (key === "v") {
         event.preventDefault();
         setView((value) => (value === "atlas" ? "ledger" : "atlas"));
@@ -787,7 +771,7 @@ export const App = (): React.JSX.Element => {
             type="button"
           >
             <strong>{String(scopedCommandCentre?.counts.attention ?? 0).padStart(2, "0")}</strong>
-            <span>Attention</span>
+            <span>Needs you</span>
           </button>
           <button
             aria-expanded={sidePanel === "inbox"}
@@ -799,16 +783,6 @@ export const App = (): React.JSX.Element => {
           >
             <strong>{String(data.commandCentre.counts.unassigned).padStart(2, "0")}</strong>
             <span>Inbox</span>
-          </button>
-          <button
-            aria-expanded={sidePanel === "closeout"}
-            onClick={() => {
-              setSidePanel((value) => (value === "closeout" ? undefined : "closeout"));
-            }}
-            type="button"
-          >
-            <strong>{String(data.closeout.counts.total).padStart(2, "0")}</strong>
-            <span>Closeout</span>
           </button>
         </div>
         {portfolio.error ? (
@@ -844,7 +818,7 @@ export const App = (): React.JSX.Element => {
         >
           <span>{data.catchUp.pending ? "Catch up" : "Caught up"}</span>
           <b>
-            {data.catchUp.groups.reduce((total, group) => total + group.items.length, 0)} changes
+            {data.catchUp.groups.reduce((total, group) => total + group.items.length, 0)} updates
           </b>
         </button>
         {view === "atlas" && !selectedSystemId ? (
@@ -875,11 +849,7 @@ export const App = (): React.JSX.Element => {
               setSidePanel(undefined);
             }}
             projection={scopedMap}
-            reservedLeft={
-              sidePanel === "attention" || sidePanel === "inbox" || sidePanel === "closeout"
-                ? 430
-                : 0
-            }
+            reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 430 : 0}
             reservedRight={0}
             selection={selection}
             theme={theme}
@@ -925,25 +895,6 @@ export const App = (): React.JSX.Element => {
             onSelect={selectAndFocus}
             pending={commandPending}
             projection={data.catchUp}
-          />
-        ) : null}
-        {sidePanel === "closeout" ? (
-          <CloseoutPanel
-            error={commandError}
-            repositoryEvidence={closeoutRepositoryEvidence}
-            onArchive={archiveAgents}
-            onClose={() => setSidePanel(undefined)}
-            onCloseAndArchive={runCloseout}
-            onReview={(agent) => {
-              setSidePanel(undefined);
-              openWorkspaceReview(agent);
-            }}
-            onSelect={(next) => {
-              setSelection(next);
-              setSidePanel("inspector");
-            }}
-            pending={commandPending}
-            projection={data.closeout}
           />
         ) : null}
         {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
