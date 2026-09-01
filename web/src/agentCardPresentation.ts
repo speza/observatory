@@ -2,7 +2,7 @@ import { formatAge } from "../../src/attention/attention.ts";
 import type { AgentView, ProviderEvidenceView } from "../../src/projection/types.ts";
 
 const TITLE_LINE_LENGTH = 26;
-const DETAIL_LENGTH = 38;
+const DETAIL_LENGTH = 35;
 const CONTEXT_LENGTH = 34;
 
 const concise = (value: string | undefined, maximumCharacters: number): string | undefined => {
@@ -37,7 +37,7 @@ export const agentTitleLines = (value: string): readonly string[] => {
 const observedAge = (evidence: ProviderEvidenceView): string | undefined => {
   if (evidence.ageMs === undefined) return undefined;
   if (evidence.ageMs < 10_000) return "now";
-  return `${formatAge(evidence.ageMs)} ago`;
+  return formatAge(evidence.ageMs);
 };
 
 const withAge = (label: string, evidence: ProviderEvidenceView): string => {

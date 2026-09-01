@@ -405,10 +405,14 @@
   transform-origin: center;
 }
 .agent:hover .agent__card,
-.agent:focus .agent__card {
+.agent__card-target:focus .agent__card {
   stroke: var(--goal-color);
   stroke-width: 2;
   filter: drop-shadow(0 4px 7px rgb(24 21 17 / 14%));
+}
+.agent__card-target:focus,
+.agent__quick-action:focus {
+  outline: none;
 }
 .agent__selection {
   fill: none;
@@ -421,6 +425,46 @@
 .agent.is-selected .agent__selection {
   opacity: 0.95;
   filter: drop-shadow(0 4px 7px rgb(24 21 17 / 18%));
+}
+.agent__quick-actions {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+.agent:hover .agent__quick-actions,
+.agent:focus-within .agent__quick-actions,
+.agent.is-selected .agent__quick-actions {
+  opacity: 1;
+  visibility: visible;
+}
+.agent__quick-action {
+  color: var(--ink);
+  cursor: pointer;
+}
+.agent__quick-action rect {
+  fill: var(--paper-panel);
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.agent__quick-action svg {
+  overflow: visible;
+  pointer-events: none;
+}
+.agent__quick-action:hover rect,
+.agent__quick-action:focus rect {
+  fill: var(--goal-color);
+  stroke: var(--goal-color);
+}
+.agent__quick-action:hover svg,
+.agent__quick-action:focus svg {
+  color: var(--paper-panel);
+}
+@media (hover: none) {
+  .agent__quick-actions {
+    opacity: 1;
+    visibility: visible;
+  }
 }
 .zoom-control {
   position: absolute;

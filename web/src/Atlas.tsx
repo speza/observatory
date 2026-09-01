@@ -2,9 +2,11 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { UniverseMapProjection } from "../../src/projection/types.ts";
+import { GitCompareArrows, Terminal } from "lucide-react";
+import type { AgentView, UniverseMapProjection } from "../../src/projection/types.ts";
 import { AgentLogo } from "./AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
@@ -53,12 +55,22 @@ interface AtlasProps {
   readonly motion?: boolean;
   readonly cameraCommand?: AtlasCameraCommand;
   readonly onClearSelection?: () => void;
+  readonly onFocusSelection?: (selection: Selection) => void;
   readonly onMoveGoal?: (
     goalId: string,
     position: { readonly x: number; readonly y: number },
   ) => void | Promise<void>;
+  readonly onOpenTerminal?: (agent: AgentView) => void;
+  readonly onReviewChanges?: (agent: AgentView) => void;
   readonly onSelect: (selection: Selection) => void;
 }
+
+const runQuickAction = (event: ReactKeyboardEvent<SVGGElement>, action: () => void): void => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  event.stopPropagation();
+  action();
+};
 
 const palettes = {
   light: [
@@ -88,7 +100,10 @@ export const Atlas = ({
   motion = true,
   cameraCommand,
   onClearSelection,
+  onFocusSelection,
   onMoveGoal,
+  onOpenTerminal,
+  onReviewChanges,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
   const {
@@ -438,12 +453,18 @@ export const Atlas = ({
                     "conflict",
                   ].includes(agent.lifecycleState);
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
+                  const canOpenTerminal =
+                    agent.executionPresence === "live" && onOpenTerminal !== undefined;
+                  const canReview =
+                    agent.attention?.action === "review" && onReviewChanges !== undefined;
                   const state = stateLabel(agent);
                   const card = presentAgentCard(agent);
                   const style: AgentStyle = {
                     "--goal-color": palette.mark,
                     "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
                   };
+                  const focusAgent = (): void =>
+                    (onFocusSelection ?? onSelect)({ type: "agent", id: agent.id });
                   return (
                     <g
                       className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
@@ -454,116 +475,182 @@ export const Atlas = ({
                       data-orbit-rx={point.radiusX}
                       data-orbit-ry={point.radiusY}
                       key={agent.id}
-                      onClick={() => {
-                        onSelect({ type: "agent", id: agent.id });
-                      }}
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        onSelect({ type: "agent", id: agent.id });
-                        focusPoint(point, { type: "agent", id: agent.id });
-                      }}
-                      onFocus={() => onSelect({ type: "agent", id: agent.id })}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          onSelect({ type: "agent", id: agent.id });
-                        }
-                      }}
-                      aria-label={`${agent.displayName}, ${state}${card.detail ? `, ${card.detail}` : ""}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
-                      role="button"
                       style={style}
-                      tabIndex={0}
                       transform={`translate(${point.x} ${point.y})`}
                     >
-                      <g className="agent__presence">
-                        {attention ? (
+                      <g
+                        aria-label={`${agent.displayName}, ${state}${card.detail ? `, ${card.detail}` : ""}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
+                        className="agent__card-target"
+                        onClick={() => {
+                          onSelect({ type: "agent", id: agent.id });
+                        }}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+                          onSelect({ type: "agent", id: agent.id });
+                          focusPoint(point, { type: "agent", id: agent.id });
+                        }}
+                        onFocus={focusAgent}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onSelect({ type: "agent", id: agent.id });
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <g className="agent__presence">
+                          {attention ? (
+                            <rect
+                              className="agent__attention-wave"
+                              height={AGENT_CARD_HEIGHT + 8}
+                              rx="7"
+                              width={AGENT_CARD_WIDTH + 8}
+                              x={-AGENT_CARD_WIDTH / 2 - 4}
+                              y={-AGENT_CARD_HEIGHT / 2 - 4}
+                            />
+                          ) : null}
                           <rect
-                            className="agent__attention-wave"
+                            className="agent__working-aura"
                             height={AGENT_CARD_HEIGHT + 8}
-                            rx="7"
+                            rx="8"
                             width={AGENT_CARD_WIDTH + 8}
                             x={-AGENT_CARD_WIDTH / 2 - 4}
                             y={-AGENT_CARD_HEIGHT / 2 - 4}
                           />
-                        ) : null}
+                          <rect
+                            className="agent__card"
+                            height={AGENT_CARD_HEIGHT}
+                            rx="4"
+                            width={AGENT_CARD_WIDTH}
+                            x={-AGENT_CARD_WIDTH / 2}
+                            y={-AGENT_CARD_HEIGHT / 2}
+                          />
+                          <rect
+                            className="agent__working-circuit"
+                            height={AGENT_CARD_HEIGHT}
+                            rx="4"
+                            width={AGENT_CARD_WIDTH}
+                            x={-AGENT_CARD_WIDTH / 2}
+                            y={-AGENT_CARD_HEIGHT / 2}
+                          />
+                          <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
+                          <g className="agent__provider-mark" transform="translate(-91 -35)">
+                            <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
+                          </g>
+                          <text className="agent__identity" x="-77" y="-32">
+                            {card.identity}
+                          </text>
+                          <g className="agent__state" transform="translate(98 -35)">
+                            <circle className="agent__state-pulse" r="3" />
+                            <circle className="agent__state-dot" r="3" />
+                            <text x="-8" y="3">
+                              {state.toUpperCase()}
+                            </text>
+                          </g>
+                          {attention ? (
+                            <g className="agent__review-badge" transform="translate(88 -50)">
+                              <circle r="8" />
+                              <text y="3">!</text>
+                            </g>
+                          ) : null}
+                          <text className="agent__name" x="-96" y="-5">
+                            {card.titleLines.map((line, lineIndex) => (
+                              <tspan
+                                dy={lineIndex === 0 ? 0 : 15}
+                                key={`${line}-${lineIndex}`}
+                                x="-96"
+                              >
+                                {line}
+                              </tspan>
+                            ))}
+                          </text>
+                          {card.detail ? (
+                            <text
+                              className="agent__activity"
+                              x="-96"
+                              y={card.titleLines.length > 1 ? "25" : "11"}
+                            >
+                              {card.detail}
+                            </text>
+                          ) : null}
+                          {card.context ? (
+                            <text className="agent__context" x="-96" y="42">
+                              {card.context}
+                            </text>
+                          ) : null}
+                        </g>
                         <rect
-                          className="agent__working-aura"
+                          className="agent__selection"
                           height={AGENT_CARD_HEIGHT + 8}
-                          rx="8"
+                          rx="7"
                           width={AGENT_CARD_WIDTH + 8}
                           x={-AGENT_CARD_WIDTH / 2 - 4}
                           y={-AGENT_CARD_HEIGHT / 2 - 4}
                         />
-                        <rect
-                          className="agent__card"
-                          height={AGENT_CARD_HEIGHT}
-                          rx="4"
-                          width={AGENT_CARD_WIDTH}
-                          x={-AGENT_CARD_WIDTH / 2}
-                          y={-AGENT_CARD_HEIGHT / 2}
-                        />
-                        <rect
-                          className="agent__working-circuit"
-                          height={AGENT_CARD_HEIGHT}
-                          rx="4"
-                          width={AGENT_CARD_WIDTH}
-                          x={-AGENT_CARD_WIDTH / 2}
-                          y={-AGENT_CARD_HEIGHT / 2}
-                        />
-                        <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
-                        <g className="agent__provider-mark" transform="translate(-91 -35)">
-                          <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
-                        </g>
-                        <text className="agent__identity" x="-77" y="-32">
-                          {card.identity}
-                        </text>
-                        <g className="agent__state" transform="translate(98 -35)">
-                          <circle className="agent__state-pulse" r="3" />
-                          <circle className="agent__state-dot" r="3" />
-                          <text x="-8" y="3">
-                            {state.toUpperCase()}
-                          </text>
-                        </g>
-                        {attention ? (
-                          <g className="agent__review-badge" transform="translate(88 -50)">
-                            <circle r="8" />
-                            <text y="3">!</text>
-                          </g>
-                        ) : null}
-                        <text className="agent__name" x="-96" y="-5">
-                          {card.titleLines.map((line, lineIndex) => (
-                            <tspan
-                              dy={lineIndex === 0 ? 0 : 15}
-                              key={`${line}-${lineIndex}`}
-                              x="-96"
-                            >
-                              {line}
-                            </tspan>
-                          ))}
-                        </text>
-                        {card.detail ? (
-                          <text
-                            className="agent__activity"
-                            x="-96"
-                            y={card.titleLines.length > 1 ? "25" : "11"}
-                          >
-                            {card.detail}
-                          </text>
-                        ) : null}
-                        {card.context ? (
-                          <text className="agent__context" x="-96" y="42">
-                            {card.context}
-                          </text>
-                        ) : null}
                       </g>
-                      <rect
-                        className="agent__selection"
-                        height={AGENT_CARD_HEIGHT + 8}
-                        rx="7"
-                        width={AGENT_CARD_WIDTH + 8}
-                        x={-AGENT_CARD_WIDTH / 2 - 4}
-                        y={-AGENT_CARD_HEIGHT / 2 - 4}
-                      />
+                      {canOpenTerminal || canReview ? (
+                        <g className="agent__quick-actions">
+                          {canReview ? (
+                            <g
+                              aria-label={`Review ${agent.displayName} changes`}
+                              className="agent__quick-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onReviewChanges?.(agent);
+                              }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onFocus={focusAgent}
+                              onKeyDown={(event) =>
+                                runQuickAction(event, () => onReviewChanges?.(agent))
+                              }
+                              onPointerDown={(event) => event.stopPropagation()}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <title>Review changes</title>
+                              <rect height="20" rx="3" width="22" x="48" y="27" />
+                              <GitCompareArrows
+                                aria-hidden="true"
+                                height="14"
+                                strokeWidth="1.8"
+                                width="14"
+                                x="52"
+                                y="30"
+                              />
+                            </g>
+                          ) : null}
+                          {canOpenTerminal ? (
+                            <g
+                              aria-label={`Open ${agent.displayName} terminal`}
+                              className="agent__quick-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenTerminal?.(agent);
+                              }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onFocus={focusAgent}
+                              onKeyDown={(event) =>
+                                runQuickAction(event, () => onOpenTerminal?.(agent))
+                              }
+                              onPointerDown={(event) => event.stopPropagation()}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <title>Open terminal</title>
+                              <rect height="20" rx="3" width="22" x="74" y="27" />
+                              <Terminal
+                                aria-hidden="true"
+                                height="14"
+                                strokeWidth="1.8"
+                                width="14"
+                                x="78"
+                                y="30"
+                              />
+                            </g>
+                          ) : null}
+                        </g>
+                      ) : null}
                     </g>
                   );
                 })}

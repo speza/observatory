@@ -840,10 +840,17 @@ export const App = (): React.JSX.Element => {
         ) : view === "atlas" && scopedMap ? (
           <Atlas
             cameraCommand={cameraCommand}
+            onFocusSelection={setSelection}
             onMoveGoal={async (goalId, position) => {
               await runCommand({ type: "SetGoalMapPosition", goalId, position });
             }}
             onSelect={select}
+            onOpenTerminal={(agent) => {
+              setTerminalLaunch(undefined);
+              setTerminalAgent(agent);
+              setSidePanel(undefined);
+            }}
+            onReviewChanges={openWorkspaceReview}
             onClearSelection={() => {
               setSelection(undefined);
               setSidePanel(undefined);

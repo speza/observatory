@@ -58,6 +58,22 @@ describe("agent card presentation", () => {
     });
   });
 
+  test("bounds provider activity to the available card width", () => {
+    expect(
+      presentAgentCard(
+        agent({
+          providerEvidence: {
+            providerLabel: "Codex",
+            health: "healthy",
+            ageMs: 56_000,
+            activity: "responding",
+            supportedKinds: ["activity"],
+          },
+        }),
+      ).detail,
+    ).toBe("Observed: composing response · 56s");
+  });
+
   test("prioritises an observed human request over background activity", () => {
     expect(
       presentAgentCard(
@@ -73,7 +89,7 @@ describe("agent card presentation", () => {
           },
         }),
       ).detail,
-    ).toBe("Observed: permission needed · 1m ago");
+    ).toBe("Observed: permission needed · 1m");
   });
 
   test("keeps stale provider evidence explicitly uncertain", () => {
@@ -88,7 +104,7 @@ describe("agent card presentation", () => {
           },
         }),
       ).detail,
-    ).toBe("Provider observation stale · 8m ago");
+    ).toBe("Provider observation stale · 8m");
   });
 
   test("uses the durable description when no current provider observation exists", () => {

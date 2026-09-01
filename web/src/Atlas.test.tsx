@@ -90,6 +90,8 @@ describe("production web Atlas", () => {
         projection,
         reservedLeft: 0,
         reservedRight: 0,
+        onOpenTerminal: () => undefined,
+        onReviewChanges: () => undefined,
         onSelect: () => undefined,
       }),
     );
@@ -114,6 +116,9 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__attention-wave");
     expect(markup).toContain("agent__working-aura");
     expect(markup).toContain("agent__working-circuit");
+    expect(markup).toContain("agent__quick-actions");
+    expect(markup).toContain("Open terminal");
+    expect(markup).toContain("Review changes");
     expect(markup).not.toContain("goal__halo");
     expect(markup).not.toContain("goal__quiet-field");
     expect(markup).not.toContain("goal__contour");
