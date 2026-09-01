@@ -106,11 +106,11 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__selection");
     expect(markup).toContain("goal__selection");
     expect(markup).toContain("agent__identity");
-    expect(markup).toContain("agent__summary");
+    expect(markup).toContain("agent__activity");
     expect(markup).toContain("agent__provider-mark");
     expect(markup).toContain("agent__rule");
     expect(markup).not.toContain("agent__state-rail");
-    expect(markup).toContain("Maps host facts to semantic s…");
+    expect(markup).toContain("Blocked · may need input");
     expect(markup).toContain("agent__attention-wave");
     expect(markup).toContain("agent__working-aura");
     expect(markup).toContain("agent__working-circuit");

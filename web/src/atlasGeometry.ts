@@ -25,7 +25,7 @@ export interface OrbitPlacement {
   readonly y: number;
 }
 
-export const AGENT_CARD_WIDTH = 180;
+export const AGENT_CARD_WIDTH = 220;
 export const AGENT_CARD_HEIGHT = 104;
 const AGENT_CARD_GAP = 14;
 const AGENT_CARD_COLUMN_GAP = 18;
@@ -56,8 +56,6 @@ const wrappedLines = (
 };
 
 export const linesFor = (title: string): readonly string[] => wrappedLines(title, 16, 3);
-export const agentLinesFor = (name: string): readonly string[] => wrappedLines(name, 21, 2);
-
 export const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
 

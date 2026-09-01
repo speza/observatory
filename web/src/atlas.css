@@ -363,8 +363,8 @@
 }
 .agent__identity,
 .agent__state text,
-.agent__summary,
-.agent__workspace {
+.agent__activity,
+.agent__context {
   font-family: "DM Mono", ui-monospace, monospace;
 }
 .agent__identity {
@@ -392,17 +392,23 @@
   font-weight: 700;
   letter-spacing: -0.02em;
 }
-.agent__summary {
+.agent__activity {
   fill: var(--ink);
-  font-size: 10px;
+  font-size: 9px;
+  font-weight: 550;
   letter-spacing: 0.015em;
-  opacity: 0.72;
+  opacity: 0.78;
 }
-.agent__workspace {
+.agent--attention .agent__activity {
+  fill: currentColor;
+  font-weight: 700;
+  opacity: 1;
+}
+.agent__context {
   fill: var(--ink);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.04em;
-  opacity: 0.58;
+  opacity: 0.52;
 }
 .agent__attention-wave {
   fill: none;

@@ -9,7 +9,6 @@ import { AgentLogo } from "./AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
-  agentLinesFor,
   goalAgentPoints,
   goalRadius,
   hash,
@@ -18,6 +17,7 @@ import {
   type AtlasCameraCommand,
   type Selection,
 } from "./atlasGeometry.ts";
+import { presentAgentCard } from "./agentCardPresentation.ts";
 import { useAtlasCamera } from "./useAtlasCamera.ts";
 
 export type { AtlasCameraCommand, Selection } from "./atlasGeometry.ts";
@@ -43,15 +43,6 @@ interface AgentStyle extends CSSProperties {
 interface GoalStyle extends CSSProperties {
   readonly "--goal-color": string;
 }
-
-const concise = (value: string | undefined, maximumCharacters: number): string | undefined => {
-  const normalized = value?.trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= maximumCharacters) return normalized;
-  return `${normalized.slice(0, maximumCharacters - 1).trimEnd()}…`;
-};
-
-const basename = (value: string | undefined): string | undefined => value?.match(/[^\\/]+$/u)?.[0];
 
 interface AtlasProps {
   readonly projection: UniverseMapProjection;
@@ -463,14 +454,7 @@ export const Atlas = ({
                   ].includes(agent.lifecycleState);
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
                   const state = stateLabel(agent);
-                  const nameLines = agentLinesFor(agent.displayName);
-                  const identity = concise(agent.harnessId ?? agent.provider ?? "session", 16);
-                  const description = concise(agent.description, 30);
-                  const repository = basename(agent.repository) ?? basename(agent.worktree);
-                  const workspace = concise(
-                    [repository, agent.branch].filter(Boolean).join(" / ") || undefined,
-                    30,
-                  );
+                  const card = presentAgentCard(agent);
                   const style: AgentStyle = {
                     "--goal-color": palette.mark,
                     "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
@@ -500,7 +484,7 @@ export const Atlas = ({
                           onSelect({ type: "agent", id: agent.id });
                         }
                       }}
-                      aria-label={`${agent.displayName}, ${state}${description ? `, ${description}` : ""}${workspace ? `, ${workspace}` : ""}`}
+                      aria-label={`${agent.displayName}, ${state}, ${card.detail}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
                       role="button"
                       style={style}
                       tabIndex={0}
@@ -541,14 +525,14 @@ export const Atlas = ({
                           x={-AGENT_CARD_WIDTH / 2}
                           y={-AGENT_CARD_HEIGHT / 2}
                         />
-                        <line className="agent__rule" x1="-76" x2="76" y1="-22" y2="-22" />
-                        <g className="agent__provider-mark" transform="translate(-71 -35)">
+                        <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
+                        <g className="agent__provider-mark" transform="translate(-91 -35)">
                           <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
                         </g>
-                        <text className="agent__identity" x="-57" y="-32">
-                          {identity?.toUpperCase()}
+                        <text className="agent__identity" x="-77" y="-32">
+                          {card.identity}
                         </text>
-                        <g className="agent__state" transform="translate(78 -35)">
+                        <g className="agent__state" transform="translate(98 -35)">
                           <circle className="agent__state-pulse" r="3" />
                           <circle className="agent__state-dot" r="3" />
                           <text x="-8" y="3">
@@ -561,27 +545,27 @@ export const Atlas = ({
                             <text y="3">!</text>
                           </g>
                         ) : null}
-                        <text className="agent__name" x="-76" y="-5">
-                          {nameLines.map((line, lineIndex) => (
+                        <text className="agent__name" x="-96" y="-5">
+                          {card.titleLines.map((line, lineIndex) => (
                             <tspan
                               dy={lineIndex === 0 ? 0 : 15}
                               key={`${line}-${lineIndex}`}
-                              x="-76"
+                              x="-96"
                             >
                               {line}
                             </tspan>
                           ))}
                         </text>
                         <text
-                          className="agent__summary"
-                          x="-76"
-                          y={nameLines.length > 1 ? "25" : "11"}
+                          className="agent__activity"
+                          x="-96"
+                          y={card.titleLines.length > 1 ? "25" : "11"}
                         >
-                          {description ?? workspace ?? "No session summary"}
+                          {card.detail}
                         </text>
-                        {description && workspace ? (
-                          <text className="agent__workspace" x="-76" y="42">
-                            {workspace}
+                        {card.context ? (
+                          <text className="agent__context" x="-96" y="42">
+                            {card.context}
                           </text>
                         ) : null}
                       </g>
