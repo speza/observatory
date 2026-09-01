@@ -86,19 +86,12 @@
   display: none;
   pointer-events: none;
 }
-.atlas__grid-major,
-.atlas__grid-tick {
+.atlas__grid-major {
   fill: none;
   stroke: var(--ink);
   vector-effect: non-scaling-stroke;
-}
-.atlas__grid-major {
-  opacity: 0.09;
+  opacity: 0.11;
   stroke-width: 0.7;
-}
-.atlas__grid-tick {
-  opacity: 0.18;
-  stroke-width: 1;
 }
 .app--survey .atlas__coordinate-grid,
 .app--survey .goal__datum,
@@ -135,13 +128,6 @@
 .agent:focus-visible {
   outline: none;
 }
-.map-grain circle {
-  fill: var(--ink);
-  opacity: 0.16;
-}
-.map-grain {
-  pointer-events: none;
-}
 .goal {
   transition:
     opacity 260ms ease,
@@ -157,9 +143,6 @@
 }
 .atlas--spotlight .goal--spotlight-focus .goal__outline {
   stroke-width: 3;
-}
-.atlas--spotlight .map-grain {
-  opacity: 0.45;
 }
 .goal--completed {
   opacity: 0.62;

@@ -25,6 +25,16 @@ export type { AtlasCameraCommand, Selection } from "./atlasGeometry.ts";
 const GRID_LOGICAL_STEP = 24;
 const GRID_EXTENT = 100_000;
 
+const snapCoordinateToGrid = (value: number): number => {
+  const magnitude = Math.round(Math.abs(value) / GRID_LOGICAL_STEP) * GRID_LOGICAL_STEP;
+  return value < 0 ? -magnitude : magnitude;
+};
+
+export const snapToAtlasGrid = (position: { readonly x: number; readonly y: number }) => ({
+  x: snapCoordinateToGrid(position.x),
+  y: snapCoordinateToGrid(position.y),
+});
+
 interface AgentStyle extends CSSProperties {
   readonly "--goal-color": string;
   readonly "--agent-phase": string;
@@ -148,10 +158,12 @@ export const Atlas = ({
     if (Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) >= 4) {
       drag.moved = true;
     }
-    const position = {
-      x: drag.startPosition.x + deltaX,
-      y: drag.startPosition.y + deltaY,
-    };
+    const position = drag.moved
+      ? snapToAtlasGrid({
+          x: drag.startPosition.x + deltaX,
+          y: drag.startPosition.y + deltaY,
+        })
+      : drag.startPosition;
     drag.position = position;
     setDraggedGoal({
       goalId: drag.goalId,
@@ -167,10 +179,7 @@ export const Atlas = ({
     }
     if (commit && drag.moved) {
       suppressGoalClick.current = drag.goalId;
-      const committedPosition = {
-        x: Math.round(drag.position.x),
-        y: Math.round(drag.position.y),
-      };
+      const committedPosition = snapToAtlasGrid(drag.position);
       setDraggedGoal({ goalId: drag.goalId, position: committedPosition });
       void Promise.resolve(onMoveGoal?.(drag.goalId, committedPosition)).finally(() => {
         setDraggedGoal((current) =>
@@ -234,10 +243,6 @@ export const Atlas = ({
             y={gridOrigin.y}
           >
             <path className="atlas__grid-major" d={`M ${gridStep} 0 L 0 0 0 ${gridStep}`} />
-            <path
-              className="atlas__grid-tick"
-              d={`M ${gridStep / 2} 0 V 5 M 0 ${gridStep / 2} H 5`}
-            />
           </pattern>
           {projection.goals.map((goal) => (
             <clipPath id={`goal-clip-${hash(goal.id)}`} key={goal.id}>
@@ -254,16 +259,6 @@ export const Atlas = ({
           x="0"
           y="0"
         />
-        <g className="map-grain" aria-hidden="true">
-          {Array.from({ length: 54 }, (_, index) => (
-            <circle
-              cx={(index * 197 + 43) % Math.max(1, size.width)}
-              cy={(index * 311 + 71) % Math.max(1, size.height)}
-              key={index}
-              r={index % 9 === 0 ? 1.2 : 0.55}
-            />
-          ))}
-        </g>
         <g
           className="atlas__world"
           data-camera-zoom={camera.zoom}

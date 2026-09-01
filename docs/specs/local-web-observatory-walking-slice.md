@@ -27,7 +27,8 @@ another writable Observatory process.
   inactive work remains visually quiet;
 - one coherent SVG camera transform for goal bodies, labels, satellites and
   orbit geometry, plus a world-anchored logical grid that pans and scales with
-  the Atlas, with pointer-anchored wheel zoom;
+  the Atlas and supplies the snap points for dragged Goals, with
+  pointer-anchored wheel zoom;
 - a focused-goal spotlight that keeps the selected system crisp while dimming
   and desaturating unrelated work without losing spatial context;
 - a readable minimum world scale: constrained viewports expose a pannable
@@ -147,8 +148,9 @@ general audit log or transcript store.
   agent label—expanded detail is scoped to the selected goal.
 - The scale fixture uses stable, irregular accepted goal positions rather than
   runtime randomness or a perfectly uniform grid. The world-anchored grid is a
-  placement reference, not a layout engine, and follows the same pan and zoom
-  transform as the accepted goal positions.
+  placement reference, not a layout engine; dragged Goals snap to its visible
+  intersections, and it follows the same pan and zoom transform as accepted
+  goal positions.
 - Motion can be disabled explicitly and also honours the operating system's
   reduced-motion preference.
 - A live Herdr smoke on 2026-08-25 reconciled 14 agents and returned both

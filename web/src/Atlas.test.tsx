@@ -7,7 +7,7 @@ import { createMockScenario } from "../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../src/hosts/mock/seed.ts";
 import { FixedClock, hostSnapshot, makeUniverse } from "../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../src/projection/types.ts";
-import { Atlas } from "./Atlas.tsx";
+import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
@@ -341,5 +341,11 @@ describe("production web Atlas", () => {
     expect(worldStart).toBeGreaterThan(-1);
     expect(gridStart).toBeGreaterThan(worldStart);
     expect(goalStart).toBeGreaterThan(gridStart);
+  });
+
+  test("snaps goal placement to the visible Survey grid", () => {
+    expect(snapToAtlasGrid({ x: 11, y: -13 })).toEqual({ x: 0, y: -24 });
+    expect(snapToAtlasGrid({ x: 12, y: -12 })).toEqual({ x: 24, y: -24 });
+    expect(snapToAtlasGrid({ x: 35, y: 37 })).toEqual({ x: 24, y: 48 });
   });
 });
