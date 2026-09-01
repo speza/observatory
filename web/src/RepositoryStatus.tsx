@@ -11,6 +11,20 @@ interface RepositoryStatusProps {
 
 const abbreviated = (value: string): string => value.slice(0, 8);
 const NO_PULL_REQUEST = "No pull request found for this repository and branch.";
+const CLIENT_CACHE_TTL_MS = 60_000;
+const snapshotCache = new Map<
+  string,
+  { readonly snapshot: WebAgentRepositoryStatusResponse; readonly storedAt: number }
+>();
+
+const cachedSnapshot = (agentId: string): WebAgentRepositoryStatusResponse | undefined => {
+  const cached = snapshotCache.get(agentId);
+  if (!cached || Date.now() - cached.storedAt > CLIENT_CACHE_TTL_MS) {
+    snapshotCache.delete(agentId);
+    return undefined;
+  }
+  return cached.snapshot;
+};
 
 const checkoutSummary = (
   snapshot: WebAgentRepositoryStatusResponse,
@@ -42,21 +56,25 @@ export const RepositoryStatus = ({
   agent,
   onReviewChanges,
 }: RepositoryStatusProps): React.JSX.Element => {
-  const [snapshot, setSnapshot] = useState<WebAgentRepositoryStatusResponse>();
+  const [snapshot, setSnapshot] = useState<WebAgentRepositoryStatusResponse | undefined>(() =>
+    cachedSnapshot(agent.id),
+  );
   const [error, setError] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
-    if (revision === 0) setSnapshot(undefined);
     setError(undefined);
     setLoading(true);
     void fetchAgentRepositoryStatus(agent.id, {
       refresh: revision > 0,
       signal: controller.signal,
     })
-      .then(setSnapshot)
+      .then((nextSnapshot) => {
+        snapshotCache.set(agent.id, { snapshot: nextSnapshot, storedAt: Date.now() });
+        setSnapshot(nextSnapshot);
+      })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
           setError(cause instanceof Error ? cause.message : "Repository status is unavailable.");
@@ -69,10 +87,11 @@ export const RepositoryStatus = ({
 
   const pullRequest = snapshot?.pullRequests.length === 1 ? snapshot.pullRequests[0] : undefined;
   const checkout = snapshot ? checkoutSummary(snapshot) : undefined;
-  const noPullRequest = snapshot?.diagnostics.includes(NO_PULL_REQUEST) === true;
+  const noPullRequest = snapshot?.diagnostics.includes(NO_PULL_REQUEST);
   const otherDiagnostics = snapshot?.diagnostics.filter(
     (diagnostic) => diagnostic !== NO_PULL_REQUEST,
   );
+  const observedRepository = agent.repository;
   return (
     <section className="repository-status" aria-label="Repository status">
       <div className="repository-status__heading">
@@ -89,7 +108,35 @@ export const RepositoryStatus = ({
           {loading && snapshot ? "Refreshing…" : "Refresh"}
         </button>
       </div>
-      {!snapshot && !error ? <p>Inspecting local Git and code host…</p> : null}
+      {!snapshot && !error ? (
+        <div className="repository-status__loading" role="status">
+          {observedRepository ? (
+            <div className="repository-status__identity is-observed">
+              <div>
+                <span>Observed workspace</span>
+                <strong>{observedRepository}</strong>
+              </div>
+            </div>
+          ) : null}
+          <div className="repository-status__loading-row">
+            <span aria-hidden="true" />
+            <div>
+              <strong>Checking current checkout</strong>
+              <p>Reading local Git and code-host status…</p>
+            </div>
+          </div>
+          {agent.branch ? (
+            <div className="repository-status__branch is-observed">
+              <span>Observed branch</span>
+              <code>{agent.branch}</code>
+            </div>
+          ) : null}
+          <div className="repository-status__loading-metadata" aria-hidden="true">
+            <span />
+            <span />
+          </div>
+        </div>
+      ) : null}
       {error ? <p className="repository-status__diagnostic">{error}</p> : null}
       {snapshot?.git ? (
         <>
@@ -186,6 +233,11 @@ export const RepositoryStatus = ({
         ))}
       {snapshot?.providerCached ? (
         <p className="repository-status__cached">Code-host status from cache</p>
+      ) : null}
+      {loading && snapshot ? (
+        <p className="repository-status__cached" role="status">
+          Checking for newer status…
+        </p>
       ) : null}
     </section>
   );

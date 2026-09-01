@@ -198,19 +198,83 @@ export const Inspector = ({
       ) : null}
       {projection?.kind === "agent-inspector" ? (
         <>
-          <RepositoryStatus agent={projection.agent} onReviewChanges={onReviewChanges} />
+          <section className="inspector__agent-summary" aria-label="Agent summary and actions">
+            <div className="inspector__status-line">
+              <span className={`is-${projection.agent.runtimeState}`} aria-hidden="true" />
+              <strong>{projection.agent.runtimeState.replace("-", " ")}</strong>
+              <span>
+                {projection.agent.harnessId ?? projection.agent.provider ?? "Unknown provider"}
+              </span>
+            </div>
+            <label className="inspector__assignment">
+              <span>Assigned goal</span>
+              <select
+                disabled={commandPending}
+                onChange={(event) => {
+                  const goalId = event.target.value;
+                  void onCommand(
+                    goalId
+                      ? { type: "AssignAgent", agentId: projection.agent.id, goalId }
+                      : { type: "UnassignAgent", agentId: projection.agent.id },
+                  );
+                }}
+                value={projection.agent.primaryGoalId ?? ""}
+              >
+                <option value="">Unassigned inbox</option>
+                {commandCentre.goals
+                  .filter((candidate) => candidate.status === "active")
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.priority} · {candidate.title}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <nav className="inspector__actions" aria-label="Agent actions">
+              {projection.agent.canResume ? (
+                <button
+                  className="is-primary"
+                  disabled={commandPending}
+                  onClick={() => void onResume(projection.agent)}
+                  type="button"
+                >
+                  Resume conversation
+                </button>
+              ) : null}
+              {projection.agent.executionPresence === "live" ? (
+                <button
+                  className={projection.agent.canResume ? undefined : "is-primary"}
+                  onClick={() => onOpenTerminal(projection.agent)}
+                  type="button"
+                >
+                  Open terminal
+                </button>
+              ) : null}
+              <button onClick={() => onReviewChanges(projection.agent)} type="button">
+                Review changes
+              </button>
+            </nav>
+          </section>
+          <RepositoryStatus
+            agent={projection.agent}
+            key={projection.agent.id}
+            onReviewChanges={onReviewChanges}
+          />
           {projection.agent.providerEvidence ? (
             <section className="provider-evidence" aria-label="Provider observations">
-              <div>
-                <p className="overline">PROVIDER OBSERVATIONS / NOT ACCEPTED STATE</p>
-                <h3>{projection.agent.providerEvidence.providerLabel}</h3>
-                <span>
-                  {projection.agent.providerEvidence.health.replace("-", " ")}
-                  {projection.agent.providerEvidence.mechanism
-                    ? ` · ${projection.agent.providerEvidence.mechanism.replace("-", " ")}`
-                    : ""}
-                </span>
+              <div className="provider-evidence__heading">
+                <div>
+                  <p className="overline">PROVIDER SIGNALS</p>
+                  <h3>{projection.agent.providerEvidence.providerLabel}</h3>
+                </div>
+                <strong>{projection.agent.providerEvidence.health.replace("-", " ")}</strong>
               </div>
+              <p className="provider-evidence__provenance">
+                Observations only · not accepted state
+                {projection.agent.providerEvidence.mechanism
+                  ? ` · ${projection.agent.providerEvidence.mechanism.replace("-", " ")}`
+                  : ""}
+              </p>
               <dl>
                 <div>
                   <dt>Activity</dt>
@@ -247,9 +311,11 @@ export const Inspector = ({
                   </dd>
                 </div>
               </dl>
-              <p>Provider response completion does not complete this Agent or its Goal.</p>
+              <p className="provider-evidence__note">
+                A provider response does not complete this Agent or its Goal.
+              </p>
               {projection.agent.providerEvidence.hostConflict ? (
-                <p>
+                <p className="provider-evidence__conflict">
                   Evidence conflict: the provider reports{" "}
                   {projection.agent.providerEvidence.hostConflict.providerActivity.replace(
                     "-",
@@ -261,175 +327,152 @@ export const Inspector = ({
               ) : null}
             </section>
           ) : null}
-          <div className="inspector__controls">
-            {projection.agent.canResume ? (
-              <button
-                disabled={commandPending}
-                onClick={() => void onResume(projection.agent)}
-                type="button"
-              >
-                Resume exact conversation
-              </button>
-            ) : null}
-            {projection.agent.executionPresence === "live" ? (
-              <button onClick={() => onOpenTerminal(projection.agent)} type="button">
-                Open terminal
-              </button>
-            ) : null}
-            <button onClick={() => onReviewChanges(projection.agent)} type="button">
-              Review workspace changes
-            </button>
-            <label>
-              <span>Assigned goal</span>
-              <select
-                disabled={commandPending}
-                onChange={(event) => {
-                  const goalId = event.target.value;
-                  void onCommand(
-                    goalId
-                      ? { type: "AssignAgent", agentId: projection.agent.id, goalId }
-                      : { type: "UnassignAgent", agentId: projection.agent.id },
-                  );
-                }}
-                value={projection.agent.primaryGoalId ?? ""}
-              >
-                <option value="">Unassigned inbox</option>
-                {commandCentre.goals
-                  .filter((candidate) => candidate.status === "active")
-                  .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.priority} · {candidate.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {projection.agent.executionPresence === "live" && confirming !== "agent-close" ? (
-              <button onClick={() => setConfirming("agent-close")} type="button">
-                Close & archive…
-              </button>
-            ) : null}
-            {confirming === "agent-close" ? (
-              <div className="confirm-action">
-                <p>
-                  {projection.agent.runtimeState === "done"
-                    ? "Close this host execution and archive its Observatory record? Runtime done is not verification."
-                    : `Stop this ${projection.agent.runtimeState} Agent in the host and archive its Observatory record?`}
-                </p>
-                <button
-                  disabled={commandPending}
-                  onClick={() => {
-                    void onCloseAndArchive([projection.agent.id]).then((succeeded) => {
-                      if (succeeded) onClose();
-                    });
-                  }}
-                  type="button"
-                >
-                  Confirm close & archive
+          <details className="inspector__disclosure">
+            <summary>
+              <span>Technical details</span>
+              <small>Conversation, runtime and workspace</small>
+            </summary>
+            <div className="inspector__details-body">
+              <h4>Conversation</h4>
+              <dl>
+                <div>
+                  <dt>Provider</dt>
+                  <dd>{projection.agent.harnessId ?? projection.agent.provider ?? "Unknown"}</dd>
+                </div>
+                <div>
+                  <dt>Availability</dt>
+                  <dd>{projection.agent.providerContinuity}</dd>
+                </div>
+                <div>
+                  <dt>Conversation ID</dt>
+                  <dd className="inspector__identifier">
+                    {conversationId ? (
+                      <>
+                        <code title={conversationId}>{conversationId}</code>
+                        <button onClick={() => copyIdentifier(conversationId)} type="button">
+                          Copy
+                        </button>
+                      </>
+                    ) : (
+                      "Unavailable"
+                    )}
+                  </dd>
+                </div>
+              </dl>
+              <h4>Runtime</h4>
+              <dl>
+                <div>
+                  <dt>State</dt>
+                  <dd>{projection.agent.lifecycleState}</dd>
+                </div>
+                <div>
+                  <dt>Execution</dt>
+                  <dd>{projection.agent.executionPresence}</dd>
+                </div>
+                <div>
+                  <dt>Execution ID</dt>
+                  <dd className="inspector__identifier">
+                    {executionId ? (
+                      <>
+                        <code title={executionId}>{executionId}</code>
+                        <button onClick={() => copyIdentifier(executionId)} type="button">
+                          Copy
+                        </button>
+                      </>
+                    ) : (
+                      "No current execution"
+                    )}
+                  </dd>
+                </div>
+              </dl>
+              <h4>Context</h4>
+              <dl>
+                <div>
+                  <dt>Workspace</dt>
+                  <dd title={projection.agent.worktree}>
+                    {projection.agent.worktree ?? "Unknown"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Agent ID</dt>
+                  <dd className="inspector__identifier">
+                    <code title={projection.agent.id}>{projection.agent.id}</code>
+                    <button onClick={() => copyIdentifier(projection.agent.id)} type="button">
+                      Copy
+                    </button>
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </details>
+          <details className="inspector__disclosure inspector__disclosure--lifecycle">
+            <summary>
+              <span>Agent lifecycle</span>
+              <small>Close or archive this Agent</small>
+            </summary>
+            <div className="inspector__lifecycle-actions">
+              {projection.agent.executionPresence === "live" && confirming !== "agent-close" ? (
+                <button onClick={() => setConfirming("agent-close")} type="button">
+                  Close & archive…
                 </button>
-                <button onClick={() => setConfirming(undefined)} type="button">
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-            {confirming !== "agent-archive" ? (
-              <button onClick={() => setConfirming("agent-archive")} type="button">
-                {projection.agent.executionPresence === "live" ? "Archive only…" : "Archive Agent…"}
-              </button>
-            ) : null}
-            {confirming === "agent-archive" ? (
-              <div className="confirm-action">
-                <p>
+              ) : null}
+              {confirming === "agent-close" ? (
+                <div className="confirm-action">
+                  <p>
+                    {projection.agent.runtimeState === "done"
+                      ? "Close this host execution and archive its Observatory record? Runtime done is not verification."
+                      : `Stop this ${projection.agent.runtimeState} Agent in the host and archive its Observatory record?`}
+                  </p>
+                  <button
+                    disabled={commandPending}
+                    onClick={() => {
+                      void onCloseAndArchive([projection.agent.id]).then((succeeded) => {
+                        if (succeeded) onClose();
+                      });
+                    }}
+                    type="button"
+                  >
+                    Confirm close & archive
+                  </button>
+                  <button onClick={() => setConfirming(undefined)} type="button">
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
+              {confirming !== "agent-archive" ? (
+                <button onClick={() => setConfirming("agent-archive")} type="button">
                   {projection.agent.executionPresence === "live"
-                    ? "Hide this Agent from active Observatory views while leaving its host execution running?"
-                    : "Archive this ended or unavailable observation? Its identity and history are retained."}
-                </p>
-                <button
-                  disabled={commandPending}
-                  onClick={() => {
-                    void onCommand({ type: "ArchiveAgent", agentId: projection.agent.id }).then(
-                      (response) => {
-                        if (response) onClose();
-                      },
-                    );
-                  }}
-                  type="button"
-                >
-                  Confirm archive
+                    ? "Archive only…"
+                    : "Archive Agent…"}
                 </button>
-                <button onClick={() => setConfirming(undefined)} type="button">
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <h4>Conversation</h4>
-          <dl>
-            <div>
-              <dt>Provider</dt>
-              <dd>{projection.agent.harnessId ?? projection.agent.provider ?? "Unknown"}</dd>
+              ) : null}
+              {confirming === "agent-archive" ? (
+                <div className="confirm-action">
+                  <p>
+                    {projection.agent.executionPresence === "live"
+                      ? "Hide this Agent from active Observatory views while leaving its host execution running?"
+                      : "Archive this ended or unavailable observation? Its identity and history are retained."}
+                  </p>
+                  <button
+                    disabled={commandPending}
+                    onClick={() => {
+                      void onCommand({ type: "ArchiveAgent", agentId: projection.agent.id }).then(
+                        (response) => {
+                          if (response) onClose();
+                        },
+                      );
+                    }}
+                    type="button"
+                  >
+                    Confirm archive
+                  </button>
+                  <button onClick={() => setConfirming(undefined)} type="button">
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
             </div>
-            <div>
-              <dt>Availability</dt>
-              <dd>{projection.agent.providerContinuity}</dd>
-            </div>
-            <div>
-              <dt>Conversation ID</dt>
-              <dd className="inspector__identifier">
-                {conversationId ? (
-                  <>
-                    <code title={conversationId}>{conversationId}</code>
-                    <button onClick={() => copyIdentifier(conversationId)} type="button">
-                      Copy
-                    </button>
-                  </>
-                ) : (
-                  "Unavailable"
-                )}
-              </dd>
-            </div>
-          </dl>
-          <h4>Runtime</h4>
-          <dl>
-            <div>
-              <dt>State</dt>
-              <dd>{projection.agent.lifecycleState}</dd>
-            </div>
-            <div>
-              <dt>Execution</dt>
-              <dd>{projection.agent.executionPresence}</dd>
-            </div>
-            <div>
-              <dt>Execution ID</dt>
-              <dd className="inspector__identifier">
-                {executionId ? (
-                  <>
-                    <code title={executionId}>{executionId}</code>
-                    <button onClick={() => copyIdentifier(executionId)} type="button">
-                      Copy
-                    </button>
-                  </>
-                ) : (
-                  "No current execution"
-                )}
-              </dd>
-            </div>
-          </dl>
-          <h4>Context</h4>
-          <dl>
-            <div>
-              <dt>Workspace</dt>
-              <dd title={projection.agent.worktree}>{projection.agent.worktree ?? "Unknown"}</dd>
-            </div>
-            <div>
-              <dt>Agent ID</dt>
-              <dd className="inspector__identifier">
-                <code title={projection.agent.id}>{projection.agent.id}</code>
-                <button onClick={() => copyIdentifier(projection.agent.id)} type="button">
-                  Copy
-                </button>
-              </dd>
-            </div>
-          </dl>
+          </details>
         </>
       ) : null}
       {commandError ? <p className="command-error">{commandError}</p> : null}

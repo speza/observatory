@@ -685,8 +685,10 @@ button {
 }
 .inspector {
   right: 28px;
+  width: min(400px, calc(100vw - 40px));
   max-height: calc(100% - 176px);
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 .attention-queue > header,
 .inbox-panel > header,
@@ -697,6 +699,13 @@ button {
   gap: 12px;
   padding: 20px;
   border-bottom: 1px solid var(--hairline);
+}
+.inspector > header {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  background: color-mix(in srgb, var(--paper-panel) 96%, transparent);
+  backdrop-filter: blur(18px);
 }
 .attention-queue h2,
 .inbox-panel h2,
@@ -1086,16 +1095,126 @@ button {
   font-size: 14px;
 }
 
-.provider-evidence {
-  border-block: 1px solid var(--line);
-  padding: 18px 22px;
-  background: color-mix(in srgb, var(--surface-raised) 78%, var(--accent) 4%);
+.inspector__agent-summary {
+  display: grid;
+  gap: 14px;
+  padding: 16px 20px 18px;
+  border-bottom: 1px solid var(--hairline);
 }
 
-.provider-evidence > div {
+.inspector__status-line {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inspector__status-line > span:first-child {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--uncertain);
+}
+
+.inspector__status-line > span:first-child.is-working,
+.inspector__status-line > span:first-child.is-done {
+  background: var(--good);
+}
+
+.inspector__status-line > span:first-child.is-blocked {
+  background: var(--accent);
+}
+
+.inspector__status-line strong {
+  color: var(--ink);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.inspector__status-line > span:last-child::before {
+  content: "\00b7";
+  margin-right: 7px;
+}
+
+.inspector__assignment {
+  display: grid;
+  gap: 6px;
+}
+
+.inspector__assignment > span {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inspector__assignment select {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  font: inherit;
+  font-size: 13px;
+}
+
+.inspector__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inspector__actions button,
+.inspector__lifecycle-actions > button {
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.inspector__actions button:hover,
+.inspector__lifecycle-actions > button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.inspector__actions .is-primary {
+  border-color: var(--ink);
+  color: var(--paper);
+  background: var(--ink);
+}
+
+.inspector__actions .is-primary:hover {
+  border-color: var(--accent);
+  color: var(--paper);
+  background: var(--accent);
+}
+
+.inspector__actions button:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.provider-evidence {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.provider-evidence__heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .provider-evidence h3,
@@ -1103,14 +1222,55 @@ button {
   margin: 0;
 }
 
-.provider-evidence > div > span,
-.provider-evidence > p {
-  color: var(--text-muted);
-  font-size: 0.75rem;
+.provider-evidence h3 {
+  margin-top: 2px;
+  font-size: 16px;
+}
+
+.provider-evidence__heading > strong {
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-evidence .provider-evidence__provenance {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .provider-evidence dl {
-  margin: 14px 0;
+  margin: 13px 0 10px;
+  border: 1px solid var(--hairline);
+}
+
+.provider-evidence dl div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--faint);
+}
+
+.provider-evidence dl div:last-child {
+  border-bottom: 0;
+}
+
+.provider-evidence .provider-evidence__note,
+.provider-evidence .provider-evidence__conflict {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.provider-evidence .provider-evidence__conflict {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .inspector__error {
   margin: 10px 20px;
@@ -1253,17 +1413,17 @@ button {
 .confirm-action button + button {
   margin-left: 7px;
 }
-.inspector dl {
+.inspector__details-body dl {
   margin: 12px 20px 22px;
   border: 1px solid var(--hairline);
 }
-.inspector dl div {
+.inspector__details-body dl div {
   display: grid;
   grid-template-columns: 90px 1fr;
   padding: 9px;
   border-bottom: 1px solid var(--faint);
 }
-.inspector dl div:last-child {
+.inspector__details-body dl div:last-child {
   border: 0;
 }
 .inspector dt {
@@ -1300,6 +1460,72 @@ button {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
+}
+.inspector__disclosure {
+  border-bottom: 1px solid var(--hairline);
+}
+.inspector__disclosure > summary {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 14px 42px 14px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+.inspector__disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.inspector__disclosure > summary::after {
+  content: "+";
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 15px;
+}
+.inspector__disclosure[open] > summary::after {
+  content: "−";
+}
+.inspector__disclosure > summary:hover {
+  background: var(--faint);
+}
+.inspector__disclosure > summary span {
+  font-size: 13px;
+  font-weight: 600;
+}
+.inspector__disclosure > summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.inspector__details-body {
+  padding: 2px 0 1px;
+  border-top: 1px solid var(--faint);
+}
+.inspector__details-body h4 {
+  margin: 16px 20px 0;
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.inspector__lifecycle-actions {
+  display: grid;
+  gap: 8px;
+  padding: 0 20px 18px;
+  border-top: 1px solid var(--faint);
+}
+.inspector__lifecycle-actions > button:first-child {
+  margin-top: 16px;
+}
+.inspector__lifecycle-actions > .confirm-action:first-child {
+  margin-top: 16px;
+}
+.inspector__disclosure--lifecycle > summary span {
+  color: var(--muted);
 }
 .inspector footer {
   margin-top: auto;
@@ -2347,6 +2573,10 @@ button {
   min-width: 0;
 }
 
+.repository-status__identity.is-observed {
+  min-height: 36px;
+}
+
 .repository-status__identity > div {
   display: grid;
   gap: 2px;
@@ -2420,6 +2650,10 @@ button {
   gap: 4px;
   min-width: 0;
   padding: 0 1px;
+}
+
+.repository-status__branch.is-observed {
+  min-height: 38px;
 }
 
 .repository-status__branch code {
@@ -2503,4 +2737,67 @@ button {
 .repository-status__cached {
   color: var(--muted);
   font-size: 0.7rem;
+}
+
+.repository-status__loading {
+  display: grid;
+  gap: 12px;
+  min-height: 224px;
+}
+
+.repository-status__loading-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 58px;
+  padding: 10px 11px;
+  border: 1px solid var(--hairline);
+  background: var(--faint);
+}
+
+.repository-status__loading-row > span {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--uncertain);
+  animation: repository-status-pulse 1.4s ease-in-out infinite;
+}
+
+.repository-status__loading-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.repository-status__loading-row p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.repository-status__loading-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  min-height: 52px;
+  border-top: 1px solid var(--faint);
+  border-bottom: 1px solid var(--faint);
+}
+
+.repository-status__loading-metadata span {
+  margin: 10px 12px 10px 1px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+.repository-status__loading-metadata span + span {
+  margin-right: 1px;
+  padding-left: 12px;
+  border-left: 1px solid var(--faint);
+}
+
+@keyframes repository-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }

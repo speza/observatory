@@ -86,7 +86,8 @@ describe("Inspector", () => {
     expect(markup).toContain("provider-visible");
     expect(markup).toContain("execution-visible");
     expect(markup).toContain("Workspace");
-    expect(markup).toContain("PROVIDER OBSERVATIONS / NOT ACCEPTED STATE");
+    expect(markup).toContain("PROVIDER SIGNALS");
+    expect(markup).toContain("Observations only · not accepted state");
     expect(markup).toContain("permission · open");
     expect(markup).toContain("Provider reported response completed");
     expect(markup).toContain("does not complete this Agent or its Goal");
@@ -95,5 +96,7 @@ describe("Inspector", () => {
     );
     expect(markup).not.toContain("<dt>Repository</dt>");
     expect(markup).not.toContain("<dt>Branch</dt>");
+    expect(markup).toContain("Technical details");
+    expect(markup).toContain("Agent lifecycle");
   });
 });

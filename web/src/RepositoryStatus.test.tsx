@@ -26,6 +26,9 @@ describe("RepositoryStatus", () => {
       displayNameSource: "fallback",
       runtimeState: "working",
       runtimeStateSource: "test",
+      repository: "spez/observatory",
+      branch: "improve/inspector-layout",
+      worktree: "/synthetic/observatory",
       hostHealth: "live",
       lastSeenAt: 1,
       lastObservedAt: 1,
@@ -38,7 +41,11 @@ describe("RepositoryStatus", () => {
 
     expect(markup).toContain("REPOSITORY");
     expect(markup).toContain("Code status");
-    expect(markup).toContain("Inspecting local Git and code host");
+    expect(markup).toContain("Observed workspace");
+    expect(markup).toContain("spez/observatory");
+    expect(markup).toContain("Checking current checkout");
+    expect(markup).toContain("Reading local Git and code-host status");
+    expect(markup).toContain("improve/inspector-layout");
     expect(markup).toContain("Refresh");
   });
 });
