@@ -313,4 +313,33 @@ describe("production web Atlas", () => {
       }
     }
   });
+
+  test("anchors the Survey grid to durable world coordinates", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "World origin" });
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    expect(projection.goals[0]?.mapPosition).toEqual({ x: 0, y: 0 });
+
+    const markup = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    const goal = renderedGoals(markup)[0];
+    const gridOriginX = Number(markup.match(/data-grid-origin-x="([^"]+)"/u)?.[1]);
+    const gridOriginY = Number(markup.match(/data-grid-origin-y="([^"]+)"/u)?.[1]);
+    const worldStart = markup.indexOf('class="atlas__world"');
+    const gridStart = markup.indexOf('class="atlas__coordinate-grid"');
+    const goalStart = markup.indexOf('data-goal-id="goal-1"');
+
+    expect(markup).toContain('data-logical-step="24"');
+    expect(goal?.x).toBe(gridOriginX);
+    expect(goal?.y).toBe(gridOriginY);
+    expect(worldStart).toBeGreaterThan(-1);
+    expect(gridStart).toBeGreaterThan(worldStart);
+    expect(goalStart).toBeGreaterThan(gridStart);
+  });
 });

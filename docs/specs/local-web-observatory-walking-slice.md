@@ -1,7 +1,7 @@
 # Local web Observatory walking slice
 
 Status: sole maintained client; command, catch-up and hosted-terminal loops implemented
-Updated: 2026-08-27
+Updated: 2026-09-01
 
 ## Decision
 
@@ -22,11 +22,12 @@ another writable Observatory process.
 - attention queue and Ledger rendered from `CommandCentreProjection`;
 - selection card rendered from `InspectorProjection`;
 - browser-local pan, zoom, theme, motion preference, selection and active lens;
-- clipped Mineral Atlas surfaces, responsive SVG detail and state-driven motion:
-  working orbit traces advance, attention pulses, and uncertain or inactive
-  work remains visually quiet;
+- clipped Carbon Survey surfaces, responsive SVG detail and state-driven
+  motion: working orbit traces advance, attention pulses, and uncertain or
+  inactive work remains visually quiet;
 - one coherent SVG camera transform for goal bodies, labels, satellites and
-  orbit geometry, with pointer-anchored wheel zoom;
+  orbit geometry, plus a world-anchored logical grid that pans and scales with
+  the Atlas, with pointer-anchored wheel zoom;
 - a focused-goal spotlight that keeps the selected system crisp while dimming
   and desaturating unrelated work without losing spatial context;
 - a readable minimum world scale: constrained viewports expose a pannable
@@ -127,7 +128,7 @@ general audit log or transcript store.
   and 75 agents without overlapping goal bodies.
 - Decorative planetary material remains clipped to each goal body, while
   labels and attention marks remain intentionally external. Planet surfaces
-  are flat mineral colour without gradient or glow effects.
+  use flat, restrained survey colours without gradient or glow effects.
 - Every assigned agent marker is derived from the same ellipse geometry used to
   draw its visible orbit line. Unassigned observations are rendered by the
   supporting Inbox list rather than as a semantic map node.
@@ -138,13 +139,16 @@ general audit log or transcript store.
   inspector floats over the field without changing the world fit or camera.
 - Focus mode spotlights one goal or agent system, preserves nearby map context,
   and returns to the full atlas on reset or empty-field clear.
-- Agent runtime states have a visible map grammar and key: working is active
-  teal, idle is neutral, and human-review attention carries an accent badge.
+- Agent runtime states have a visible map grammar and key: neutral carbon and
+  bone own structure, working is semantic green, idle is neutral, and
+  human-review attention carries a vermilion accent badge.
 - Attention totals are labelled explicitly inside goal bodies; decorative
   marks do not resemble semantic nodes. Global zoom does not reveal every
   agent label—expanded detail is scoped to the selected goal.
 - The scale fixture uses stable, irregular accepted goal positions rather than
-  runtime randomness or a perfectly uniform grid.
+  runtime randomness or a perfectly uniform grid. The world-anchored grid is a
+  placement reference, not a layout engine, and follows the same pan and zoom
+  transform as the accepted goal positions.
 - Motion can be disabled explicitly and also honours the operating system's
   reduced-motion preference.
 - A live Herdr smoke on 2026-08-25 reconciled 14 agents and returned both

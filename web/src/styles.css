@@ -1,9 +1,9 @@
 @import "@xterm/xterm/css/xterm.css";
 
 :root {
-  font-family: "Libre Caslon Text", Georgia, serif;
-  color: #29251f;
-  background: #ddd4bf;
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  color: #303735;
+  background: #d7d8d2;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -26,16 +26,17 @@ button {
 
 .app {
   --masthead-height: 88px;
-  --paper: #ddd4bf;
-  --paper-deep: #d3cab3;
-  --paper-panel: rgba(231, 224, 205, 0.96);
-  --ink: #29251f;
-  --muted: #756e61;
-  --hairline: rgba(54, 48, 39, 0.3);
-  --faint: rgba(54, 48, 39, 0.11);
-  --accent: #a84f35;
-  --good: #3f7650;
-  --uncertain: #7e7b70;
+  --paper: #d7d8d2;
+  --paper-deep: #c7cac4;
+  --paper-panel: rgba(232, 232, 225, 0.96);
+  --ink: #303735;
+  --muted: #68706d;
+  --hairline: rgba(48, 55, 53, 0.28);
+  --faint: rgba(48, 55, 53, 0.09);
+  --accent: #e14b2d;
+  --instrument: #303735;
+  --good: #26715e;
+  --uncertain: #767c75;
   min-height: 100%;
   position: relative;
   isolation: isolate;
@@ -60,16 +61,17 @@ button {
 }
 
 .app--dark {
-  --paper: #191b19;
-  --paper-deep: #141615;
-  --paper-panel: rgba(31, 34, 31, 0.97);
-  --ink: #e7decb;
-  --muted: #aaa293;
-  --hairline: rgba(229, 221, 204, 0.25);
-  --faint: rgba(229, 221, 204, 0.09);
-  --accent: #d68163;
-  --good: #78a985;
-  --uncertain: #85867f;
+  --paper: #151918;
+  --paper-deep: #0d100f;
+  --paper-panel: rgba(28, 32, 30, 0.97);
+  --ink: #e0e2dc;
+  --muted: #9da39f;
+  --hairline: rgba(224, 226, 220, 0.23);
+  --faint: rgba(224, 226, 220, 0.08);
+  --accent: #ff7049;
+  --instrument: #e0e2dc;
+  --good: #70b29c;
+  --uncertain: #7f8983;
 }
 
 .overline,
@@ -501,6 +503,68 @@ button {
 .app--dark .work-surface::before {
   box-shadow: inset 0 0 190px 40px rgb(0 0 0 / 66%);
   opacity: 1;
+}
+
+/* Carbon Survey: measured cartography, neutral instrument ink, and visible datum. */
+.app--survey::after {
+  opacity: 0.035;
+}
+.app--survey .masthead {
+  border-top: 3px solid var(--ink);
+  background: color-mix(in srgb, var(--paper) 96%, transparent);
+}
+.app--survey .brandmark {
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  transform: none;
+}
+.app--survey .brandmark::before {
+  width: 42px;
+  height: 1px;
+  border: 0;
+  background: var(--hairline);
+  box-shadow:
+    0 -8px 0 -0.25px var(--paper),
+    0 8px 0 -0.25px var(--paper);
+  transform: rotate(-28deg);
+}
+.app--survey .brandmark i {
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--instrument);
+  transform: translate(7px, -6px);
+}
+.app--survey .masthead__view button[aria-pressed="true"] {
+  color: var(--paper-panel);
+  background: var(--instrument);
+}
+.app--survey .atlas svg:focus-visible {
+  outline-color: color-mix(in srgb, var(--instrument) 72%, transparent);
+}
+.app--survey .identity h1,
+.app--survey .goal__title {
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-weight: 600;
+}
+.app--survey .work-surface {
+  background: linear-gradient(145deg, var(--paper) 0%, var(--paper-deep) 100%);
+}
+.app--survey.app--dark .work-surface {
+  background: linear-gradient(145deg, var(--paper) 0%, var(--paper-deep) 100%);
+}
+.app--survey .work-surface::before {
+  box-shadow: inset 0 0 110px 10px color-mix(in srgb, var(--paper-deep) 62%, transparent);
+  opacity: 0.45;
+}
+.app--survey .agent__card,
+.app--survey .agent__working-circuit,
+.app--survey .agent__attention-wave,
+.app--survey .catch-up-trigger,
+.app--survey .system-scope select,
+.app--survey .masthead__utility button {
+  border-radius: 0;
 }
 
 .metrics {

@@ -634,7 +634,7 @@ export const App = (): React.JSX.Element => {
 
   if (!data) {
     return (
-      <main className={`app app--${theme}`}>
+      <main className={`app app--${theme} app--survey`}>
         <div className="boot-state">
           <span className="brandmark">
             <i />
@@ -646,15 +646,15 @@ export const App = (): React.JSX.Element => {
   }
 
   return (
-    <main className={`app app--${theme} ${motion ? "app--motion" : "app--still"}`}>
+    <main className={`app app--${theme} app--survey ${motion ? "app--motion" : "app--still"}`}>
       <header className="masthead">
         <div className="masthead__brand">
           <span className="brandmark" aria-hidden="true">
             <i />
           </span>
           <div className="identity">
-            <p className="overline">OBSERVATORY / ACTIVE WORK ATLAS 01</p>
-            <h1>A field guide to work in motion</h1>
+            <p className="overline">OBSERVATORY / FIELD SURVEY 01</p>
+            <h1>A measured view of work in motion</h1>
           </div>
         </div>
         <nav aria-label="Portfolio controls">

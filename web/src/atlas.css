@@ -80,6 +80,53 @@
   fill: transparent;
   pointer-events: all;
 }
+.atlas__coordinate-grid,
+.goal__datum,
+.goal__range-rings {
+  display: none;
+  pointer-events: none;
+}
+.atlas__grid-major,
+.atlas__grid-tick {
+  fill: none;
+  stroke: var(--ink);
+  vector-effect: non-scaling-stroke;
+}
+.atlas__grid-major {
+  opacity: 0.09;
+  stroke-width: 0.7;
+}
+.atlas__grid-tick {
+  opacity: 0.18;
+  stroke-width: 1;
+}
+.app--survey .atlas__coordinate-grid,
+.app--survey .goal__datum,
+.app--survey .goal__range-rings {
+  display: block;
+}
+.goal__datum circle,
+.goal__datum path {
+  fill: none;
+  stroke: var(--goal-color, var(--muted));
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+.goal__datum circle {
+  opacity: 0.24;
+  stroke-dasharray: 1 5;
+}
+.goal__datum path {
+  opacity: 0.18;
+  stroke-dasharray: 3 7;
+}
+.goal__range-rings circle {
+  fill: none;
+  stroke: var(--paper);
+  stroke-width: 0.8;
+  opacity: 0.22;
+  vector-effect: non-scaling-stroke;
+}
 .atlas svg:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
   outline-offset: -3px;
@@ -155,6 +202,12 @@
 .goal__body:focus .goal__outline {
   stroke-width: 3;
   opacity: 1;
+}
+.app--survey .goal__land {
+  opacity: 0.035;
+}
+.app--survey .goal__outline {
+  stroke-width: 1.2;
 }
 .goal__selection {
   fill: none;

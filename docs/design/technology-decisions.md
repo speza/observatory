@@ -2,7 +2,7 @@
 
 Status: accepted for the web-only V1 product
 
-Updated: 2026-08-27
+Updated: 2026-09-01
 
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
@@ -89,9 +89,13 @@ scene scaling reduced clarity without solving a product requirement. Electron
 is deferred because the current local browser process already provides the GUI;
 add a desktop shell only for a measured packaging or OS-integration need.
 
-The Mineral visual language is an art direction over production projections,
-not a fixture tree or a second semantic model. Atlas, Ledger, Attention, Catch
-up, Inbox and Closeout are complementary lenses over the same accepted state.
+The Carbon Survey visual language is an art direction over production
+projections, not a fixture tree or a second semantic model. Neutral carbon and
+bone tones own structure, green denotes healthy working state, and vermilion is
+reserved for attention and intervention. Its world-anchored logical grid pans
+and scales with the Atlas to provide a durable placement reference. Atlas,
+Ledger, Attention, Catch up, Inbox and Closeout remain complementary lenses over
+the same accepted state.
 
 ## Host and terminal integration
 

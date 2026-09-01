@@ -22,9 +22,16 @@ import { useAtlasCamera } from "./useAtlasCamera.ts";
 
 export type { AtlasCameraCommand, Selection } from "./atlasGeometry.ts";
 
+const GRID_LOGICAL_STEP = 24;
+const GRID_EXTENT = 100_000;
+
 interface AgentStyle extends CSSProperties {
   readonly "--goal-color": string;
   readonly "--agent-phase": string;
+}
+
+interface GoalStyle extends CSSProperties {
+  readonly "--goal-color": string;
 }
 
 const concise = (value: string | undefined, maximumCharacters: number): string | undefined => {
@@ -54,20 +61,20 @@ interface AtlasProps {
 
 const palettes = {
   light: [
-    { body: "#c77962", mark: "#8f3f2d" },
-    { body: "#d7aa5e", mark: "#80601b" },
-    { body: "#78a097", mark: "#356b62" },
-    { body: "#bd7b89", mark: "#814150" },
-    { body: "#7895ac", mark: "#365f7b" },
-    { body: "#9380a2", mark: "#604b72" },
+    { body: "#b9c7b7", mark: "#1e5b50" },
+    { body: "#c8c2a5", mark: "#756521" },
+    { body: "#a9c5c4", mark: "#24656a" },
+    { body: "#c9b5a5", mark: "#8c4d36" },
+    { body: "#b3bec9", mark: "#405f78" },
+    { body: "#beb7c4", mark: "#66516f" },
   ],
   dark: [
-    { body: "#7e3f31", mark: "#dc8c72" },
-    { body: "#7a5924", mark: "#e0b865" },
-    { body: "#355f58", mark: "#82b7ab" },
-    { body: "#754352", mark: "#d68b99" },
-    { body: "#39576d", mark: "#86aac4" },
-    { body: "#594663", mark: "#ad94bb" },
+    { body: "#294a42", mark: "#81b7a9" },
+    { body: "#504a2e", mark: "#c6b974" },
+    { body: "#27474c", mark: "#78b6bd" },
+    { body: "#513b31", mark: "#d19070" },
+    { body: "#304658", mark: "#8aaac1" },
+    { body: "#44394c", mark: "#af98b5" },
   ],
 } as const;
 
@@ -119,6 +126,8 @@ export const Atlas = ({
     readonly goalId: string;
     readonly position: { readonly x: number; readonly y: number };
   }>();
+  const gridOrigin = screenPoint({ x: 0, y: 0 });
+  const gridStep = GRID_LOGICAL_STEP * layout.goalSpacingScale;
 
   const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
     const drag = goalDrag.current;
@@ -215,6 +224,21 @@ export const Atlas = ({
       >
         <title>Observatory goal and agent atlas</title>
         <defs>
+          <pattern
+            data-logical-step={GRID_LOGICAL_STEP}
+            height={gridStep}
+            id="atlas-coordinate-grid"
+            patternUnits="userSpaceOnUse"
+            width={gridStep}
+            x={gridOrigin.x}
+            y={gridOrigin.y}
+          >
+            <path className="atlas__grid-major" d={`M ${gridStep} 0 L 0 0 0 ${gridStep}`} />
+            <path
+              className="atlas__grid-tick"
+              d={`M ${gridStep / 2} 0 V 5 M 0 ${gridStep / 2} H 5`}
+            />
+          </pattern>
           {projection.goals.map((goal) => (
             <clipPath id={`goal-clip-${hash(goal.id)}`} key={goal.id}>
               <circle r={goalRadius(goal)} />
@@ -246,6 +270,17 @@ export const Atlas = ({
           data-focus-target={focusedSelection?.id}
           transform={worldTransform}
         >
+          <rect
+            aria-hidden="true"
+            className="atlas__coordinate-grid"
+            data-grid-origin-x={gridOrigin.x}
+            data-grid-origin-y={gridOrigin.y}
+            fill="url(#atlas-coordinate-grid)"
+            height={GRID_EXTENT * 2}
+            width={GRID_EXTENT * 2}
+            x={-GRID_EXTENT}
+            y={-GRID_EXTENT}
+          />
           {projection.goals.map((goal) => {
             const displayedPosition =
               draggedGoal?.goalId === goal.id ? draggedGoal.position : goal.mapPosition;
@@ -277,11 +312,23 @@ export const Atlas = ({
             const orbitBands = [
               ...new Map(agentPoints.map((point) => [point.band, point])).values(),
             ];
+            const goalStyle: GoalStyle = { "--goal-color": palette.mark };
             return (
               <g
                 className={`goal ${goal.status !== "active" ? `goal--${goal.status}` : ""} ${hasWorkingAgent ? "goal--working" : ""} ${goal.attentionCount > 0 ? "goal--attention" : ""} ${hasUncertainAgent ? "goal--uncertain" : ""} ${spotlightActive && focusedGoal ? "goal--spotlight-focus" : ""} ${spotlightActive && !focusedGoal ? "goal--spotlight-dimmed" : ""}`}
                 key={goal.id}
+                style={goalStyle}
               >
+                <g
+                  aria-hidden="true"
+                  className="goal__datum"
+                  transform={`translate(${centre.x} ${centre.y})`}
+                >
+                  <circle r={radius + 12} />
+                  <path
+                    d={`M${-radius - 20} 0 H${radius + 20} M0 ${-radius - 20} V${radius + 20}`}
+                  />
+                </g>
                 <g className="goal__orbits" aria-hidden="true">
                   {orbitBands.map((orbit) => (
                     <ellipse
@@ -345,6 +392,10 @@ export const Atlas = ({
                   transform={`translate(${centre.x} ${centre.y})`}
                 >
                   <circle className="goal__surface" fill={palette.body} r={radius} />
+                  <g aria-hidden="true" className="goal__range-rings">
+                    <circle cx={radius * -0.12} cy={radius * -0.08} r={radius * 0.72} />
+                    <circle cx={radius * -0.12} cy={radius * -0.08} r={radius * 0.52} />
+                  </g>
                   <g clipPath={`url(#goal-clip-${token})`}>
                     <path
                       className="goal__land goal__land--upper"

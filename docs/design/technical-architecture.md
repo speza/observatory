@@ -61,7 +61,8 @@ linked shell or Herdr itself handles provider-specific review workflows.
 ## Client decision
 
 Observatory has one maintained application client: the local web GUI. It owns
-the Mineral Atlas, Ledger, attention, review and hosted-terminal experiences.
+the Carbon Survey Atlas, Ledger, attention, review and hosted-terminal
+experiences.
 The OpenTUI client was retired on 2026-08-27 after proving the architecture but
 before client parity became a permanent product tax. Herdr remains the native
 terminal fallback. A future CLI may expose launch, status and structured
