@@ -515,13 +515,17 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #67685f;
   background: #1d211e;
   box-shadow:
     14px 16px 0 rgb(0 0 0 / 28%),
     0 28px 90px rgb(0 0 0 / 38%);
+}
+
+.workspace-review--terminal-open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .workspace-review__terminal,
@@ -649,6 +653,11 @@
   border-right: 1px solid #53574f;
 }
 
+.diff-review__terminal-toggle {
+  min-width: 116px !important;
+  padding: 0 12px;
+}
+
 .diff-review__refresh {
   font-size: 20px !important;
 }
@@ -718,59 +727,70 @@
 
 .diff-review__body {
   min-height: 0;
-  display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
-}
-
-.diff-review__files {
-  min-height: 0;
   overflow: auto;
-  border-right: 1px solid #3c4039;
+  padding: 12px;
   background: #191d1a;
+  scrollbar-gutter: stable;
 }
 
-.diff-review__files-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 15px 16px 12px;
-  color: #a9a695;
-  font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.diff-review__file {
+  min-width: 0;
+  margin-bottom: 12px;
+  border: 1px solid #3c4039;
+  background: #222622;
 }
 
-.diff-review__files-heading b {
-  color: #e7decb;
-  font-weight: 500;
+.diff-review__file:last-child {
+  margin-bottom: 0;
 }
 
-.diff-review__files > button {
-  width: 100%;
+.diff-review__file-header {
+  position: sticky;
+  z-index: 2;
+  top: -12px;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  gap: 4px 8px;
-  padding: 12px 16px;
-  text-align: left;
-  border: 0;
-  border-top: 1px solid #30352f;
-  color: #d6d0c1;
-  background: transparent;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid #3c4039;
+  background: #20251f;
   cursor: pointer;
+  list-style: none;
 }
 
-.diff-review__files > button:hover,
-.diff-review__files > button.is-selected {
-  background: #2b302b;
+.diff-review__file-header::-webkit-details-marker {
+  display: none;
 }
 
-.diff-review__files > button.is-selected {
-  box-shadow: inset 3px 0 #d68163;
+.diff-review__file-header:hover {
+  background: #292e29;
+}
+
+.diff-review__file-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid #a9a695;
+  border-bottom: 1px solid #a9a695;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.diff-review__file[open] .diff-review__file-chevron {
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.diff-review__file-identity {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .diff-review__file-status,
 .diff-review__file-counts {
+  flex: 0 0 auto;
   font-family: "DM Mono", ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -778,70 +798,27 @@
 }
 
 .diff-review__file-status {
+  width: 70px;
   color: #a9a695;
 }
 
 .diff-review__file-path {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: #f1e8d6;
+  font-family: "DM Mono", ui-monospace, monospace;
   font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .diff-review__file-counts {
-  grid-column: 2;
-  display: flex;
-  gap: 8px;
-}
-
-.diff-review__content {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: #222622;
-}
-
-.diff-review__file-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 14px 20px;
-  border-bottom: 1px solid #3c4039;
-}
-
-.diff-review__file-header p {
-  margin: 0 0 4px;
-  color: #a9a695;
-  font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.diff-review__file-header h3 {
-  margin: 0;
-  overflow: hidden;
-  color: #f1e8d6;
-  font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 14px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diff-review__file-header > span {
   display: flex;
   gap: 10px;
-  font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 12px;
 }
 
 .diff-review__renderer {
-  min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: auto;
   padding: 12px;
 }
 
@@ -950,7 +927,7 @@
   .workspace-review-backdrop {
     padding: 0;
   }
-  .workspace-review {
+  .workspace-review--terminal-open {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(260px, 0.42fr) minmax(0, 1.58fr);
   }
@@ -966,6 +943,9 @@
   }
   .diff-review__header {
     padding: 16px;
+  }
+  .diff-review__header > div:first-child {
+    min-width: 0;
   }
   .diff-review__header h2 {
     font-size: 22px;
@@ -983,12 +963,40 @@
     font-size: 9px;
   }
   .diff-review__body {
-    grid-template-columns: 150px minmax(0, 1fr);
+    padding: 8px;
   }
-  .diff-review__files > button {
-    grid-template-columns: 1fr;
+  .diff-review__file-header {
+    top: -8px;
   }
-  .diff-review__file-counts {
-    grid-column: 1;
+  .diff-review__file-status {
+    display: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .diff-review__header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .diff-review__header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .diff-review__context,
+  .diff-review__summary {
+    flex-wrap: wrap;
+  }
+  .diff-review__context {
+    overflow-wrap: anywhere;
+  }
+  .diff-review__summary {
+    min-height: 42px;
+    padding-block: 8px;
+  }
+  .diff-review__summary code {
+    margin-left: 0;
+  }
+  .diff-review__terminal-toggle {
+    flex: 1 1 116px;
   }
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { AgentView } from "../../src/projection/types.ts";
 import { ModalDialog } from "./ModalDialog.tsx";
 import { TerminalDeck } from "./TerminalDeck.tsx";
@@ -21,27 +21,49 @@ export const WorkspaceReview = ({
   agent,
   theme,
   onClose,
-}: WorkspaceReviewProps): React.JSX.Element => (
-  <ModalDialog
-    ariaLabel={`Workspace review for ${agent.displayName}`}
-    className="workspace-review-backdrop"
-    onClose={onClose}
-  >
-    <section className="workspace-review" onMouseDown={(event) => event.stopPropagation()}>
-      <div className="workspace-review__terminal">
-        <TerminalDeck agent={agent} embedded key={agent.id} onClose={onClose} theme={theme} />
-      </div>
-      <div className="workspace-review__diff">
-        <Suspense
-          fallback={
-            <div className="workspace-review__loading" role="status">
-              Preparing workspace diff…
-            </div>
-          }
-        >
-          <WorkingTreeDiff agent={agent} embedded onClose={onClose} theme={theme} />
-        </Suspense>
-      </div>
-    </section>
-  </ModalDialog>
-);
+}: WorkspaceReviewProps): React.JSX.Element => {
+  const [terminalOpen, setTerminalOpen] = useState(false);
+
+  return (
+    <ModalDialog
+      ariaLabel={`Workspace review for ${agent.displayName}`}
+      className="workspace-review-backdrop"
+      onClose={onClose}
+    >
+      <section
+        className={`workspace-review${terminalOpen ? " workspace-review--terminal-open" : ""}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {terminalOpen ? (
+          <div className="workspace-review__terminal">
+            <TerminalDeck
+              agent={agent}
+              embedded
+              key={agent.id}
+              onClose={() => setTerminalOpen(false)}
+              theme={theme}
+            />
+          </div>
+        ) : null}
+        <div className="workspace-review__diff">
+          <Suspense
+            fallback={
+              <div className="workspace-review__loading" role="status">
+                Preparing workspace diff…
+              </div>
+            }
+          >
+            <WorkingTreeDiff
+              agent={agent}
+              embedded
+              onClose={onClose}
+              onTerminalToggle={() => setTerminalOpen((open) => !open)}
+              terminalOpen={terminalOpen}
+              theme={theme}
+            />
+          </Suspense>
+        </div>
+      </section>
+    </ModalDialog>
+  );
+};

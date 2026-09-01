@@ -112,9 +112,13 @@ receives ordinary keyboard input, paste and scroll. Opening, switching or
 closing tabs must not mutate Atlas selection, camera, inspector or durable
 state.
 
-Workspace review may place the terminal beside a bounded read-only Git diff.
-Both are transient views over the same accepted Agent. `resizeMode: fit` lets
-the host PTY follow the visible xterm.js dimensions so wrapping stays faithful.
+Workspace review opens as a full-width, read-only Git diff. Changed files form
+one vertically scrollable series of collapsible sections so review remains
+usable when its width is constrained. The human may open the terminal beside
+the diff when runtime context is useful and hide it again without leaving the
+review. Both are transient views over the same accepted Agent. `resizeMode:
+fit` lets the host PTY follow the visible xterm.js dimensions so wrapping stays
+faithful.
 
 ## Failure and uncertainty rules
 

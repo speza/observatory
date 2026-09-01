@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import type { AgentView } from "../../src/projection/types.ts";
@@ -14,6 +14,8 @@ interface WorkingTreeDiffProps {
   readonly embedded?: boolean;
   readonly theme: Theme;
   readonly onClose: () => void;
+  readonly onTerminalToggle?: () => void;
+  readonly terminalOpen?: boolean;
 }
 
 const statusLabel = (status: WebWorkingTreeDiffResponse["status"]): string => {
@@ -34,16 +36,68 @@ const fileDataFor = (file: WorkspaceDiffFile) => ({
   hunks: [...file.hunks],
 });
 
+interface ChangedFileListProps {
+  readonly files: readonly WorkspaceDiffFile[];
+  readonly generatedAt: number;
+  readonly mode: DiffMode;
+  readonly theme: Theme;
+}
+
+export const ChangedFileList = ({
+  files,
+  generatedAt,
+  mode,
+  theme,
+}: ChangedFileListProps): React.JSX.Element => (
+  <div aria-label="Changed files" className="diff-review__body" role="region">
+    {files.map((file) => (
+      <details className="diff-review__file" key={file.path} open>
+        <summary className="diff-review__file-header">
+          <span className="diff-review__file-chevron" aria-hidden="true" />
+          <span className="diff-review__file-identity">
+            <span className="diff-review__file-status">{fileStatusLabel(file)}</span>
+            <strong className="diff-review__file-path">{file.path}</strong>
+          </span>
+          <span className="diff-review__file-counts">
+            {file.additions ? <em>+{file.additions}</em> : null}
+            {file.deletions ? <i>−{file.deletions}</i> : null}
+          </span>
+        </summary>
+        {file.binary ? (
+          <div className="diff-review__binary">Binary or oversized file · content omitted</div>
+        ) : file.hunks.length > 0 ? (
+          <div className="diff-review__renderer">
+            <DiffView
+              key={`${file.path}-${mode}-${generatedAt}`}
+              data={fileDataFor(file)}
+              diffViewFontSize={13}
+              diffViewHighlight
+              diffViewMode={mode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified}
+              diffViewTheme={theme}
+              diffViewWrap={false}
+            />
+          </div>
+        ) : (
+          <pre className="diff-review__raw">
+            {file.newFile?.content ?? file.oldFile?.content ?? "No textual hunk available."}
+          </pre>
+        )}
+      </details>
+    ))}
+  </div>
+);
+
 export const WorkingTreeDiff = ({
   agent,
   embedded = false,
   theme,
   onClose,
+  onTerminalToggle,
+  terminalOpen = false,
 }: WorkingTreeDiffProps): React.JSX.Element => {
   const [snapshot, setSnapshot] = useState<WebWorkingTreeDiffResponse>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const [selectedPath, setSelectedPath] = useState<string>();
   const [mode, setMode] = useState<DiffMode>("unified");
   const [refreshNonce, setRefreshNonce] = useState(0);
 
@@ -53,10 +107,7 @@ export const WorkingTreeDiff = ({
     setError(undefined);
     setSnapshot(undefined);
     void fetchWorkingTreeDiff(agent.id, controller.signal)
-      .then((next) => {
-        setSnapshot(next);
-        setSelectedPath(next.files[0]?.path);
-      })
+      .then(setSnapshot)
       .catch((reason) => {
         if (!controller.signal.aborted)
           setError(reason instanceof Error ? reason.message : "Workspace diff unavailable.");
@@ -66,11 +117,6 @@ export const WorkingTreeDiff = ({
       });
     return () => controller.abort();
   }, [agent.id, refreshNonce]);
-
-  const selectedFile = useMemo(
-    () => snapshot?.files.find((file) => file.path === selectedPath) ?? snapshot?.files[0],
-    [selectedPath, snapshot],
-  );
 
   const review = (
     <section
@@ -91,6 +137,16 @@ export const WorkingTreeDiff = ({
           </p>
         </div>
         <div className="diff-review__header-actions">
+          {onTerminalToggle ? (
+            <button
+              aria-pressed={terminalOpen}
+              className="diff-review__terminal-toggle"
+              onClick={onTerminalToggle}
+              type="button"
+            >
+              {terminalOpen ? "Hide terminal" : "Open terminal"}
+            </button>
+          ) : null}
           <div className="diff-review__mode" aria-label="Diff view mode" role="group">
             <button
               aria-pressed={mode === "unified"}
@@ -147,64 +203,13 @@ export const WorkingTreeDiff = ({
           <span>{snapshot?.message ?? "No changed files were observed."}</span>
         </div>
       ) : null}
-      {!loading && !error && selectedFile && snapshot?.status === "changed" ? (
-        <div className="diff-review__body">
-          <nav aria-label="Changed files" className="diff-review__files">
-            <div className="diff-review__files-heading">
-              <span>Changed files</span>
-              <b>{snapshot.files.length}</b>
-            </div>
-            {snapshot.files.map((file) => (
-              <button
-                aria-current={selectedFile.path === file.path ? "page" : undefined}
-                className={selectedFile.path === file.path ? "is-selected" : ""}
-                key={file.path}
-                onClick={() => setSelectedPath(file.path)}
-                type="button"
-              >
-                <span className="diff-review__file-status">{fileStatusLabel(file)}</span>
-                <span className="diff-review__file-path">{file.path}</span>
-                <span className="diff-review__file-counts">
-                  {file.additions ? <em>+{file.additions}</em> : null}
-                  {file.deletions ? <i>−{file.deletions}</i> : null}
-                </span>
-              </button>
-            ))}
-          </nav>
-          <article className="diff-review__content">
-            <header className="diff-review__file-header">
-              <div>
-                <p>{fileStatusLabel(selectedFile)}</p>
-                <h3>{selectedFile.path}</h3>
-              </div>
-              <span>
-                {selectedFile.additions ? <em>+{selectedFile.additions}</em> : null}
-                {selectedFile.deletions ? <i>−{selectedFile.deletions}</i> : null}
-              </span>
-            </header>
-            {selectedFile.binary ? (
-              <div className="diff-review__binary">Binary or oversized file · content omitted</div>
-            ) : selectedFile.hunks.length > 0 ? (
-              <div className="diff-review__renderer">
-                <DiffView
-                  key={`${selectedFile.path}-${mode}-${snapshot.generatedAt}`}
-                  data={fileDataFor(selectedFile)}
-                  diffViewFontSize={13}
-                  diffViewHighlight
-                  diffViewMode={mode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified}
-                  diffViewTheme={theme}
-                  diffViewWrap={false}
-                />
-              </div>
-            ) : (
-              <pre className="diff-review__raw">
-                {selectedFile.newFile?.content ??
-                  selectedFile.oldFile?.content ??
-                  "No textual hunk available."}
-              </pre>
-            )}
-          </article>
-        </div>
+      {!loading && !error && snapshot?.status === "changed" ? (
+        <ChangedFileList
+          files={snapshot.files}
+          generatedAt={snapshot.generatedAt}
+          mode={mode}
+          theme={theme}
+        />
       ) : null}
 
       {snapshot?.truncated ? (
