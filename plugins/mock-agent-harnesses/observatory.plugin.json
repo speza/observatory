@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "mock-agent-harnesses",
+  "displayName": "Mock agent harnesses",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "entrypoint": "./plugin.ts",
+  "capabilities": ["agent-harness"]
+}

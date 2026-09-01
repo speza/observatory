@@ -3,7 +3,10 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
-import { SqliteUniverseStore } from "../src/persistence/sqlite/sqlite-store.ts";
+import {
+  SQLITE_SCHEMA_GENERATION,
+  SqliteUniverseStore,
+} from "../src/persistence/sqlite/sqlite-store.ts";
 
 const cliArguments = process.argv.slice(2);
 const fullReset = cliArguments.includes("--all");
@@ -20,27 +23,14 @@ if (!existsSync(databasePath))
 const backupSuffix = new Date().toISOString().replaceAll(/[-:.]/gu, "");
 const backupPath = `${databasePath}.backup-${backupSuffix}`;
 const database = new Database(databasePath);
-const hasSchemaTable = Boolean(
-  database
-    .query<{ found: number }, []>(
-      "SELECT COUNT(*) AS found FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
-    )
-    .get()?.found,
-);
-const currentSchema =
-  hasSchemaTable &&
-  Boolean(
-    database
-      .query<{ found: number }, []>(
-        "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 12",
-      )
-      .get()?.found,
-  );
+const generation =
+  database.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
+const currentSchema = generation === SQLITE_SCHEMA_GENERATION;
 
 if (!currentSchema && !fullReset) {
   database.close();
   throw new Error(
-    "This database predates conversation-first tracking. Use `bun run db:reset:all` to back it up and replace it.",
+    "This database uses an incompatible schema. Use `bun run db:reset:all` to back it up and replace it.",
   );
 }
 
@@ -58,7 +48,7 @@ if (!currentSchema) {
         mode: "all",
         databasePath,
         backupPath,
-        replacedLegacySchema: true,
+        replacedIncompatibleSchema: true,
       },
       null,
       2,

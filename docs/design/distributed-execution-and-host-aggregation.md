@@ -1232,11 +1232,11 @@ reconnect and clean up only resources created by the test.
 
 ## Delivery from the current implementation
 
-### Implemented migrations and invariants
+### Implemented persistence invariants
 
-The current SQLite migrations already:
+The current clean-break SQLite schema:
 
-- backfill legacy executions with a deterministic host instance ID;
+- stores executions with an explicit host instance ID;
 - key host health by `host_instance_id` while retaining `host_kind`;
 - enforce live execution uniqueness by `(host_instance_id, native_id)`;
 - persist scoped provider-session records and aliases;
@@ -1244,11 +1244,10 @@ The current SQLite migrations already:
 - retain prior and conflicting executions; and
 - persist launch receipts and pending recovery state.
 
-Future site, environment and workspace migrations must preserve all existing
-Agent IDs, provider-session bindings, assignments, names, archive state, layout,
-execution history and launch receipts. Attaching a second host or provider
-instance remains explicit; migration must not guess identity from endpoints,
-paths or matching native IDs.
+Introducing site, environment or workspace persistence requires another
+explicit clean-break schema decision while the database remains experimental.
+Attaching a second host or provider instance remains explicit; no replacement
+schema may guess identity from endpoints, paths or matching native IDs.
 
 ### Staged delivery
 

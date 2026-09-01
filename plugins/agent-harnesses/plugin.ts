@@ -5,7 +5,11 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
   HarnessError,
+  HarnessObservationError,
   type AgentHarness,
+  type AgentObservation,
+  type AgentObservationCapability,
+  type AgentObservationSourceV1,
   type AgentHarnessDescriptor,
   type AgentProcessPlan,
   type BoundedProcessRunner,
@@ -23,6 +27,7 @@ import {
 interface HarnessDefinition {
   readonly descriptor: AgentHarnessDescriptor;
   readonly executable: string;
+  readonly observationSource: AgentObservationSourceV1;
   snapshotSessions(): Promise<ProviderSessionSnapshot>;
   start(request: StartHarnessSessionRequest): AgentProcessPlan;
   resume(request: ResumeHarnessSessionRequest): AgentProcessPlan;
@@ -34,9 +39,89 @@ const DEFAULT_MAX_SESSIONS = 500;
 const ProviderConfigurationSchema = Schema.Struct({
   claudeProjectsRoot: Schema.optional(Schema.String),
   codexRoot: Schema.optional(Schema.String),
+  claudeObservationOutbox: Schema.optional(Schema.String),
+  codexObservationOutbox: Schema.optional(Schema.String),
   maxSessions: Schema.optional(Schema.Number),
 });
 type ProviderConfiguration = typeof ProviderConfigurationSchema.Type;
+
+const OutboxObservationFields = {
+  schemaVersion: Schema.Literal(1),
+  observationId: Schema.String,
+  revision: Schema.optional(Schema.Number),
+  nativeConversationRef: Schema.Struct({
+    harnessId: Schema.String,
+    continuityScopeId: Schema.optional(Schema.String),
+    kind: Schema.String,
+    value: Schema.String,
+  }),
+  providerInstanceId: Schema.String,
+  observedAt: Schema.Number,
+  source: Schema.Struct({
+    mechanism: Schema.Literal("hook", "structured-api", "metadata"),
+    providerVersion: Schema.optional(Schema.String),
+  }),
+} as const;
+const ToolCategorySchema = Schema.Literal(
+  "read",
+  "write",
+  "execute",
+  "search",
+  "network",
+  "delegate",
+  "other",
+);
+const OutboxObservationSchema = Schema.Union(
+  Schema.Struct({
+    ...OutboxObservationFields,
+    kind: Schema.Literal("activity"),
+    payload: Schema.Struct({
+      phase: Schema.Literal("responding", "using-tool", "compacting", "idle"),
+      toolCategory: Schema.optional(ToolCategorySchema),
+    }),
+  }),
+  Schema.Struct({
+    ...OutboxObservationFields,
+    kind: Schema.Literal("human-input-request"),
+    payload: Schema.Struct({
+      requestId: Schema.String,
+      requestKind: Schema.Literal("permission", "question", "plan-approval", "other"),
+      state: Schema.Literal("open", "resolved", "withdrawn"),
+      toolCategory: Schema.optional(ToolCategorySchema),
+    }),
+  }),
+  Schema.Struct({
+    ...OutboxObservationFields,
+    kind: Schema.Literal("turn-outcome"),
+    payload: Schema.Struct({
+      turnId: Schema.optional(Schema.String),
+      outcome: Schema.Literal("response-completed", "failed", "interrupted"),
+      failureCategory: Schema.optional(
+        Schema.Literal(
+          "rate-limit",
+          "authentication",
+          "billing",
+          "provider-overloaded",
+          "context-limit",
+          "tool",
+          "unknown",
+        ),
+      ),
+    }),
+  }),
+  Schema.Struct({
+    ...OutboxObservationFields,
+    kind: Schema.Literal("context-pressure"),
+    payload: Schema.Struct({
+      usedRatio: Schema.optional(Schema.Number),
+      compaction: Schema.optional(Schema.Literal("started", "completed")),
+    }),
+  }),
+);
+const OutboxRowSchema = Schema.Struct({
+  current: Schema.optional(Schema.Boolean),
+  observation: OutboxObservationSchema,
+});
 
 const ClaudeIndexSchema = Schema.Struct({
   entries: Schema.Array(
@@ -90,6 +175,152 @@ const scopeFor = (harnessId: string, root: string): string =>
 
 const providerInstanceFor = (harnessId: string, scope: string): string =>
   `${harnessId}-local-${scope}`;
+
+const sanitizedObservation = (
+  input: typeof OutboxObservationSchema.Type,
+): AgentObservation | undefined => {
+  const base = {
+    schemaVersion: 1 as const,
+    observationId: input.observationId.slice(0, 200),
+    revision: input.revision,
+    nativeConversationRef: input.nativeConversationRef,
+    providerInstanceId: input.providerInstanceId,
+    observedAt: input.observedAt,
+    source: input.source.providerVersion
+      ? {
+          mechanism: input.source.mechanism,
+          providerVersion: input.source.providerVersion.slice(0, 80),
+        }
+      : { mechanism: input.source.mechanism },
+  };
+  if (input.kind === "activity") {
+    return {
+      ...base,
+      kind: input.kind,
+      payload: input.payload,
+    };
+  }
+  if (input.kind === "human-input-request") {
+    return {
+      ...base,
+      kind: input.kind,
+      payload: {
+        ...input.payload,
+        requestId: input.payload.requestId.slice(0, 200),
+      },
+    };
+  }
+  if (input.kind === "turn-outcome") {
+    return {
+      ...base,
+      kind: input.kind,
+      payload: input.payload,
+    };
+  }
+  const ratio = input.payload.usedRatio;
+  const usedRatio =
+    ratio !== undefined && Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : undefined;
+  const compaction = input.payload.compaction;
+  return usedRatio === undefined && compaction === undefined
+    ? undefined
+    : { ...base, kind: input.kind, payload: { usedRatio, compaction } };
+};
+
+class LocalObservationOutbox implements AgentObservationSourceV1 {
+  readonly schemaVersion = 1 as const;
+  private readonly capability: AgentObservationCapability;
+  constructor(
+    private readonly harnessId: string,
+    private readonly path: string | undefined,
+    private readonly root: string,
+    private readonly now: () => number,
+  ) {
+    this.capability = {
+      kinds: ["activity", "human-input-request", "turn-outcome", "context-pressure"],
+      acquisition: "hook",
+      delivery: "retained-events-and-snapshot",
+      configured: path !== undefined,
+      freshnessSeconds: {
+        activity: 120,
+        "human-input-request": 1_800,
+        "turn-outcome": 86_400,
+        "context-pressure": 600,
+      },
+    };
+  }
+  describe() {
+    return this.capability;
+  }
+  snapshot(request: { readonly afterCursor?: string; readonly limit: number }) {
+    return Effect.tryPromise({
+      try: async () => {
+        const continuityScopeId = scopeFor(this.harnessId, this.root);
+        const providerInstanceId = providerInstanceFor(this.harnessId, continuityScopeId);
+        if (!this.path)
+          return {
+            schemaVersion: 1 as const,
+            harnessId: this.harnessId,
+            providerInstanceId,
+            continuityScopeId,
+            capturedAt: this.now(),
+            complete: true,
+            current: [],
+            transitions: [],
+            health: {
+              state: "not-configured" as const,
+              diagnostics: ["Provider observation outbox is not configured."],
+            },
+          };
+        const metadata = await stat(this.path);
+        if (metadata.size > MAX_INDEX_BYTES)
+          throw new Error("Observation outbox exceeds the safe read limit.");
+        const rows: { readonly current: boolean; readonly observation: AgentObservation }[] = [];
+        let invalidRows = 0;
+        for (const line of (await readFile(this.path, "utf8")).split("\n")) {
+          if (!line.trim()) continue;
+          try {
+            const decoded = Schema.decodeUnknownSync(Schema.parseJson(OutboxRowSchema))(line);
+            const observation = sanitizedObservation(decoded.observation);
+            if (observation) rows.push({ current: decoded.current !== false, observation });
+            else invalidRows += 1;
+          } catch {
+            invalidRows += 1;
+          }
+        }
+        const offset = Math.max(0, Number.parseInt(request.afterCursor ?? "0", 10) || 0);
+        const transitions = rows
+          .slice(offset, offset + request.limit)
+          .map(({ observation }) => observation);
+        const currentByKey = new Map<string, AgentObservation>();
+        for (const row of rows)
+          if (row.current)
+            currentByKey.set(
+              `${row.observation.nativeConversationRef.value}\u0000${row.observation.kind}\u0000${row.observation.observationId}`,
+              row.observation,
+            );
+        return {
+          schemaVersion: 1 as const,
+          harnessId: this.harnessId,
+          providerInstanceId,
+          continuityScopeId,
+          capturedAt: this.now(),
+          complete: invalidRows === 0,
+          cursor: String(Math.min(rows.length, offset + transitions.length)),
+          current: [...currentByKey.values()].slice(-request.limit),
+          transitions,
+          health: {
+            state: invalidRows === 0 ? ("healthy" as const) : ("degraded" as const),
+            lastSuccessfulAt: this.now(),
+            diagnostics:
+              invalidRows === 0 ? [] : [`${invalidRows} observation outbox records were invalid.`],
+          },
+        };
+      },
+      catch: () =>
+        new HarnessObservationError(`${this.harnessId} observation outbox could not be read.`),
+    });
+  }
+}
 
 const timestamp = (value: string | undefined): number | undefined => {
   if (value === undefined) return undefined;
@@ -451,12 +682,14 @@ const continuityFor = (harnessId: string, request: ContinuityRequest): Continuit
 
 class CliAgentHarness implements AgentHarness {
   readonly harnessId: string;
+  readonly observationSource: AgentObservationSourceV1;
 
   constructor(
     private readonly definition: HarnessDefinition,
     private readonly process: BoundedProcessRunner,
   ) {
     this.harnessId = definition.descriptor.harnessId;
+    this.observationSource = definition.observationSource;
   }
 
   describe(): AgentHarnessDescriptor {
@@ -547,6 +780,12 @@ const claudeDefinition = (config: ProviderConfiguration, now: () => number): Har
     description: "Anthropic Claude Code CLI",
   },
   executable: "claude",
+  observationSource: new LocalObservationOutbox(
+    "claude",
+    normalized(config.claudeObservationOutbox ?? ""),
+    normalized(config.claudeProjectsRoot ?? "") ?? join(homedir(), ".claude", "projects"),
+    now,
+  ),
   snapshotSessions: () =>
     claudeSnapshot(
       normalized(config.claudeProjectsRoot ?? "") ?? join(homedir(), ".claude", "projects"),
@@ -587,6 +826,12 @@ const codexDefinition = (config: ProviderConfiguration, now: () => number): Harn
     description: "OpenAI Codex CLI",
   },
   executable: "codex",
+  observationSource: new LocalObservationOutbox(
+    "codex",
+    normalized(config.codexObservationOutbox ?? ""),
+    normalized(config.codexRoot ?? "") ?? join(homedir(), ".codex"),
+    now,
+  ),
   snapshotSessions: () =>
     codexSnapshot(
       normalized(config.codexRoot ?? "") ?? join(homedir(), ".codex"),

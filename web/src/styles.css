@@ -1085,6 +1085,33 @@ button {
   color: var(--muted);
   font-size: 14px;
 }
+
+.provider-evidence {
+  border-block: 1px solid var(--line);
+  padding: 18px 22px;
+  background: color-mix(in srgb, var(--surface-raised) 78%, var(--accent) 4%);
+}
+
+.provider-evidence > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.provider-evidence h3,
+.provider-evidence p {
+  margin: 0;
+}
+
+.provider-evidence > div > span,
+.provider-evidence > p {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.provider-evidence dl {
+  margin: 14px 0;
+}
 .inspector__error {
   margin: 10px 20px;
   padding: 12px;

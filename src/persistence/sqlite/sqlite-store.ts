@@ -23,7 +23,18 @@ import type {
   ConversationCatalogueStore,
   StoredConversation,
 } from "../../conversations/types.ts";
-import type { ProviderSessionSnapshot } from "../../plugin-sdk/index.ts";
+import type {
+  AgentObservation,
+  AgentObservationCapability,
+  AgentObservationSnapshot,
+  ProviderSessionSnapshot,
+} from "../../plugin-sdk/index.ts";
+import type {
+  AgentEvidenceTransition,
+  AgentObservationStore,
+  StoredAgentObservation,
+  StoredObservationSource,
+} from "../../agent-observations/types.ts";
 
 interface GoalRow {
   id: string;
@@ -150,6 +161,32 @@ interface ProviderConversationAliasRow {
   native_value: string;
 }
 
+interface ObservationSourceRow {
+  plugin_id: string;
+  harness_id: string;
+  provider_instance_id: string;
+  continuity_scope_id: string;
+  capability_json: string;
+  health_json: string;
+  cursor: string | null;
+  captured_at: number;
+}
+
+interface ObservationRow {
+  harness_id: string;
+  observation_id: string;
+  revision: number;
+  observation_json: string;
+  received_at: number;
+}
+
+interface ObservationTransitionRow extends ObservationRow {
+  sequence: number;
+}
+
+export const SQLITE_SCHEMA_GENERATION = 1;
+const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
+
 export interface DatabaseResetSummary {
   readonly removedGoals: number;
   readonly removedAgents: number;
@@ -259,6 +296,13 @@ const conversationHandle = (
     .digest("hex")
     .slice(0, 24)}`;
 
+const observationStorageKey = (observation: AgentObservation): string =>
+  createHash("sha256")
+    .update(
+      `${observation.providerInstanceId}\u0000${observation.nativeConversationRef.harnessId}\u0000${observation.nativeConversationRef.continuityScopeId ?? "legacy"}\u0000${observation.nativeConversationRef.kind}\u0000${observation.nativeConversationRef.value}\u0000${observation.observationId}`,
+    )
+    .digest("hex");
+
 const resumeEligibility = (value: string): StoredConversation["resumeEligibility"] =>
   value === "same-site" || value === "provider-account" || value === "blocked" ? value : "unknown";
 
@@ -266,7 +310,7 @@ const conversationProvenance = (value: string): StoredConversation["provenance"]
   value === "provider-index" ? "provider-index" : "session-header";
 
 export class SqliteUniverseStore
-  implements UniverseStore, LaunchReceiptStore, ConversationCatalogueStore
+  implements UniverseStore, LaunchReceiptStore, ConversationCatalogueStore, AgentObservationStore
 {
   readonly db: Database;
 
@@ -680,6 +724,224 @@ export class SqliteUniverseStore
     return row ? this.conversationFromRow(row) : undefined;
   }
 
+  observationSource(harnessId: string): StoredObservationSource | undefined {
+    const row = this.db
+      .query<ObservationSourceRow, [string]>(
+        "SELECT * FROM agent_observation_sources WHERE harness_id = ?",
+      )
+      .get(harnessId);
+    return row ? this.observationSourceFromRow(row) : undefined;
+  }
+
+  agentObservationSources(): readonly StoredObservationSource[] {
+    return this.db
+      .query<ObservationSourceRow, []>(
+        "SELECT * FROM agent_observation_sources ORDER BY harness_id",
+      )
+      .all()
+      .map((row) => this.observationSourceFromRow(row));
+  }
+
+  reconcileAgentObservations(
+    snapshot: AgentObservationSnapshot,
+    capability: AgentObservationCapability,
+    receivedAt: number,
+    pluginId: string,
+  ): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare(`
+          INSERT INTO agent_observation_sources (
+            harness_id, plugin_id, provider_instance_id, continuity_scope_id, capability_json,
+            health_json, cursor, captured_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(harness_id) DO UPDATE SET
+            plugin_id = excluded.plugin_id,
+            provider_instance_id = excluded.provider_instance_id,
+            continuity_scope_id = excluded.continuity_scope_id,
+            capability_json = excluded.capability_json,
+            health_json = excluded.health_json,
+            cursor = COALESCE(excluded.cursor, agent_observation_sources.cursor),
+            captured_at = excluded.captured_at
+        `)
+        .run(
+          snapshot.harnessId,
+          pluginId,
+          snapshot.providerInstanceId,
+          snapshot.continuityScopeId,
+          JSON.stringify(capability),
+          JSON.stringify(snapshot.health),
+          snapshot.cursor ?? null,
+          snapshot.capturedAt,
+        );
+      if (snapshot.complete)
+        this.db
+          .prepare("DELETE FROM agent_observation_current WHERE harness_id = ?")
+          .run(snapshot.harnessId);
+      const upsert = this.db.prepare(`
+        INSERT INTO agent_observation_current (
+          harness_id, observation_id, revision, observation_json, received_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(harness_id, observation_id) DO UPDATE SET
+          revision = excluded.revision,
+          observation_json = excluded.observation_json,
+          received_at = excluded.received_at
+        WHERE excluded.revision >= agent_observation_current.revision
+      `);
+      for (const observation of snapshot.current)
+        upsert.run(
+          snapshot.harnessId,
+          observationStorageKey(observation),
+          observation.revision ?? 0,
+          JSON.stringify(observation),
+          receivedAt,
+        );
+      this.db
+        .prepare(`
+          DELETE FROM agent_observation_current
+          WHERE harness_id = ?
+            AND observation_id NOT IN (
+              SELECT observation_id
+              FROM agent_observation_current
+              WHERE harness_id = ?
+              ORDER BY received_at DESC, observation_id DESC
+              LIMIT ${MAX_CURRENT_OBSERVATIONS_PER_SOURCE}
+            )
+        `)
+        .run(snapshot.harnessId, snapshot.harnessId);
+      const transition = this.db.prepare(`
+        INSERT OR IGNORE INTO agent_observation_transitions (
+          harness_id, observation_id, revision, observation_json, received_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const observation of snapshot.transitions)
+        transition.run(
+          snapshot.harnessId,
+          observationStorageKey(observation),
+          observation.revision ?? 0,
+          JSON.stringify(observation),
+          receivedAt,
+        );
+      this.db.exec(`
+        DELETE FROM agent_observation_transitions
+        WHERE sequence NOT IN (
+          SELECT sequence FROM agent_observation_transitions ORDER BY sequence DESC LIMIT 5000
+        );
+      `);
+    })();
+  }
+
+  markObservationSourceUnavailable(
+    harnessId: string,
+    capability: AgentObservationCapability,
+    observedAt: number,
+    diagnostic: string,
+    pluginId: string,
+  ): void {
+    const existing = this.observationSource(harnessId);
+    this.db
+      .prepare(`
+        INSERT INTO agent_observation_sources (
+          harness_id, plugin_id, provider_instance_id, continuity_scope_id, capability_json,
+          health_json, cursor, captured_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(harness_id) DO UPDATE SET
+          plugin_id = excluded.plugin_id,
+          capability_json = excluded.capability_json,
+          health_json = excluded.health_json
+      `)
+      .run(
+        harnessId,
+        pluginId,
+        existing?.providerInstanceId ?? "unknown",
+        existing?.continuityScopeId ?? "unknown",
+        JSON.stringify(capability),
+        JSON.stringify({ state: "unavailable", diagnostics: [diagnostic] }),
+        existing?.cursor ?? null,
+        existing?.capturedAt ?? observedAt,
+      );
+  }
+
+  currentAgentObservations(): readonly StoredAgentObservation[] {
+    return this.db
+      .query<ObservationRow, []>(
+        "SELECT * FROM agent_observation_current ORDER BY harness_id, observation_id",
+      )
+      .all()
+      .map((row) => this.observationFromRow(row));
+  }
+
+  agentObservationTransitions(afterSequence: number): readonly AgentEvidenceTransition[] {
+    return this.db
+      .query<ObservationTransitionRow, [number]>(
+        "SELECT * FROM agent_observation_transitions WHERE sequence > ? ORDER BY sequence",
+      )
+      .all(afterSequence)
+      .map((row) => ({ sequence: row.sequence, observation: this.observationFromRow(row) }));
+  }
+
+  observationCheckpoint():
+    | { readonly sequence: number; readonly acknowledgedAt: number }
+    | undefined {
+    const row = this.db
+      .query<{ last_sequence: number; acknowledged_at: number }, []>(
+        "SELECT last_sequence, acknowledged_at FROM agent_observation_checkpoint WHERE singleton = 1",
+      )
+      .get();
+    return row ? { sequence: row.last_sequence, acknowledgedAt: row.acknowledged_at } : undefined;
+  }
+
+  acknowledgeAgentObservations(at: number): number {
+    const latestTransition =
+      this.db
+        .query<{ sequence: number }, []>(
+          "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_observation_transitions",
+        )
+        .get()?.sequence ?? 0;
+    const sequence = Math.max(this.observationCheckpoint()?.sequence ?? 0, latestTransition);
+    this.db.transaction(() => {
+      this.db
+        .prepare(`
+          INSERT INTO agent_observation_checkpoint (singleton, last_sequence, acknowledged_at)
+          VALUES (1, ?, ?)
+          ON CONFLICT(singleton) DO UPDATE SET
+            last_sequence = excluded.last_sequence,
+            acknowledged_at = excluded.acknowledged_at
+        `)
+        .run(sequence, at);
+      this.db
+        .prepare("DELETE FROM agent_observation_transitions WHERE sequence <= ?")
+        .run(sequence);
+    })();
+    return sequence;
+  }
+
+  private observationSourceFromRow(row: ObservationSourceRow): StoredObservationSource {
+    // SAFETY: These JSON values are written only by reconcileAgentObservations from the typed plugin contract.
+    const capability = JSON.parse(row.capability_json) as AgentObservationCapability;
+    // SAFETY: Source health is written only from a validated AgentObservationSnapshot.
+    const health = JSON.parse(row.health_json) as StoredObservationSource["health"];
+    return {
+      pluginId: row.plugin_id,
+      harnessId: row.harness_id,
+      providerInstanceId: row.provider_instance_id,
+      continuityScopeId: row.continuity_scope_id,
+      capability,
+      health,
+      cursor: row.cursor ?? undefined,
+      capturedAt: row.captured_at,
+    };
+  }
+
+  private observationFromRow(row: ObservationRow): StoredAgentObservation {
+    // SAFETY: Observation JSON is persisted only after coordinator validation of the V1 union.
+    const observation = JSON.parse(row.observation_json) as AgentObservation;
+    return {
+      ...observation,
+      receivedAt: row.received_at,
+    };
+  }
+
   private conversationFromRow(row: ProviderConversationRow): StoredConversation {
     const aliases = this.db
       .query<ProviderConversationAliasRow, [string]>(
@@ -741,6 +1003,10 @@ export class SqliteUniverseStore
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
         DELETE FROM provider_catalogue_baselines;
+        DELETE FROM agent_observation_sources;
+        DELETE FROM agent_observation_current;
+        DELETE FROM agent_observation_transitions;
+        DELETE FROM agent_observation_checkpoint;
       `);
     })();
     return {
@@ -765,6 +1031,10 @@ export class SqliteUniverseStore
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
         DELETE FROM provider_catalogue_baselines;
+        DELETE FROM agent_observation_sources;
+        DELETE FROM agent_observation_current;
+        DELETE FROM agent_observation_transitions;
+        DELETE FROM agent_observation_checkpoint;
       `);
     })();
     return {
@@ -855,29 +1125,21 @@ export class SqliteUniverseStore
   }
 
   private initializeSchema(): void {
-    const existingSchema = this.db
-      .query<{ name: string }, []>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
-      )
-      .get();
-    if (existingSchema) {
-      const current = this.db
-        .query<{ found: number }, []>(
-          "SELECT COUNT(*) AS found FROM schema_migrations WHERE version = 12",
+    const existingTableCount =
+      this.db
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
         )
-        .get()?.found;
-      if (!current) {
-        this.db.close();
-        throw new Error(
-          "This Observatory database predates conversation-first tracking. Reset it before starting Observatory.",
-        );
-      }
+        .get()?.count ?? 0;
+    const generation =
+      this.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
+    if (existingTableCount > 0 && generation !== SQLITE_SCHEMA_GENERATION) {
+      this.db.close();
+      throw new Error(
+        "This Observatory database uses an incompatible schema. Reset it before starting Observatory.",
+      );
     }
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS systems (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -1012,11 +1274,42 @@ export class SqliteUniverseStore
         established_at INTEGER NOT NULL,
         snapshot_observed_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS agent_observation_sources (
+        harness_id TEXT PRIMARY KEY,
+        plugin_id TEXT NOT NULL,
+        provider_instance_id TEXT NOT NULL,
+        continuity_scope_id TEXT NOT NULL,
+        capability_json TEXT NOT NULL,
+        health_json TEXT NOT NULL,
+        cursor TEXT,
+        captured_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_observation_current (
+        harness_id TEXT NOT NULL,
+        observation_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        observation_json TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        PRIMARY KEY(harness_id, observation_id)
+      );
+      CREATE TABLE IF NOT EXISTS agent_observation_transitions (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        harness_id TEXT NOT NULL,
+        observation_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        observation_json TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        UNIQUE(harness_id, observation_id, revision)
+      );
+      CREATE TABLE IF NOT EXISTS agent_observation_checkpoint (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        last_sequence INTEGER NOT NULL,
+        acknowledged_at INTEGER NOT NULL
+      );
       CREATE UNIQUE INDEX IF NOT EXISTS agents_live_execution_identity
         ON agents(host_instance_id, native_id)
         WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
-      INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-        VALUES (12, unixepoch() * 1000);
+      PRAGMA user_version = ${SQLITE_SCHEMA_GENERATION};
     `);
   }
 }

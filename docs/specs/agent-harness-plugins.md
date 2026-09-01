@@ -11,6 +11,7 @@ Depends on:
 - [Agent launch and workspace preparation](session-launch.md)
 - [Agent and linked execution model](agent-execution-model.md)
 - [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
+- [Provider-native Agent observations](provider-native-agent-observations.md)
 
 ## Why
 
@@ -257,7 +258,10 @@ Additional operations are capability-gated and added only when at least one
 real workflow needs them:
 
 - fork a native conversation;
-- provider-native title, model, context and usage facts;
+- provider-native activity, human-input requests, turn outcomes and context
+  pressure through the versioned metadata-only observation source specified in
+  [Provider-native Agent observations](provider-native-agent-observations.md);
+- provider-native title, model and usage facts not covered by that source;
 - bounded transcript or result inspection;
 - provider-native prompt submission, attachments or permission responses;
 - compaction or checkpoint controls; and
@@ -266,7 +270,9 @@ real workflow needs them:
 Terminal input, interrupt, resize, scrollback, native handoff and process close
 remain `SessionHost` capabilities. A harness plugin must not duplicate them.
 There is no universal chat or attachment interface hidden inside the required
-contract.
+contract. Observation is read-only and remains operational evidence: it cannot
+complete an Agent or Goal, approve a request, substitute for checks or write
+SQLite directly.
 
 ## Discovery and progressive support
 
@@ -361,8 +367,8 @@ long as needed to keep `main` working; new harnesses must not extend it.
   restore, replacement in the same host target and ambiguous cold restart.
 - Add coordinator-level acceptance tests proving no duplicate launch and no
   silent Goal inheritance.
-- Record current SQLite identity assumptions and a forward-only migration
-  fixture before changing the schema.
+- Record current SQLite identity assumptions and a clean-break reset fixture
+  before changing the schema.
 
 Gate: the scenarios are executable as contract inputs, the current limitations
 are recorded as characterization evidence and `main` remains green. Each later
@@ -395,7 +401,7 @@ generic process plan can be launched without a provider name in the host API.
 ### Phase 3: separate Agent identity from execution binding
 
 - Add durable harness/conversation identity and replaceable execution-binding
-  persistence with a forward migration.
+  persistence in a clean-break schema.
 - Change reconciliation to apply the five identity rules above.
 - Mark saved runtime facts unknown on process start until a fresh host snapshot
   supplies evidence.
@@ -494,7 +500,7 @@ The implementation provides:
 - provider-neutral `SessionHost.launchExecution`, implemented by the mock and
   Herdr adapters under shared host contract tests;
 - durable Agent identity separated from replaceable execution binding, with a
-  forward SQLite migration and cold-start invalidation;
+  clean-break SQLite schema and cold-start invalidation;
 - strong native-conversation reconciliation for restored, moved and replaced
   executions, while weak post-restart evidence creates an unassigned Agent;
 - durable atomic launch receipts that prevent replay after an Observatory
@@ -506,7 +512,7 @@ The implementation provides:
 
 Deterministic coverage includes fresh start, exact absent resume,
 host-restored resume without duplicate launch, target replacement, ambiguous
-cold restart, durable request replay, request-id conflict, schema migration,
+cold restart, durable request replay, request-id conflict, schema reset,
 plugin collision and provider diagnostic redaction. The real-machine evidence
 must record the installed Herdr integration status because exact Codex
 continuity cannot be claimed from process or pane evidence alone.

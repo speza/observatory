@@ -564,7 +564,7 @@ instead of offering a dead action.
 - Idempotent host reconciliation and stale-agent behaviour.
 - Table-driven attention ordering with a controlled clock.
 - Search across accepted goal and agent metadata.
-- SQLite transaction rollback, restart persistence and migrations.
+- SQLite transaction rollback, restart persistence and clean-break reset behavior.
 - Projection snapshots at wide and 80x24 layouts.
 - Deterministic map positions, goal sizing, direct satellites, priority
   treatment and focused-map projection.

@@ -51,6 +51,124 @@ export interface ProviderSessionSnapshot {
   readonly diagnostics: readonly string[];
 }
 
+export type AgentObservationKind =
+  | "activity"
+  | "human-input-request"
+  | "turn-outcome"
+  | "context-pressure";
+export type AgentToolCategory =
+  | "read"
+  | "write"
+  | "execute"
+  | "search"
+  | "network"
+  | "delegate"
+  | "other";
+interface AgentObservationEnvelope {
+  readonly schemaVersion: 1;
+  readonly observationId: string;
+  readonly revision?: number;
+  readonly nativeConversationRef: OpaqueNativeConversationRef;
+  readonly providerInstanceId: string;
+  readonly observedAt: number;
+  readonly source: {
+    readonly mechanism: "hook" | "structured-api" | "metadata";
+    readonly providerVersion?: string;
+  };
+  readonly extensions?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export type AgentObservation = AgentObservationEnvelope &
+  (
+    | {
+        readonly kind: "activity";
+        readonly payload: {
+          readonly phase: "responding" | "using-tool" | "compacting" | "idle";
+          readonly toolCategory?: AgentToolCategory;
+        };
+      }
+    | {
+        readonly kind: "human-input-request";
+        readonly payload: {
+          readonly requestId: string;
+          readonly requestKind: "permission" | "question" | "plan-approval" | "other";
+          readonly state: "open" | "resolved" | "withdrawn";
+          readonly toolCategory?: AgentToolCategory;
+        };
+      }
+    | {
+        readonly kind: "turn-outcome";
+        readonly payload: {
+          readonly turnId?: string;
+          readonly outcome: "response-completed" | "failed" | "interrupted";
+          readonly failureCategory?:
+            | "rate-limit"
+            | "authentication"
+            | "billing"
+            | "provider-overloaded"
+            | "context-limit"
+            | "tool"
+            | "unknown";
+        };
+      }
+    | {
+        readonly kind: "context-pressure";
+        readonly payload: {
+          readonly usedRatio?: number;
+          readonly compaction?: "started" | "completed";
+        };
+      }
+  );
+
+export interface AgentObservationCapability {
+  readonly kinds: readonly AgentObservationKind[];
+  readonly acquisition: "hook" | "structured-api" | "metadata" | "mixed";
+  readonly delivery: "snapshot" | "retained-events-and-snapshot";
+  readonly configured: boolean;
+  readonly freshnessSeconds: Partial<Record<AgentObservationKind, number>>;
+}
+
+export interface AgentObservationSnapshot {
+  readonly schemaVersion: 1;
+  readonly harnessId: string;
+  readonly providerInstanceId: string;
+  readonly continuityScopeId: string;
+  readonly capturedAt: number;
+  readonly complete: boolean;
+  readonly cursor?: string;
+  readonly current: readonly AgentObservation[];
+  readonly transitions: readonly AgentObservation[];
+  readonly health: {
+    readonly state:
+      | "unsupported"
+      | "not-configured"
+      | "healthy"
+      | "stale"
+      | "unavailable"
+      | "degraded";
+    readonly lastSuccessfulAt?: number;
+    readonly diagnostics: readonly string[];
+  };
+}
+
+export class HarnessObservationError extends Error {
+  readonly _tag = "HarnessObservationError" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "HarnessObservationError";
+  }
+}
+
+export interface AgentObservationSourceV1 {
+  readonly schemaVersion: 1;
+  describe(): AgentObservationCapability;
+  snapshot(request: {
+    readonly providerInstanceId: string;
+    readonly afterCursor?: string;
+    readonly limit: number;
+  }): Effect.Effect<AgentObservationSnapshot, HarnessObservationError>;
+}
+
 export interface AgentProcessPlan {
   readonly harnessId: string;
   readonly executable: string;
@@ -114,6 +232,7 @@ export class HarnessError extends Error {
 
 export interface AgentHarness {
   readonly harnessId: string;
+  readonly observationSource?: AgentObservationSourceV1;
   describe(): AgentHarnessDescriptor;
   availability(): Effect.Effect<HarnessAvailability, HarnessError>;
   snapshotSessions(): Effect.Effect<ProviderSessionSnapshot, HarnessError>;

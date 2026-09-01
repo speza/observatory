@@ -10,6 +10,7 @@ import { ObservatoryWebApi } from "./api.ts";
 import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry.ts";
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
 import { ConversationTracker } from "../conversations/tracker.ts";
+import { AgentObservationCoordinator } from "../agent-observations/coordinator.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -65,10 +66,17 @@ const program = Effect.scoped(
     const configuredPlugins = yield* Effect.promise(() =>
       readPluginConfiguration(process.env.AO_PLUGIN_CONFIG),
     );
+    const builtInPlugins = [
+      { path: resolve(import.meta.dir, "../../plugins/agent-harnesses") },
+      { path: resolve(import.meta.dir, "../../plugins/github") },
+      ...(runtime.useMockHost
+        ? [{ path: resolve(import.meta.dir, "../../plugins/mock-agent-harnesses") }]
+        : []),
+    ];
+    const configuredPaths = new Set(configuredPlugins.map(({ path }) => resolve(path)));
     const plugins = yield* loadPluginRegistry({
       packages: [
-        { path: resolve(import.meta.dir, "../../plugins/agent-harnesses") },
-        { path: resolve(import.meta.dir, "../../plugins/github") },
+        ...builtInPlugins.filter(({ path }) => !configuredPaths.has(path)),
         ...configuredPlugins,
       ],
       now: () => runtime.clock.now(),
@@ -80,6 +88,12 @@ const program = Effect.scoped(
       plugins,
     );
     const conversations = new ConversationTracker(plugins, runtime.store, runtime.universe);
+    const agentObservations = new AgentObservationCoordinator(
+      plugins,
+      runtime.store,
+      runtime.universe,
+      () => runtime.clock.now(),
+    );
     const startAgent = createStartAgentCoordinator({
       universe: runtime.universe,
       host: runtime.host,
@@ -97,6 +111,7 @@ const program = Effect.scoped(
             diagnostics: [],
           }
         : yield* conversations.refresh();
+    const observationRefresh = yield* agentObservations.refresh();
     const initialMessage = yield* initializeObservatoryRuntime(
       runtime,
       conversations.observeHost.bind(conversations),
@@ -112,9 +127,11 @@ const program = Effect.scoped(
       repositoryStatus,
       plugins,
       conversations,
+      agentObservations,
     );
     const refreshMs = Number(process.env.AO_WEB_REFRESH_MS ?? 2_000);
     const providerRefreshMs = Number(process.env.AO_PROVIDER_REFRESH_MS ?? 60_000);
+    const observationRefreshMs = Number(process.env.AO_OBSERVATION_REFRESH_MS ?? 2_000);
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port,
@@ -142,14 +159,20 @@ const program = Effect.scoped(
               console.error(`Conversation refresh failed: ${error.message}`);
             });
           }, providerRefreshMs);
+    const observationTimer = setInterval(() => {
+      void Effect.runPromise(agentObservations.refresh()).catch((error: Error) => {
+        console.error(`Agent-observation refresh failed: ${error.message}`);
+      });
+    }, observationRefreshMs);
     console.log(
-      `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered\nObservatory web · http://${server.hostname}:${server.port}`,
+      `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
 
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         clearInterval(timer);
         if (providerTimer) clearInterval(providerTimer);
+        clearInterval(observationTimer);
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

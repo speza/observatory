@@ -9,6 +9,7 @@ const githubPath = resolve(import.meta.dir, "../../plugins/github");
 const examplePath = resolve(import.meta.dir, "../../examples/plugins/code-host");
 const harnessExamplePath = resolve(import.meta.dir, "../../examples/plugins/agent-harness");
 const duplicateHarnessPath = resolve(import.meta.dir, "fixtures/duplicate-harness");
+const mockHarnessesPath = resolve(import.meta.dir, "../../plugins/mock-agent-harnesses");
 
 const runner = (response: {
   readonly exitCode: number;
@@ -60,6 +61,29 @@ describe("plugin registry", () => {
     );
     expect(registry.status()[0]).toMatchObject({ id: "example-agent-harness", state: "ready" });
     expect(registry.agentHarness("example-agent")?.describe().label).toBe("Example Agent");
+  });
+
+  test("loads deterministic mock observation sources through the normal harness contract", async () => {
+    const registry = await Effect.runPromise(
+      loadPluginRegistry({ packages: [{ path: mockHarnessesPath }], now: () => 1_000_000 }),
+    );
+    const harnesses = registry.agentHarnesses();
+    expect(harnesses.map(({ harnessId }) => harnessId)).toEqual([
+      "claude-mock",
+      "codex-mock",
+      "pi-mock",
+    ]);
+    const snapshot = await Effect.runPromise(
+      harnesses[0]!.observationSource!.snapshot({ providerInstanceId: "", limit: 10 }),
+    );
+    expect(snapshot.health).toMatchObject({ state: "healthy" });
+    expect(snapshot.current).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "human-input-request" })]),
+    );
+    expect(harnesses[2]!.observationSource!.describe()).toMatchObject({
+      configured: false,
+      kinds: [],
+    });
   });
 
   test("degrades a plugin that collides with an existing harness id", async () => {

@@ -13,7 +13,18 @@ const AttentionItem = Schema.Struct({
   targetId: Schema.String,
   agentId: Schema.optional(Schema.String),
   goalId: Schema.optional(Schema.String),
-  reason: Schema.Literal("blocked", "waiting", "archived-running", "runtime-unknown"),
+  reason: Schema.Literal(
+    "blocked",
+    "waiting",
+    "archived-running",
+    "runtime-unknown",
+    "provider-input",
+    "provider-failure",
+    "provider-complete",
+    "context-pressure",
+    "provider-stale",
+    "provider-conflict",
+  ),
   requiresHumanInput: Schema.Boolean,
   startedAt: Schema.Number,
   lastChangedAt: Schema.Number,
@@ -86,6 +97,45 @@ const AgentFields = {
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
+  providerEvidence: Schema.optional(
+    Schema.Struct({
+      providerLabel: Schema.String,
+      mechanism: Schema.optional(Schema.Literal("hook", "structured-api", "metadata")),
+      health: Schema.Literal(
+        "unsupported",
+        "not-configured",
+        "healthy",
+        "stale",
+        "unavailable",
+        "degraded",
+      ),
+      observedAt: Schema.optional(Schema.Number),
+      ageMs: Schema.optional(Schema.Number),
+      activity: Schema.optional(Schema.Literal("responding", "using-tool", "compacting", "idle")),
+      toolCategory: Schema.optional(
+        Schema.Literal("read", "write", "execute", "search", "network", "delegate", "other"),
+      ),
+      request: Schema.optional(
+        Schema.Struct({
+          kind: Schema.Literal("permission", "question", "plan-approval", "other"),
+          state: Schema.Literal("open", "resolved", "withdrawn"),
+        }),
+      ),
+      outcome: Schema.optional(Schema.Literal("response-completed", "failed", "interrupted")),
+      failureCategory: Schema.optional(Schema.String),
+      contextBand: Schema.optional(Schema.Literal("normal", "elevated", "critical")),
+      compaction: Schema.optional(Schema.Literal("started", "completed")),
+      hostConflict: Schema.optional(
+        Schema.Struct({
+          hostState: Schema.Literal("waiting", "blocked", "done"),
+          providerActivity: Schema.Literal("responding", "using-tool", "compacting"),
+        }),
+      ),
+      supportedKinds: Schema.Array(
+        Schema.Literal("activity", "human-input-request", "turn-outcome", "context-pressure"),
+      ),
+    }),
+  ),
 };
 const AgentView = Schema.Struct(AgentFields);
 const MapAgentView = Schema.Struct({ ...AgentFields, mapPosition: MapPosition });
@@ -185,6 +235,23 @@ const CatchUp = Schema.Struct({
     key: Schema.Literal("new", "changed", "attention", "finished", "stale"),
     value: Schema.Number,
   }),
+  evidenceTransitionCount: Schema.optional(Schema.Number),
+  evidenceGroups: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        kind: Schema.Literal("activity", "human-input-request", "turn-outcome", "context-pressure"),
+        label: Schema.String,
+        items: Schema.Array(
+          Schema.Struct({
+            sequence: Schema.Number,
+            agentId: Schema.String,
+            occurredAt: Schema.Number,
+            summary: Schema.String,
+          }),
+        ),
+      }),
+    ),
+  ),
 });
 const CloseoutGoalCount = Schema.Struct({
   goalId: Schema.optional(Schema.String),

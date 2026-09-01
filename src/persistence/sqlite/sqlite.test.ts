@@ -98,12 +98,18 @@ describe("SQLite persistence", () => {
     }
   });
 
-  test("initializes the complete conversation-first schema", () => {
+  test("initializes the complete clean-break schema", () => {
     const store = new SqliteUniverseStore(":memory:");
-    const versions = store.db
-      .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
-      .all();
-    expect(versions.map((row) => row.version)).toEqual([12]);
+    expect(
+      store.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
+    ).toBe(1);
+    expect(
+      store.db
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+        )
+        .all(),
+    ).toEqual([]);
     const columns = store.db.query<{ name: string }, []>("PRAGMA table_info(agents)").all();
     expect(columns.map((column) => column.name)).toContain("last_changed_at");
     expect(columns.map((column) => column.name)).toContain("display_name_source");
@@ -122,6 +128,19 @@ describe("SQLite persistence", () => {
         )
         .all(),
     ).toHaveLength(1);
+    expect(
+      store.db
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'agent_observation_%' ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name),
+    ).toEqual([
+      "agent_observation_checkpoint",
+      "agent_observation_current",
+      "agent_observation_sources",
+      "agent_observation_transitions",
+    ]);
     const dismissalTables = store.db
       .query<{ name: string }, []>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'related_agent_dismissals'",
@@ -146,14 +165,14 @@ describe("SQLite persistence", () => {
     store.close();
   });
 
-  test("requires an explicit reset for a pre-conversation-first database", () => {
+  test("requires an explicit reset for an incompatible database", () => {
     const directory = mkdtempSync(join(tmpdir(), "ao-old-schema-"));
     const databasePath = join(directory, "universe.sqlite");
     try {
       const legacy = new Database(databasePath, { create: true });
       legacy.exec(`
         CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
-        INSERT INTO schema_migrations VALUES (11, 1);
+        INSERT INTO schema_migrations VALUES (13, 1);
       `);
       legacy.close();
 

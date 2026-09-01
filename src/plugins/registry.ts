@@ -40,6 +40,7 @@ export interface PluginStatus {
 export interface PluginRegistry {
   agentHarnesses(): readonly AgentHarness[];
   agentHarness(harnessId: string): AgentHarness | undefined;
+  agentHarnessPluginId?(harnessId: string): string | undefined;
   availableAgentHarnesses(): Effect.Effect<readonly AgentHarnessDescriptor[], HarnessError>;
   codeHosts(): readonly CodeHostingProvider[];
   status(): readonly PluginStatus[];
@@ -208,6 +209,12 @@ class LoadedPluginRegistry implements PluginRegistry {
   agentHarness(harnessId: string): AgentHarness | undefined {
     const normalized = harnessId.trim();
     return this.agentHarnesses().find((harness) => harness.harnessId === normalized);
+  }
+
+  agentHarnessPluginId(harnessId: string): string | undefined {
+    return this.plugins.find((loaded) =>
+      loaded.contributions?.agentHarnesses?.some((harness) => harness.harnessId === harnessId),
+    )?.status.id;
   }
 
   availableAgentHarnesses(): Effect.Effect<readonly AgentHarnessDescriptor[], HarnessError> {

@@ -1,4 +1,5 @@
 import type { AttentionItem, AttentionProjection } from "../attention/attention.ts";
+import type { AgentObservationKind } from "../plugin-sdk/index.ts";
 import type {
   Goal,
   HostHealth,
@@ -65,6 +66,43 @@ export interface AgentView extends Omit<
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;
   readonly executionConflictCount: number;
+  readonly providerEvidence?: ProviderEvidenceView;
+}
+
+export interface ProviderEvidenceView {
+  readonly providerLabel: string;
+  readonly mechanism?: "hook" | "structured-api" | "metadata";
+  readonly health:
+    | "unsupported"
+    | "not-configured"
+    | "healthy"
+    | "stale"
+    | "unavailable"
+    | "degraded";
+  readonly observedAt?: number;
+  readonly ageMs?: number;
+  readonly activity?: "responding" | "using-tool" | "compacting" | "idle";
+  readonly toolCategory?:
+    | "read"
+    | "write"
+    | "execute"
+    | "search"
+    | "network"
+    | "delegate"
+    | "other";
+  readonly request?: {
+    readonly kind: "permission" | "question" | "plan-approval" | "other";
+    readonly state: "open" | "resolved" | "withdrawn";
+  };
+  readonly outcome?: "response-completed" | "failed" | "interrupted";
+  readonly failureCategory?: string;
+  readonly contextBand?: "normal" | "elevated" | "critical";
+  readonly compaction?: "started" | "completed";
+  readonly hostConflict?: {
+    readonly hostState: "waiting" | "blocked" | "done";
+    readonly providerActivity: "responding" | "using-tool" | "compacting";
+  };
+  readonly supportedKinds: readonly AgentObservationKind[];
 }
 
 export interface GoalView extends Goal {
@@ -231,6 +269,21 @@ export interface CatchUpProjection {
   readonly pending: boolean;
   readonly groups: readonly CatchUpGroup[];
   readonly counts: Record<UniverseChange["outcome"], number>;
+  readonly evidenceTransitionCount?: number;
+  readonly evidenceGroups?: readonly EvidenceCatchUpGroup[];
+}
+
+export interface EvidenceCatchUpItem {
+  readonly sequence: number;
+  readonly agentId: string;
+  readonly occurredAt: number;
+  readonly summary: string;
+}
+
+export interface EvidenceCatchUpGroup {
+  readonly kind: AgentObservationKind;
+  readonly label: string;
+  readonly items: readonly EvidenceCatchUpItem[];
 }
 
 export interface CloseoutGoalCount {

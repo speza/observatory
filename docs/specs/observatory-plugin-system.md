@@ -15,6 +15,7 @@ Depends on:
 - [Observatory plugin architecture](../design/plugin-architecture.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Agent repository status and code-host plugins](agent-repository-and-code-host-plugins.md)
+- [Provider-native Agent observations](provider-native-agent-observations.md)
 
 ## Why
 
@@ -94,6 +95,7 @@ interface PluginContext {
 }
 
 interface PluginActivation {
+  readonly agentHarnesses?: readonly AgentHarness[];
   readonly codeHosts?: readonly CodeHostingProvider[];
   readonly dispose?: () => Effect<void, PluginError>;
 }
@@ -116,6 +118,14 @@ interface CodeHostingProvider {
 
 Provider-specific response objects do not cross this interface. The repository
 status module owns correlation, caching, ambiguity and merge-readiness rules.
+
+`agent-harness` is the second implemented manifest capability. Provider-native
+observation is not a third top-level capability: an `AgentHarness` may expose a
+versioned `observationSource` sub-capability beside its existing catalogue,
+start, resume and continuity methods. Existing harnesses remain valid without
+it. The source returns bounded normalised snapshots through Effect; it receives
+no persistence or Universe handle. See
+[Provider-native Agent observations](provider-native-agent-observations.md).
 
 ## Loading and lifecycle
 
@@ -144,6 +154,7 @@ The plugin registry is a deep module with a small read-only interface:
 
 ```ts
 interface PluginRegistry {
+  agentHarnesses(): readonly AgentHarness[];
   codeHosts(): readonly CodeHostingProvider[];
   status(): readonly PluginStatus[];
   close(): Effect<void, never>;

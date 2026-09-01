@@ -2,7 +2,7 @@
 
 Status: accepted web-first direction; plugin and harness baseline implemented
 
-Date: 2026-08-28
+Date: 2026-08-30
 
 Depends on:
 
@@ -11,6 +11,7 @@ Depends on:
 - [Local web Observatory walking slice](local-web-observatory-walking-slice.md)
 - [Agent harness plugins](agent-harness-plugins.md)
 - [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+- [Provider-native Agent observations](provider-native-agent-observations.md)
 - [Agent repository and code-host plugins](agent-repository-and-code-host-plugins.md)
 
 ## Product decision
@@ -49,6 +50,7 @@ workflows.
 | Related-Agent evidence                           | Done       | Next | Immediate discovery slice            |
 | Verification and handoff evidence                | Next       | Next | Major trust gap                      |
 | Rich deterministic attention                     | Next       | Next | Major usefulness gap                 |
+| Metadata-only provider-native observations       | Next       | Next | Evidence fusion through harnesses    |
 | Typed delegation/result/dependency relationships | Next       | Next | Preserve provenance                  |
 | Cross-agent Git and integration warnings         | Next       | Next | Evidence, not map nodes              |
 
@@ -91,18 +93,24 @@ non-goals.
 ### Next — trust and daily operation
 
 1. Define a verification/evidence contract with synthetic evidence first.
-2. Add deterministic returned-result, stalled, failed-check and downstream
+2. Add the versioned metadata-only AgentHarness observation source and prove
+   deterministic activity, input-request, turn-outcome and context-pressure
+   projections with synthetic evidence.
+3. Validate Claude Code and Codex through the same contract, with explicit
+   unsupported, stale and unavailable states and no transcript ingestion.
+4. Add deterministic returned-result, stalled, failed-check and downstream
    blocker attention signals.
-3. Make completion a coherent flow: reported done → inspect evidence → review
+5. Make completion a coherent flow: reported done → inspect evidence → review
    diff/checks → accept, revise, close or archive.
-4. Harden terminal tabs, resize, release and host-loss recovery from real use.
-5. Add explicit semantic-density controls.
+6. Harden terminal tabs, resize, release and host-loss recovery from real use.
+7. Add explicit semantic-density controls.
 
 ### Later — relationships and scale
 
 1. Add typed delegation, result, dependency and integration relationships.
 2. Surface cross-Agent workspace overlap, divergence and integration risk.
-3. Add provider enrichment only through provenance-bearing plugin observations.
+3. Consider provider usage facts, richer read-only inspection or remote
+   observation transport only after the metadata slice proves useful.
 4. Evaluate a second production host only after Herdr workflows prove useful;
    use it to validate `SessionHost`, not broaden the domain model.
 

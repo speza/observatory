@@ -72,8 +72,8 @@ The default database is `data/ao.sqlite`. Use another path when needed:
 AO_DB_PATH=/private/tmp/observatory.sqlite bun run start
 ```
 
-The conversation-first schema intentionally does not migrate the earlier
-experimental host-first database. Back it up and replace it once with:
+The current schema is a clean break and has no compatibility migrations. Back
+up and replace an incompatible local database with:
 
 ```sh
 bun run db:reset:all

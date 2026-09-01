@@ -22,7 +22,7 @@ to build a marketplace, automatic installer or universal extension framework.
 The kernel owns:
 
 - trusted goals, agents, typed relationships and lifecycle invariants;
-- SQLite persistence and migrations;
+- SQLite persistence and explicit clean-break schema boundaries;
 - provenance, uncertainty and human authority;
 - deterministic attention and projections; and
 - generic renderer and agent-host capability contracts.
@@ -128,3 +128,11 @@ renderer. Herdr's semantic state and native session restoration remain useful
 optional host capabilities rather than provider policy. See
 [Agent harness plugins](../specs/agent-harness-plugins.md) and
 [Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md).
+
+Provider-native activity, human-input requests, turn outcomes and context
+pressure deepen that same harness capability through a versioned optional
+observation source. The composition root reconciles those bounded observations
+with host, workspace and code-host evidence; deterministic projections consume
+the resulting snapshot. Hooks improve latency but never write persistence or
+accepted Universe state, and missing support remains explicit. See
+[Provider-native Agent observations](../specs/provider-native-agent-observations.md).

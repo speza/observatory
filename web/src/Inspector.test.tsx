@@ -55,7 +55,30 @@ describe("Inspector", () => {
         onRetry={() => {}}
         onReviewChanges={() => {}}
         onResume={async () => {}}
-        projection={projection}
+        projection={{
+          ...projection,
+          agent: {
+            ...projection.agent,
+            providerEvidence: {
+              providerLabel: "Codex",
+              mechanism: "hook",
+              health: "healthy",
+              activity: "using-tool",
+              toolCategory: "execute",
+              request: { kind: "permission", state: "open" },
+              outcome: "response-completed",
+              contextBand: "elevated",
+              compaction: "completed",
+              hostConflict: { hostState: "waiting", providerActivity: "using-tool" },
+              supportedKinds: [
+                "activity",
+                "human-input-request",
+                "turn-outcome",
+                "context-pressure",
+              ],
+            },
+          },
+        }}
       />,
     );
 
@@ -63,6 +86,13 @@ describe("Inspector", () => {
     expect(markup).toContain("provider-visible");
     expect(markup).toContain("execution-visible");
     expect(markup).toContain("Workspace");
+    expect(markup).toContain("PROVIDER OBSERVATIONS / NOT ACCEPTED STATE");
+    expect(markup).toContain("permission · open");
+    expect(markup).toContain("Provider reported response completed");
+    expect(markup).toContain("does not complete this Agent or its Goal");
+    expect(markup).toContain(
+      "Evidence conflict: the provider reports using tool activity while the host reports waiting.",
+    );
     expect(markup).not.toContain("<dt>Repository</dt>");
     expect(markup).not.toContain("<dt>Branch</dt>");
   });

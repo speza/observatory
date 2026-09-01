@@ -199,6 +199,68 @@ export const Inspector = ({
       {projection?.kind === "agent-inspector" ? (
         <>
           <RepositoryStatus agent={projection.agent} onReviewChanges={onReviewChanges} />
+          {projection.agent.providerEvidence ? (
+            <section className="provider-evidence" aria-label="Provider observations">
+              <div>
+                <p className="overline">PROVIDER OBSERVATIONS / NOT ACCEPTED STATE</p>
+                <h3>{projection.agent.providerEvidence.providerLabel}</h3>
+                <span>
+                  {projection.agent.providerEvidence.health.replace("-", " ")}
+                  {projection.agent.providerEvidence.mechanism
+                    ? ` · ${projection.agent.providerEvidence.mechanism.replace("-", " ")}`
+                    : ""}
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Activity</dt>
+                  <dd>
+                    {projection.agent.providerEvidence.activity ?? "Unknown"}
+                    {projection.agent.providerEvidence.toolCategory
+                      ? ` · ${projection.agent.providerEvidence.toolCategory} tool`
+                      : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Human request</dt>
+                  <dd>
+                    {projection.agent.providerEvidence.request
+                      ? `${projection.agent.providerEvidence.request.kind.replace("-", " ")} · ${projection.agent.providerEvidence.request.state}`
+                      : "None observed"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Turn outcome</dt>
+                  <dd>
+                    {projection.agent.providerEvidence.outcome
+                      ? `Provider reported ${projection.agent.providerEvidence.outcome.replaceAll("-", " ")}`
+                      : "Unknown"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Context</dt>
+                  <dd>
+                    {projection.agent.providerEvidence.contextBand ?? "Unknown"}
+                    {projection.agent.providerEvidence.compaction
+                      ? ` · compaction ${projection.agent.providerEvidence.compaction}`
+                      : ""}
+                  </dd>
+                </div>
+              </dl>
+              <p>Provider response completion does not complete this Agent or its Goal.</p>
+              {projection.agent.providerEvidence.hostConflict ? (
+                <p>
+                  Evidence conflict: the provider reports{" "}
+                  {projection.agent.providerEvidence.hostConflict.providerActivity.replace(
+                    "-",
+                    " ",
+                  )}
+                  {" activity while the host reports "}
+                  {projection.agent.providerEvidence.hostConflict.hostState}.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
           <div className="inspector__controls">
             {projection.agent.canResume ? (
               <button

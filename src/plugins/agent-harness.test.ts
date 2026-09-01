@@ -7,6 +7,7 @@ import type {
   AgentHarness,
   BoundedProcessRunner,
   OpaqueNativeConversationRef,
+  ProviderSessionSnapshot,
 } from "../plugin-sdk/index.ts";
 import { loadPluginRegistry } from "./registry.ts";
 
@@ -40,12 +41,57 @@ const loadHarnesses = async (
 const sessionRef = (harnessId: string, value = "session-123") =>
   ({ harnessId, kind: "id", value }) satisfies OpaqueNativeConversationRef;
 
+const writeObservation = async (
+  path: string,
+  harnessId: string,
+  snapshot: ProviderSessionSnapshot,
+  sessionId: string,
+) => {
+  await writeFile(
+    path,
+    `${JSON.stringify({
+      current: true,
+      observation: {
+        schemaVersion: 1,
+        observationId: `${harnessId}-permission`,
+        nativeConversationRef: {
+          harnessId,
+          continuityScopeId: snapshot.continuityScopeId,
+          kind: "id",
+          value: sessionId,
+        },
+        providerInstanceId: snapshot.providerInstanceId,
+        kind: "human-input-request",
+        observedAt: snapshot.observedAt,
+        source: { mechanism: "hook" },
+        payload: {
+          requestId: "request-safe-id",
+          requestKind: "permission",
+          state: "open",
+          prompt: "SECRET_PROMPT",
+          command: "SECRET_COMMAND",
+        },
+        transcript: "SECRET_TRANSCRIPT_PATH",
+      },
+    })}\n`,
+  );
+};
+
 describe("agent harness plugins", () => {
   test("loads Claude Code and Codex through the contributed registry", async () => {
     const harnesses = await loadHarnesses();
 
     expect(harnesses.map(({ harnessId }) => harnessId)).toEqual(["claude", "codex"]);
     expect(harnesses.map((harness) => harness.describe().label)).toEqual(["Claude Code", "Codex"]);
+    expect(harnesses.map((harness) => harness.observationSource?.describe().configured)).toEqual([
+      false,
+      false,
+    ]);
+    expect(
+      await Effect.runPromise(
+        harnesses[0]!.observationSource!.snapshot({ providerInstanceId: "", limit: 10 }),
+      ),
+    ).toMatchObject({ health: { state: "not-configured" }, current: [], transitions: [] });
   });
 
   test("discovers Claude and Codex from provider metadata without retaining transcript fields", async () => {
@@ -53,6 +99,8 @@ describe("agent harness plugins", () => {
     const claudeRoot = join(root, "claude-projects");
     const codexRoot = join(root, "codex");
     const codexSessions = join(codexRoot, "sessions", "2026", "08", "28");
+    const claudeOutbox = join(root, "claude-observations.jsonl");
+    const codexOutbox = join(root, "codex-observations.jsonl");
     await mkdir(join(claudeRoot, "synthetic-project"), { recursive: true });
     await mkdir(codexSessions, { recursive: true });
     await writeFile(
@@ -122,10 +170,20 @@ describe("agent harness plugins", () => {
       const [claude, codex] = await loadHarnesses(runner(), {
         claudeProjectsRoot: claudeRoot,
         codexRoot,
+        claudeObservationOutbox: claudeOutbox,
+        codexObservationOutbox: codexOutbox,
         maxSessions: 20,
       });
       const claudeSnapshot = await Effect.runPromise(claude!.snapshotSessions());
       const codexSnapshot = await Effect.runPromise(codex!.snapshotSessions());
+      await writeObservation(claudeOutbox, "claude", claudeSnapshot, "claude-session");
+      await writeObservation(codexOutbox, "codex", codexSnapshot, "codex-session");
+      const claudeObservations = await Effect.runPromise(
+        claude!.observationSource!.snapshot({ providerInstanceId: "", limit: 20 }),
+      );
+      const codexObservations = await Effect.runPromise(
+        codex!.observationSource!.snapshot({ providerInstanceId: "", limit: 20 }),
+      );
 
       expect(claudeSnapshot.sessions[0]).toMatchObject({
         workspaceRef: "/synthetic/project",
@@ -138,6 +196,15 @@ describe("agent harness plugins", () => {
       expect(codexSnapshot.sessions).toHaveLength(1);
       expect(JSON.stringify(codexSnapshot.sessions)).not.toContain("codex-guardian");
       expect(JSON.stringify([claudeSnapshot, codexSnapshot])).not.toContain("SECRET_");
+      expect(claudeObservations.current[0]).toMatchObject({
+        kind: "human-input-request",
+        payload: { requestKind: "permission", state: "open" },
+      });
+      expect(codexObservations.current[0]).toMatchObject({
+        kind: "human-input-request",
+        payload: { requestKind: "permission", state: "open" },
+      });
+      expect(JSON.stringify([claudeObservations, codexObservations])).not.toContain("SECRET_");
       expect(claudeSnapshot.sessions[0]?.nativeConversationRef.continuityScopeId).toBeDefined();
     } finally {
       await rm(root, { recursive: true, force: true });

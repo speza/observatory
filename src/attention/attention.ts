@@ -8,7 +8,17 @@ import {
 } from "../universe/types.ts";
 import { displayHostKind } from "../hosts/types.ts";
 
-export type AttentionReason = "blocked" | "waiting" | "archived-running" | "runtime-unknown";
+export type AttentionReason =
+  | "blocked"
+  | "waiting"
+  | "archived-running"
+  | "runtime-unknown"
+  | "provider-input"
+  | "provider-failure"
+  | "provider-complete"
+  | "context-pressure"
+  | "provider-stale"
+  | "provider-conflict";
 
 export interface AttentionItem {
   readonly id: string;
@@ -41,7 +51,7 @@ const attentionReason = (state: RuntimeState): AttentionReason | undefined => {
 const goalPriorities = (goals: readonly Goal[]): Map<string, Priority> =>
   new Map(goals.map((goal) => [goal.id, goal.priority]));
 
-const sortAttention = (left: AttentionItem, right: AttentionItem): number => {
+export const compareAttention = (left: AttentionItem, right: AttentionItem): number => {
   if (left.requiresHumanInput !== right.requiresHumanInput) return left.requiresHumanInput ? -1 : 1;
   const priorityDifference = priorityRank(left.priority) - priorityRank(right.priority);
   if (priorityDifference !== 0) return priorityDifference;
@@ -150,7 +160,7 @@ export const evaluateAttention = (
     }
   }
 
-  items.sort(sortAttention);
+  items.sort(compareAttention);
   return {
     items,
     currentCount: items.filter((item) => item.requiresHumanInput).length,

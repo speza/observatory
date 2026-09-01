@@ -408,35 +408,32 @@ fetched on every host poll. See
 [Observatory plugin system](../specs/observatory-plugin-system.md) and
 [Agent repository status and code-host plugins](../specs/agent-repository-and-code-host-plugins.md).
 
-### Agent-harness and provider-session module
+### Conversation tracking and Agent-harness observations
 
-Provider facts and catalogue discovery sit behind the deeper `AgentHarness`
-plugin interface. An agent host knows where a process runs; a harness adapter
-knows which provider sessions exist, how its CLI starts and resumes, and how to
-prove native conversation continuity.
+Provider catalogue discovery and optional provider-native observations sit
+behind the deeper `AgentHarness` plugin interface. An agent host knows where a
+process runs; a harness adapter knows which provider sessions exist, how its
+CLI starts and resumes, how to prove native conversation continuity and which
+bounded observations its provider can truthfully supply.
 
 ```text
-snapshotSessions(ProviderInstance) -> ProviderSessionSnapshot
-recognise(HostObservation)         -> Recognition
-inspect(NativeAgentReference)      -> ProviderFacts
-watch(ProviderInstance)            -> EventStream<ProviderObservation>?
+snapshotSessions(ProviderInstance)    -> ProviderSessionSnapshot
+proveContinuity(HostObservation)      -> ContinuityResult
+observationSource?.snapshot(Instance) -> AgentObservationSnapshot
 ```
 
-Candidate facts include:
+The versioned observation source normalises only activity/tool category,
+human-input requests, provider-reported turn outcome and context pressure.
+Provider hooks and structured APIs are lossy acquisition details inside the
+harness. The composition root runs their Effects, correlates exact scoped
+conversation identity and stores bounded operational evidence; pure projections
+then fuse it with host, workspace and code-host snapshots. No observation writes
+Universe state or makes reported completion authoritative.
 
-- provider and native agent identifier;
-- native transcript locator;
-- agent-reported title or objective;
-- runtime state and the source of that state;
-- last activity time;
-- context usage where exposed; and
-- parent agent identity where exposed.
-
-AO does not ingest transcripts by default. Catalogue discovery reads bounded
-provider metadata, while start, resume and continuity use the provider's opaque
-native conversation reference rather than conversation contents. A later
-capability may expose bounded transcript or result inspection with explicit
-provenance.
+AO does not ingest transcripts by default. Catalogue and observation sources
+discard transcript paths, prompts, messages, tool payloads, raw errors,
+credentials and terminal output at acquisition. See
+[Provider-native Agent observations](../specs/provider-native-agent-observations.md).
 
 Harness support is progressive:
 

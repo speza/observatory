@@ -3,6 +3,7 @@ import type {
   CommandCentreProjection,
   CatchUpProjection,
   CloseoutProjection,
+  InspectorProjection,
   Projection,
   SearchProjection,
   UniverseMapProjection,
@@ -36,6 +37,13 @@ import type {
 import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
 import { WebCloseoutError, WebCloseoutGateway } from "./closeout.ts";
+import type { AgentObservationModule } from "../agent-observations/types.ts";
+import {
+  enrichCatchUp,
+  enrichCommandCentre,
+  enrichInspector,
+  enrichMap,
+} from "../agent-observations/projection.ts";
 
 export interface PortfolioResponse {
   readonly map: UniverseMapProjection;
@@ -55,6 +63,7 @@ const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
 });
+const CommandTypeSchema = Schema.Struct({ type: Schema.String });
 
 type WebResponse =
   | PortfolioResponse
@@ -108,6 +117,7 @@ export class ObservatoryWebApi {
     private readonly repositoryStatus?: AgentRepositoryStatusReader,
     private readonly plugins?: PluginRegistry,
     private readonly conversations?: ConversationTrackerModule,
+    private readonly agentObservations?: AgentObservationModule,
   ) {
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
@@ -164,8 +174,14 @@ export class ObservatoryWebApi {
       if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
         return json({ error: "Commands require application/json." }, 415);
       try {
-        const result = this.commands.execute(await request.text());
+        const body = await request.text();
+        const result = this.commands.execute(body);
         if (!result.ok) return json({ error: result.error ?? "Command rejected." }, 409);
+        if (
+          Schema.decodeUnknownSync(Schema.parseJson(CommandTypeSchema))(body).type ===
+          "AcknowledgeCatchUp"
+        )
+          this.agentObservations?.acknowledge(this.clock.now());
         const portfolio = this.portfolio(this.clock.now());
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebCommandResponse);
@@ -186,11 +202,21 @@ export class ObservatoryWebApi {
       const type = targetType(url.searchParams.get("type"));
       const id = url.searchParams.get("id")?.trim();
       if (!type || !id) return json({ error: "A valid target type and id are required." }, 400);
-      const projection = this.universe.project({
+      const baseProjection = this.universe.project({
         kind: "inspector",
         now,
         target: { type, id },
       });
+      const projection =
+        this.agentObservations &&
+        (baseProjection.kind === "goal-inspector" ||
+          baseProjection.kind === "agent-inspector" ||
+          baseProjection.kind === "empty-inspector")
+          ? enrichInspector(
+              baseProjection satisfies InspectorProjection,
+              this.agentObservations.snapshot(),
+            )
+          : baseProjection;
       return json(projection);
     }
 
@@ -294,7 +320,14 @@ export class ObservatoryWebApi {
       closeout.kind !== "closeout"
     )
       return json({ error: "Projection contract mismatch." }, 500);
-    return { map, commandCentre, catchUp, closeout };
+    if (!this.agentObservations) return { map, commandCentre, catchUp, closeout };
+    const evidence = this.agentObservations.snapshot();
+    return {
+      map: enrichMap(map, evidence),
+      commandCentre: enrichCommandCentre(commandCentre, evidence),
+      catchUp: enrichCatchUp(catchUp, evidence),
+      closeout,
+    };
   }
 
   private async terminal(request: Request, url: URL): Promise<Response> {

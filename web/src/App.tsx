@@ -233,7 +233,7 @@ export const App = (): React.JSX.Element => {
       attention: {
         items: attentionItems,
         currentCount: attentionItems.filter((item) => item.requiresHumanInput).length,
-        uncertaintyCount: attentionItems.filter((item) => item.reason === "runtime-unknown").length,
+        uncertaintyCount: attentionItems.filter((item) => !item.requiresHumanInput).length,
       },
       counts: {
         ...data.commandCentre.counts,
