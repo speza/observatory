@@ -283,22 +283,17 @@ button {
 .brandmark {
   width: 32px;
   height: 32px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--hairline);
-  transform: rotate(45deg);
+  flex: 0 0 auto;
+  color: var(--ink);
 }
-.brandmark::before {
-  content: "";
-  width: 17px;
-  height: 17px;
-  border: 1px solid var(--hairline);
+.observatory-logo__aperture,
+.observatory-logo__datum {
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
-.brandmark i {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  background: var(--accent);
+.observatory-logo__signal {
+  fill: var(--accent);
 }
 .identity .overline {
   margin: 0 0 4px;
@@ -512,29 +507,6 @@ button {
 .app--survey .masthead {
   border-top: 3px solid var(--ink);
   background: color-mix(in srgb, var(--paper) 96%, transparent);
-}
-.app--survey .brandmark {
-  border: 1px solid var(--ink);
-  border-radius: 50%;
-  transform: none;
-}
-.app--survey .brandmark::before {
-  width: 42px;
-  height: 1px;
-  border: 0;
-  background: var(--hairline);
-  box-shadow:
-    0 -8px 0 -0.25px var(--paper),
-    0 8px 0 -0.25px var(--paper);
-  transform: rotate(-28deg);
-}
-.app--survey .brandmark i {
-  width: 7px;
-  height: 7px;
-  border: 2px solid var(--paper);
-  border-radius: 50%;
-  background: var(--instrument);
-  transform: translate(7px, -6px);
 }
 .app--survey .masthead__view button[aria-pressed="true"] {
   color: var(--paper-panel);

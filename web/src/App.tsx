@@ -30,6 +30,7 @@ import { KeyboardGuide } from "./KeyboardGuide.tsx";
 import { Ledger } from "./Ledger.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { NewGoalDialog } from "./NewGoalDialog.tsx";
+import { ObservatoryLogo } from "./ObservatoryLogo.tsx";
 import { PendingLaunches } from "./PendingLaunches.tsx";
 import { PendingLaunchTerminal } from "./PendingLaunchTerminal.tsx";
 import { ConversationHistoryDialog } from "./ConversationHistoryDialog.tsx";
@@ -636,9 +637,7 @@ export const App = (): React.JSX.Element => {
     return (
       <main className={`app app--${theme} app--survey`}>
         <div className="boot-state">
-          <span className="brandmark">
-            <i />
-          </span>
+          <ObservatoryLogo className="brandmark" />
           <p>{portfolio.error ?? "Reading the Observatory…"}</p>
         </div>
       </main>
@@ -649,9 +648,7 @@ export const App = (): React.JSX.Element => {
     <main className={`app app--${theme} app--survey ${motion ? "app--motion" : "app--still"}`}>
       <header className="masthead">
         <div className="masthead__brand">
-          <span className="brandmark" aria-hidden="true">
-            <i />
-          </span>
+          <ObservatoryLogo className="brandmark" />
           <div className="identity">
             <p className="overline">OBSERVATORY / FIELD SURVEY 01</p>
             <h1>A measured view of work in motion</h1>
