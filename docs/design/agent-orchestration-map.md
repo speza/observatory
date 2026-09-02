@@ -29,7 +29,7 @@ The product should answer five questions quickly:
 2. What changed while I was away?
 3. Which result matters?
 4. Where is my judgment needed?
-5. Can I trust what says it is finished?
+5. Can I trust that finished work is actually finished?
 
 Activity alone cannot answer these questions. A busy process may be irrelevant;
 a completed process may still need review; a missing runtime may represent a

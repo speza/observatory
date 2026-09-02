@@ -25,7 +25,7 @@ supervision. The product should answer five questions quickly:
 2. What changed while I was away?
 3. Which result matters?
 4. Where is my judgment needed?
-5. Can I trust what says it is finished?
+5. Can I trust that finished work is actually finished?
 
 The Atlas is useful only when its stable System → Goal → Agent geography makes
 those answers easier than reconstructing them from a flat list. Needs you,
@@ -58,12 +58,6 @@ Herdr executions. After a laptop or Herdr restart, a confirmed conversation
 with no process becomes dormant and can be exactly resumed in a new eligible
 Herdr execution. Weak pane or process evidence never inherits its Goal, and a
 remote session is not presented as locally portable without provider proof.
-
-The former OpenTUI client was retired on 2026-08-27. It proved the renderer and
-host boundaries, but maintaining a second client constrained density, review
-workflows and product iteration without strengthening the core hypothesis.
-Historical disposable rendering experiments remain under `prototypes/` as
-evidence; they are not maintained application code.
 
 ## Run
 
@@ -106,7 +100,7 @@ bun run db:reset:all
 
 Open `http://127.0.0.1:4310` after the server starts.
 
-Inspect the redacted local Claude Code and Codex session catalogues without
+Inspect the redacted local Claude Code, Codex and Pi session catalogues without
 starting Herdr or writing Observatory state:
 
 ```sh
@@ -158,7 +152,7 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 
 - durable human-owned Systems and Goals, with Goal priority, completion and archive;
 - stable Goal → Agent assignments and accepted goal positions;
-- conversation-first Agent tracking with Herdr represented as an optional runtime;
+- conversation-first Agent tracking independent of current Herdr execution placement;
 - one-subject Needs-you decisions composed from blocked, waiting, result and uncertain evidence;
 - durable semantic Catch up since the last explicit acknowledgement;
 - Atlas and Ledger projections over the same state;
@@ -166,8 +160,8 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 - goal editing, agent assignment and host-backed agent launch;
 - visible blank-prompt launches with an immediate Observatory terminal until
   the provider creates and identifies the durable conversation;
-- provider-independent Claude Code and Codex start/exact-resume plugins;
-- automatic Claude Code and Codex admission for exact-live and newly observed
+- provider-independent Claude Code, Codex and Pi start/exact-resume plugins;
+- automatic Claude Code, Codex and Pi admission for exact-live and newly observed
   conversations, exact execution rebinding, dormant/runtime-unknown states and
   searchable Conversation history for older work;
 - selected-Agent repository and code-host status through contributed plugins;
