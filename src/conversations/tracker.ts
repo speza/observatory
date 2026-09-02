@@ -2,7 +2,6 @@ import { Effect, Either } from "effect";
 import type { AgentHarness } from "../plugin-sdk/index.ts";
 import type { HostAgentObservation, HostSnapshot } from "../hosts/types.ts";
 import type { ReconciliationResult, Universe } from "../universe/universe.ts";
-import type { NativeConversationRef } from "../universe/types.ts";
 import type {
   AddedConversation,
   ConversationCatalogueStore,
@@ -11,9 +10,6 @@ import type {
   ConversationTrackerModule,
   StoredConversation,
 } from "./types.ts";
-
-const referenceKey = (reference: NativeConversationRef): string =>
-  `${reference.harnessId}\u0000${reference.continuityScopeId ?? "legacy"}\u0000${reference.kind}\u0000${reference.value}`;
 
 const boundedText = (value: string | undefined, fallback: string): string => {
   const normalized = value?.replaceAll(/\s+/gu, " ").trim();
@@ -46,7 +42,6 @@ export class ConversationTracker implements ConversationTrackerModule {
       const diagnostics: string[] = [];
       let observedProviders = 0;
       let discoveredConversations = 0;
-      let admittedConversations = 0;
       for (const [index, result] of results.entries()) {
         if (Either.isLeft(result)) {
           diagnostics.push(result.left.message);
@@ -79,15 +74,10 @@ export class ConversationTracker implements ConversationTrackerModule {
           })),
         });
         if (this.lastHostSnapshot) this.observeHost(this.lastHostSnapshot);
-        for (const handle of ingestion.newlyObservedHandles) {
-          this.add(handle);
-          admittedConversations += 1;
-        }
       }
       return {
         observedProviders,
         discoveredConversations,
-        admittedConversations,
         diagnostics,
       };
     });
@@ -95,13 +85,6 @@ export class ConversationTracker implements ConversationTrackerModule {
   }
 
   history(): readonly ConversationHistoryView[] {
-    const accepted = new Set(
-      this.universe
-        .snapshot()
-        .agents.flatMap((agent) =>
-          agent.nativeConversationRef ? [referenceKey(agent.nativeConversationRef)] : [],
-        ),
-    );
     const labels = new Map(
       this.harnesses
         .agentHarnesses()
@@ -110,7 +93,9 @@ export class ConversationTracker implements ConversationTrackerModule {
     const grouped = new Map<string, ConversationHistoryView[]>();
     for (const session of this.store
       .conversations()
-      .filter((candidate) => !accepted.has(referenceKey(candidate.nativeConversationRef)))
+      .filter(
+        (candidate) => this.universe.resolveAgentId(candidate.nativeConversationRef) === undefined,
+      )
       .sort((left, right) => (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0))) {
       const view = this.toView(session, labels.get(session.nativeConversationRef.harnessId));
       const conversations = grouped.get(view.harnessId) ?? [];
@@ -130,6 +115,8 @@ export class ConversationTracker implements ConversationTrackerModule {
       session.nativeConversationRef.harnessId;
     const result = this.universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: session.resumeEligibility,
       harnessId: session.nativeConversationRef.harnessId,
       nativeConversationRef: session.nativeConversationRef,
       displayName: boundedText(session.title, `${label} conversation`),

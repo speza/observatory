@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import type { BoundedProcessRunner, CodeHostingProvider } from "../plugin-sdk/index.ts";
 import type { PluginRegistry } from "../plugins/registry.ts";
-import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../universe/test-support.ts";
 import type { WorkspaceDiffReader } from "../workspaces/types.ts";
 import { DefaultAgentRepositoryStatusReader, repositoryIdentityFromRemote } from "./reader.ts";
 
@@ -61,7 +65,8 @@ describe("agent repository status reader", () => {
 
   test("joins by trusted Agent worktree and caches remote status by revision", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",
@@ -144,7 +149,8 @@ describe("agent repository status reader", () => {
 
   test("preserves multiple matching pull requests as ambiguous", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",

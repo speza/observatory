@@ -1,13 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../../../src/universe/test-support.ts";
 import { AttentionQueue } from "./AttentionQueue.tsx";
 
 describe("AttentionQueue", () => {
   test("renders one decision subject with supporting evidence", () => {
     const fixture = makeUniverse();
     fixture.universe.execute({ type: "CreateGoal", title: "Ship safely", priority: "P1" });
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "blocked-result",

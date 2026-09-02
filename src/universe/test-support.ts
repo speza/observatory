@@ -1,6 +1,6 @@
 import { createProjectionModule } from "../projection/projection.ts";
 import type { HostSnapshot } from "../hosts/types.ts";
-import { Universe } from "./universe.ts";
+import { Universe, type ReconciliationResult } from "./universe.ts";
 import {
   emptyUniverseState,
   type Clock,
@@ -70,6 +70,28 @@ export const makeUniverse = <TStore extends UniverseStore = MemoryStore>(options
     store,
     clock,
   };
+};
+
+export const admitObservedConversationsAndReconcile = (
+  universe: Universe,
+  snapshot: HostSnapshot,
+): ReconciliationResult => {
+  for (const observation of snapshot.agents) {
+    const reference = observation.harnessEvidence?.nativeConversationRef;
+    if (!reference) continue;
+    const result = universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: reference.harnessId,
+      nativeConversationRef: reference,
+      displayName: observation.displayName,
+      workspaceRef: observation.worktree,
+      observedAt: observation.observedAt,
+    });
+    if (!result.ok)
+      throw new Error(result.error ?? "Test conversation could not be explicitly admitted.");
+  }
+  return universe.reconcile(snapshot);
 };
 
 export const hostSnapshot = (

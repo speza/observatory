@@ -6,7 +6,6 @@ import type {
   AgentObservationSnapshot,
 } from "../plugin-sdk/index.ts";
 import type { Universe } from "../universe/universe.ts";
-import type { NativeConversationRef } from "../universe/types.ts";
 import type {
   AgentEvidence,
   AgentEvidenceSnapshot,
@@ -23,8 +22,6 @@ const MAX_NATIVE_VALUE_LENGTH = 1_000;
 const MAX_CURSOR_LENGTH = 500;
 const MAX_DIAGNOSTICS = 16;
 const MAX_DIAGNOSTIC_LENGTH = 300;
-const referenceKey = (reference: NativeConversationRef): string =>
-  `${reference.harnessId}\u0000${reference.continuityScopeId ?? "legacy"}\u0000${reference.kind}\u0000${reference.value}`;
 const kindNames: readonly string[] = [
   "activity",
   "human-input-request",
@@ -288,7 +285,7 @@ export class AgentObservationCoordinator implements AgentObservationModule {
           );
           continue;
         }
-        const current = snapshot.current.filter((item) =>
+        const validCurrent = snapshot.current.filter((item) =>
           capability.kinds.includes(item.kind)
             ? validObservation(
                 item,
@@ -300,7 +297,7 @@ export class AgentObservationCoordinator implements AgentObservationModule {
               )
             : false,
         );
-        const transitions = snapshot.transitions.filter((item) =>
+        const validTransitions = snapshot.transitions.filter((item) =>
           capability.kinds.includes(item.kind)
             ? validObservation(
                 item,
@@ -315,8 +312,14 @@ export class AgentObservationCoordinator implements AgentObservationModule {
         const rejected =
           snapshot.current.length +
           snapshot.transitions.length -
-          current.length -
-          transitions.length;
+          validCurrent.length -
+          validTransitions.length;
+        const current = validCurrent.filter(
+          (item) => this.universe.resolveAgentId(item.nativeConversationRef) !== undefined,
+        );
+        const transitions = validTransitions.filter(
+          (item) => this.universe.resolveAgentId(item.nativeConversationRef) !== undefined,
+        );
         if (rejected > 0)
           diagnostics.push(
             `${harness.describe().label} discarded ${rejected} invalid observations.`,
@@ -356,13 +359,6 @@ export class AgentObservationCoordinator implements AgentObservationModule {
   snapshot(): AgentEvidenceSnapshot {
     const generatedAt = this.now();
     const state = this.universe.snapshot();
-    const agentsByReference = new Map(
-      state.agents.flatMap((agent) =>
-        agent.nativeConversationRef
-          ? [[referenceKey(agent.nativeConversationRef), agent.id] as const]
-          : [],
-      ),
-    );
     const sources = new Map(
       this.store.agentObservationSources().map((source) => [source.harnessId, source]),
     );
@@ -373,7 +369,7 @@ export class AgentObservationCoordinator implements AgentObservationModule {
     );
     const observationsByAgent = new Map<string, StoredAgentObservation[]>();
     for (const observation of this.store.currentAgentObservations()) {
-      const agentId = agentsByReference.get(referenceKey(observation.nativeConversationRef));
+      const agentId = this.universe.resolveAgentId(observation.nativeConversationRef);
       if (!agentId) continue;
       const list = observationsByAgent.get(agentId) ?? [];
       list.push(observation);
@@ -409,9 +405,7 @@ export class AgentObservationCoordinator implements AgentObservationModule {
     const transitions = this.store
       .agentObservationTransitions(checkpoint?.sequence ?? 0)
       .flatMap((transition) => {
-        const agentId = agentsByReference.get(
-          referenceKey(transition.observation.nativeConversationRef),
-        );
+        const agentId = this.universe.resolveAgentId(transition.observation.nativeConversationRef);
         return agentId ? [{ ...transition, agentId }] : [];
       });
     return { generatedAt, agents, transitions, checkpoint };

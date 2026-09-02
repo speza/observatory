@@ -129,14 +129,25 @@ understands both typed interfaces.
 ### `conversations/`
 
 `ConversationTracker` ingests provider catalogues through harness plugins. It
-owns the supporting Conversation history and decides which exact observations
-are submitted to Universe:
+owns supporting Conversation history and submits provider facts to Universe
+without granting them admission authority:
 
-- exact-live and newly observed conversations are admitted automatically;
-- older dormant conversations remain in supporting history until explicitly
-  added;
+- catalogue entries remain history until explicitly added;
+- host liveness and recency do not admit an entry;
 - aliases are canonicalised only with provider proof; and
 - unavailable or incomplete catalogues cannot prove absence.
+
+Only `AddConversation` and a proven Observatory-managed new launch create a
+durable Agent. Admission provenance is explicit: catalogue admission carries
+scoped provider evidence, while managed-launch admission may begin with an
+unscoped host reference and must not fabricate provider freshness or naming.
+Exact resume requires an Agent that already exists.
+
+Universe owns admitted-reference resolution. Conversation history, provider
+observation correlation and launch coordination ask Universe to resolve an
+identity rather than reimplementing scope matching. A scoped provider reference
+may enrich one compatible unscoped managed launch only when no conflicting
+scope exists.
 
 ### `agent-observations/`
 
@@ -236,7 +247,8 @@ scope.
 
 1. Poll the selected SessionHost through a serialized, deadline-bounded refresh loop.
 2. Enrich host observations with exact harness evidence where available.
-3. Refresh provider catalogues and metadata observations independently.
+3. Refresh provider catalogues at startup or on explicit history requests, and
+   refresh metadata observations independently.
 4. Submit typed observations to Universe.
 5. Persist accepted state atomically.
 6. Derive projections and return them to the browser.

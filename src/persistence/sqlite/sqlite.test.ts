@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
 import { SqliteUniverseStore } from "./sqlite-store.ts";
-import { makeUniverse, hostSnapshot } from "../../universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  makeUniverse,
+  hostSnapshot,
+} from "../../universe/test-support.ts";
 
 const observation = {
   nativeId: "pane-1",
@@ -50,7 +54,7 @@ describe("SQLite persistence", () => {
         goalId: "goal-1",
         position: { x: 123, y: -45 },
       });
-      setup.universe.reconcile(hostSnapshot([observation]));
+      admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
       setup.universe.execute({
         type: "AssignAgent",
         agentId: "agent-1",
@@ -102,7 +106,7 @@ describe("SQLite persistence", () => {
     const store = new SqliteUniverseStore(":memory:");
     expect(
       store.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
-    ).toBe(2);
+    ).toBe(3);
     expect(
       store.db
         .query<{ name: string }, []>(
@@ -163,6 +167,13 @@ describe("SQLite persistence", () => {
         .all()
         .map((row) => row.name),
     ).toEqual(["provider_catalogue_freshness", "provider_conversations"]);
+    expect(
+      store.db
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_catalogue_baselines'",
+        )
+        .all(),
+    ).toEqual([]);
     store.close();
   });
 
@@ -191,6 +202,8 @@ describe("SQLite persistence", () => {
       const fixture = makeUniverse({ store: first });
       fixture.universe.execute({
         type: "AddConversation",
+        admissionSource: "provider-catalogue",
+        resumeEligibility: "same-site",
         harnessId: "codex",
         nativeConversationRef: {
           harnessId: "codex",
@@ -202,7 +215,8 @@ describe("SQLite persistence", () => {
         workspaceRef: "/tree",
         observedAt: 1_000_000,
       });
-      fixture.universe.reconcile(
+      admitObservedConversationsAndReconcile(
+        fixture.universe,
         hostSnapshot([
           {
             ...observation,
@@ -218,7 +232,7 @@ describe("SQLite persistence", () => {
           },
         ]),
       );
-      fixture.universe.reconcile(hostSnapshot([], 1_001_000));
+      admitObservedConversationsAndReconcile(fixture.universe, hostSnapshot([], 1_001_000));
       first.close();
 
       const second = new SqliteUniverseStore(databasePath);
@@ -257,9 +271,9 @@ describe("SQLite persistence", () => {
   test("persists the explicit archive marker for stale agents", () => {
     const store = new SqliteUniverseStore(":memory:");
     const setup = makeUniverse({ store });
-    setup.universe.reconcile(hostSnapshot([observation]));
+    admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
     setup.clock.value = 1_001_000;
-    setup.universe.reconcile(hostSnapshot([], setup.clock.value));
+    admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([], setup.clock.value));
     expect(setup.universe.execute({ type: "ArchiveAgent", agentId: "agent-1" })).toEqual({
       ok: true,
       agentId: "agent-1",

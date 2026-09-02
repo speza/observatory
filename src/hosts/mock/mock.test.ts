@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Option, Stream } from "effect";
-import { makeUniverse, FixedClock } from "../../universe/test-support.ts";
+import {
+  makeUniverse,
+  FixedClock,
+  admitObservedConversationsAndReconcile,
+} from "../../universe/test-support.ts";
 import { MockHostAdapter } from "./adapter.ts";
 import { createMockScenario } from "./scenarios.ts";
 import { seedMockPortfolio } from "./seed.ts";
@@ -100,16 +104,14 @@ describe("Mock host adapter", () => {
     const { universe } = makeUniverse({ clock });
     const adapter = new MockHostAdapter({ clock });
     const snapshot = await Effect.runPromise(adapter.snapshot());
-    expect(universe.reconcile(snapshot).accepted).toBe(true);
-
-    expect(seedMockPortfolio(universe)).toEqual({
+    expect(seedMockPortfolio(universe, snapshot)).toEqual({
       createdGoals: 3,
       assignedAgents: 17,
     });
     const state = universe.snapshot();
     expect(state.goals.map((goal) => goal.priority)).toEqual(["P0", "P1", "P2"]);
     expect(state.agents.filter((agent) => agent.primaryGoalId)).toHaveLength(17);
-    expect(seedMockPortfolio(universe)).toEqual({
+    expect(seedMockPortfolio(universe, snapshot)).toEqual({
       createdGoals: 0,
       assignedAgents: 0,
     });
@@ -122,9 +124,7 @@ describe("Mock host adapter", () => {
     const adapter = new MockHostAdapter({ clock, scenario });
     const snapshot = await Effect.runPromise(adapter.snapshot());
     expect(snapshot.agents).toHaveLength(75);
-    expect(universe.reconcile(snapshot).accepted).toBe(true);
-
-    expect(seedMockPortfolio(universe)).toEqual({
+    expect(seedMockPortfolio(universe, snapshot)).toEqual({
       createdGoals: 12,
       assignedAgents: 71,
     });
@@ -245,7 +245,7 @@ describe("Mock host adapter", () => {
 
     const healthy = await Effect.runPromise(adapter.snapshot());
     expect(healthy.available).toBe(true);
-    expect(universe.reconcile(healthy).accepted).toBe(true);
+    expect(admitObservedConversationsAndReconcile(universe, healthy).accepted).toBe(true);
     const healthyAccess = await Effect.runPromise(
       adapter.access({ hostKind: "mock", nativeId: "mock-p01" }),
     );

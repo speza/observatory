@@ -10,70 +10,58 @@ the identity rules used by [Agent launch and workspace preparation](session-laun
 
 ## Decision summary
 
-Observatory tracks durable provider conversations as Agents. A Codex, Claude
-Code, Pi or other supported provider conversation is the primary identity,
-regardless of whether it was started by Observatory, directly in Herdr, in a
-native terminal or by another compatible tool.
+Observatory tracks only explicitly admitted provider conversations as Agents. A
+conversation enters the durable Universe when the operator adds it from
+Conversation history or when an Observatory-managed new launch proves its exact
+conversation identity. Merely appearing in a provider catalogue or host
+snapshot never creates an Agent.
 
-Herdr does not define the Agent. It reports whether and where that conversation
-currently has an execution that Observatory can inspect, attach to or close.
+Herdr does not define the Agent. It reports whether and where an admitted
+conversation currently has an execution that Observatory can inspect, attach
+to or close.
 
 ```text
 System
 └── Goal
-    └── Agent = one durable provider conversation
+    └── Agent = one admitted durable provider conversation
         ├── human metadata and assignment
         ├── provider metadata and continuity
-        └── execution bindings* = current runtime locations
+        └── execution binding = current runtime location, when proven
 ```
 
-The common path has no Session import step. A new or currently running
-conversation is tracked automatically and appears either on its assigned Goal
-or in Inbox. An older dormant conversation remains searchable in Conversation
-history until the operator chooses to bring it into the active Observatory.
+Conversation history is the discovery and admission surface for work started
+outside Observatory. Untracked live executions remain bounded diagnostics until
+the operator explicitly admits their conversation.
 
 ## Why
 
-The current implementation allows two inventories to compete:
+Automatic discovery made external provider and host observations an implicit
+write authority over the durable Universe. A background catalogue scan could
+create an Agent and put it in Inbox without a user decision, while a host
+snapshot could turn unrelated local activity into managed work.
 
-- Herdr observations can create host-bound Agents before provider identity is
-  available; and
-- provider catalogue observations create separate recovery candidates that
-  require import.
+The product instead answers two separate questions:
 
-That creates operational questions the user should not have to answer:
+1. Which durable provider conversations has the operator chosen to supervise?
+2. Where, if anywhere, is each admitted conversation running now?
 
-- Is this an Observatory Agent, a provider session or a Herdr session?
-- Does it need importing even though it is already running?
-- Is a stale Agent actually stopped, or did its execution identity fail to
-  correlate?
-- Which duplicate preserves the Goal, name and conversation?
-
-The product should instead answer two separate questions:
-
-1. Which durable provider conversations am I supervising?
-2. Where, if anywhere, is each conversation running now?
-
-Conversation identity is durable. Execution presence is replaceable and may be
-unknown. A failure to observe Herdr must never damage, duplicate or stale the
-conversation identity.
+Admission is explicit. After admission, conversation identity is durable and
+execution presence is replaceable and may be unknown. A failure to observe
+Herdr must never damage, duplicate or stale the conversation identity.
 
 ## Goals
 
-- Track every new or currently running supported provider conversation without
-  requiring an import workflow.
-- Preserve one Agent identity across process exit, Herdr restart, Observatory
-  restart and exact resume into a new execution.
+- Admit Agents only through an explicit user action or an
+  Observatory-managed new launch.
+- Preserve one admitted Agent identity across process exit, Herdr restart,
+  Observatory restart and exact resume into a new execution.
 - Detect current Herdr execution presence independently from provider
   continuity.
-- Keep Goal assignment, human name, archive and other semantic state under
-  human control.
+- Keep Goal assignment, human name, archive and admission under human control.
 - Preserve uncertainty without exposing internal reconciliation axes as the
   primary user experience.
-- Make direct native, direct Herdr and Observatory-launched conversations
-  converge to the same Agent model.
-- Keep historical provider catalogues useful without flooding the active
-  universe.
+- Keep external conversations discoverable in Conversation history without
+  flooding Atlas or Inbox.
 - Concentrate matching, admission, launch completion and recovery in one deep
   module with one test surface.
 
@@ -140,10 +128,11 @@ show it temporarily as `Starting`.
 
 ### Conversation history
 
-A searchable catalogue of older dormant provider conversations that are not
-part of the active Observatory. It replaces Session import as a recovery-heavy
-workflow. Selecting an entry performs `Add to Observatory`; this is an explicit
-admission of historical work, not a prerequisite for tracking current work.
+A searchable catalogue of provider conversations that are not part of the
+active Observatory. It replaces Session import as a recovery-heavy workflow.
+Selecting an entry performs `Add to Observatory`; this explicit admission is
+required for any conversation started outside Observatory, regardless of
+recency or current execution presence.
 
 ## Authorities
 
@@ -245,48 +234,34 @@ not persisted as one overloaded Agent status.
 
 ## Admission policy
 
-Observatory maintains an active universe and a historical conversation index.
-Admission is deterministic.
+Observatory maintains an active Universe and a supporting conversation index.
+Only two operations may create a durable Agent:
 
-### Automatically admitted
+1. the operator selects a catalogue entry in Conversation history and chooses
+   `Add to Observatory` or `Add and assign to Goal`; or
+2. an Observatory-managed **new** launch returns or later proves the exact
+   conversation reference it created.
 
-A user-resumable provider conversation becomes an active Agent when any of the
-following is true:
+The admission command carries that provenance explicitly. Provider-catalogue
+admission requires a scoped reference and carries the provider's actual resume
+eligibility rather than assuming it is resumable. It may establish provider
+title and continuity freshness. Managed-launch admission may begin
+with an unscoped host reference; it preserves provider uncertainty and treats
+the host display name as fallback evidence until provider evidence arrives.
 
-1. an exact live execution reports its conversation key;
-2. the conversation is identified by an Observatory launch operation;
-3. the provider reports that it was created or first became active after the
-   provider instance's durable catalogue baseline; or
-4. it was already an accepted Agent before the current observation.
-
-Automatically admitted conversations with no Goal appear in Inbox. They do
-not require confirmation or import.
+An exact resume never creates an Agent: the target conversation must already be
+admitted. Host observations, provider catalogues and provider-native activity
+observations never admit Agents, regardless of liveness or recency.
 
 Internal provider sessions, subagents, review threads, compaction sessions and
 other non-user-resumable records are excluded by the harness adapter before
-they reach this policy.
+they reach Conversation history.
 
-### Historical only
-
-On first connection to a provider instance, older dormant conversations with
-no exact live execution are indexed in Conversation history. They do not flood
-Atlas or Inbox.
-
-The provider instance stores a durable baseline so restart and pagination do
-not make old conversations look new. A configurable retention limit may bound
-the history index, but it must not alter already accepted Agents.
-
-### Explicit historical admission
-
-The operator can select an older conversation and choose:
-
-- `Add to Observatory`;
-- `Add and assign to Goal`; or
-- `Resume`, which first adds the Agent and then starts an exact eligible
-  execution.
-
-This is the only remaining import-like action, and the UI calls it Conversation
-history rather than Session import.
+Provider catalogues populate and refresh Conversation history on startup or
+explicit refresh. They do not need an admission baseline because newly
+discovered and historical entries have the same status: discoverable but not
+managed. Adding an entry is the only import-like action, and the UI calls it
+Conversation history rather than Session import.
 
 ## Observation and reconciliation module
 
@@ -305,8 +280,8 @@ observe(
 
 Inside `universe/`, one deep conversation reconciler owns:
 
-- canonical conversation indexing;
-- automatic admission policy;
+- canonical conversation indexing and admitted-reference resolution;
+- explicit admission lookup;
 - provider alias resolution;
 - exact execution binding;
 - execution absence and host-unavailable handling;
@@ -345,10 +320,14 @@ an ordering failure and must become impossible at the module interface.
 
 - If a host execution reports a canonical conversation key, bind it to the
   Agent for that key.
-- If no Agent exists and the conversation is automatically admissible, create
-  exactly one unassigned Agent and bind the execution.
-- If the conversation exists only in history but now has an exact live
-  execution, promote it automatically and bind it.
+- A scoped provider reference may resolve to one compatible unscoped
+  managed-launch Agent only when no conflicting scoped identity exists.
+  Provider catalogue evidence then enriches that Agent in place rather than
+  creating a duplicate.
+- If no Agent exists for the exact conversation key, retain the execution as
+  untracked diagnostic evidence and do not create or promote an Agent.
+- If the conversation exists only in history, liveness does not change its
+  admission status; the operator must add it explicitly.
 - If an accepted launch operation reports both execution and conversation,
   complete the operation and apply its requested Goal and human name.
 - If an execution lacks conversation identity, retain it only in the transient
@@ -424,30 +403,19 @@ Once the first interaction causes the provider to create a conversation, the
 operation is promoted to the exact Agent and its requested name and Goal are
 applied.
 
-### Start directly in Herdr
+### Start directly in Herdr or another client
 
 ```text
-User starts Codex/Claude in Herdr
-  -> Herdr reports execution
-  -> native integration or provider catalogue reports ConversationKey
-  -> conversation is admitted automatically
-  -> exact execution is bound
-  -> unassigned Agent appears in Inbox
+User starts Codex/Claude outside Observatory
+  -> provider catalogue may add it to Conversation history
+  -> Herdr may report an exact live execution
+  -> no durable Agent is created
+  -> operator chooses Add to Observatory
+  -> the admitted Agent binds to the exact current execution, if still proven
 ```
 
-No Session import action is required.
-
-### Start outside Herdr
-
-```text
-User starts a supported provider natively
-  -> provider catalogue observes a new conversation after baseline
-  -> conversation is admitted automatically
-  -> no supported host execution is known
-  -> unassigned Agent appears in Inbox as Runtime unknown
-```
-
-Provider activity alone does not prove that the process remains live.
+Provider activity alone does not prove that the process remains live. A host
+observation alone does not make external work part of the managed Universe.
 
 ### Execution exits
 
@@ -485,25 +453,22 @@ No implicit continuation prompt is sent.
 ### Observatory restart
 
 ```text
-load Agents, observations, baselines and launch operations
+load Agents, observations and launch operations
   -> mark runtime evidence unknown until refreshed
   -> refresh provider catalogues and hosts independently
   -> deterministically reconstruct the same Agent bindings
 ```
 
-Restart does not expose an import workflow for already accepted or currently
-running conversations.
+Restart rebinds already admitted Agents only. Newly discovered external
+conversations remain in Conversation history until explicitly added.
 
 ### Database reset
 
 A full semantic reset loses Observatory-owned Goal assignment, human names,
-relationships and layout. After reset:
-
-- exact currently running conversations are admitted automatically;
-- conversations created after the new provider baseline are admitted
-  automatically;
-- older dormant conversations remain in Conversation history; and
-- no Goal or human metadata is inferred from provider or host facts.
+relationships and layout. Provider catalogue and host refreshes after reset do
+not reconstruct Agents. Conversation history can be repopulated, but each
+conversation must be explicitly added again; no Goal or human metadata is
+inferred from provider or host facts.
 
 ## Projections and interaction
 
@@ -524,9 +489,9 @@ launch operation.
 
 ### Inbox
 
-Inbox contains active, automatically admitted Agents without a Goal. Typical
-entries are conversations started directly in Herdr or natively outside
-Observatory.
+Inbox contains admitted active Agents without a Goal. Typical entries are
+conversations explicitly added without assignment or Observatory-launched work
+whose requested Goal is no longer available.
 
 ### Conversation history
 
@@ -580,7 +545,6 @@ history catalogue:
 agents
 provider_conversations
 provider_conversation_aliases
-provider_catalogue_baselines
 launch_receipts
 goals and semantic relationships
 ```
@@ -595,16 +559,10 @@ renderers never write these tables.
 
 ## Database transition
 
-The conversation-first schema deliberately has no compatibility migration from
-the experimental host-first database. Reset the local database when adopting
-this version. After reset:
-
-- exact currently running conversations are admitted automatically;
-- the first complete provider catalogue establishes the durable history
-  baseline without flooding Inbox;
-- conversations first observed after that baseline are admitted automatically;
-- older dormant conversations remain in Conversation history; and
-- old Goals, assignments and human names are not inferred or reconstructed.
+The explicit-admission schema is a clean-break generation. Existing local
+databases from the automatic-admission generation require an explicit reset.
+After reset, provider catalogues repopulate Conversation history but neither
+catalogue nor host observations recreate durable Agents.
 
 ## Deleted or collapsed
 
@@ -618,130 +576,79 @@ The implementation removes:
 - the command that attached provider identity to a host-created Agent; and
 - separate provider recovery and host admission paths.
 
-`ConversationTracker` now owns provider catalogue baselining, exact alias
-canonicalisation, automatic admission and Conversation history behind one
-interface. Production submits all accepted host and provider observations
-through `Universe.observe`.
+`ConversationTracker` owns exact alias canonicalisation and Conversation
+history behind one interface. It submits provider observations for already
+admitted Agents only. Production submits accepted host and provider observations
+through `Universe.observe`; untracked identities remain diagnostic.
 
 ## Implementation record
 
-### Phase 0 — ratify and fixture the model — complete
+The unified observation model, exact execution binding, launch receipts and
+Conversation history remain implemented. The explicit-admission revision:
 
-- Accept this specification and mark conflicting portions of the previous
-  continuity, execution and launch specifications as superseded.
-- Add sanitized scenario fixtures for all acceptance cases below.
-- Delete `ProviderSessionRecovery` after the unified observation scenarios pass.
-
-Gate: the team can explain any Agent using only conversation identity, semantic
-state and optional execution bindings.
-
-### Phase 1 — introduce the unified observation interface — complete
-
-- Add typed provider, host and launch observation variants to `universe/`.
-- Implement the pure internal conversation reconciler.
-- Persist raw scoped observations and catalogue baselines.
-- Prove order independence with the mock harness and mock host.
-
-Gate: provider-first, host-first and restart replays produce byte-equivalent
-semantic Agent state.
-
-### Phase 2 — conversation-first admission — complete
-
-- Require a conversation key for newly created managed Agents.
-- Automatically admit exact live and post-baseline conversations.
-- Route unassigned admitted Agents to Inbox.
-- Keep old dormant conversations in Conversation history.
-
-Gate: new conversations started through Observatory, Herdr or a native client
-all produce one unassigned-or-assigned Agent without import.
-
-### Phase 3 — execution bindings and launch completion — complete
-
-- Bind host executions only by exact conversation key.
-- Make launch operations resolve through the unified observation interface.
-- Preserve `Starting` without creating a host-bound Agent.
-- Implement exact resume and execution conflicts through the same path.
-
-Gate: concurrent same-cwd launches cannot cross-bind, and loss/reappearance of
-Herdr never duplicates or stales an Agent.
-
-### Phase 4 — reset the experimental database — complete
-
-- Do not ship compatibility code for host-first Agent records.
-- Reset the local database once when adopting the conversation-first schema.
-- Rebuild active Agents from exact current conversations and future catalogue
-  observations.
-
-Gate: a fresh database produces no host-only Agents and no exact conversation
-has two active Agents.
-
-### Phase 5 — simplify the product surface — complete
-
-- Replace Session import with Conversation history.
-- Replace stale/possibly-running headlines with the reduced runtime vocabulary.
-- Separate Conversation, Runtime and Context in the inspector.
-- Remove superseded recovery controls and explanatory copy.
-
-Gate: normal dogfooding requires no understanding of provider catalogues,
-imports, Herdr identity or reconciliation state.
+- removes provider catalogue baselines and post-baseline admission;
+- prevents host and provider observations from creating Agents;
+- admits successful Observatory-managed new launches before binding them;
+- preserves admission provenance and provider uncertainty;
+- keeps exact resume restricted to an existing Agent;
+- resolves scoped provider enrichment against compatible admitted launches
+  inside Universe;
+- filters provider-native enrichment to admitted conversations; and
+- stops periodic catalogue scans while retaining startup and explicit history
+  refreshes.
 
 ## Acceptance scenarios
 
-1. Start a named Codex conversation through Observatory. Exactly one assigned
-   Agent appears with the human name and `Running in Herdr`.
-2. Start an unnamed Codex conversation through Observatory. Exactly one Agent
+1. Start a named new conversation through Observatory. Exactly one assigned
+   Agent appears after exact launch identity is proven.
+2. Start an unnamed new conversation through Observatory. Exactly one Agent
    appears; provider title may replace only its fallback name.
-3. Start Claude Code directly in Herdr. Once exact identity arrives, one
-   unassigned Agent appears automatically in Inbox.
-4. Start Codex in a native terminal outside Herdr. A new conversation appears
-   automatically in Inbox with `Runtime unknown`.
-5. Observe host execution before provider identity, then identity before the
-   next host snapshot. No host-bound Agent or duplicate is created.
-6. Repeat scenario 5 in every observation order. Final semantic state is
-   identical.
-7. Stop a Herdr process. The Agent becomes Dormant and keeps its Goal, name and
-   conversation.
+3. Start Claude Code directly in Herdr. No Agent appears automatically; its
+   exact execution remains diagnostic until the conversation is explicitly
+   added.
+4. Start Codex in a native terminal. It may appear in Conversation history but
+   not Atlas or Inbox until explicitly added.
+5. Add a currently live history entry. Exactly one Agent is created and the
+   exact host execution binds regardless of provider-first or host-first order.
+6. Observe an untracked exact execution in every observation order. No durable
+   Agent is created.
+7. Stop an admitted Herdr process. The Agent becomes Dormant and keeps its Goal,
+   name and conversation.
 8. Disconnect Herdr. The Agent becomes Runtime unknown, never stale or dormant.
-9. Restart Observatory while the process continues. The same Agent rebinds
-   without import.
-10. Restart Herdr and lose the process. The same Agent becomes Dormant and
-    offers exact Resume when eligible.
-11. Resume into a new pane. The same Agent binds the new execution and preserves
-    semantic history.
-12. Report the same conversation in two live executions. The Agent becomes
-    Conflict and neither execution is silently preferred.
-13. Run two conversations in the same cwd. Exact keys keep them separate.
-14. Discover 500 old dormant conversations on first provider connection. They
-    stay in Conversation history and do not flood Inbox or Atlas.
-15. Create a new conversation after that baseline. It appears automatically.
-16. Reset the database while `ao-fix-logo-colour` is exactly live. It returns
-    as one unassigned live Agent without a stale host-only clone.
-17. Observe an execution without exact conversation identity. It remains
-    diagnostic evidence and does not appear in Atlas or Inbox.
-18. Delete a disposable Observatory database. Exact live conversations return
-    automatically; old dormant conversations remain history; Goals are not
-    invented.
+9. Restart Observatory while an admitted process continues. The same Agent
+   rebinds without another admission action.
+10. Resume into a new pane. The existing Agent binds the new execution; resume
+    cannot manufacture an Agent.
+11. Report the same admitted conversation in two live executions. The Agent
+    becomes Conflict and neither execution is silently preferred.
+12. Discover 500 conversations. They stay in Conversation history and do not
+    flood Inbox or Atlas, regardless of when they were created.
+13. Reset the database while conversations are live. No Agent returns until the
+    operator explicitly adds it or starts new work through Observatory.
+14. Provider-native observations for untracked conversations do not enter the
+    durable observation store or projections.
 
 ## Success measures
 
-- Zero import actions for newly created or currently running supported
-  conversations.
+- Zero durable Agents created by provider catalogue, host snapshot or
+  provider-native observation alone.
+- Exactly one Agent for each explicitly added or Observatory-launched
+  conversation.
 - Zero duplicate Agents under observation-order permutations.
 - Zero cases where Herdr loss changes durable conversation identity.
-- One obvious runtime headline per Agent.
 - Every displayed uncertainty names the missing authority: provider, host or
   launch acknowledgement.
-- An operator can identify the conversation, its Goal and whether it is running
-  without knowing what an Observatory recovery candidate is.
 
 ## Implemented defaults
 
-1. The first successful complete snapshot for a provider instance establishes
-   its durable catalogue baseline.
-2. Conversation history retains the local provider catalogue and projects the
+1. Conversation history retains the local provider catalogue and projects the
    50 most recent entries per harness.
-3. `Runtime unknown` is the single headline; host/provider details explain the
+2. Catalogues refresh at startup and on explicit Conversation history refresh;
+   there is no steady-state catalogue scan.
+3. Only `AddConversation` and a proven Observatory-managed new launch admit an
+   Agent.
+4. `Runtime unknown` is the single headline; host/provider details explain the
    missing authority in the inspector and attention copy.
-4. There is no host-first compatibility window or `Needs identity` queue.
-5. Archived Agents remain human-controlled and do not automatically unarchive;
+5. There is no host-first compatibility window or `Needs identity` queue.
+6. Archived Agents remain human-controlled and do not automatically unarchive;
    a live execution creates an explicit `archived-running` attention item.

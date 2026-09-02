@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../../../src/universe/test-support.ts";
 import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
 
 const fixture = makeUniverse();
@@ -10,7 +14,8 @@ fixture.universe.execute({
   systemId: "system-1",
 });
 fixture.universe.execute({ type: "CreateGoal", title: "Ungrouped goal" });
-fixture.universe.reconcile(
+admitObservedConversationsAndReconcile(
+  fixture.universe,
   hostSnapshot([
     {
       nativeId: "assigned",

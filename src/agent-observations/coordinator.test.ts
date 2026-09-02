@@ -59,6 +59,8 @@ describe("agent observation coordination", () => {
     expect(
       fixture.universe.execute({
         type: "AddConversation",
+        admissionSource: "provider-catalogue",
+        resumeEligibility: "same-site",
         harnessId: "codex",
         nativeConversationRef: reference,
         displayName: "Observed Codex",
@@ -193,9 +195,74 @@ describe("agent observation coordination", () => {
     expect(withoutPlugin.snapshot().agents[0]?.health).toBe("unavailable");
   });
 
+  test("correlates scoped provider evidence to one compatible unscoped managed launch", async () => {
+    const store = createMemoryStore();
+    const fixture = makeUniverse({ store });
+    expect(
+      fixture.universe.execute({
+        type: "AddConversation",
+        admissionSource: "managed-launch",
+        harnessId: "codex",
+        nativeConversationRef: {
+          harnessId: "codex",
+          kind: reference.kind,
+          value: reference.value,
+        },
+        displayName: "Managed launch",
+        observedAt,
+      }).ok,
+    ).toBe(true);
+    const event = {
+      schemaVersion: 1 as const,
+      observationId: "managed-launch-activity",
+      nativeConversationRef: reference,
+      providerInstanceId: "codex-local-test",
+      kind: "activity" as const,
+      observedAt,
+      source: { mechanism: "hook" as const },
+      payload: { phase: "responding" as const },
+    };
+    const coordinator = new AgentObservationCoordinator(
+      {
+        agentHarnesses: () => [
+          harness({
+            schemaVersion: 1,
+            harnessId: "codex",
+            providerInstanceId: "codex-local-test",
+            continuityScopeId: "scope-test",
+            capturedAt: observedAt,
+            complete: true,
+            current: [event],
+            transitions: [event],
+            health: { state: "healthy", lastSuccessfulAt: observedAt, diagnostics: [] },
+          }),
+        ],
+      },
+      store,
+      fixture.universe,
+      () => observedAt,
+    );
+
+    expect(await Effect.runPromise(coordinator.refresh())).toEqual({
+      observedSources: 1,
+      diagnostics: [],
+    });
+    expect(coordinator.snapshot().agents[0]?.current).toHaveLength(1);
+    expect(coordinator.snapshot().transitions[0]?.agentId).toBe("agent-1");
+  });
+
   test("ignores an older complete snapshot without clearing newer current evidence", async () => {
     const store = createMemoryStore();
     const fixture = makeUniverse({ store });
+    fixture.universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: reference,
+      displayName: "Tracked conversation",
+      observedAt: 2_000_000,
+    });
     let sourceSnapshot: AgentObservationSnapshot = {
       schemaVersion: 1,
       harnessId: "codex",
@@ -270,6 +337,8 @@ describe("agent observation coordination", () => {
     const fixture = makeUniverse({ store });
     fixture.universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: reference,
       displayName: "Conflicting Codex",

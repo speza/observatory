@@ -284,11 +284,11 @@ Directly launched executions without exact provider conversation identity
 remain diagnostic host evidence. They are not durable managed Agents and
 cannot be manually promoted through cwd, title or recency.
 
-On first connection, older dormant provider conversations remain in
-Conversation history. Exact-live conversations and conversations first
-observed after the durable provider baseline become Agents automatically.
-Provider facts never overwrite human-authored Goal assignment, priority,
-completion, archive or naming.
+Provider conversations remain in Conversation history until the operator adds
+them explicitly. Exact liveness, recency and first-observed time do not create
+Agents. A proven Observatory-managed new launch is the only non-history path to
+admission. Provider facts never overwrite human-authored Goal assignment,
+priority, completion, archive or naming.
 
 Harness plugins do not receive concrete Herdr payloads. `SessionHost` exposes
 only generic execution observations and opaque provider/session evidence it can
@@ -317,13 +317,13 @@ completed, and Observatory never silently sends "continue" after a restart.
 
 The recovery decision table is:
 
-| Fresh evidence                                     | Result              | Automatic action                             |
-| -------------------------------------------------- | ------------------- | -------------------------------------------- |
-| Same native conversation is live                   | proved continuation | rebind and reconcile                         |
-| Known conversation is absent and exactly resumable | dormant/resumable   | offer resume                                 |
-| Previous host target contains another conversation | replaced            | preserve old Agent; discover replacement     |
-| Evidence is weak, missing or contradictory         | unknown             | do not launch or reassign                    |
-| Provider or host unavailable                       | unavailable/unknown | preserve durable state and retry observation |
+| Fresh evidence                                     | Result              | Automatic action                                 |
+| -------------------------------------------------- | ------------------- | ------------------------------------------------ |
+| Same native conversation is live                   | proved continuation | rebind and reconcile                             |
+| Known conversation is absent and exactly resumable | dormant/resumable   | offer resume                                     |
+| Previous host target contains another conversation | replaced            | preserve old Agent; report untracked replacement |
+| Evidence is weak, missing or contradictory         | unknown             | do not launch or reassign                        |
+| Provider or host unavailable                       | unavailable/unknown | preserve durable state and retry observation     |
 
 ## Plugin package contract
 

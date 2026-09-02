@@ -142,7 +142,6 @@ describe("conversation tracker", () => {
     expect(await Effect.runPromise(fixture.tracker.refresh())).toMatchObject({
       observedProviders: 1,
       discoveredConversations: 1,
-      admittedConversations: 0,
     });
     const history = fixture.tracker.history();
     expect(history).toHaveLength(1);
@@ -159,6 +158,17 @@ describe("conversation tracker", () => {
       execution: undefined,
       executionPresence: "unknown",
     });
+    fixture.store.close();
+  });
+
+  test("preserves blocked resume eligibility during explicit admission", async () => {
+    const blocked = { ...conversation(), resumeEligibility: "blocked" as const };
+    const fixture = trackerFixture(() => providerSnapshot([blocked]));
+    await Effect.runPromise(fixture.tracker.refresh());
+
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle);
+
+    expect(fixture.universe.snapshot().agents[0]?.resumeCapability).toBe("blocked");
     fixture.store.close();
   });
 
@@ -183,7 +193,7 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
-  test("automatically admits an exact live conversation without import", async () => {
+  test("keeps an exact live conversation untracked until explicitly added", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
 
@@ -194,17 +204,13 @@ describe("conversation tracker", () => {
     );
 
     expect(reconciled.accepted).toBe(true);
-    expect(reconciled.addedAgentIds).toHaveLength(1);
-    expect(fixture.tracker.history()).toEqual([]);
-    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
-      nativeConversationRef: { value: "native-secret-id", continuityScopeId: "scope-test" },
-      execution: { nativeId: "pane-live" },
-      executionPresence: "live",
-    });
+    expect(reconciled.diagnostics.join(" ")).toContain("untracked");
+    expect(fixture.universe.snapshot().agents).toEqual([]);
+    expect(fixture.tracker.history()).toHaveLength(1);
     fixture.store.close();
   });
 
-  test("automatically admits conversations first observed after the durable baseline", async () => {
+  test("keeps newly discovered conversations in history until explicitly added", async () => {
     let snapshot = providerSnapshot();
     const fixture = trackerFixture(() => snapshot);
     await Effect.runPromise(fixture.tracker.refresh());
@@ -213,22 +219,18 @@ describe("conversation tracker", () => {
       1_001_000,
     );
 
-    const refreshed = await Effect.runPromise(fixture.tracker.refresh());
+    await Effect.runPromise(fixture.tracker.refresh());
 
-    expect(refreshed.admittedConversations).toBe(1);
-    expect(fixture.universe.snapshot().agents).toHaveLength(1);
-    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
-      displayName: "New native work",
-      executionPresence: "unknown",
-      primaryGoalId: undefined,
-    });
-    expect(fixture.tracker.history()).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents).toEqual([]);
+    expect(fixture.tracker.history()).toHaveLength(2);
+    expect(fixture.tracker.history().map(({ title }) => title)).toContain("New native work");
     fixture.store.close();
   });
 
-  test("provider-first and host-first observations converge to the same Agent", async () => {
+  test("explicit admission binds the same Agent whether host or provider is observed first", async () => {
     const providerFirst = trackerFixture();
     await Effect.runPromise(providerFirst.tracker.refresh());
+    providerFirst.tracker.add(providerFirst.tracker.history()[0]!.handle);
     providerFirst.tracker.observeHost(
       hostSnapshot([
         liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
@@ -242,6 +244,7 @@ describe("conversation tracker", () => {
       ]),
     );
     await Effect.runPromise(hostFirst.tracker.refresh());
+    hostFirst.tracker.add(hostFirst.tracker.history()[0]!.handle);
 
     expect(semanticAgentFacts(hostFirst.universe.snapshot().agents[0]!)).toEqual(
       semanticAgentFacts(providerFirst.universe.snapshot().agents[0]!),
@@ -252,6 +255,8 @@ describe("conversation tracker", () => {
 
   test("canonicalizes a provider-declared alias without transferring Agent metadata", async () => {
     const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle);
     fixture.tracker.observeHost(
       hostSnapshot([
         liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
@@ -264,8 +269,6 @@ describe("conversation tracker", () => {
       agentId: "agent-1",
       displayName: "Human name",
     });
-
-    await Effect.runPromise(fixture.tracker.refresh());
 
     expect(fixture.universe.snapshot().agents).toHaveLength(1);
     expect(fixture.universe.snapshot().agents[0]).toMatchObject({
@@ -298,7 +301,7 @@ describe("conversation tracker", () => {
     const result = fixture.tracker.observeHost(hostSnapshot([unidentified]));
 
     expect(result.accepted).toBe(true);
-    expect(result.diagnostics.join(" ")).toContain("no durable Agent was created");
+    expect(result.diagnostics.join(" ")).toContain("untracked");
     expect(fixture.universe.snapshot().agents).toEqual([]);
     fixture.store.close();
   });
@@ -306,6 +309,7 @@ describe("conversation tracker", () => {
   test("preserves the Agent and marks its execution absent after host loss", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle);
     fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-before-restart")]));
     fixture.tracker.observeHost(hostSnapshot([], 1_001_000));
 
@@ -322,6 +326,7 @@ describe("conversation tracker", () => {
   test("preserves provider uncertainty when the catalogue is unavailable", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle);
     fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-live")]));
     const unavailableHarness: AgentHarness = {
       ...harnessFor(() => providerSnapshot()),
@@ -365,6 +370,15 @@ describe("conversation tracker", () => {
       ...providerSnapshot([other]),
       providerInstanceId: "codex-other-test",
       continuityScopeId: "scope-other",
+    });
+    fixture.universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: conversation().nativeConversationRef,
+      displayName: "Tracked conversation",
+      observedAt: 1_000_000,
     });
     const scopedExecution = liveProviderExecution("pane-live");
     fixture.universe.reconcile(

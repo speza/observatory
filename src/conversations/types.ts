@@ -24,8 +24,6 @@ export interface StoredConversation {
 
 export interface ConversationCatalogueIngestion {
   readonly accepted: boolean;
-  readonly baselineEstablished: boolean;
-  readonly newlyObservedHandles: readonly string[];
   readonly diagnostic?: string;
 }
 
@@ -51,7 +49,6 @@ export interface ConversationHistoryView {
 export interface ConversationRefreshResult {
   readonly observedProviders: number;
   readonly discoveredConversations: number;
-  readonly admittedConversations: number;
   readonly diagnostics: readonly string[];
 }
 

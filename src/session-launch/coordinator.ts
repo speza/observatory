@@ -184,6 +184,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               launched.executionRef,
               harnessId,
               provedReference,
+              "admit-managed-launch",
             )
           : undefined;
       if (agent) {
@@ -289,6 +290,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               alreadyLive.nativeId,
               saved.harnessId,
               saved.nativeConversationRef,
+              "existing-agent-only",
             );
             return yield* this.remember(
               {
@@ -394,6 +396,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
                 launched.executionRef,
                 saved.harnessId,
                 saved.nativeConversationRef,
+                "existing-agent-only",
               )
             : undefined;
         return yield* this.remember(
@@ -570,6 +573,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               recovery.executionRef,
               recovery.harnessId,
               recovery.nativeConversationRef ?? continuity.nativeConversationRef!,
+              recovery.kind === "start" ? "admit-managed-launch" : "existing-agent-only",
             )
           : undefined;
       const expectedAgent =
@@ -652,9 +656,27 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
     executionRef: string,
     harnessId: string,
     nativeConversationRef: OpaqueNativeConversationRef,
+    admission: "admit-managed-launch" | "existing-agent-only",
   ): Effect.Effect<Agent | undefined, LaunchError> {
     return Effect.try({
       try: () => {
+        const execution = snapshot.agents.find(
+          (observation) => observation.nativeId === executionRef,
+        );
+        const existingAgentId = this.options.universe.resolveAgentId(nativeConversationRef);
+        if (admission === "admit-managed-launch" && !existingAgentId) {
+          const admitted = this.options.universe.execute({
+            type: "AddConversation",
+            admissionSource: "managed-launch",
+            harnessId,
+            nativeConversationRef,
+            displayName: execution?.displayName.trim() || `${harnessId} agent`,
+            workspaceRef: execution?.worktree,
+            observedAt: execution?.observedAt ?? snapshot.observedAt,
+          });
+          if (!admitted.ok)
+            throw new Error(admitted.error ?? "Launched conversation could not be admitted.");
+        }
         const agents = snapshot.agents.map((observation) =>
           observation.nativeId === executionRef
             ? {

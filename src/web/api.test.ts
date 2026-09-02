@@ -4,7 +4,11 @@ import { MockHostAdapter } from "../hosts/mock/adapter.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { loadPluginRegistry } from "../plugins/registry.ts";
 import { resolve } from "node:path";
-import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
+import {
+  hostSnapshot,
+  makeUniverse,
+  admitObservedConversationsAndReconcile,
+} from "../universe/test-support.ts";
 import type {
   PreparedWorkspace,
   WorkspaceDiffReader,
@@ -55,7 +59,6 @@ describe("ObservatoryWebApi", () => {
         Effect.succeed({
           observedProviders: 1,
           discoveredConversations: 1,
-          admittedConversations: 0,
           diagnostics: [],
         }),
       history: () => [
@@ -75,7 +78,7 @@ describe("ObservatoryWebApi", () => {
         expect(handle).toBe("ps_public-handle");
         return { agentId: "agent-history" };
       },
-      observeHost: (snapshot) => fixture.universe.reconcile(snapshot),
+      observeHost: (snapshot) => admitObservedConversationsAndReconcile(fixture.universe, snapshot),
     };
     const api = new ObservatoryWebApi(
       fixture.universe,
@@ -115,7 +118,10 @@ describe("ObservatoryWebApi", () => {
   test("lists launch choices and starts an observed agent through the shared coordinator", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const goal = fixture.universe.execute({ type: "CreateGoal", title: "Web launch proof" });
     if (!goal.goalId) throw new Error("Expected a created goal.");
     const workspace: WorkspaceProvider = {
@@ -278,7 +284,8 @@ describe("ObservatoryWebApi", () => {
 
   test("serves the map and command-centre projections from one Universe", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",
@@ -368,7 +375,8 @@ describe("ObservatoryWebApi", () => {
 
   test("serves a diff by trusted agent id without accepting a browser path", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",
@@ -434,7 +442,8 @@ describe("ObservatoryWebApi", () => {
 
   test("serves repository status by trusted agent id without accepting repository inputs", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-repository",
@@ -523,7 +532,8 @@ describe("ObservatoryWebApi", () => {
 
   test("executes the browser command allow-list and returns a refreshed portfolio", async () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",
@@ -597,7 +607,7 @@ describe("ObservatoryWebApi", () => {
     expect(fixture.universe.snapshot().goals[0]?.mapPositionPinned).toBe(false);
     expect((await command({ type: "UnassignAgent", agentId })).status).toBe(200);
     fixture.clock.value += 1_000;
-    fixture.universe.reconcile(hostSnapshot([], fixture.clock.now()));
+    admitObservedConversationsAndReconcile(fixture.universe, hostSnapshot([], fixture.clock.now()));
     expect((await command({ type: "ArchiveAgent", agentId })).status).toBe(200);
     expect((await command({ type: "CompleteGoal", goalId })).status).toBe(200);
     const archived = await command({ type: "ArchiveGoal", goalId });
@@ -635,7 +645,10 @@ describe("ObservatoryWebApi", () => {
   test("streams a host-owned terminal without exposing the host adapter to the client", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe
       .snapshot()
       .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
@@ -833,7 +846,6 @@ describe("ObservatoryWebApi", () => {
         Effect.succeed({
           observedProviders: 0,
           discoveredConversations: 0,
-          admittedConversations: 0,
           diagnostics: [],
         }),
       history: () => [],
@@ -842,10 +854,13 @@ describe("ObservatoryWebApi", () => {
       },
       observeHost: (snapshot) => {
         canonicalHostObservations += 1;
-        return fixture.universe.reconcile(snapshot);
+        return admitObservedConversationsAndReconcile(fixture.universe, snapshot);
       },
     };
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe
       .snapshot()
       .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
@@ -902,7 +917,10 @@ describe("ObservatoryWebApi", () => {
   test("protects terminal mutations with the browser command boundary", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a deterministic mock agent.");
     const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);

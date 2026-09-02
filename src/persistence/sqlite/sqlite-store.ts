@@ -184,7 +184,7 @@ interface ObservationTransitionRow extends ObservationRow {
   sequence: number;
 }
 
-export const SQLITE_SCHEMA_GENERATION = 2;
+export const SQLITE_SCHEMA_GENERATION = 3;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {
@@ -610,24 +610,8 @@ export class SqliteUniverseStore
       if (freshness && snapshot.observedAt < freshness.observed_at)
         return {
           accepted: false,
-          baselineEstablished: false,
-          newlyObservedHandles: [],
           diagnostic: `Ignored out-of-order ${snapshot.harnessId} catalogue at ${snapshot.observedAt}; latest accepted observation is ${freshness.observed_at}.`,
         };
-      const baseline = this.db
-        .query<{ provider_instance_id: string }, [string]>(
-          "SELECT provider_instance_id FROM provider_catalogue_baselines WHERE provider_instance_id = ?",
-        )
-        .get(snapshot.providerInstanceId);
-      const knownHandles = new Set(
-        this.db
-          .query<{ handle: string }, [string]>(
-            "SELECT handle FROM provider_conversations WHERE provider_instance_id = ?",
-          )
-          .all(snapshot.providerInstanceId)
-          .map(({ handle }) => handle),
-      );
-      const observedHandles: string[] = [];
       if (snapshot.complete)
         this.db
           .prepare("DELETE FROM provider_conversations WHERE provider_instance_id = ?")
@@ -669,7 +653,6 @@ export class SqliteUniverseStore
           reference.kind,
           reference.value,
         );
-        observedHandles.push(handle);
         upsert.run(
           handle,
           reference.harnessId,
@@ -702,18 +685,6 @@ export class SqliteUniverseStore
           );
         }
       }
-      if (!baseline && snapshot.complete)
-        this.db
-          .prepare(
-            "INSERT INTO provider_catalogue_baselines (provider_instance_id, harness_id, continuity_scope_id, established_at, snapshot_observed_at) VALUES (?, ?, ?, ?, ?)",
-          )
-          .run(
-            snapshot.providerInstanceId,
-            snapshot.harnessId,
-            snapshot.continuityScopeId,
-            Date.now(),
-            snapshot.observedAt,
-          );
       this.db
         .prepare(`
           INSERT INTO provider_catalogue_freshness (
@@ -727,13 +698,7 @@ export class SqliteUniverseStore
           snapshot.continuityScopeId,
           snapshot.observedAt,
         );
-      return {
-        accepted: true,
-        baselineEstablished: Boolean(baseline) || snapshot.complete,
-        newlyObservedHandles: baseline
-          ? observedHandles.filter((handle) => !knownHandles.has(handle))
-          : [],
-      };
+      return { accepted: true };
     });
     return write();
   }
@@ -1045,7 +1010,6 @@ export class SqliteUniverseStore
         DELETE FROM operator_checkpoint;
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
-        DELETE FROM provider_catalogue_baselines;
         DELETE FROM provider_catalogue_freshness;
         DELETE FROM agent_observation_sources;
         DELETE FROM agent_observation_current;
@@ -1074,7 +1038,6 @@ export class SqliteUniverseStore
         DELETE FROM operator_checkpoint;
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
-        DELETE FROM provider_catalogue_baselines;
         DELETE FROM provider_catalogue_freshness;
         DELETE FROM agent_observation_sources;
         DELETE FROM agent_observation_current;
@@ -1312,13 +1275,6 @@ export class SqliteUniverseStore
       );
       CREATE INDEX IF NOT EXISTS provider_conversation_alias_identity
         ON provider_conversation_aliases(harness_id, continuity_scope_id, native_kind, native_value);
-      CREATE TABLE IF NOT EXISTS provider_catalogue_baselines (
-        provider_instance_id TEXT PRIMARY KEY,
-        harness_id TEXT NOT NULL,
-        continuity_scope_id TEXT NOT NULL,
-        established_at INTEGER NOT NULL,
-        snapshot_observed_at INTEGER NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS provider_catalogue_freshness (
         provider_instance_id TEXT PRIMARY KEY,
         harness_id TEXT NOT NULL,

@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../../../src/universe/test-support.ts";
 import { InboxPanel } from "./InboxPanel.tsx";
 
 describe("InboxPanel", () => {
   test("contains accepted unassigned Agents without provider import candidates", () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "native-a",

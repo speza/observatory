@@ -111,6 +111,8 @@ export type UniverseCommand =
     }
   | {
       readonly type: "AddConversation";
+      readonly admissionSource: "provider-catalogue" | "managed-launch";
+      readonly resumeEligibility?: "same-site" | "provider-account" | "blocked" | "unknown";
       readonly harnessId: string;
       readonly nativeConversationRef: NativeConversationRef;
       readonly displayName: string;
@@ -136,7 +138,6 @@ export interface CommandResult {
 
 export interface ReconciliationResult {
   readonly accepted: boolean;
-  readonly addedAgentIds: readonly AgentId[];
   readonly updatedAgentIds: readonly AgentId[];
   readonly staleAgentIds: readonly AgentId[];
   readonly diagnostics: readonly string[];
@@ -159,8 +160,6 @@ const normalizeText = (value: string | undefined): string | undefined => {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
 };
-
-const copyOptional = (value: string | undefined): string | undefined => normalizeText(value);
 
 const copyExecutionContainer = (
   value: ExecutionContainerRef | undefined,
@@ -442,6 +441,33 @@ const sameConversationWithoutScope = (
   current.kind === observed.kind &&
   current.value === observed.value;
 
+const resolveConversationAgent = (
+  agents: readonly Agent[],
+  reference: NativeConversationRef,
+): Agent | undefined => {
+  const exact = agents.find(
+    (agent) =>
+      agent.nativeConversationRef &&
+      nativeConversationKey(agent.nativeConversationRef) === nativeConversationKey(reference),
+  );
+  if (exact || !reference.continuityScopeId) return exact;
+
+  const compatible = agents.filter(
+    (agent) =>
+      agent.nativeConversationRef &&
+      sameConversationWithoutScope(agent.nativeConversationRef, reference),
+  );
+  const unscoped = compatible.filter(
+    (agent) => agent.nativeConversationRef?.continuityScopeId === undefined,
+  );
+  const conflictingScope = compatible.some(
+    (agent) =>
+      agent.nativeConversationRef?.continuityScopeId !== undefined &&
+      agent.nativeConversationRef.continuityScopeId !== reference.continuityScopeId,
+  );
+  return unscoped.length === 1 && !conflictingScope ? unscoped[0] : undefined;
+};
+
 const appendDistinctExecutions = (
   left: readonly NonNullable<Agent["execution"]>[],
   right: readonly NonNullable<Agent["execution"]>[],
@@ -493,7 +519,6 @@ const appendExecutionHistory = (
 interface ReconciliationDraft {
   readonly state: UniverseState;
   readonly diagnostics: string[];
-  readonly addedAgentIds: AgentId[];
   readonly updatedAgentIds: AgentId[];
   readonly staleAgentIds: AgentId[];
 }
@@ -503,7 +528,6 @@ const rejectedReconciliation = (
   diagnostics: readonly string[] = [],
 ): ReconciliationResult => ({
   accepted: false,
-  addedAgentIds: [],
   updatedAgentIds: [],
   staleAgentIds: [],
   diagnostics: [...diagnostics, error],
@@ -526,53 +550,6 @@ const hostHealthFromSnapshot = (
     Object.assign(health, { lastObservedAt: previous.lastObservedAt });
   if (snapshot.error) Object.assign(health, { lastError: snapshot.error });
   return health;
-};
-
-const agentFromObservation = (
-  id: AgentId,
-  snapshot: HostSnapshot,
-  observation: HostAgentObservation,
-  nativeConversationRef: NativeConversationRef,
-): Agent => {
-  return {
-    id,
-    execution: {
-      hostKind: snapshot.hostKind,
-      hostInstanceId: snapshot.hostInstanceId,
-      nativeId: observation.nativeId.trim(),
-      hostLocator: observation.hostLocator,
-      observedAt: observation.observedAt,
-    },
-    harnessId: observation.harnessEvidence?.detectedHarnessId ?? nativeConversationRef?.harnessId,
-    nativeConversationRef,
-    continuity: nativeConversationRef ? "proved" : "unknown",
-    providerContinuity: nativeConversationRef?.continuityScopeId ? "confirmed" : "unknown",
-    executionPresence: "live",
-    resumeCapability: "unknown",
-    observationHealth: "fresh",
-    providerObservedAt: nativeConversationRef?.continuityScopeId
-      ? observation.observedAt
-      : undefined,
-    executionObservedAt: observation.observedAt,
-    executionHistory: [],
-    conflictingExecutions: [],
-    displayName: observation.displayName,
-    displayNameSource: "fallback",
-    runtimeState: observation.runtimeState,
-    runtimeStateSource: observation.runtimeStateSource,
-    hostHealth: "live",
-    lastSeenAt: observation.observedAt,
-    lastObservedAt: observation.observedAt,
-    lastChangedAt: observation.observedAt,
-    attentionSince: isCurrentAttentionState(observation.runtimeState)
-      ? observation.observedAt
-      : undefined,
-    repository: copyOptional(observation.repository),
-    branch: copyOptional(observation.branch),
-    worktree: copyOptional(observation.worktree),
-    provider: copyOptional(observation.provider),
-    executionContainer: copyExecutionContainer(observation.executionContainer),
-  };
 };
 
 const markHostUnavailable = (draft: ReconciliationDraft, hostInstanceId: string): void => {
@@ -736,7 +713,6 @@ const reconcileObservation = (
   snapshot: HostSnapshot,
   observation: HostAgentObservation,
   conversationExecutions: ReadonlyMap<string, Agent["conflictingExecutions"]>,
-  ids: IdGenerator,
 ): void => {
   const observedConversation = nativeConversationFromObservation(observation);
   const byConversation = observedConversation
@@ -778,18 +754,9 @@ const reconcileObservation = (
 
   let existing = byConversation ?? byExecution;
   if (!existing) {
-    if (!observedConversation) {
-      draft.diagnostics.push(
-        `Observed unidentified ${snapshot.hostKind} execution ${observation.nativeId.trim()}; no durable Agent was created.`,
-      );
-      return;
-    }
-    const id = ids.next("agent");
-    draft.state.agents = [
-      ...draft.state.agents,
-      agentFromObservation(id, snapshot, observation, observedConversation),
-    ];
-    draft.addedAgentIds.push(id);
+    draft.diagnostics.push(
+      `Observed untracked ${snapshot.hostKind} execution ${observation.nativeId.trim()}; no durable Agent was created.`,
+    );
     return;
   }
 
@@ -874,7 +841,6 @@ const reconcileObservation = (
 const planReconciliation = (
   previous: UniverseState,
   snapshot: HostSnapshot,
-  ids: IdGenerator,
 ): ReconciliationDraft | ReconciliationResult => {
   const duplicate = isDuplicateObservation(snapshot.agents);
   if (duplicate) return rejectedReconciliation(duplicate);
@@ -908,7 +874,6 @@ const planReconciliation = (
   const draft: ReconciliationDraft = {
     state: cloneUniverseState(previous),
     diagnostics,
-    addedAgentIds: [],
     updatedAgentIds: [],
     staleAgentIds: [],
   };
@@ -929,7 +894,7 @@ const planReconciliation = (
       `Incomplete ${snapshot.hostKind} snapshot did not prove any execution absent.`,
     );
   for (const observation of snapshot.agents)
-    reconcileObservation(draft, snapshot, observation, conversationExecutions, ids);
+    reconcileObservation(draft, snapshot, observation, conversationExecutions);
   return draft;
 };
 
@@ -947,6 +912,10 @@ export class Universe {
 
   snapshot(): UniverseState {
     return cloneUniverseState(this.state);
+  }
+
+  resolveAgentId(reference: NativeConversationRef): AgentId | undefined {
+    return resolveConversationAgent(this.state.agents, reference)?.id;
   }
 
   project(query: ProjectionQuery): Projection {
@@ -1012,6 +981,14 @@ export class Universe {
         canonical: session.nativeConversationRef,
       })),
     );
+    for (const session of options.sessions) {
+      const compatible = resolveConversationAgent(next.agents, session.nativeConversationRef);
+      if (compatible && compatible.nativeConversationRef?.continuityScopeId === undefined)
+        replaceAgent(next, {
+          ...compatible,
+          nativeConversationRef: session.nativeConversationRef,
+        });
+    }
     next.agents = next.agents.map((agent) => {
       const reference = agent.nativeConversationRef;
       if (!reference) return agent;
@@ -1090,7 +1067,6 @@ export class Universe {
     this.state = next;
     return {
       accepted: true,
-      addedAgentIds: [],
       updatedAgentIds,
       staleAgentIds: [],
       diagnostics: [],
@@ -1120,7 +1096,6 @@ export class Universe {
     this.state = next;
     return {
       accepted: true,
-      addedAgentIds: [],
       updatedAgentIds,
       staleAgentIds: [],
       diagnostics: [],
@@ -1410,28 +1385,57 @@ export class Universe {
         const displayName = normalizeText(command.displayName);
         const reference = command.nativeConversationRef;
         const continuityScopeId = normalizeText(reference.continuityScopeId);
+        const kind = normalizeText(reference.kind);
+        const value = normalizeText(reference.value);
         if (!harnessId || !displayName)
           return { ok: false, error: "Harness id and Agent name are required." };
-        if (
-          reference.harnessId !== harnessId ||
-          !continuityScopeId ||
-          !normalizeText(reference.kind) ||
-          !normalizeText(reference.value)
-        )
-          return { ok: false, error: "Scoped provider session reference is invalid." };
+        if (reference.harnessId !== harnessId || !kind || !value)
+          return { ok: false, error: "Provider conversation reference is invalid." };
+        if (command.admissionSource === "provider-catalogue" && !continuityScopeId)
+          return { ok: false, error: "Provider catalogue admission requires a scoped reference." };
+        if (command.admissionSource === "provider-catalogue" && !command.resumeEligibility)
+          return { ok: false, error: "Provider catalogue admission requires resume eligibility." };
+        if (command.admissionSource === "managed-launch" && command.resumeEligibility)
+          return { ok: false, error: "Managed launch admission cannot claim resume eligibility." };
+        const normalizedReference: NativeConversationRef = continuityScopeId
+          ? { harnessId, continuityScopeId, kind, value }
+          : { harnessId, kind, value };
         const goal = command.goalId ? findGoal(next, command.goalId) : undefined;
         if (command.goalId && !goal) return { ok: false, error: "Goal not found." };
         if (goal?.status === "archived")
           return { ok: false, error: "Archived goals cannot receive agents." };
-        const referenceKey = nativeConversationKey(reference);
-        const existing = next.agents.find(
-          (agent) =>
-            agent.nativeConversationRef &&
-            nativeConversationKey(agent.nativeConversationRef) === referenceKey,
-        );
+        const providerAdmission = command.admissionSource === "provider-catalogue";
+        const resumeEligible =
+          command.resumeEligibility === "same-site" ||
+          command.resumeEligibility === "provider-account";
+        const existing = resolveConversationAgent(next.agents, normalizedReference);
         if (existing) {
-          if (goal && existing.primaryGoalId !== goal.id)
-            replaceAgent(next, { ...existing, primaryGoalId: goal.id });
+          replaceAgent(next, {
+            ...existing,
+            nativeConversationRef:
+              providerAdmission && continuityScopeId
+                ? normalizedReference
+                : existing.nativeConversationRef,
+            providerContinuity: providerAdmission ? "confirmed" : existing.providerContinuity,
+            resumeCapability: providerAdmission
+              ? resumeEligible
+                ? "eligible"
+                : "blocked"
+              : existing.resumeCapability,
+            providerObservedAt: providerAdmission
+              ? command.observedAt
+              : existing.providerObservedAt,
+            displayName:
+              providerAdmission && existing.displayNameSource === "fallback"
+                ? displayName
+                : existing.displayName,
+            displayNameSource:
+              providerAdmission && existing.displayNameSource === "fallback"
+                ? "provider"
+                : existing.displayNameSource,
+            primaryGoalId: goal?.id ?? existing.primaryGoalId,
+            worktree: normalizeText(command.workspaceRef) ?? existing.worktree,
+          });
           result = { ok: true, agentId: existing.id, goalId: goal?.id };
           break;
         }
@@ -1439,26 +1443,29 @@ export class Universe {
         next.agents.push({
           id: agentId,
           harnessId,
-          nativeConversationRef: { ...reference, continuityScopeId },
+          nativeConversationRef: normalizedReference,
           continuity: "proved",
-          providerContinuity: "confirmed",
+          providerContinuity: providerAdmission ? "confirmed" : "unknown",
           executionPresence: "unknown",
-          resumeCapability: "eligible",
+          resumeCapability: providerAdmission
+            ? resumeEligible
+              ? "eligible"
+              : "blocked"
+            : "unknown",
           observationHealth: "fresh",
-          providerObservedAt: command.observedAt,
+          providerObservedAt: providerAdmission ? command.observedAt : undefined,
           executionHistory: [],
           conflictingExecutions: [],
           displayName,
-          displayNameSource: "provider",
+          displayNameSource: providerAdmission ? "provider" : "fallback",
           primaryGoalId: goal?.id,
           runtimeState: "unknown",
-          runtimeStateSource: `${harnessId}.provider-catalogue`,
+          runtimeStateSource: `${harnessId}.${command.admissionSource}`,
           hostHealth: "stale",
           lastSeenAt: command.observedAt,
           lastObservedAt: command.observedAt,
           lastChangedAt: now,
           worktree: normalizeText(command.workspaceRef),
-          provider: harnessId,
         });
         if (goal) repairUnpinnedGoalPosition(next, goal.id);
         result = { ok: true, agentId, goalId: goal?.id };
@@ -1538,7 +1545,7 @@ export class Universe {
   }
 
   reconcile(snapshot: HostSnapshot): ReconciliationResult {
-    const planned = planReconciliation(this.state, snapshot, this.ids);
+    const planned = planReconciliation(this.state, snapshot);
     if ("accepted" in planned) return planned;
 
     appendChanges(this.state, planned.state, snapshot.observedAt);
@@ -1547,7 +1554,6 @@ export class Universe {
     } catch (error) {
       return {
         accepted: false,
-        addedAgentIds: [],
         updatedAgentIds: [],
         staleAgentIds: [],
         diagnostics: planned.diagnostics,
@@ -1557,7 +1563,6 @@ export class Universe {
     this.state = planned.state;
     return {
       accepted: true,
-      addedAgentIds: planned.addedAgentIds,
       updatedAgentIds: planned.updatedAgentIds,
       staleAgentIds: planned.staleAgentIds,
       diagnostics: planned.diagnostics,

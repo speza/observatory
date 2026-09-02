@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../../../src/universe/test-support.ts";
 import { Inspector } from "./Inspector.tsx";
 
 describe("Inspector", () => {
   test("shows bounded operational IDs without duplicating repository facts", () => {
     const fixture = makeUniverse();
-    fixture.universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
       hostSnapshot([
         {
           nativeId: "execution-visible",

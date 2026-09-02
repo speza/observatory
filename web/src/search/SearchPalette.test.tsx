@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SearchResult } from "../../../src/projection/types.ts";
-import { hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../../../src/universe/test-support.ts";
 import { SearchPalette, searchPaletteKeyAction, searchResultAction } from "./SearchPalette.tsx";
 
 const fixture = makeUniverse();
 fixture.universe.execute({ type: "CreateGoal", id: "goal-a", title: "Atlas search" });
-fixture.universe.reconcile(
+admitObservedConversationsAndReconcile(
+  fixture.universe,
   hostSnapshot([
     {
       nativeId: "native-a",

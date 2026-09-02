@@ -3,7 +3,11 @@ import { Effect } from "effect";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
 import { createMockScenario } from "../hosts/mock/scenarios.ts";
 import type { SessionHost } from "../hosts/types.ts";
-import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  hostSnapshot,
+  makeUniverse,
+} from "../universe/test-support.ts";
 import { createAgentCloseoutCoordinator } from "./coordinator.ts";
 
 const coordinatorFor = (fixture: ReturnType<typeof makeUniverse>, host: SessionHost) =>
@@ -17,7 +21,10 @@ describe("Agent closeout coordinator", () => {
   test("closes a live host execution, reconciles absence, then archives it", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a mock Agent.");
     const coordinator = coordinatorFor(fixture, host);
@@ -39,7 +46,10 @@ describe("Agent closeout coordinator", () => {
   test("still closes a live host execution whose Observatory record was already archived", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent?.execution) throw new Error("Expected a live mock Agent.");
     expect(fixture.universe.execute({ type: "ArchiveAgent", agentId: agent.id }).ok).toBe(true);
@@ -60,12 +70,18 @@ describe("Agent closeout coordinator", () => {
     const fixture = makeUniverse();
     const scenario = createMockScenario();
     const host = new MockHostAdapter({ clock: fixture.clock, scenario });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a mock Agent.");
     if (!agent.execution) throw new Error("Expected a mock execution.");
     await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent.execution))));
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const coordinator = coordinatorFor(fixture, host);
 
     const result = await Effect.runPromise(coordinator.closeAndArchive(agent.id));
@@ -76,7 +92,10 @@ describe("Agent closeout coordinator", () => {
   test("does not downgrade a live close request to archive-only when the target disappears", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
-    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(host.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent?.execution) throw new Error("Expected a live mock Agent.");
     await Effect.runPromise(host.closeAgent(await Effect.runPromise(host.access(agent.execution))));
@@ -92,7 +111,10 @@ describe("Agent closeout coordinator", () => {
   test("fails closed while the host is unavailable", async () => {
     const fixture = makeUniverse();
     const unavailableHost = new MockHostAdapter({ clock: fixture.clock });
-    fixture.universe.reconcile(await Effect.runPromise(unavailableHost.snapshot()));
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      await Effect.runPromise(unavailableHost.snapshot()),
+    );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a mock Agent.");
     const host: SessionHost = {
@@ -129,7 +151,7 @@ describe("Agent closeout coordinator", () => {
     const fixture = makeUniverse();
     const base = new MockHostAdapter({ clock: fixture.clock, scenario: createMockScenario() });
     const complete = await Effect.runPromise(base.snapshot());
-    fixture.universe.reconcile(complete);
+    admitObservedConversationsAndReconcile(fixture.universe, complete);
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a mock Agent.");
     let accessCalls = 0;
@@ -164,6 +186,8 @@ describe("Agent closeout coordinator", () => {
     const fixture = makeUniverse();
     fixture.universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",
@@ -194,7 +218,7 @@ describe("Agent closeout coordinator", () => {
       },
     }));
     const snapshot = hostSnapshot(agents);
-    fixture.universe.reconcile(snapshot);
+    admitObservedConversationsAndReconcile(fixture.universe, snapshot);
     let accessCalls = 0;
     const host: SessionHost = {
       snapshot: () => Effect.succeed(snapshot),

@@ -34,7 +34,7 @@ agent work.
 | Atlas and Ledger                                      | Implemented | Shared projection and browser tests                       |
 | Needs-you decision composition                        | Implemented | Independent host/provider claims compose per Agent        |
 | Durable Goal-level Catch up                           | Implemented | Explicit checkpoint and synthesis tests                   |
-| Inbox and Conversation history                        | Implemented | Automatic admission plus explicit historical add          |
+| Inbox and Conversation history                        | Implemented | Explicit add plus Observatory-managed launch admission    |
 | New launch and exact resume                           | Implemented | Idempotent coordinator and browser gateway tests          |
 | Claude Code, Codex and Pi harnesses                   | Implemented | Plugin contract and live validation                       |
 | Metadata-only provider observations                   | Implemented | Activity, input, outcome and context evidence             |

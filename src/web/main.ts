@@ -111,7 +111,6 @@ const program = Effect.scoped(
       ? {
           observedProviders: 0,
           discoveredConversations: 0,
-          admittedConversations: 0,
           diagnostics: [],
         }
       : yield* conversations.refresh();
@@ -151,12 +150,6 @@ const program = Effect.scoped(
       2_000,
       { minimum: 100 },
     );
-    const providerRefreshMs = positiveIntegerSetting(
-      "AO_PROVIDER_REFRESH_MS",
-      process.env.AO_PROVIDER_REFRESH_MS,
-      60_000,
-      { minimum: 100 },
-    );
     const observationRefreshMs = positiveIntegerSetting(
       "AO_OBSERVATION_REFRESH_MS",
       process.env.AO_OBSERVATION_REFRESH_MS,
@@ -182,15 +175,6 @@ const program = Effect.scoped(
       },
       onError: (message) => console.error(`Observatory refresh failed: ${message}`),
     });
-    const providerLoop = runtime.useMockHost
-      ? undefined
-      : startSerializedRefreshLoop({
-          intervalMs: providerRefreshMs,
-          refresh: async () => {
-            await Effect.runPromise(conversations.refresh());
-          },
-          onError: (message) => console.error(`Conversation refresh failed: ${message}`),
-        });
     const observationLoop = startSerializedRefreshLoop({
       intervalMs: observationRefreshMs,
       refresh: async () => {
@@ -205,7 +189,6 @@ const program = Effect.scoped(
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         hostLoop.stop();
-        providerLoop?.stop();
         observationLoop.stop();
         await api.close();
         void runningServer.stop(true);

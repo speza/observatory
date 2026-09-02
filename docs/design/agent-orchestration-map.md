@@ -145,9 +145,10 @@ advance the checkpoint.
 ### Inbox and Conversation history
 
 Inbox contains accepted Agents that do not yet have a Goal. Conversation history
-is a supporting catalogue of older provider conversations that are not active
-Observatory Agents. Exact-live and newly observed conversations are admitted
-automatically; older dormant history requires an explicit add action.
+is a supporting catalogue of provider conversations that are not active
+Observatory Agents. Catalogue and host observations never admit Agents;
+Conversation history requires an explicit add action regardless of recency or
+liveness.
 
 ### Inspector and review
 

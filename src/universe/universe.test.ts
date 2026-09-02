@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { createProjectionModule } from "../projection/projection.ts";
 import { createEmptyUniverse } from "./universe.ts";
-import { makeUniverse, hostSnapshot, SequenceIds } from "./test-support.ts";
+import {
+  makeUniverse,
+  hostSnapshot,
+  SequenceIds,
+  admitObservedConversationsAndReconcile,
+} from "./test-support.ts";
 
 const observation = (
   nativeId: string,
@@ -101,7 +106,10 @@ describe("Universe", () => {
       }),
     ).toEqual({ ok: true, goalId: "goal-1" });
     expect(
-      universe.reconcile(hostSnapshot([observation("pane-1", "live agent", "working")])).accepted,
+      admitObservedConversationsAndReconcile(
+        universe,
+        hostSnapshot([observation("pane-1", "live agent", "working")]),
+      ).accepted,
     ).toBe(true);
     expect(
       universe.execute({
@@ -158,7 +166,8 @@ describe("Universe", () => {
     universe.execute({ type: "CreateGoal", title: "Admin" });
     universe.execute({ type: "CreateGoal", title: "Observatory" });
     universe.execute({ type: "CreateGoal", title: "Copilot" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(Array.from({ length: 18 }, (_, index) => observation(`pane-${index}`))),
     );
     const goalsBefore = universe.snapshot().goals;
@@ -189,7 +198,8 @@ describe("Universe", () => {
       goalId: "goal-1",
       position: { x: 0, y: 0 },
     });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(Array.from({ length: 15 }, (_, index) => observation(`pane-${index}`))),
     );
     universe.execute({
@@ -204,7 +214,7 @@ describe("Universe", () => {
   test("does not allow assignment to an archived goal", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Old goal" });
-    universe.reconcile(hostSnapshot([observation("pane-1")]));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane-1")]));
     universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
     universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
     expect(
@@ -219,7 +229,10 @@ describe("Universe", () => {
   test("assigns multiple agents atomically", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Batch destination" });
-    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
 
     expect(
       universe.execute({
@@ -251,7 +264,8 @@ describe("Universe", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Primary outcome" });
     universe.execute({ type: "CreateGoal", title: "Other outcome" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         {
           ...observation("target"),
@@ -316,7 +330,10 @@ describe("Universe", () => {
   test("preserves human agent metadata across reconciliation", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });
-    universe.reconcile(hostSnapshot([observation("pane-1", "host title", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1", "host title", "working")]),
+    );
     universe.execute({
       type: "AssignAgent",
       agentId: "agent-1",
@@ -333,7 +350,8 @@ describe("Universe", () => {
       description: "Human context",
     });
     clock.value = 1_002_000;
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(
         [
           {
@@ -353,13 +371,20 @@ describe("Universe", () => {
 
   test("is idempotent and detaches missing executions without losing Agent identity", () => {
     const { universe } = makeUniverse();
-    const first = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
-    const second = universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
-    expect(first.addedAgentIds).toHaveLength(2);
-    expect(second.addedAgentIds).toHaveLength(0);
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
     expect(universe.snapshot().agents.every((agent) => agent.continuity === "proved")).toBe(true);
     expect(universe.snapshot().agents).toHaveLength(2);
-    const stale = universe.reconcile(hostSnapshot([observation("pane-1")], 1_001_000));
+    const stale = admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1")], 1_001_000),
+    );
     expect(stale.staleAgentIds).toEqual(["agent-2"]);
     expect(universe.snapshot().agents.find((agent) => agent.id === "agent-2")).toMatchObject({
       execution: undefined,
@@ -371,10 +396,10 @@ describe("Universe", () => {
 
   test("does not infer execution absence from an incomplete host inventory", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane-1")]));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane-1")]));
 
     clock.value += 1_000;
-    const result = universe.reconcile({
+    const result = admitObservedConversationsAndReconcile(universe, {
       ...hostSnapshot([], clock.now()),
       complete: false,
       diagnostics: ["Synthetic inventory record was skipped."],
@@ -389,31 +414,32 @@ describe("Universe", () => {
     });
   });
 
-  test("only reconciles a shell as an Agent after the host recognises it", () => {
+  test("binds a recognised host execution only after explicit admission", () => {
     const { universe } = makeUniverse();
     expect(universe.reconcile(hostSnapshot([])).accepted).toBe(true);
     expect(universe.snapshot().agents).toHaveLength(0);
 
     const promoted = observation("shell-pane", "promoted agent", "working");
-    const first = universe.reconcile(hostSnapshot([promoted]));
-    expect(first.addedAgentIds).toEqual(["agent-1"]);
+    const untracked = universe.reconcile(hostSnapshot([promoted]));
+    expect(untracked.diagnostics.join(" ")).toContain("untracked");
+    expect(universe.snapshot().agents).toEqual([]);
+
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([promoted], 1_001_000));
     expect(universe.snapshot().agents[0]).toMatchObject({
       id: "agent-1",
       execution: { nativeId: "shell-pane" },
       displayName: "promoted agent",
     });
-
-    const second = universe.reconcile(hostSnapshot([promoted], 1_001_000));
-    expect(second.addedAgentIds).toHaveLength(0);
-    expect(universe.snapshot().agents).toHaveLength(1);
   });
 
   test("rejects out-of-order snapshots without regressing accepted state", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "newer", "blocked", 2_000_000)], 2_000_000),
     );
-    const older = universe.reconcile(
+    const older = admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "older", "idle", 1_000_000)], 1_000_000),
     );
     expect(older.accepted).toBe(false);
@@ -424,10 +450,12 @@ describe("Universe", () => {
 
   test("ignores an older agent observation inside a newer snapshot", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "newer", "blocked", 2_000_000)], 2_000_000),
     );
-    const result = universe.reconcile(
+    const result = admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "older", "idle", 1_000_000)], 3_000_000),
     );
     expect(result.accepted).toBe(true);
@@ -439,8 +467,11 @@ describe("Universe", () => {
 
   test("preserves host observation age while the host is unavailable", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane-1")], 1_000_000));
-    universe.reconcile({
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1")], 1_000_000),
+    );
+    admitObservedConversationsAndReconcile(universe, {
       hostKind: "test-host",
       hostInstanceId: "test-host:default",
       available: false,
@@ -460,8 +491,11 @@ describe("Universe", () => {
 
   test("does not use one host instance to prove another instance absent", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane-a")], 1_000_000));
-    universe.reconcile({
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-a")], 1_000_000),
+    );
+    admitObservedConversationsAndReconcile(universe, {
       ...hostSnapshot([], 1_001_000),
       hostInstanceId: "test-host:remote-b",
     });
@@ -474,8 +508,12 @@ describe("Universe", () => {
 
   test("normalizes native identities at the reconciliation boundary", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation(" pane-1 ", "first")], 1_000_000));
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation(" pane-1 ", "first")], 1_000_000),
+    );
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "second", "idle", 1_001_000)], 1_001_000),
     );
     expect(universe.snapshot().agents).toHaveLength(1);
@@ -485,7 +523,10 @@ describe("Universe", () => {
   test("archives Agents without deleting their identity or assignment", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Keep the context" });
-    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
     universe.execute({
       type: "AssignAgent",
       agentId: "agent-2",
@@ -497,7 +538,10 @@ describe("Universe", () => {
     });
 
     clock.value = 1_001_000;
-    universe.reconcile(hostSnapshot([observation("pane-2")], clock.value));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-2")], clock.value),
+    );
     const archived = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
     expect(archived?.archivedAt).toBe(1_000_000);
 
@@ -509,7 +553,10 @@ describe("Universe", () => {
     expect(active.counts.uncertainty).toBe(0);
 
     clock.value = 1_002_000;
-    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")], clock.value));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")], clock.value),
+    );
     const rediscovered = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
     expect(rediscovered?.hostHealth).toBe("live");
     expect(rediscovered?.archivedAt).toBe(1_000_000);
@@ -518,7 +565,10 @@ describe("Universe", () => {
 
   test("archives multiple Agents atomically", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane-1"), observation("pane-2")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
 
     expect(
       universe.execute({ type: "ArchiveAgents", agentIds: ["agent-1", "agent-2", "agent-1"] }),
@@ -540,11 +590,15 @@ describe("Universe", () => {
   test("rebinds the same proven conversation to a new execution and retains its goal", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Durable work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
 
     clock.value += 1_000;
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observedConversation("pane-2", "conversation-a", clock.now())], clock.now()),
     );
     const agents = universe.snapshot().agents;
@@ -561,6 +615,8 @@ describe("Universe", () => {
     const { universe } = makeUniverse();
     universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",
@@ -584,7 +640,7 @@ describe("Universe", () => {
         },
       },
     }));
-    const result = universe.reconcile(hostSnapshot(conflicting));
+    const result = admitObservedConversationsAndReconcile(universe, hostSnapshot(conflicting));
     expect(result.accepted).toBe(true);
     expect(universe.snapshot().agents).toHaveLength(1);
     expect(universe.snapshot().agents[0]).toMatchObject({
@@ -598,6 +654,8 @@ describe("Universe", () => {
     const { universe } = makeUniverse();
     universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",
@@ -663,9 +721,12 @@ describe("Universe", () => {
 
   test("marks a proved conversation execution absent without losing continuity", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     clock.value += 1_000;
-    universe.reconcile(hostSnapshot([], clock.now()));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([], clock.now()));
     expect(universe.snapshot().agents[0]).toMatchObject({
       continuity: "proved",
       hostHealth: "stale",
@@ -677,31 +738,36 @@ describe("Universe", () => {
   test("does not transfer a goal when a pane now contains a different conversation", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Original work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
 
     clock.value += 1_000;
-    universe.reconcile(
+    const result = universe.reconcile(
       hostSnapshot([observedConversation("pane-1", "conversation-b", clock.now())], clock.now()),
     );
     const original = universe.snapshot().agents.find((agent) => agent.id === "agent-1");
-    const replacement = universe.snapshot().agents.find((agent) => agent.id === "agent-2");
+    expect(result.diagnostics.join(" ")).toContain("untracked");
     expect(original).toMatchObject({ primaryGoalId: "goal-1", continuity: "replaced" });
     expect(original?.execution).toBeUndefined();
-    expect(replacement).toMatchObject({ continuity: "proved", execution: { nativeId: "pane-1" } });
-    expect(replacement?.primaryGoalId).toBeUndefined();
+    expect(universe.snapshot().agents).toHaveLength(1);
   });
 
   test("does not transfer metadata when a reused execution changes from unscoped A to scoped B", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Original work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.execute({ type: "RenameAgent", agentId: "agent-1", displayName: "Human name" });
 
     clock.value += 1_000;
     const replacement = observedConversation("pane-1", "conversation-b", clock.now());
-    universe.reconcile(
+    const result = universe.reconcile(
       hostSnapshot(
         [
           {
@@ -719,7 +785,8 @@ describe("Universe", () => {
       ),
     );
 
-    expect(universe.snapshot().agents).toHaveLength(2);
+    expect(result.diagnostics.join(" ")).toContain("untracked");
+    expect(universe.snapshot().agents).toHaveLength(1);
     expect(universe.snapshot().agents[0]).toMatchObject({
       displayName: "Human name",
       primaryGoalId: "goal-1",
@@ -728,24 +795,22 @@ describe("Universe", () => {
       nativeConversationRef: { value: "conversation-a" },
     });
     expect(universe.snapshot().agents[0]?.nativeConversationRef?.continuityScopeId).toBeUndefined();
-    expect(universe.snapshot().agents[1]).toMatchObject({
-      continuity: "proved",
-      nativeConversationRef: { value: "conversation-b", continuityScopeId: "scope-test" },
-      execution: { nativeId: "pane-1" },
-    });
-    expect(universe.snapshot().agents[1]?.primaryGoalId).toBeUndefined();
   });
 
   test("enriches only the scope of the same exact conversation", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Scoped work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.execute({ type: "RenameAgent", agentId: "agent-1", displayName: "Human name" });
 
     clock.value += 1_000;
     const scoped = observedConversation("pane-1", "conversation-a", clock.now());
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(
         [
           {
@@ -775,7 +840,8 @@ describe("Universe", () => {
   test("rejects an unscoped observation that would downgrade a scoped execution", () => {
     const { universe, clock } = makeUniverse();
     const scoped = observedConversation("pane-1", "conversation-a");
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         {
           ...scoped,
@@ -808,11 +874,110 @@ describe("Universe", () => {
     });
   });
 
+  test("uses scoped provider admission to enrich one compatible managed launch", () => {
+    const { universe } = makeUniverse();
+    expect(
+      universe.execute({
+        type: "AddConversation",
+        admissionSource: "managed-launch",
+        harnessId: "codex",
+        nativeConversationRef: {
+          harnessId: "codex",
+          kind: "session-id",
+          value: "conversation-a",
+        },
+        displayName: "Host fallback",
+        observedAt: 1_000_000,
+      }),
+    ).toMatchObject({ ok: true, agentId: "agent-1" });
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      displayNameSource: "fallback",
+      providerContinuity: "unknown",
+      resumeCapability: "unknown",
+      providerObservedAt: undefined,
+    });
+
+    expect(
+      universe.execute({
+        type: "AddConversation",
+        admissionSource: "provider-catalogue",
+        resumeEligibility: "same-site",
+        harnessId: "codex",
+        nativeConversationRef: {
+          harnessId: "codex",
+          continuityScopeId: "scope-test",
+          kind: "session-id",
+          value: "conversation-a",
+        },
+        displayName: "Provider title",
+        observedAt: 1_001_000,
+      }),
+    ).toMatchObject({ ok: true, agentId: "agent-1" });
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      nativeConversationRef: { continuityScopeId: "scope-test" },
+      displayName: "Provider title",
+      displayNameSource: "provider",
+      providerContinuity: "confirmed",
+      resumeCapability: "eligible",
+      providerObservedAt: 1_001_000,
+    });
+  });
+
+  test("canonicalizes one compatible managed launch from provider catalogue evidence", () => {
+    const { universe } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        kind: "session-id",
+        value: "conversation-a",
+      },
+      displayName: "Host fallback",
+      observedAt: 1_000_000,
+    });
+
+    const result = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 1_001_000,
+      complete: false,
+      sessions: [
+        {
+          nativeConversationRef: {
+            harnessId: "codex",
+            continuityScopeId: "scope-test",
+            kind: "session-id",
+            value: "conversation-a",
+          },
+          observedAt: 1_001_000,
+          resumeEligibility: "same-site",
+          title: "Provider title",
+        },
+      ],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      nativeConversationRef: { continuityScopeId: "scope-test" },
+      displayName: "Provider title",
+      displayNameSource: "provider",
+      providerContinuity: "confirmed",
+      resumeCapability: "eligible",
+    });
+  });
+
   test("consolidates a persisted legacy duplicate into its scoped Agent", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Preserved assignment" });
     universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",
@@ -823,13 +988,17 @@ describe("Universe", () => {
       displayName: "Provider name",
       observedAt: clock.now(),
     });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-2", goalId: "goal-1" });
     universe.execute({ type: "RenameAgent", agentId: "agent-2", displayName: "Human name" });
 
     clock.value += 1_000;
     const scoped = observedConversation("pane-1", "conversation-a", clock.now());
-    const result = universe.reconcile(
+    const result = admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(
         [
           {
@@ -866,7 +1035,10 @@ describe("Universe", () => {
   test("requires strong identity evidence after process restart", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Restarted work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
 
     universe.invalidateRuntimeFacts();
@@ -878,7 +1050,8 @@ describe("Universe", () => {
       observationHealth: "stale",
     });
     clock.value += 1_000;
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(
         [
           {
@@ -915,22 +1088,29 @@ describe("Universe", () => {
         observedAt: clock.now(),
       },
     };
-    universe.reconcile(hostSnapshot([hostOnly]));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([hostOnly]));
     universe.invalidateRuntimeFacts();
     clock.value += 1_000;
-    universe.reconcile(hostSnapshot([{ ...hostOnly, observedAt: clock.now() }], clock.now()));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([{ ...hostOnly, observedAt: clock.now() }], clock.now()),
+    );
     expect(universe.snapshot().agents).toEqual([]);
   });
 
   test("restores the same Agent after restart when the conversation is proven", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Recover exact work" });
-    universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.invalidateRuntimeFacts();
 
     clock.value += 1_000;
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observedConversation("pane-9", "conversation-a", clock.now())], clock.now()),
     );
     expect(universe.snapshot().agents).toHaveLength(1);
@@ -965,29 +1145,34 @@ describe("Universe", () => {
   test("records deterministic semantic changes and acknowledges a durable catch-up cursor", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Catch up", priority: "P2" });
-    universe.reconcile(hostSnapshot([observation("pane-1", "worker", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1", "worker", "working")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
 
     expect(universe.snapshot().changes.map((item) => item.summary)).toEqual([
       "New goal · Catch up",
       "New agent observed · worker",
+      "Agent returned live · worker",
       "Assignment changed · worker → Catch up",
     ]);
     expect(universe.execute({ type: "AcknowledgeCatchUp" })).toEqual({
       ok: true,
-      checkpointSequence: 3,
+      checkpointSequence: 4,
     });
     expect(universe.snapshot().operatorCheckpoint).toEqual({
-      lastSequence: 3,
+      lastSequence: 4,
       acknowledgedAt: clock.now(),
     });
 
     clock.value += 1_000;
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-1", "worker", "blocked", clock.now())], clock.now()),
     );
     expect(universe.snapshot().changes.at(-1)).toMatchObject({
-      sequence: 4,
+      sequence: 5,
       outcome: "attention",
       summary: "Agent state · worker · working → blocked",
     });

@@ -479,6 +479,8 @@ describe("agent launch coordinator", () => {
     });
     const adopted = universe.execute({
       type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
       harnessId: "codex",
       nativeConversationRef: {
         harnessId: "codex",

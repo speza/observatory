@@ -5,7 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MockHostAdapter } from "../../../src/hosts/mock/adapter.ts";
 import { createMockScenario } from "../../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../../src/hosts/mock/seed.ts";
-import { FixedClock, hostSnapshot, makeUniverse } from "../../../src/universe/test-support.ts";
+import {
+  FixedClock,
+  hostSnapshot,
+  makeUniverse,
+  admitObservedConversationsAndReconcile,
+} from "../../../src/universe/test-support.ts";
 import type { Projection, UniverseMapProjection } from "../../../src/projection/types.ts";
 import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
 import {
@@ -68,8 +73,8 @@ describe("production web Atlas", () => {
     const scenario = createMockScenario("portfolio");
     const host = new MockHostAdapter({ clock, scenario });
     const { universe } = makeUniverse({ clock });
-    expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
-    expect(seedMockPortfolio(universe)).toEqual({ createdGoals: 12, assignedAgents: 71 });
+    const snapshot = await Effect.runPromise(host.snapshot());
+    expect(seedMockPortfolio(universe, snapshot)).toEqual({ createdGoals: 12, assignedAgents: 71 });
 
     const baseProjection = mapProjection(
       universe.project({ kind: "universe-map", now: clock.now() }),
@@ -200,8 +205,8 @@ describe("production web Atlas", () => {
     const clock = new FixedClock(50_000);
     const host = new MockHostAdapter({ clock, scenario: createMockScenario("portfolio") });
     const { universe } = makeUniverse({ clock });
-    expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
-    expect(seedMockPortfolio(universe)).toEqual({ createdGoals: 12, assignedAgents: 71 });
+    const snapshot = await Effect.runPromise(host.snapshot());
+    expect(seedMockPortfolio(universe, snapshot)).toEqual({ createdGoals: 12, assignedAgents: 71 });
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
     const crowdedProjection: UniverseMapProjection = {
       ...projection,
@@ -238,7 +243,8 @@ describe("production web Atlas", () => {
     universe.execute({ type: "CreateGoal", title: "admin" });
     universe.execute({ type: "CreateGoal", title: "observatory - general" });
     universe.execute({ type: "CreateGoal", title: "synthetic product / companion" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot(
         Array.from({ length: 18 }, (_, index) => ({
           nativeId: `pane-${index}`,

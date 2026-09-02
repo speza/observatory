@@ -1,3 +1,4 @@
+import type { HostSnapshot } from "../types.ts";
 import type { Universe } from "../../universe/universe.ts";
 
 export interface MockSeedResult {
@@ -145,8 +146,29 @@ const nativeIdsForRange = (range: readonly [number, number]): readonly string[] 
     (_, index) => `mock-p${String(range[0] + index).padStart(2, "0")}`,
   );
 
-export const seedMockPortfolio = (universe: Universe): MockSeedResult => {
+export const seedMockPortfolio = (
+  universe: Universe,
+  hostSnapshot: HostSnapshot,
+): MockSeedResult => {
   if (universe.snapshot().goals.length > 0) return { createdGoals: 0, assignedAgents: 0 };
+
+  for (const observation of hostSnapshot.agents) {
+    const reference = observation.harnessEvidence?.nativeConversationRef;
+    if (!reference) continue;
+    const admitted = universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: reference.harnessId,
+      nativeConversationRef: reference,
+      displayName: observation.displayName,
+      workspaceRef: observation.worktree,
+      observedAt: observation.observedAt,
+    });
+    if (!admitted.ok) throw new Error(admitted.error ?? "Could not admit mock Agent.");
+  }
+  const reconciled = universe.reconcile(hostSnapshot);
+  if (!reconciled.accepted)
+    throw new Error(reconciled.error ?? "Could not reconcile admitted mock Agents.");
 
   const scaleFixture = universe.snapshot().agents.length >= 70;
   const selectedGoals: readonly MockGoalSeed[] = scaleFixture

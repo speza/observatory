@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { makeUniverse, hostSnapshot } from "../universe/test-support.ts";
+import {
+  admitObservedConversationsAndReconcile,
+  makeUniverse,
+  hostSnapshot,
+} from "../universe/test-support.ts";
 
 const observation = (
   nativeId: string,
@@ -25,7 +29,8 @@ const observation = (
 describe("projections", () => {
   test("exposes an ID-backed provider session only in its explicit inspector projection", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         {
           ...observation("pane", "private session"),
@@ -61,7 +66,8 @@ describe("projections", () => {
 
   test("never exposes a provider transcript path through the inspector", () => {
     const { universe, clock } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         {
           ...observation("pane", "private session"),
@@ -92,7 +98,8 @@ describe("projections", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "P0 goal", priority: "P0" });
     universe.execute({ type: "CreateGoal", title: "P2 goal", priority: "P2" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         observation("p1", "blocked agent", "blocked"),
         observation("p2", "unassigned"),
@@ -123,7 +130,10 @@ describe("projections", () => {
       priority: "P0",
       systemId: "system-1",
     });
-    universe.reconcile(hostSnapshot([observation("p1", "working agent", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("p1", "working agent", "working")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
 
     const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
@@ -143,7 +153,8 @@ describe("projections", () => {
   test("groups agents by observed code context without changing goal assignment", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Cross-repository outcome" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         observation("repo-a-1", "repo a worker", "working", "synthetic/repo-a", "/trees/a-1"),
         observation("repo-a-2", "repo a reviewer", "blocked", "synthetic/repo-a", "/trees/a-2"),
@@ -175,7 +186,8 @@ describe("projections", () => {
 
   test("keeps missing repository identity visibly grouped as an unknown context", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         {
           ...observation("unknown", "unknown workspace"),
@@ -194,7 +206,8 @@ describe("projections", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Copilot dev mode UI" });
     universe.execute({ type: "CreateGoal", title: "Other accepted work" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         observation("target", "target agent", "working", "synthetic/repo-a", "/trees/target", {
           id: "container-ui",
@@ -284,7 +297,8 @@ describe("projections", () => {
 
   test("projects code contexts as a stable map with agents around each context", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([
         observation("repo-a-1", "repo a worker", "working", "synthetic/repo-a", "/trees/a-1"),
         observation("repo-a-2", "repo a reviewer", "idle", "synthetic/repo-a", "/trees/a-2"),
@@ -320,7 +334,7 @@ describe("projections", () => {
       description: "needle description",
     });
     universe.execute({ type: "CreateGoal", title: "Other" });
-    universe.reconcile(hostSnapshot([observation("pane", "worker")]));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane", "worker")]));
     universe.execute({
       type: "RenameAgent",
       agentId: "agent-1",
@@ -345,7 +359,10 @@ describe("projections", () => {
   test("does not surface attention for agents hidden under archived goals", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Archived goal" });
-    universe.reconcile(hostSnapshot([observation("pane", "blocked", "blocked")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "blocked", "blocked")]),
+    );
     universe.execute({
       type: "AssignAgent",
       agentId: "agent-1",
@@ -361,7 +378,10 @@ describe("projections", () => {
 
   test("surfaces a live archived Agent as attention without restoring it", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(hostSnapshot([observation("pane", "archived worker", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "archived worker", "working")]),
+    );
     universe.execute({ type: "ArchiveAgent", agentId: "agent-1" });
 
     const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
@@ -377,7 +397,7 @@ describe("projections", () => {
   test("inspector reports host facts without making infrastructure nodes", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Goal" });
-    universe.reconcile(hostSnapshot([observation("pane", "worker")]));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane", "worker")]));
     const projection = universe.project({
       kind: "inspector",
       target: { type: "agent", id: "agent-1" },
@@ -392,7 +412,8 @@ describe("projections", () => {
   test("projects a stable portfolio of goal bodies and direct satellites", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal", priority: "P0" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("pane-a", "satellite-a"), observation("pane-b", "satellite-b")]),
     );
     universe.execute({
@@ -426,7 +447,8 @@ describe("projections", () => {
   test("projects unassigned agents into a stable neutral inbox sector", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal" });
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("assigned", "assigned"), observation("unassigned", "unassigned")]),
     );
     universe.execute({
@@ -446,10 +468,14 @@ describe("projections", () => {
 
   test("preserves a confirmed-absent unassigned conversation without false attention", () => {
     const { universe } = makeUniverse();
-    universe.reconcile(
+    admitObservedConversationsAndReconcile(
+      universe,
       hostSnapshot([observation("live", "live agent"), observation("missing", "stale agent")]),
     );
-    universe.reconcile(hostSnapshot([observation("live", "live agent")], 1_005_000));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("live", "live agent")], 1_005_000),
+    );
 
     const projection = universe.project({ kind: "command-centre", now: 1_005_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
@@ -465,13 +491,19 @@ describe("projections", () => {
   test("groups only post-checkpoint changes into a deterministic catch-up projection", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Catch-up goal" });
-    universe.reconcile(hostSnapshot([observation("pane", "worker", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "working")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.execute({ type: "AcknowledgeCatchUp" });
 
     clock.value += 1_000;
     universe.execute({ type: "SetGoalPriority", goalId: "goal-1", priority: "P0" });
-    universe.reconcile(hostSnapshot([observation("pane", "worker", "done")], clock.now()));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "done")], clock.now()),
+    );
     const projection = universe.project({ kind: "catch-up", now: clock.now() });
     if (projection.kind !== "catch-up") throw new Error("wrong projection");
 
@@ -500,14 +532,23 @@ describe("projections", () => {
   test("synthesises resolved attention from one Agent trajectory", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Resolve operator input" });
-    universe.reconcile(hostSnapshot([observation("pane", "worker", "working")]));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "working")]),
+    );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
     universe.execute({ type: "AcknowledgeCatchUp" });
 
     clock.value += 1_000;
-    universe.reconcile(hostSnapshot([observation("pane", "worker", "waiting")], clock.now()));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "waiting")], clock.now()),
+    );
     clock.value += 1_000;
-    universe.reconcile(hostSnapshot([observation("pane", "worker", "idle")], clock.now()));
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "idle")], clock.now()),
+    );
 
     const projection = universe.project({ kind: "catch-up", now: clock.now() });
     if (projection.kind !== "catch-up") throw new Error("wrong projection");

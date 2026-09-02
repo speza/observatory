@@ -309,14 +309,17 @@ reliable ratio exists.
 
 An observation targets an exact
 `(harnessId, continuityScopeId, nativeConversationRef)` and
-`providerInstanceId`. The coordinator resolves that sensitive reference to an
-accepted Agent server-side.
+`providerInstanceId`. The coordinator asks Universe to resolve that sensitive
+reference to an accepted Agent server-side. A scoped provider reference may
+correlate with one compatible unscoped managed-launch identity only when no
+conflicting scoped identity exists.
 
-An unknown observation remains uncorrelated. It does not create, assign or
-mutate an Agent. Only provider catalogue ingestion through `ConversationTracker`
-may admit a new conversation or expose it in conversation history. Workspace,
-cwd, title, process name and recency can rank catalogue entries but cannot
-establish identity.
+An unknown observation remains uncorrelated. It does not create, assign, mutate
+or admit an Agent. Provider catalogue ingestion through `ConversationTracker`
+may expose a conversation in history, but admission requires an explicit add
+action or a proven Observatory-managed new launch. Workspace, cwd, title,
+process name and recency can rank catalogue entries but cannot establish
+identity.
 
 ### Provenance and freshness
 

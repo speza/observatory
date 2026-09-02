@@ -50,7 +50,7 @@ const createReconcile = (
       return result.error ?? `${hostLabel} reconciliation rejected the snapshot.`;
     if (!snapshot.available)
       return `${hostLabel} unavailable · stored state retained${snapshot.error ? ` · ${snapshot.error}` : ""}`;
-    return `${hostLabel} refreshed · ${snapshot.agents.length} agents · ${result.addedAgentIds.length} new · ${result.staleAgentIds.length} stale`;
+    return `${hostLabel} refreshed · ${snapshot.agents.length} executions · ${result.updatedAgentIds.length} tracked updates · ${result.staleAgentIds.length} absent`;
   });
 
 export const createObservatoryRuntime = (): ObservatoryRuntime => {
@@ -95,7 +95,8 @@ export const initializeObservatoryRuntime = (
       ? createReconcile(runtime.host, runtime.universe, reconcileSnapshot)
       : runtime.reconcile;
     if (runtime.useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
-      const seeded = seedMockPortfolio(runtime.universe);
+      const snapshot = yield* runtime.host.snapshot();
+      const seeded = seedMockPortfolio(runtime.universe, snapshot);
       if (seeded.createdGoals > 0)
         message += ` · seeded ${seeded.createdGoals} goals/${seeded.assignedAgents} agents`;
     }
