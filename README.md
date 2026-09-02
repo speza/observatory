@@ -1,7 +1,22 @@
-# Observatory
+<p align="center">
+  <img src="docs/assets/observatory-logo.svg" width="112" alt="Observatory logo">
+</p>
+
+<h1 align="center">Observatory</h1>
+
+<p align="center">
+  <a href="https://github.com/speza/observatory/actions/workflows/ci.yml"><img src="https://github.com/speza/observatory/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
 
 Observatory is a local, goal-centred GUI for supervising many AI agent
 executions across providers, repositories and Git worktrees.
+
+> [!IMPORTANT]
+> Observatory is an experimental, early-stage personal project under active
+> development. Interfaces and persisted schemas may change without compatibility
+> migrations.
+
+![The Observatory Atlas showing a synthetic multi-goal agent portfolio](docs/assets/observatory-atlas.png)
 
 It addresses the gap between increasingly autonomous execution and human
 supervision. The product should answer five questions quickly:
@@ -52,10 +67,20 @@ evidence; they are not maintained application code.
 
 ## Run
 
-Install and verify:
+### Prerequisites
+
+- [Bun](https://bun.sh/) 1.3.14 or newer.
+- For live agent supervision, [Herdr](https://herdr.dev/docs/) 0.8.2 or newer
+  and at least one supported agent harness: Claude Code, Codex or Pi.
+- Mock mode requires no Herdr installation, provider login or local agent
+  history.
+
+Clone, install and verify:
 
 ```sh
-bun install
+git clone https://github.com/speza/observatory.git
+cd observatory
+bun install --frozen-lockfile
 bun run check
 bun test
 ```
@@ -190,3 +215,7 @@ check maintained source. Disposable prototypes are excluded deliberately.
 - [Provider-session continuity and recovery](docs/specs/provider-session-continuity-and-recovery.md)
 - [Local web walking slice](docs/specs/local-web-observatory-walking-slice.md)
 - [Application review and recommendations](docs/reviews/2026-08-27-application-review.md)
+
+## Licence
+
+Observatory is licensed under the [Apache License 2.0](LICENSE).

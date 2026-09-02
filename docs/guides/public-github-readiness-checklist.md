@@ -26,37 +26,42 @@ from private to public.
 - [x] Confirm committed host fixtures are synthetic or sanitised.
 - [x] Perform an initial scan of tracked files and reachable Git objects for
       common credential signatures.
-- [ ] Run Gitleaks or an equivalent dedicated scanner over the complete rewritten
-      history.
-- [ ] Review all tracked documentation, fixtures, test data and Git URLs for
-      private names, paths, credentials, transcripts or session identifiers.
+- [x] Run Gitleaks over the complete rewritten local history.
+- [x] Review tracked documentation, fixtures, test data, email addresses, local
+      paths and Git URLs for private names, credentials, transcripts or session
+      identifiers.
 - [x] Confirm no unintended lockfiles or generated files are untracked after
       the history rewrite. Repeat this check immediately before publication.
 
 ## 3. Public project presentation
 
-- [ ] Choose and add a project licence. Use Apache-2.0 or MIT for open-source
-      reuse, or document an intentional source-visible/no-licence decision.
-- [ ] Add an early-stage stability notice near the top of `README.md`.
-- [ ] Add prerequisites, including the supported Bun version, Herdr requirement
+- [x] Licence the project under Apache-2.0.
+- [x] Add an experimental, early-stage stability notice near the top of
+      `README.md`.
+- [x] Add prerequisites, including the supported Bun version, Herdr requirement
       for live mode and the host-independent mock path.
-- [ ] Add one strong screenshot or short recording of the synthetic mock
-      portfolio near the top of `README.md`.
-- [ ] Set the GitHub description, topics and social preview image.
-- [ ] Review naming conflicts with other projects named Observatory and explain
-      the scope clearly if retaining the name.
+- [x] Add the project mark and a screenshot of the synthetic mock portfolio near
+      the top of `README.md`.
+- [x] Set the GitHub description and topics.
+- [ ] Set the GitHub social preview image from the synthetic Atlas screenshot.
+- [x] Review naming conflicts with other projects named Observatory and explain
+      the agent-supervision scope clearly while retaining the name.
 
 ## 4. Public engineering baseline
 
-- [ ] Add GitHub Actions CI for frozen dependency installation, checks, tests and
+- [x] Add GitHub Actions CI for frozen dependency installation, checks, tests and
       the web build.
-- [ ] Enable GitHub secret scanning and dependency alerts where available.
-- [ ] Decide whether to protect `main` once the repository is public.
+- [x] Enable GitHub dependency alerts and automated security fixes.
+- [ ] Enable GitHub secret scanning and push protection after making the
+      repository public; the private repository is not currently eligible.
+- [x] Keep `main` unprotected while this remains a solo experimental project
+      developed directly on trunk; revisit this before accepting contributors.
 - [x] Run `bun run format`.
 - [x] Run `bun run check`.
 - [x] Run `bun test`.
 - [x] Run `bun run build:web`.
-- [ ] Dogfood the synthetic product with `bun run web:mock`.
+- [x] Dogfood the synthetic product with `bun run web:mock` and use only its
+      clean database for public imagery.
 
 ## 5. Publication
 
