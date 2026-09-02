@@ -83,6 +83,6 @@ Temporary working checklist for the pre-publication audit. Keep the repository p
 - [x] `bun audit`
 - [ ] Gitleaks scan passes on the rewritten reachable history.
 - [x] Documentation links pass.
-- [ ] Working tree is clean and `main` matches the intended remote commit.
-- [ ] CI is green.
+- [x] Working tree is clean and `main` matches the intended remote commit.
+- [x] CI is green.
 - [x] Repository remains private until explicit authorization to publish.
