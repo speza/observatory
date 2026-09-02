@@ -6,10 +6,10 @@ Temporary working checklist for the pre-publication audit. Keep the repository p
 
 - [x] Replace the real employer-specific goal name in `web/src/atlas/Atlas.test.tsx` with a synthetic name.
 - [x] Search the maintained tree case-insensitively for employer names, private project names, personal paths, credentials, and real session material.
-- [ ] Rewrite reachable `main` history so the old test value is not present in public history.
-- [ ] Coordinate the rewrite with existing worktrees so an old branch cannot merge the removed history back into `main`.
-- [ ] Verify all public/reachable refs are clean after the rewrite.
-- [ ] Rewrite remaining `Amp <amp@ampcode.com>` author identities and ensure all reachable commits use `Sam Perrin <samtperrin@gmail.com>`.
+- [x] Rewrite reachable `main` history so the old test value is not present in public history.
+- [x] Coordinate the rewrite with existing worktrees so an old branch cannot merge the removed history back into `main`.
+- [x] Verify all public/reachable refs are clean after the rewrite.
+- [x] Preserve existing Amp-authored history by owner decision; new audit commits use `Sam Perrin <samtperrin@gmail.com>`.
 
 ## 2. Close the loopback HTTP boundary
 
@@ -85,4 +85,4 @@ Temporary working checklist for the pre-publication audit. Keep the repository p
 - [x] Documentation links pass.
 - [ ] Working tree is clean and `main` matches the intended remote commit.
 - [ ] CI is green.
-- [ ] Repository remains private until explicit authorization to publish.
+- [x] Repository remains private until explicit authorization to publish.
