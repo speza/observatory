@@ -2,12 +2,11 @@
 
 Status: accepted and implemented
 
-Date: 2026-08-31
+Updated: 2026-09-02
 
-This is the canonical conversation identity and recovery model. It supersedes
-the earlier admission, Session import and host-first reconciliation model and
-amends [Agent and linked execution model](agent-execution-model.md) and
-[Agent launch and workspace preparation](session-launch.md).
+This is the canonical conversation identity and recovery model. It replaces the
+earlier admission, Session import and host-first reconciliation model and owns
+the identity rules used by [Agent launch and workspace preparation](session-launch.md).
 
 ## Decision summary
 
@@ -624,7 +623,7 @@ canonicalisation, automatic admission and Conversation history behind one
 interface. Production submits all accepted host and provider observations
 through `Universe.observe`.
 
-## Implementation plan
+## Implementation record
 
 ### Phase 0 — ratify and fixture the model — complete
 
@@ -666,7 +665,7 @@ all produce one unassigned-or-assigned Agent without import.
 Gate: concurrent same-cwd launches cannot cross-bind, and loss/reappearance of
 Herdr never duplicates or stales an Agent.
 
-### Phase 4 — reset the experimental database — accepted
+### Phase 4 — reset the experimental database — complete
 
 - Do not ship compatibility code for host-first Agent records.
 - Reset the local database once when adopting the conversation-first schema.

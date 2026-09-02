@@ -1,8 +1,8 @@
 # Provider-native Agent observations
 
-Status: accepted design; local Claude Code, Codex and Pi reference reporters implemented
+Status: metadata-only Claude Code, Codex and Pi observation path implemented
 
-Date: 2026-08-30
+Updated: 2026-09-02
 
 Depends on:
 
@@ -584,9 +584,9 @@ The Codex hooks page explicitly warns that `main`-branch schemas may be ahead
 of the current release and that transcript format is unstable. The integration
 uses the release documentation and never parses transcripts.
 
-## Delivery plan
+## Implementation evidence
 
-### Implemented first pass
+### Current implementation
 
 The first implementation covers the deterministic Slice 1 path and the safe
 acquisition boundary needed to dogfood three providers:
@@ -625,7 +625,7 @@ unconfigured default activation, so `claudeObservationOutbox` and
 `bun run web:mock` loads a mock harness package through the same registry and
 source contract; it does not seed the observation store directly.
 
-### Slice 0 — contract and provider spikes
+### Contract and provider evidence
 
 - Add synthetic V1 types, bounds and a shared source contract suite.
 - Verify exact installed Claude and Codex versions and document supported event
@@ -638,7 +638,7 @@ source contract; it does not seed the observation store directly.
 Gate: two synthetic sources express identical normalised claims with no
 provider brand switch in coordinator, persistence or projections.
 
-### Slice 1 — deterministic kernel path
+### Deterministic kernel path (implemented)
 
 - Add a kernel-owned operational observation repository to the clean-break
   SQLite schema for envelopes, latest claims, source health and cursors.
@@ -652,7 +652,7 @@ provider brand switch in coordinator, persistence or projections.
 Gate: synthetic observations enrich every target projection without changing
 an Agent/Goal record or the `System -> Goal -> Agent` topology.
 
-### Slice 2 — Claude Code reference source (implemented locally)
+### Claude Code reference source (implemented locally)
 
 - Add an explicit reviewed local reporter and bounded authenticated sink.
 - Translate only the verified event matrix; add status-line context pressure
@@ -662,7 +662,7 @@ an Agent/Goal record or the `System -> Goal -> Agent` topology.
 Gate: a real Claude session opens a permission signal, reports response stop
 and recovers after Observatory restart with no transcript or raw payload stored.
 
-### Slice 3 — Codex reference source (implemented locally)
+### Codex reference source (implemented locally)
 
 - Implement the same contract from supported Codex hooks.
 - Leave unsupported failure/context claims explicit.
@@ -678,7 +678,7 @@ also supplies a provider-owned session catalogue and exact start/resume plans
 through the existing harness seam; no Pi brand enters the coordinator,
 persistence or projections.
 
-### Slice 4 — measured additions
+### Measured additions
 
 Consider normalised usage, remote reporter transport or an optional live stream
 only after real workflows show the need and both reference sources prove the

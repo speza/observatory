@@ -1,8 +1,8 @@
 # Observatory plugin system
 
-Status: Slice 1 implemented
+Status: local package loading, contributed capabilities and contributor proof implemented
 
-Date: 2026-08-27
+Updated: 2026-09-02
 
 Implementation checkpoint: the versioned local manifest loader, trusted
 in-process registry, bounded process context, health diagnostics, synthetic
@@ -36,9 +36,8 @@ framework before one capability proves useful.
   claim sandboxing.
 - A plugin contributes typed capabilities through a versioned SDK. It does not
   receive the Universe, SQLite connection, concrete `SessionHost` or renderer.
-- The first contributed capability is `code-host`, implemented by GitHub and a
-  synthetic test plugin. The next accepted category is `agent-harness`, driven
-  by the concrete new-session, exact-resume and cold-restart workflow. See
+- The contributed capabilities are `code-host` and `agent-harness`, implemented
+  by built-in, synthetic and external example packages. See
   [Agent harness plugins](agent-harness-plugins.md).
 - Built-in and third-party plugins use the same manifest, activation lifecycle
   and contract tests.
@@ -206,9 +205,9 @@ language becomes a real requirement. Do not build both transports initially.
   plugin can be built and enabled without importing Observatory internals.
 - Core tests run with no third-party plugins installed.
 
-## Delivery plan
+## Implementation record
 
-### Slice 1 — real plugin seam
+### Slice 1 — real plugin seam (implemented)
 
 - Define manifest schemas, plugin lifecycle types and `code-host` capability.
 - Implement the configured loader, registry, bounded context and status
@@ -217,14 +216,14 @@ language becomes a real requirement. Do not build both transports initially.
 - Keep Herdr on the existing `SessionHost` seam; do not wrap it in a plugin
   pass-through.
 
-### Slice 2 — GitHub through the plugin system
+### Slice 2 — GitHub through the plugin system (implemented)
 
 - Package the GitHub implementation as a built-in plugin using the same SDK.
 - Connect its `CodeHostingProvider` contribution to Agent repository status.
 - Add local configuration and a plugin status/diagnostics response.
 - Prove disabled, missing `gh`, unauthenticated, rate-limited and healthy states.
 
-### Slice 3 — contribution proof
+### Slice 3 — contribution proof (implemented baseline)
 
 - Extract/publish the SDK when the interface has survived GitHub dogfood.
 - Add the contributor guide and minimal example plugin.

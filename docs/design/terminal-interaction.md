@@ -2,26 +2,20 @@
 
 Status: accepted web-only V1 implementation decision
 
-Updated: 2026-08-27
+Updated: 2026-09-02
 
-Related: [Observatory technical architecture](technical-architecture.md),
-[agent and linked execution model](../specs/agent-execution-model.md)
+Related: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision summary
 
 Observatory renders hosted Agent terminals in the browser with xterm.js. It
 does not own the PTY, process, pane scrollback or durable terminal state. Those
-remain owned by the configured `SessionHost`; Herdr is the required live V0/V1
-host.
+remain owned by the configured `SessionHost`; Herdr is the required live host.
 
 The same contract powers linked execution tabs for the selected Agent. A link
 may represent an observed shell, a host-prepared shell in the Agent worktree or
 a recognised sibling Agent. It is contextual UI, not another Observatory Agent
 or a new node in Goal → Agent topology.
-
-The native OpenTUI terminal implementation was retired with the TUI on
-2026-08-27. The generic host capability and its adapter tests remain production
-architecture; the terminal-cell renderer and native interaction rules do not.
 
 ## Ownership model
 

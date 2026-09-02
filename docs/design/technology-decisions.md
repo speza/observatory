@@ -2,7 +2,7 @@
 
 Status: accepted for the web-only V1 product
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
@@ -23,7 +23,7 @@ Testing                   bun test
 Browser renderer          React with native SVG/CSS
 Browser terminal          xterm.js over host-owned streams
 Build/dev server          Vite
-Live agent host           Herdr (required for V0/V1 live mode)
+Live agent host           Herdr (required for live mode)
 Current local transport   Loopback HTTP + SSE
 ```
 
@@ -158,28 +158,10 @@ Versions are pinned where rapid tool evolution could make builds
 non-reproducible. Commit the Bun lockfile and upgrade deliberately after the
 domain, adapter, API and browser checks pass.
 
-## Source layout
-
-```text
-src/
-├── universe/            # accepted semantic state and commands
-├── attention/           # deterministic attention rules
-├── projection/          # renderer-facing read models
-├── spatial/             # pure logical positions and viewport math
-├── runtime/             # shared composition
-├── web/                 # loopback API and application entry point
-├── persistence/sqlite/  # durable implementation detail
-├── hosts/herdr/         # concrete live-host translation
-├── hosts/mock/          # deterministic evidence path
-├── session-launch/      # workspace/host launch coordination
-└── workspaces/          # bounded local workspace capabilities
-
-web/src/                 # React, SVG, CSS and xterm.js client
-prototypes/              # isolated historical evidence only
-```
-
-Do not create packages or pass-through layers before a second deployment unit
-or consumer creates a real seam.
+Source folders follow the module ownership documented in the
+[technical architecture](technical-architecture.md). Directory layout may evolve
+without changing those interfaces. Do not add pass-through layers before a real
+variation or consumer creates a seam.
 
 ## Alternatives and reconsideration triggers
 

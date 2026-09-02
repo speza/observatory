@@ -1,133 +1,134 @@
 # Observatory feature roadmap
 
-Status: accepted web-first direction; plugin and harness baseline implemented
-
-Date: 2026-08-30
+Status: current product direction
+Updated: 2026-09-02
 
 Depends on:
 
 - [Goal-centred agent orchestration map](../design/agent-orchestration-map.md)
-- [Observatory technical architecture](../design/technical-architecture.md)
-- [Local web Observatory walking slice](local-web-observatory-walking-slice.md)
-- [Agent harness plugins](agent-harness-plugins.md)
+- [Technical architecture](../design/technical-architecture.md)
 - [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
+- [Agent harness plugins](agent-harness-plugins.md)
 - [Provider-native Agent observations](provider-native-agent-observations.md)
-- [Agent repository and code-host plugins](agent-repository-and-code-host-plugins.md)
+- [Repository status and code-host plugins](agent-repository-and-code-host-plugins.md)
 
 ## Product decision
 
-Observatory has one maintained client: the local web GUI. The native TUI was
-retired after proving the product boundaries because graphical interfaces have
-the stronger long-term fit for portfolio density, evidence, diffs, multiple
-terminal surfaces, accessibility and rapid iteration.
+Observatory has one maintained client: the local React GUI. The spatial Atlas is
+the primary product hypothesis. Ledger, Needs you, Catch up, Inbox, inspector,
+workspace review and terminals are supporting lenses over the same state.
 
-`CORE` owns durable meaning, commands, persistence, reconciliation, projections
-and host capabilities. `WEB` owns the Atlas, Ledger, attention and review
-experience. A future command-line interface may start the server, report status
-or submit structured commands, but it must not become a second interactive UI.
-Herdr remains the terminal-native fallback for provider-specific or recovery
-workflows.
+The immediate goal is not broader infrastructure. It is to prove that the
+implemented local product improves human supervision of realistic concurrent
+agent work.
 
-## Current baseline
+## Implemented baseline
 
-| Feature                                          | CORE       | WEB  | Note                                 |
-| ------------------------------------------------ | ---------- | ---- | ------------------------------------ |
-| System → Goal → Agent topology and assignment    | Done       | Done | Durable semantic baseline            |
-| Goal lifecycle, priority and accepted position   | Done       | Done | Auto-repair plus drag-to-pin         |
-| SQLite persistence and atomic commands           | Done       | —    | Browser never accesses SQLite        |
-| Herdr reconciliation and uncertainty             | Done       | Done | Snapshot polling walking slice       |
-| Composed Needs-you decisions                     | Done       | Done | One subject over independent claims  |
-| Goal-level Catch Up synthesis                    | Done       | Done | Explicit acknowledgement             |
-| Atlas, Ledger, Needs you and Inbox               | Projection | Done | One model, several lenses            |
-| Host-owned terminal and linked executions        | Done       | Done | xterm.js renders host streams        |
-| Agent launch and workspace preparation           | Done       | Done | Shared coordinator                   |
-| Agent-harness plugins and exact resume           | Done       | Done | Claude and Codex live-validated      |
-| Conversation tracking and supporting history     | Done       | Done | Automatic admission and exact resume |
-| Contributed plugins and repository status        | Done       | Done | Inspector evidence live              |
-| Host-synchronised close and archive              | Done       | Done | Inspector uses close before archive  |
-| Read-only working-tree review                    | Done       | Done | Bounded server-side path resolution  |
-| Search                                           | Done       | Done | Bounded type-to-find Atlas palette   |
-| Related-Agent evidence                           | Done       | Next | Immediate discovery slice            |
-| Verification and handoff evidence                | Next       | Next | Major trust gap                      |
-| Rich deterministic attention                     | Next       | Next | Major usefulness gap                 |
-| Metadata-only provider-native observations       | Next       | Next | Evidence fusion through harnesses    |
-| Typed delegation/result/dependency relationships | Next       | Next | Preserve provenance                  |
-| Cross-agent Git and integration warnings         | Next       | Next | Evidence, not map nodes              |
+| Capability                                            | State       | Evidence                                                  |
+| ----------------------------------------------------- | ----------- | --------------------------------------------------------- |
+| System → Goal → Agent organisation                    | Implemented | Durable Universe and SQLite tests                         |
+| Human Goal priority, completion, archive and position | Implemented | Command and restart tests                                 |
+| Conversation-first Agent identity                     | Implemented | Provider-first/host-first convergence tests               |
+| Herdr execution reconciliation                        | Implemented | Shared host contract and live smoke path                  |
+| Deterministic mock host                               | Implemented | Healthy, degraded and recovery scenarios                  |
+| Atlas and Ledger                                      | Implemented | Shared projection and browser tests                       |
+| Needs-you decision composition                        | Implemented | Independent host/provider claims compose per Agent        |
+| Durable Goal-level Catch up                           | Implemented | Explicit checkpoint and synthesis tests                   |
+| Inbox and Conversation history                        | Implemented | Automatic admission plus explicit historical add          |
+| New launch and exact resume                           | Implemented | Idempotent coordinator and browser gateway tests          |
+| Claude Code, Codex and Pi harnesses                   | Implemented | Plugin contract and live validation                       |
+| Metadata-only provider observations                   | Implemented | Activity, input, outcome and context evidence             |
+| Host-owned primary and linked terminals               | Implemented | Mock and Herdr stream contract tests                      |
+| Repository and code-host status                       | Implemented | Bounded local reader and plugin evidence                  |
+| Working-tree diff review                              | Implemented | Trusted Agent lookup and bounded diff tests               |
+| Host-synchronised close and archive                   | Implemented | Revalidation and failure-path tests                       |
+| Search and browser preference retention               | Implemented | Browser and projection tests                              |
+| Related-Agent evidence projection                     | Core only   | Deterministic projection exists; product workflow pending |
 
-## Product risks still to prove
+## Risks to prove
 
-1. **Verification is thin.** Runtime `done`, local repository state and bounded
-   pull-request/check facts are visible, but trustworthy result and handoff
-   evidence remains incomplete.
-2. **Needs-you coverage is narrow.** Result, input, lifecycle and uncertainty
-   claims now compose per subject, but downstream blockers, failed checks and
-   stalled work do not yet form a complete model.
-3. **Atlas geography is stable but not sufficiently semantic.** Goal membership
-   is clear; delegation, dependency, handoff and integration relationships are
-   not yet represented truthfully enough to prove that space beats a strong
-   Ledger.
-4. **The GUI needs full live-host sign-off.** Mock and API coverage are strong;
-   browser → Herdr terminal → return, host loss and resize/scroll need sustained
-   real use.
-5. **Atlas versus Ledger remains unproven.** Preference and visual character are
-   not evidence of faster, more accurate supervision.
+### Spatial value
 
-Provider transcript ingestion, a remotely accessible service, an AO-owned
-multiplexer, automatic assignment/completion and a generic graph engine remain
-non-goals.
+Atlas geography is stable, but it is not yet proved to outperform Ledger for
+orientation and catch-up. Visual character is not evidence. The decisive test is
+whether operators remember where work is and make fewer navigation errors after
+time away.
 
-## Delivery sequence
+### Verification depth
 
-### Now — discovery and context
+Runtime completion, provider outcome, local repository state, pull-request facts
+and working-tree diffs are visible, but trustworthy handoff and integration
+evidence remains incomplete. Observatory must help the operator decide, not
+merely make `done` prominent.
 
-1. Implement metadata-only Claude and Codex conversation catalogues, automatic
-   exact-live/new admission and a supporting Conversation history lens. Done.
-2. Prove laptop/Herdr restart as `dormant/resumable`, with exact resume into a
-   new execution and no automatic continuation.
-3. Expose related-Agent projections through the loopback API.
-4. Add related-Agent evidence with explicit adopt and dismiss commands.
-5. Preserve owning Goal, camera context and inspector for every related result.
-6. Complete live browser acceptance for terminal return and host loss.
-7. Dogfood repository/code-host status against real Agent pull requests and
-   preserve ambiguity when more than one candidate matches.
+### Attention coverage
 
-### Next — trust and daily operation
+Human-input requests, blocked/waiting state, result review and lifecycle
+uncertainty compose correctly. Failed checks, downstream blockers, stalled work
+and integration risk are not yet a complete model.
 
-1. Define a verification/evidence contract with synthetic evidence first.
-2. Add the versioned metadata-only AgentHarness observation source and prove
-   deterministic activity, input-request, turn-outcome and context-pressure
-   projections with synthetic evidence.
-3. Validate Claude Code and Codex through the same contract, with explicit
-   unsupported, stale and unavailable states and no transcript ingestion.
-4. Add deterministic returned-result, stalled, failed-check and downstream
-   blocker attention signals.
-5. Deepen the implemented result flow: reported done → Needs you → inspect
-   evidence → review diff/checks → accept, revise, close or archive.
-6. Harden terminal tabs, resize, release and host-loss recovery from real use.
-7. Add explicit semantic-density controls.
+### Daily reliability
 
-### Later — relationships and scale
+Mock and automated coverage are strong. Browser terminal return, host loss,
+restart recovery, long-running observation hooks and closeout still require
+sustained use against disposable real Agents.
 
-1. Add typed delegation, result, dependency and integration relationships.
-2. Surface cross-Agent workspace overlap, divergence and integration risk.
-3. Consider provider usage facts, richer read-only inspection or remote
-   observation transport only after the metadata slice proves useful.
-4. Evaluate a second production host only after Herdr workflows prove useful;
-   use it to validate `SessionHost`, not broaden the domain model.
+## Now: evaluate the implemented product
+
+1. Dogfood Atlas and Ledger over the same realistic 20–40 Agent portfolios.
+2. Run return-after-absence sessions at 24–72 hours and record missed decisions,
+   unnecessary Agent opens, completion time and confidence.
+3. Exercise browser → Herdr terminal → return, restart, host-loss and exact-resume
+   paths repeatedly with disposable work.
+4. Review real pull requests and dirty worktrees through the inspector and diff
+   surfaces; preserve ambiguous associations.
+5. Measure whether Needs you and Catch up replace manual reconstruction rather
+   than adding another inbox.
+6. Keep screenshots, fixtures and public evidence synthetic or sanitised.
+
+## Next: deepen trust and spatial meaning
+
+1. Define a typed verification and handoff evidence contract.
+2. Add failed-check, stalled, returned-result and downstream-blocker decisions
+   without creating one queue item per raw claim.
+3. Complete the human-controlled flow from reported result to inspect, revise,
+   accept, close or archive.
+4. Add the Related-Agent review/adopt/dismiss workflow over the existing
+   projection; never auto-assign from weak similarity.
+5. Introduce only the typed delegation, result, dependency or integration
+   relationships that improve concrete supervision tasks.
+6. Surface cross-Agent workspace overlap and integration risk as evidence, not
+   new organisational nodes.
+7. Add explicit semantic-density controls only if focus and Ledger do not solve
+   realistic Atlas density.
+
+## Later: broaden only after evidence
+
+- Evaluate a second production SessionHost to validate the existing seam, not to
+  broaden the Universe model.
+- Consider richer read-only provider or code-host facts when they improve a
+  measured decision workflow.
+- Consider remote observation or another client only after an explicit product
+  decision and a concrete local limitation.
+- Consider narrow automation only when its authority, preview, reversibility and
+  failure semantics are explicit.
+
+A daemon, remote control plane, Observatory-owned multiplexer, transcript
+pipeline, automatic completion/merge/archive and generic graph engine remain
+out of scope.
 
 ## Evaluation gate
 
-Compare Atlas and Ledger with the same 20–40 Agent world. The decisive session
-is a return after 24–72 hours of realistic changes. Measure whether the operator
-can:
+Compare Atlas and Ledger over identical state. After time away, measure whether
+the operator can:
 
 - explain active Goal state in under two minutes;
-- identify every item requiring judgment without opening every Agent;
-- find a named Goal or Agent and reach its context in under ten seconds;
-- catch up without losing orientation;
-- distinguish runtime completion from verified integration readiness; and
-- reach the correct terminal, artifact or review surface and return without
-  reconstructing their place.
+- identify every subject requiring judgment without opening every Agent;
+- find named work and reach its context in under ten seconds;
+- distinguish runtime completion from verified integration readiness;
+- reach the correct terminal or review surface and return without losing place;
+  and
+- recall stable Goal locations across sessions.
 
-If users consistently use Ledger or Herdr to orient, simplify or change the
-spatial product. Do not defend the Atlas by adding decoration.
+If Ledger or Herdr consistently wins orientation, simplify or change the spatial
+product. Do not defend Atlas by adding decoration.

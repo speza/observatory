@@ -29,15 +29,11 @@ owns the decision.
 These documents retain detailed invariants that are not repeated in the
 architecture overview.
 
-- [Agent and linked execution model](specs/agent-execution-model.md)
 - [Agent launch and workspace preparation](specs/session-launch.md)
-- [Agent closeout and host lifecycle](specs/agent-closeout-and-host-lifecycle.md)
 - [Agent harness plugins](specs/agent-harness-plugins.md)
 - [Provider-native Agent observations](specs/provider-native-agent-observations.md)
 - [Plugin system](specs/observatory-plugin-system.md)
 - [Repository status and code-host plugins](specs/agent-repository-and-code-host-plugins.md)
-- [Contextual linked execution surfaces](specs/contextual-companion-surfaces.md)
-- [Local web walking slice](specs/local-web-observatory-walking-slice.md)
 
 ## Guides and operations
 

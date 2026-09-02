@@ -2,14 +2,13 @@
 
 Status: implemented and live-validated
 
-Date: 2026-08-28
+Updated: 2026-09-02
 
 Depends on:
 
 - [Observatory plugin architecture](../design/plugin-architecture.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Agent launch and workspace preparation](session-launch.md)
-- [Agent and linked execution model](agent-execution-model.md)
 - [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 - [Provider-native Agent observations](provider-native-agent-observations.md)
 
@@ -356,12 +355,12 @@ path without installing a real provider CLI. Claude Code and Codex should be
 the first two real adapters because they prove that the interface handles
 different native resume command shapes.
 
-## Implementation plan
+## Implementation record
 
 Each phase has a usable evidence gate. The transitional path remains only as
 long as needed to keep `main` working; new harnesses must not extend it.
 
-### Phase 0: lock the recovery contract
+### Phase 0: recovery contract (implemented)
 
 - Add synthetic fixtures for fresh start, exact resume, Herdr-style automatic
   restore, replacement in the same host target and ambiguous cold restart.
@@ -374,7 +373,7 @@ Gate: the scenarios are executable as contract inputs, the current limitations
 are recorded as characterization evidence and `main` remains green. Each later
 phase promotes the relevant scenario to a passing acceptance assertion.
 
-### Phase 1: add the harness plugin seam
+### Phase 1: harness plugin seam (implemented)
 
 - Add `agent-harness` to the plugin manifest and SDK capability union.
 - Add `AgentHarness`, request/result, process-plan, opaque-reference and error
@@ -386,7 +385,7 @@ phase promotes the relevant scenario to a passing acceptance assertion.
 Gate: two synthetic harness implementations pass the same contract without
 importing host or Universe modules.
 
-### Phase 2: make host launch provider-neutral
+### Phase 2: provider-neutral host launch (implemented)
 
 - Add `launchExecution(AgentProcessPlan)` to `SessionHost` and its mock.
 - Add optional `HostHarnessEvidence` to host observations.
@@ -398,7 +397,7 @@ importing host or Universe modules.
 Gate: the mock and Herdr adapters pass the shared `SessionHost` contract, and a
 generic process plan can be launched without a provider name in the host API.
 
-### Phase 3: separate Agent identity from execution binding
+### Phase 3: separate Agent identity from execution binding (implemented)
 
 - Add durable harness/conversation identity and replaceable execution-binding
   persistence in a clean-break schema.
@@ -411,7 +410,7 @@ generic process plan can be launched without a provider name in the host API.
 Gate: a durable Agent keeps its Goal across a proved target change, while a
 replacement or ambiguous observation cannot inherit that Goal.
 
-### Phase 4: implement the first real harnesses
+### Phase 4: first production harnesses (implemented)
 
 - Add built-in Claude Code, Codex and Pi plugins with availability, new-session,
   exact-resume and continuity implementations.
@@ -424,7 +423,7 @@ replacement or ambiguous observation cannot inherit that Goal.
 Gate: each real adapter passes the shared harness contract with sanitised
 fixtures, including invalid references and exact-resume failure.
 
-### Phase 5: cut the coordinator and clients over
+### Phase 5: coordinator and browser cutover (implemented)
 
 - Inject the harness registry into the composition root and launch coordinator.
 - Source launch choices from available harness descriptors rather than
@@ -440,7 +439,7 @@ fixtures, including invalid references and exact-resume failure.
 Gate: the maintained web flow launches and assigns both real harnesses through
 the registry, with duplicate-request and delayed-observation coverage.
 
-### Phase 6: ship explicit restart recovery
+### Phase 6: explicit restart recovery (implemented)
 
 - Run the cold-restart sequence at composition-root startup and host reconnect.
 - Surface `restored`, `resumable`, `replaced`, `unknown` and `host unavailable`
@@ -452,7 +451,7 @@ the registry, with duplicate-request and delayed-observation coverage.
 Gate: restart AO, restart Herdr and restart the machine-equivalent test fixture;
 in every case the operator sees the correct state and no duplicate process.
 
-### Phase 7: remove transitional coupling
+### Phase 7: transitional coupling removal (implemented)
 
 - Delete `SessionHost.listLaunchOptions`, `HostLaunchRequest.agentKind` and
   provider command construction from `hosts/herdr/`.
@@ -465,7 +464,7 @@ Gate: adding a third synthetic harness changes only its plugin package and
 registration/configuration; a minimal synthetic host executes plans without
 changes to Universe, persistence, projection or renderer modules.
 
-### Phase 8: live validation
+### Phase 8: live validation (complete baseline)
 
 - Smoke new and resumed Claude Code and Codex sessions on real Herdr.
 - Exercise Herdr automatic restoration, agent replacement, unavailable CLI,
