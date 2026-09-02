@@ -39,7 +39,6 @@ architecture overview.
 
 - [Plugin contributor guide](guides/plugin-contributor.md)
 - [Provider observation hooks](guides/provider-observation-hooks.md)
-- [Public GitHub readiness checklist](guides/public-github-readiness-checklist.md)
 
 ## Historical evidence
 
