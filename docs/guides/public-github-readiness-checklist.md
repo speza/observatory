@@ -10,13 +10,13 @@ from private to public.
       moonlighting and acceptable-use agreements.
 - [x] Configure this repository to author new commits as
       `Sam Perrin <samtperrin@gmail.com>`.
-- [ ] Rewrite all reachable commit author and committer addresses from the work
+- [x] Rewrite all reachable commit author and committer addresses from the work
       address to `samtperrin@gmail.com`.
-- [ ] Remove employer names, repositories and other employer-specific details
+- [x] Remove employer names, repositories and other employer-specific details
       from the current tree and reachable history.
-- [ ] Remove machine-specific absolute paths from maintained documentation and
+- [x] Remove machine-specific absolute paths from maintained documentation and
       retained prototype evidence.
-- [ ] Verify every local worktree and branch after the history rewrite so old
+- [x] Verify every local worktree and branch after the history rewrite so old
       history cannot be pushed back accidentally.
 
 ## 2. Privacy and repository hygiene
@@ -30,8 +30,8 @@ from private to public.
       history.
 - [ ] Review all tracked documentation, fixtures, test data and Git URLs for
       private names, paths, credentials, transcripts or session identifiers.
-- [ ] Confirm no unintended lockfiles or generated files are untracked before
-      publication.
+- [x] Confirm no unintended lockfiles or generated files are untracked after
+      the history rewrite. Repeat this check immediately before publication.
 
 ## 3. Public project presentation
 
@@ -60,11 +60,13 @@ from private to public.
 
 ## 5. Publication
 
-- [ ] Create a local backup or immutable tag/reference before rewriting history.
-- [ ] Force-push the reviewed rewritten history while the repository is private.
-- [ ] Re-clone or reset every existing checkout and worktree to the rewritten
-      history.
-- [ ] Repeat the history privacy and credential scans against the remote.
+- [x] Create a private local bundle backup before rewriting history.
+- [x] Recreate the private GitHub repository and push only the reviewed rewritten
+      `main` history, removing the immutable pull-request ref from the old
+      repository.
+- [x] Reset every existing checkout and worktree to the rewritten history.
+- [x] Clone the recreated remote and repeat the identity, privacy and common
+      credential-signature scans.
 - [ ] Change `speza/observatory` visibility from private to public.
 - [ ] Verify the README, image, licence, CI and clone instructions on GitHub.
 - [ ] Pin the repository on the GitHub profile and add it to relevant CV or
