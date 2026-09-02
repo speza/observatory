@@ -232,9 +232,9 @@ home` panel is confusing and does not scale.
 ### FIND-002 — Repository details contradict each other
 
 - Status: Implemented and manually verified
-- The `synthetic-alerting` inspector resolves
-  `example/synthetic-alerting` and branch `main` in Code status, but also shows
-  Repository and Branch as `Unknown` below.
+- The `synthetic-alerting` inspector resolves `example/synthetic-alerting` and
+  branch `main` in Code status, but also shows Repository and Branch as
+  `Unknown` below.
 
 ### FIND-003 — Show operational IDs in the inspector
 

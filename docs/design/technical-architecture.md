@@ -1091,9 +1091,9 @@ V1 is local-only and single-user.
 - Do not execute instructions embedded in observed terminal output.
 - Do not automatically merge, delete worktrees or archive goals.
 
-Implementation and fixtures must remain clean-room: no employer code,
-confidential information, customer data, internal designs, credentials, work
-accounts or proprietary agent transcripts.
+Implementation and fixtures must remain clean-room: no employer or client
+code, confidential information, customer data, internal designs, credentials,
+work accounts or proprietary agent transcripts.
 
 ## Failure handling
 
