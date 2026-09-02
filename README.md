@@ -217,4 +217,4 @@ check maintained source. Disposable prototypes are excluded deliberately.
 
 ## Licence
 
-Observatory is licensed under the [Apache License 2.0](LICENSE).
+Observatory is licensed under the [MIT License](LICENSE).
