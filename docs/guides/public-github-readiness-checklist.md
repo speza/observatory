@@ -52,10 +52,10 @@ from private to public.
       the web build.
 - [ ] Enable GitHub secret scanning and dependency alerts where available.
 - [ ] Decide whether to protect `main` once the repository is public.
-- [ ] Run `bun run format`.
-- [ ] Run `bun run check`.
-- [ ] Run `bun test`.
-- [ ] Run `bun run build:web`.
+- [x] Run `bun run format`.
+- [x] Run `bun run check`.
+- [x] Run `bun test`.
+- [x] Run `bun run build:web`.
 - [ ] Dogfood the synthetic product with `bun run web:mock`.
 
 ## 5. Publication
