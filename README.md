@@ -208,13 +208,12 @@ check maintained source. Disposable prototypes are excluded deliberately.
 
 ## Documentation
 
+- [Documentation index](docs/README.md)
 - [Product design](docs/design/agent-orchestration-map.md)
 - [Technical architecture](docs/design/technical-architecture.md)
-- [Technology decisions](docs/design/technology-decisions.md)
 - [Feature roadmap](docs/specs/observatory-feature-roadmap.md)
-- [Provider-session continuity and recovery](docs/specs/provider-session-continuity-and-recovery.md)
-- [Local web walking slice](docs/specs/local-web-observatory-walking-slice.md)
-- [Application review and recommendations](docs/reviews/2026-08-27-application-review.md)
+- [Conversation-first Agent tracking](docs/specs/conversation-first-agent-tracking.md)
+- [Plugin contributor guide](docs/guides/plugin-contributor.md)
 
 ## Licence
 

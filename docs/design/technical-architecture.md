@@ -1,19 +1,14 @@
 # Observatory technical architecture
 
-Status: implemented V1 control plane and web-only local product; conversation-first replacement proposed
-Updated: 2026-08-31
+Status: implemented V1 control plane, conversation-first Agent model and web-only local product
+Updated: 2026-09-02
 Depends on: [Goal-centred agent orchestration map](agent-orchestration-map.md)
 
 Technology choices: [Observatory technology decisions](technology-decisions.md)
 
 Extension boundary: [Observatory plugin architecture](plugin-architecture.md)
 
-Continuity and recovery: [Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md)
-
-Conversation-first replacement: [Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md)
-
-Future distributed execution study:
-[Distributed execution and host aggregation](distributed-execution-and-host-aggregation.md)
+Conversation identity and recovery: [Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md)
 
 Feature ownership and delivery: [Observatory feature roadmap](../specs/observatory-feature-roadmap.md)
 
@@ -34,10 +29,9 @@ The implementation language and toolchain are selected separately in the
 technology decision record. Disposable and retired renderer experiments remain
 historical evidence; live web-product evidence drives current layout decisions.
 
-The staged native-terminal experiments are specified in
-[Native terminal surface POCs](../specs/terminal-surface-pocs.md). They test
-terminal fidelity and Herdr transport separately from the semantic control
-plane and do not change the implemented V0 boundary by themselves.
+Retained experiments under `prototypes/` tested terminal fidelity and Herdr
+transport separately from the semantic control plane. They remain historical
+evidence rather than maintained product documentation or dependencies.
 
 The 2026-08-22 evidence pass found that Herdr could stream a live Agent while
 retaining process ownership after release. That host-owned capability remains
@@ -1204,15 +1198,13 @@ the active product roadmap; current priorities live in the
 
 ### Phase 3 — interaction and agent integration (partially complete)
 
-- Preserve the completed [native terminal surface POCs](../specs/terminal-surface-pocs.md)
-  as historical evidence for the host-owned terminal boundary.
+- Preserve the completed experiments under `prototypes/` as historical evidence
+  for the host-owned terminal boundary.
 - Add targeted quick messages only after exact-target UX is trusted.
 - Add the `StartAgent` CLI/skill flow for agent-created goals, workspace
   preparation and agent assignment; keep the one-request contract above
   Herdr.
 - Preserve human approval for completion and archive behaviour.
-- Introduce the local daemon and control transport when multiple clients or
-  agent processes create a real need.
 
 ### Phase 4 — local web observatory (complete walking slice)
 
@@ -1243,7 +1235,7 @@ the active product roadmap; current priorities live in the
 ## Decisions deliberately deferred
 
 - Broader Atlas relationship and layout semantics
-- Whether the daemon starts on demand or runs continuously
+- Whether another client or transport is ever justified by a concrete workflow
 - Provider-specific metadata mechanisms
 - Pull-request provider integrations
 - Cross-machine synchronisation

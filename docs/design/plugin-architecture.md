@@ -1,6 +1,6 @@
 # Observatory plugin architecture
 
-Status: accepted boundary; contributed plugin system planned
+Status: accepted boundary; contributed plugin system implemented
 Date: 2026-08-23  
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
@@ -127,7 +127,7 @@ be added without editing the Herdr adapter, launch coordinator, Universe or
 renderer. Herdr's semantic state and native session restoration remain useful
 optional host capabilities rather than provider policy. See
 [Agent harness plugins](../specs/agent-harness-plugins.md) and
-[Provider-session continuity and execution recovery](../specs/provider-session-continuity-and-recovery.md).
+[Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md).
 
 Provider-native activity, human-input requests, turn outcomes and context
 pressure deepen that same harness capability through a versioned optional

@@ -2,7 +2,7 @@
 
 Status: web launch slice implemented; native-client passages are historical
 Date: 2026-08-23
-Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md), [provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md), [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
+Depends on: [Observatory technical architecture](../design/technical-architecture.md), [plugin architecture](../design/plugin-architecture.md), [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 
 > Implemented amendment from [Conversation-first Agent tracking](conversation-first-agent-tracking.md):
 > a launch operation may show `Starting`, but it does not create a managed

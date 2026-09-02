@@ -4,8 +4,7 @@ Status: accepted implementation model
 Date: 2026-08-24
 Related: [Goal-centred agent orchestration map](../design/agent-orchestration-map.md),
 [Contextual linked execution surfaces](contextual-companion-surfaces.md),
-[Observatory technical architecture](../design/technical-architecture.md),
-[Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md),
+[Observatory technical architecture](../design/technical-architecture.md) and
 [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 
 > Amended by [Conversation-first Agent tracking](conversation-first-agent-tracking.md):

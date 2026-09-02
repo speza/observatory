@@ -4,9 +4,9 @@ Status: accepted and implemented
 
 Date: 2026-08-31
 
-Supersedes the admission, Session import and host-first reconciliation portions
-of [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md),
-[Agent and linked execution model](agent-execution-model.md) and
+This is the canonical conversation identity and recovery model. It supersedes
+the earlier admission, Session import and host-first reconciliation model and
+amends [Agent and linked execution model](agent-execution-model.md) and
 [Agent launch and workspace preparation](session-launch.md).
 
 ## Decision summary

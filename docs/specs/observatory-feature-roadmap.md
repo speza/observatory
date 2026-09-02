@@ -10,7 +10,7 @@ Depends on:
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Local web Observatory walking slice](local-web-observatory-walking-slice.md)
 - [Agent harness plugins](agent-harness-plugins.md)
-- [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+- [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 - [Provider-native Agent observations](provider-native-agent-observations.md)
 - [Agent repository and code-host plugins](agent-repository-and-code-host-plugins.md)
 

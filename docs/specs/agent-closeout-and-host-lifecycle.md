@@ -16,7 +16,7 @@ Depends on:
 - [Goal-centred agent orchestration map](../design/agent-orchestration-map.md)
 - [Observatory technical architecture](../design/technical-architecture.md)
 - [Observatory feature roadmap](observatory-feature-roadmap.md)
-- [Provider-session continuity and execution recovery](provider-session-continuity-and-recovery.md)
+- [Conversation-first Agent tracking](conversation-first-agent-tracking.md)
 
 > **Continuity amendment, 2026-08-28:** the implemented closeout slice used
 > `stale` as a proxy for host absence. The target recovery model separates
