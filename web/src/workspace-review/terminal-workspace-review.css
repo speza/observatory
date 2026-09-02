@@ -758,6 +758,7 @@
   background: #20251f;
   cursor: pointer;
   list-style: none;
+  overflow-anchor: none;
 }
 
 .diff-review__file-header::-webkit-details-marker {

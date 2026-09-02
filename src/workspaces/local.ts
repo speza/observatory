@@ -58,6 +58,7 @@ interface BoundedStreamResult {
 const readCommandStream = async (
   stream: ReadableStream<Uint8Array> | null,
   maxBytes?: number,
+  onLimitExceeded?: () => void,
 ): Promise<BoundedStreamResult> => {
   if (!stream) return { text: "", truncated: false };
   const reader = stream.getReader();
@@ -78,6 +79,7 @@ const readCommandStream = async (
       }
       const remaining = maxBytes - retainedBytes;
       if (remaining <= 0) {
+        if (!truncated) onLimitExceeded?.();
         truncated = true;
         continue;
       }
@@ -85,6 +87,7 @@ const readCommandStream = async (
         chunks.push(value.slice(0, remaining));
         retainedBytes += remaining;
         truncated = true;
+        onLimitExceeded?.();
       } else {
         chunks.push(value);
         retainedBytes += value.byteLength;
@@ -126,6 +129,7 @@ export class BunWorkspaceCommandRunner implements WorkspaceCommandRunner {
     const stdoutPromise = readCommandStream(
       process.stdout,
       options?.maxStdoutBytes ?? MAX_COMMAND_STDOUT_BYTES,
+      () => process.kill(9),
     );
     const stderrPromise = readCommandStream(
       process.stderr,
@@ -374,22 +378,6 @@ const readWorkspaceFile = async (
   }
 };
 
-const readGitFile = async (
-  runner: WorkspaceCommandRunner,
-  root: string,
-  path: string,
-): Promise<
-  { readonly content: string; readonly binary: boolean; readonly tooLarge: boolean } | undefined
-> => {
-  const result = await runner.run(["git", "show", `HEAD:${path}`], root, {
-    maxStdoutBytes: MAX_FILE_BYTES,
-  });
-  if (result.exitCode !== 0) return undefined;
-  if (result.stdoutTruncated || Buffer.byteLength(result.stdout) > MAX_FILE_BYTES)
-    return { content: "", binary: false, tooLarge: true };
-  return { content: result.stdout, binary: result.stdout.includes("\u0000"), tooLarge: false };
-};
-
 interface UntrackedPathResult {
   readonly paths: readonly string[];
   readonly incomplete: boolean;
@@ -427,6 +415,33 @@ const untrackedHunk = (path: string, content: string): string => {
   const header = `--- /dev/null\n+++ b/${path}`;
   if (lines.length === 1 && lines[0] === "") return `${header}\n@@ -0,0 +0,0 @@`;
   return `${header}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join("\n")}`;
+};
+
+const readUntrackedFiles = async (
+  root: string,
+  paths: readonly string[],
+): Promise<
+  readonly {
+    readonly path: string;
+    readonly content: Awaited<ReturnType<typeof readWorkspaceFile>>;
+  }[]
+> => {
+  const results: {
+    path: string;
+    content: Awaited<ReturnType<typeof readWorkspaceFile>>;
+  }[] = [];
+  const batchSize = 8;
+  for (let index = 0; index < paths.length; index += batchSize) {
+    // Keep filesystem pressure bounded while avoiding one serial read per file.
+    // eslint-disable-next-line no-await-in-loop -- batches intentionally cap concurrent file reads.
+    const batch = await Promise.all(
+      paths
+        .slice(index, index + batchSize)
+        .map(async (path) => ({ path, content: await readWorkspaceFile(root, path) })),
+    );
+    results.push(...batch);
+  }
+  return results;
 };
 
 const safeWorktreeSlug = (branch: string): string =>
@@ -486,8 +501,10 @@ export class LocalWorkspaceProvider implements WorkspaceProvider, WorkspaceDiffR
           } satisfies WorkspaceDiffSnapshot;
 
         const root = resolve(repositoryRoot);
-        const head = await gitHead(this.runner, root);
-        const branch = await gitBranch(this.runner, root);
+        const [head, branch] = await Promise.all([
+          gitHead(this.runner, root),
+          gitBranch(this.runner, root),
+        ]);
         const diffResult = await this.runner.run(
           [
             "git",
@@ -502,7 +519,7 @@ export class LocalWorkspaceProvider implements WorkspaceProvider, WorkspaceDiffR
           root,
           { maxStdoutBytes: MAX_DIFF_BYTES },
         );
-        if (diffResult.exitCode !== 0) {
+        if (diffResult.exitCode !== 0 && !diffResult.stdoutTruncated) {
           const detail = diffResult.stderr.trim().slice(0, 240);
           return {
             ...emptyDiff(
@@ -526,46 +543,20 @@ export class LocalWorkspaceProvider implements WorkspaceProvider, WorkspaceDiffR
 
         for (const patch of parsed.slice(0, MAX_DIFF_FILES)) {
           const oldFilePath = patch.oldPath ?? (patch.status === "added" ? undefined : patch.path);
-          const oldContent = oldFilePath
-            ? await readGitFile(this.runner, root, oldFilePath)
-            : { content: "", binary: false, tooLarge: false };
-          const newContent =
-            patch.status === "deleted"
-              ? { content: "", binary: false, tooLarge: false }
-              : await readWorkspaceFile(root, patch.path);
-          if ((oldFilePath && !oldContent) || (patch.status !== "deleted" && !newContent))
-            truncated = true;
-          const binary =
-            patch.binary ||
-            oldContent?.binary === true ||
-            newContent?.binary === true ||
-            oldContent?.tooLarge === true ||
-            newContent?.tooLarge === true;
-          truncated ||= oldContent?.tooLarge === true || newContent?.tooLarge === true;
+          // The unified hunks contain everything needed for review. Sending entire
+          // before/after files multiplied response size and required one `git show`
+          // process per changed file; the renderer can compose its bounded view from
+          // the hunks while retaining names for language detection.
           files.push({
             ...patch,
-            binary,
-            oldFile: binary
+            oldFile: patch.binary
               ? undefined
-              : oldContent
-                ? {
-                    fileName: oldFilePath ?? patch.path,
-                    fileLang: languageForPath(oldFilePath ?? patch.path),
-                    content: oldContent.content,
-                  }
+              : oldFilePath
+                ? emptyFileContent(oldFilePath)
                 : undefined,
-            newFile: binary
-              ? undefined
-              : newContent
-                ? {
-                    fileName: patch.path,
-                    fileLang: languageForPath(patch.path),
-                    content: newContent.content,
-                  }
-                : patch.status === "deleted"
-                  ? emptyFileContent(patch.path)
-                  : undefined,
-            hunks: binary ? [] : patch.hunks,
+            newFile:
+              patch.binary || patch.status === "deleted" ? undefined : emptyFileContent(patch.path),
+            hunks: patch.binary ? [] : patch.hunks,
           });
         }
 
@@ -573,13 +564,16 @@ export class LocalWorkspaceProvider implements WorkspaceProvider, WorkspaceDiffR
         const trackedPaths = new Set(files.map((file) => file.path));
         const untracked = await untrackedPaths(this.runner, root);
         truncated ||= untracked.incomplete;
-        for (const untrackedPath of untracked.paths) {
-          if (trackedPaths.has(untrackedPath)) continue;
-          if (files.length >= MAX_DIFF_FILES) {
-            truncated = true;
-            break;
-          }
-          const content = await readWorkspaceFile(root, untrackedPath);
+        const remainingFileCapacity = MAX_DIFF_FILES - files.length;
+        const untrackedCandidates = untracked.paths.filter(
+          (candidatePath) => !trackedPaths.has(candidatePath),
+        );
+        if (untrackedCandidates.length > remainingFileCapacity) truncated = true;
+        const untrackedFiles = await readUntrackedFiles(
+          root,
+          untrackedCandidates.slice(0, remainingFileCapacity),
+        );
+        for (const { path: untrackedPath, content } of untrackedFiles) {
           if (!content) {
             truncated = true;
             continue;
@@ -596,13 +590,7 @@ export class LocalWorkspaceProvider implements WorkspaceProvider, WorkspaceDiffR
             deletions: 0,
             binary,
             oldFile: binary ? undefined : emptyFileContent(untrackedPath),
-            newFile: binary
-              ? undefined
-              : {
-                  fileName: untrackedPath,
-                  fileLang: languageForPath(untrackedPath),
-                  content: content.content,
-                },
+            newFile: binary ? undefined : emptyFileContent(untrackedPath),
             hunks: binary ? [] : [untrackedHunk(untrackedPath, content.content)],
           });
         }
