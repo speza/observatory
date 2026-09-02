@@ -103,7 +103,8 @@ describe("local workspace provider", () => {
       additions: 1,
       deletions: 1,
       binary: false,
-      oldFile: { content: "old\n" },
+      oldFile: { fileName: "README.md", content: "" },
+      newFile: { fileName: "README.md", content: "" },
     });
     expect(diff.files[0]?.hunks[0]).toContain("--- a/README.md");
     expect(diff.files[0]?.hunks[0]).toContain("@@ -1 +1 @@");
@@ -111,9 +112,7 @@ describe("local workspace provider", () => {
     expect(
       runner.calls.find(({ argv }) => argv[1] === "diff")?.options?.maxStdoutBytes,
     ).toBeGreaterThan(0);
-    expect(
-      runner.calls.find(({ argv }) => argv[1] === "show")?.options?.maxStdoutBytes,
-    ).toBeGreaterThan(0);
+    expect(runner.calls.some(({ argv }) => argv[1] === "show")).toBe(false);
     expect(
       runner.calls.find(({ argv }) => argv[1] === "ls-files")?.options?.maxStdoutBytes,
     ).toBeGreaterThan(0);
@@ -137,6 +136,25 @@ describe("local workspace provider", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("keeps the bounded prefix when Git is stopped after exceeding the diff limit", async () => {
+    const runner = new FakeGitRunner({
+      diff: {
+        exitCode: 9,
+        stdout:
+          "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new",
+        stderr: "",
+        stdoutTruncated: true,
+      },
+    });
+    const provider = new LocalWorkspaceProvider({ cwd: process.cwd(), runner });
+
+    const diff = await Effect.runPromise(provider.inspectWorkingTree(process.cwd(), 1234));
+
+    expect(diff.status).toBe("changed");
+    expect(diff.truncated).toBe(true);
+    expect(diff.files[0]?.path).toBe("README.md");
   });
 
   test("reports a Git diff failure as unavailable instead of clean", async () => {

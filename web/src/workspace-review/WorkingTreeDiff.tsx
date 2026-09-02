@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { DiffModeEnum, DiffView } from "@git-diff-view/react";
+import { useEffect, useMemo, useState } from "react";
+import { DiffFile, DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import type { AgentView } from "../../../src/projection/types.ts";
 import type { WebWorkingTreeDiffResponse } from "../../../src/web/protocol.ts";
@@ -30,11 +30,39 @@ const fileStatusLabel = (file: WorkspaceDiffFile): string => {
   return file.status;
 };
 
-const fileDataFor = (file: WorkspaceDiffFile) => ({
-  oldFile: file.oldFile,
-  newFile: file.newFile,
-  hunks: [...file.hunks],
-});
+interface FileDiffProps {
+  readonly file: WorkspaceDiffFile;
+  readonly mode: DiffMode;
+  readonly theme: Theme;
+}
+
+const FileDiff = ({ file, mode, theme }: FileDiffProps): React.JSX.Element => {
+  const diffFile = useMemo(() => {
+    const prepared = DiffFile.createInstance({
+      oldFile: file.oldFile,
+      newFile: file.newFile,
+      hunks: [...file.hunks],
+    });
+    // DiffView otherwise initializes from an effect after the first paint. With
+    // many files that repeatedly changes the scrollable height and moves the
+    // reader's viewport while scrolling.
+    prepared.initTheme(theme);
+    prepared.initRaw();
+    prepared.buildSplitDiffLines();
+    prepared.buildUnifiedDiffLines();
+    return prepared;
+  }, [file, theme]);
+
+  return (
+    <DiffView
+      diffFile={diffFile}
+      diffViewFontSize={13}
+      diffViewMode={mode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified}
+      diffViewTheme={theme}
+      diffViewWrap={false}
+    />
+  );
+};
 
 interface ChangedFileListProps {
   readonly files: readonly WorkspaceDiffFile[];
@@ -45,7 +73,7 @@ interface ChangedFileListProps {
 
 export const ChangedFileList = ({
   files,
-  generatedAt,
+  generatedAt: _generatedAt,
   mode,
   theme,
 }: ChangedFileListProps): React.JSX.Element => (
@@ -67,15 +95,7 @@ export const ChangedFileList = ({
           <div className="diff-review__binary">Binary or oversized file · content omitted</div>
         ) : file.hunks.length > 0 ? (
           <div className="diff-review__renderer">
-            <DiffView
-              key={`${file.path}-${mode}-${generatedAt}`}
-              data={fileDataFor(file)}
-              diffViewFontSize={13}
-              diffViewHighlight
-              diffViewMode={mode === "split" ? DiffModeEnum.Split : DiffModeEnum.Unified}
-              diffViewTheme={theme}
-              diffViewWrap={false}
-            />
+            <FileDiff file={file} mode={mode} theme={theme} />
           </div>
         ) : (
           <pre className="diff-review__raw">
