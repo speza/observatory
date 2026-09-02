@@ -1,65 +1,61 @@
 import type { BoundedProcessRunner, ProcessResult } from "../plugin-sdk/index.ts";
+import { readBoundedStream } from "../processes/bounded-stream.ts";
+import { positiveIntegerSetting } from "../runtime/config.ts";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 256_000;
-
-const readBounded = async (
-  stream: ReadableStream<Uint8Array> | null,
-  limit: number,
-): Promise<{ readonly value: string; readonly truncated: boolean }> => {
-  if (!stream) return { value: "", truncated: false };
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let retained = 0;
-  let truncated = false;
-  try {
-    while (true) {
-      // Bounded stream consumption is necessarily sequential.
-      // eslint-disable-next-line no-await-in-loop
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      const remaining = limit - retained;
-      if (remaining <= 0) {
-        truncated = true;
-        continue;
-      }
-      const accepted = value.byteLength > remaining ? value.slice(0, remaining) : value;
-      chunks.push(accepted);
-      retained += accepted.byteLength;
-      truncated ||= accepted.byteLength !== value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return {
-    value: Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8"),
-    truncated,
-  };
-};
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export class BunBoundedProcessRunner implements BoundedProcessRunner {
+  private readonly timeoutMs: number;
+
+  constructor(options?: { readonly timeoutMs?: number }) {
+    this.timeoutMs =
+      options?.timeoutMs ??
+      positiveIntegerSetting(
+        "AO_PROCESS_TIMEOUT_MS",
+        process.env.AO_PROCESS_TIMEOUT_MS,
+        DEFAULT_TIMEOUT_MS,
+        { minimum: 100 },
+      );
+  }
+
   async run(
     argv: readonly string[],
-    options?: { readonly cwd?: string; readonly maxOutputBytes?: number },
+    options?: {
+      readonly cwd?: string;
+      readonly maxOutputBytes?: number;
+      readonly timeoutMs?: number;
+    },
   ): Promise<ProcessResult> {
     const limit = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
     const child = Bun.spawn([...argv], {
       cwd: options?.cwd,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      readBounded(child.stdout, limit),
-      readBounded(child.stderr, limit),
-      child.exited,
-    ]);
-    return {
-      exitCode,
-      stdout: stdout.value,
-      stderr: stderr.value,
-      stdoutTruncated: stdout.truncated,
-      stderrTruncated: stderr.truncated,
-    };
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill(9);
+    }, timeoutMs);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readBoundedStream(child.stdout, limit),
+        readBoundedStream(child.stderr, limit),
+        child.exited,
+      ]);
+      return {
+        exitCode: timedOut ? 124 : exitCode,
+        stdout: stdout.text,
+        stderr: stderr.text,
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated,
+        timedOut: timedOut || undefined,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

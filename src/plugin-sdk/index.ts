@@ -381,12 +381,17 @@ export interface ProcessResult {
   readonly stderr: string;
   readonly stdoutTruncated: boolean;
   readonly stderrTruncated: boolean;
+  readonly timedOut?: boolean;
 }
 
 export interface BoundedProcessRunner {
   run(
     argv: readonly string[],
-    options?: { readonly cwd?: string; readonly maxOutputBytes?: number },
+    options?: {
+      readonly cwd?: string;
+      readonly maxOutputBytes?: number;
+      readonly timeoutMs?: number;
+    },
   ): Promise<ProcessResult>;
 }
 

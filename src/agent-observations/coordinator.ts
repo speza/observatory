@@ -321,12 +321,18 @@ export class AgentObservationCoordinator implements AgentObservationModule {
           diagnostics.push(
             `${harness.describe().label} discarded ${rejected} invalid observations.`,
           );
-        this.store.reconcileAgentObservations(
+        const accepted = this.store.reconcileAgentObservations(
           { ...snapshot, current, transitions },
           capability,
           this.now(),
           pluginId,
         );
+        if (!accepted) {
+          diagnostics.push(
+            `${harness.describe().label} returned an out-of-order observation snapshot; it was ignored.`,
+          );
+          continue;
+        }
         observedSources += 1;
       }
       const activeHarnessIds = new Set(sources.map(({ harnessId }) => harnessId));

@@ -304,7 +304,7 @@ describe("ObservatoryWebApi", () => {
       true,
     );
 
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock);
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
     const response = await api.fetch(new Request("http://localhost/api/portfolio"));
     const body: PortfolioResponse = await response.json();
 
@@ -324,7 +324,7 @@ describe("ObservatoryWebApi", () => {
         priority: "P0",
       }).ok,
     ).toBe(true);
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock);
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
 
     const inspector = await api.fetch(
       new Request("http://localhost/api/inspector?type=goal&id=goal-a"),
@@ -350,7 +350,7 @@ describe("ObservatoryWebApi", () => {
         }).ok,
       ).toBe(true);
     }
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock);
+    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
 
     const found = await api.fetch(new Request("http://localhost/api/search?q=%20atlas%20"));
     const missing = await api.fetch(new Request("http://localhost/api/search?q=%20%20"));

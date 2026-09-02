@@ -184,7 +184,7 @@ interface ObservationTransitionRow extends ObservationRow {
   sequence: number;
 }
 
-export const SQLITE_SCHEMA_GENERATION = 1;
+export const SQLITE_SCHEMA_GENERATION = 2;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {
@@ -596,6 +596,24 @@ export class SqliteUniverseStore
 
   reconcileProviderCatalogue(snapshot: ProviderSessionSnapshot): ConversationCatalogueIngestion {
     const write = this.db.transaction((): ConversationCatalogueIngestion => {
+      const freshness = this.db
+        .query<{ harness_id: string; continuity_scope_id: string; observed_at: number }, [string]>(
+          "SELECT harness_id, continuity_scope_id, observed_at FROM provider_catalogue_freshness WHERE provider_instance_id = ?",
+        )
+        .get(snapshot.providerInstanceId);
+      if (
+        freshness &&
+        (freshness.harness_id !== snapshot.harnessId ||
+          freshness.continuity_scope_id !== snapshot.continuityScopeId)
+      )
+        throw new Error("Provider instance identity changed its declared catalogue scope.");
+      if (freshness && snapshot.observedAt < freshness.observed_at)
+        return {
+          accepted: false,
+          baselineEstablished: false,
+          newlyObservedHandles: [],
+          diagnostic: `Ignored out-of-order ${snapshot.harnessId} catalogue at ${snapshot.observedAt}; latest accepted observation is ${freshness.observed_at}.`,
+        };
       const baseline = this.db
         .query<{ provider_instance_id: string }, [string]>(
           "SELECT provider_instance_id FROM provider_catalogue_baselines WHERE provider_instance_id = ?",
@@ -696,7 +714,21 @@ export class SqliteUniverseStore
             Date.now(),
             snapshot.observedAt,
           );
+      this.db
+        .prepare(`
+          INSERT INTO provider_catalogue_freshness (
+            provider_instance_id, harness_id, continuity_scope_id, observed_at
+          ) VALUES (?, ?, ?, ?)
+          ON CONFLICT(provider_instance_id) DO UPDATE SET observed_at = excluded.observed_at
+        `)
+        .run(
+          snapshot.providerInstanceId,
+          snapshot.harnessId,
+          snapshot.continuityScopeId,
+          snapshot.observedAt,
+        );
       return {
+        accepted: true,
         baselineEstablished: Boolean(baseline) || snapshot.complete,
         newlyObservedHandles: baseline
           ? observedHandles.filter((handle) => !knownHandles.has(handle))
@@ -747,8 +779,15 @@ export class SqliteUniverseStore
     capability: AgentObservationCapability,
     receivedAt: number,
     pluginId: string,
-  ): void {
-    this.db.transaction(() => {
+  ): boolean {
+    return this.db.transaction(() => {
+      const previous = this.observationSource(snapshot.harnessId);
+      if (
+        previous?.providerInstanceId === snapshot.providerInstanceId &&
+        previous.continuityScopeId === snapshot.continuityScopeId &&
+        snapshot.capturedAt < previous.capturedAt
+      )
+        return false;
       this.db
         .prepare(`
           INSERT INTO agent_observation_sources (
@@ -828,6 +867,7 @@ export class SqliteUniverseStore
           SELECT sequence FROM agent_observation_transitions ORDER BY sequence DESC LIMIT 5000
         );
       `);
+      return true;
     })();
   }
 
@@ -837,8 +877,9 @@ export class SqliteUniverseStore
     observedAt: number,
     diagnostic: string,
     pluginId: string,
-  ): void {
+  ): boolean {
     const existing = this.observationSource(harnessId);
+    if (existing && observedAt < existing.capturedAt) return false;
     this.db
       .prepare(`
         INSERT INTO agent_observation_sources (
@@ -848,7 +889,8 @@ export class SqliteUniverseStore
         ON CONFLICT(harness_id) DO UPDATE SET
           plugin_id = excluded.plugin_id,
           capability_json = excluded.capability_json,
-          health_json = excluded.health_json
+          health_json = excluded.health_json,
+          captured_at = excluded.captured_at
       `)
       .run(
         harnessId,
@@ -858,8 +900,9 @@ export class SqliteUniverseStore
         JSON.stringify(capability),
         JSON.stringify({ state: "unavailable", diagnostics: [diagnostic] }),
         existing?.cursor ?? null,
-        existing?.capturedAt ?? observedAt,
+        observedAt,
       );
+    return true;
   }
 
   currentAgentObservations(): readonly StoredAgentObservation[] {
@@ -1003,6 +1046,7 @@ export class SqliteUniverseStore
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
         DELETE FROM provider_catalogue_baselines;
+        DELETE FROM provider_catalogue_freshness;
         DELETE FROM agent_observation_sources;
         DELETE FROM agent_observation_current;
         DELETE FROM agent_observation_transitions;
@@ -1031,6 +1075,7 @@ export class SqliteUniverseStore
         DELETE FROM launch_receipts;
         DELETE FROM provider_conversations;
         DELETE FROM provider_catalogue_baselines;
+        DELETE FROM provider_catalogue_freshness;
         DELETE FROM agent_observation_sources;
         DELETE FROM agent_observation_current;
         DELETE FROM agent_observation_transitions;
@@ -1273,6 +1318,12 @@ export class SqliteUniverseStore
         continuity_scope_id TEXT NOT NULL,
         established_at INTEGER NOT NULL,
         snapshot_observed_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS provider_catalogue_freshness (
+        provider_instance_id TEXT PRIMARY KEY,
+        harness_id TEXT NOT NULL,
+        continuity_scope_id TEXT NOT NULL,
+        observed_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS agent_observation_sources (
         harness_id TEXT PRIMARY KEY,

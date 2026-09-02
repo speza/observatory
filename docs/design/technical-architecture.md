@@ -56,7 +56,11 @@ Loopback web composition root
 
 The composition root in `src/web/` is the imperative edge. It runs Effects,
 polls external capabilities, coordinates modules and serves the React client.
-The browser never imports persistence, the mutable Universe or concrete host
+Each current polling loop is serialized and each process-backed observation has
+a deadline, so a slow refresh cannot accumulate overlapping work. Polling is a
+V1 compatibility mechanism rather than the desired long-term host interface;
+event-driven observation can replace it behind the same module seams. The
+browser never imports persistence, the mutable Universe or concrete host
 adapters.
 
 ## Module ownership
@@ -194,10 +198,12 @@ silently selected.
 ### `web/` and `web/src/`
 
 `src/web/` composes the application and exposes a narrow same-origin loopback
-interface. Mutation requires JSON, an explicit command header and an allow-list
-of browser commands. Host-backed launch, closeout and terminal actions use
-separate typed gateways rather than pretending they are synchronous Universe
-commands.
+interface. Every request must use the configured loopback authority; a present
+browser Origin must match it, so DNS rebinding cannot turn read endpoints into a
+cross-origin data channel. Mutation additionally requires JSON, an explicit
+command header and an allow-list of browser commands. Host-backed launch,
+closeout and terminal actions use separate typed gateways rather than pretending
+they are synchronous Universe commands.
 
 `web/src/` owns presentation-only state: selection, viewport, zoom, active lens,
 theme, dialogs and terminal tabs. It renders native SVG/CSS and xterm.js. It
@@ -228,7 +234,7 @@ scope.
 
 ### Reconciliation
 
-1. Poll the selected SessionHost.
+1. Poll the selected SessionHost through a serialized, deadline-bounded refresh loop.
 2. Enrich host observations with exact harness evidence where available.
 3. Refresh provider catalogues and metadata observations independently.
 4. Submit typed observations to Universe.
@@ -249,9 +255,11 @@ handoff or linked-terminal capabilities remain explicit.
 
 ### Catch up
 
-Universe records bounded semantic changes with a monotonic sequence. Projection
-groups changes since the durable operator checkpoint by System, Goal or Inbox.
-Only explicit acknowledgement advances the checkpoint; browser polling does not.
+Universe records semantic changes with a monotonic sequence. Projection groups
+changes since the durable operator checkpoint by System, Goal or Inbox. Only
+explicit acknowledgement advances the checkpoint; browser polling does not.
+Retention and compaction of acknowledged history remain an explicit post-V1
+decision; the current clean-break store does not yet bound that table.
 
 ## Persistence
 
@@ -265,12 +273,12 @@ storage, but they do not become trusted Observatory state.
 
 ## Security and privacy
 
-- Bind only to loopback.
+- Bind only to loopback and reject foreign HTTP authorities and browser origins.
 - Keep local database and observation journals user-owned.
 - Never ingest transcripts by default.
 - Do not expose transcript paths or provider aliases to browser projections.
-- Bound process output, terminal dimensions, diffs, search results and plugin
-  diagnostics.
+- Bound process output and deadlines, terminal dimensions, diffs, search results
+  and plugin diagnostics.
 - Build commands from structured arguments rather than shell strings.
 - Treat observed labels and terminal output as untrusted data.
 - Never execute instructions embedded in observations.

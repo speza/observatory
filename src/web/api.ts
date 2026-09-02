@@ -43,6 +43,7 @@ import {
   enrichInspector,
   enrichMap,
 } from "../agent-observations/projection.ts";
+import { isAllowedWebRequest } from "./security.ts";
 
 export interface PortfolioResponse {
   readonly map: UniverseMapProjection;
@@ -137,6 +138,8 @@ export class ObservatoryWebApi {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (!isAllowedWebRequest(request, this.allowedOrigin))
+      return json({ error: "Request origin rejected." }, 403);
     const now = this.clock.now();
 
     if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url);

@@ -193,6 +193,78 @@ describe("agent observation coordination", () => {
     expect(withoutPlugin.snapshot().agents[0]?.health).toBe("unavailable");
   });
 
+  test("ignores an older complete snapshot without clearing newer current evidence", async () => {
+    const store = createMemoryStore();
+    const fixture = makeUniverse({ store });
+    let sourceSnapshot: AgentObservationSnapshot = {
+      schemaVersion: 1,
+      harnessId: "codex",
+      providerInstanceId: "codex-local-test",
+      continuityScopeId: "scope-test",
+      capturedAt: 2_000_000,
+      complete: true,
+      cursor: "2",
+      current: [
+        {
+          schemaVersion: 1,
+          observationId: "activity-current",
+          revision: 2,
+          nativeConversationRef: reference,
+          providerInstanceId: "codex-local-test",
+          kind: "activity",
+          observedAt: 2_000_000,
+          source: { mechanism: "hook" },
+          payload: { phase: "responding" },
+        },
+      ],
+      transitions: [],
+      health: { state: "healthy", lastSuccessfulAt: 2_000_000, diagnostics: [] },
+    };
+    const base = harness(sourceSnapshot);
+    const provider: AgentHarness = {
+      ...base,
+      observationSource: {
+        ...base.observationSource!,
+        snapshot: () => Effect.succeed(sourceSnapshot),
+      },
+    };
+    const coordinator = new AgentObservationCoordinator(
+      { agentHarnesses: () => [provider] },
+      store,
+      fixture.universe,
+      () => 3_000_000,
+    );
+    expect(await Effect.runPromise(coordinator.refresh())).toMatchObject({ observedSources: 1 });
+    expect(
+      store.markObservationSourceUnavailable(
+        "codex",
+        provider.observationSource!.describe(),
+        1_500_000,
+        "stale failure",
+        "synthetic-plugin",
+      ),
+    ).toBe(false);
+    expect(store.observationSource("codex")?.health.state).toBe("healthy");
+
+    sourceSnapshot = {
+      ...sourceSnapshot,
+      capturedAt: 1_500_000,
+      complete: true,
+      cursor: "1",
+      current: [],
+      health: { state: "stale", lastSuccessfulAt: 1_500_000, diagnostics: [] },
+    };
+    const stale = await Effect.runPromise(coordinator.refresh());
+
+    expect(stale.observedSources).toBe(0);
+    expect(stale.diagnostics).toContain(
+      "Codex returned an out-of-order observation snapshot; it was ignored.",
+    );
+    expect(store.observationSource("codex")?.capturedAt).toBe(2_000_000);
+    expect(store.currentAgentObservations()).toHaveLength(1);
+    store.close();
+  });
+
   test("keeps conflicting host and provider evidence visible without replacing host attention", async () => {
     const store = createMemoryStore();
     const fixture = makeUniverse({ store });

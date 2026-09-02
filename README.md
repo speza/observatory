@@ -134,8 +134,9 @@ Run the deterministic 12-goal, 75-agent development portfolio:
 bun run web:mock
 ```
 
-It uses `${TMPDIR:-/tmp}/ao-web-mock.sqlite`, synthetic host facts and no real
-session content.
+It uses `${TMPDIR:-/tmp}/ao-web-mock-v2.sqlite`, synthetic host facts and no
+real session content. The disposable filename follows the current clean-break
+schema generation.
 
 Exercise deterministic host loss, degraded host actions and recovery through
 the same product path:
@@ -174,9 +175,10 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 - host-owned primary and linked terminals rendered with xterm.js; and
 - bounded, read-only working-tree diff review.
 
-The application is local-only and single-user. It does not ingest transcripts,
-own agent processes or PTYs, automatically accept completion, merge work, or
-expose the control plane remotely.
+The application is local-only and single-user. The server binds to loopback and
+rejects foreign HTTP authorities and browser origins. It does not ingest
+transcripts, own agent processes or PTYs, automatically accept completion,
+merge work, or expose the control plane remotely.
 
 ## Browser controls
 

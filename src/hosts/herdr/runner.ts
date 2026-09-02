@@ -1,12 +1,23 @@
+import { readBoundedStream } from "../../processes/bounded-stream.ts";
+import { positiveIntegerSetting } from "../../runtime/config.ts";
+
+const DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 15_000;
+
 export interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly stdoutTruncated?: boolean;
+  readonly stderrTruncated?: boolean;
+  readonly timedOut?: boolean;
 }
 
 export interface CommandOptions {
   /** Connect the child directly to the caller's terminal for interactive attach. */
   readonly interactive?: boolean;
+  readonly maxOutputBytes?: number;
+  readonly timeoutMs?: number;
 }
 
 export interface CommandRunner {
@@ -26,44 +37,75 @@ export interface TerminalCommandRunner {
 }
 
 export class BunCommandRunner implements CommandRunner, TerminalCommandRunner {
+  private readonly timeoutMs: number;
+  private readonly maxOutputBytes: number;
+
+  constructor(options?: { readonly timeoutMs?: number; readonly maxOutputBytes?: number }) {
+    this.timeoutMs =
+      options?.timeoutMs ??
+      positiveIntegerSetting(
+        "AO_HERDR_COMMAND_TIMEOUT_MS",
+        process.env.AO_HERDR_COMMAND_TIMEOUT_MS,
+        DEFAULT_TIMEOUT_MS,
+        { minimum: 100 },
+      );
+    this.maxOutputBytes = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  }
+
   async run(argv: readonly string[], options?: CommandOptions): Promise<CommandResult> {
     if (options?.interactive) {
-      const process = Bun.spawn([...argv], {
+      const child = Bun.spawn([...argv], {
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
       });
-      return { exitCode: await process.exited, stdout: "", stderr: "" };
+      return { exitCode: await child.exited, stdout: "", stderr: "" };
     }
-    const process = Bun.spawn([...argv], {
+    const child = Bun.spawn([...argv], {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
     });
-    const stdoutPromise = new Response(process.stdout).text();
-    const stderrPromise = new Response(process.stderr).text();
-    const [stdout, stderr, exitCode] = await Promise.all([
-      stdoutPromise,
-      stderrPromise,
-      process.exited,
-    ]);
-    return { exitCode, stdout, stderr };
+    const limit = options?.maxOutputBytes ?? this.maxOutputBytes;
+    const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill(9);
+    }, timeoutMs);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readBoundedStream(child.stdout, limit),
+        readBoundedStream(child.stderr, limit),
+        child.exited,
+      ]);
+      return {
+        exitCode: timedOut ? 124 : exitCode,
+        stdout: stdout.text,
+        stderr: stderr.text,
+        stdoutTruncated: stdout.truncated || undefined,
+        stderrTruncated: stderr.truncated || undefined,
+        timedOut: timedOut || undefined,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   spawnTerminal(argv: readonly string[]): TerminalProcess {
-    const process = Bun.spawn([...argv], {
+    const child = Bun.spawn([...argv], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
     });
     return {
-      stdout: process.stdout,
-      stderr: process.stderr,
-      exited: process.exited,
+      stdout: child.stdout,
+      stderr: child.stderr,
+      exited: child.exited,
       write: async (value: string | Uint8Array) => {
-        await process.stdin.write(value);
+        await child.stdin.write(value);
       },
-      kill: () => process.kill(),
+      kill: () => child.kill(),
     };
   }
 }

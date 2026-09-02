@@ -58,25 +58,35 @@ recover an accepted host launch without launching it again.
    identity is observed.
 3. Assignment happens only after the exact Agent exists.
 4. Retrying the same request ID does not ordinarily launch another process.
-5. Reusing a request ID for different intent is rejected.
-6. Provider command syntax belongs to AgentHarness plugins.
-7. Process and terminal placement belongs to SessionHost.
-8. Git and worktree mechanics belong to WorkspaceProvider.
-9. No launch step writes Universe state around its commands.
-10. Weak cwd, title, repository or recency matches never complete launch
+5. A setup failure is durably distinguished from post-launch uncertainty; a
+   receipt without a proven host outcome is never described as completed.
+6. Reusing a request ID for different intent is rejected.
+7. Provider command syntax belongs to AgentHarness plugins.
+8. Process and terminal placement belongs to SessionHost.
+9. Git and worktree mechanics belong to WorkspaceProvider.
+10. No launch step writes Universe state around its commands.
+11. Weak cwd, title, repository or recency matches never complete launch
     identity.
 
 ## Start flow
 
-1. Validate the request and resolve the Goal intent.
-2. Validate or prepare the workspace.
-3. Ask the selected harness for a structured new-conversation process plan.
-4. Persist a launch receipt before requesting process placement.
-5. Ask SessionHost to execute the plan.
-6. Poll canonical host/provider observations for exact conversation identity.
-7. Create or resolve the Agent through Universe observation.
-8. Assign it to the requested Goal, or retain it in Inbox.
-9. Mark the receipt complete and return the refreshed projection.
+1. Validate the request ID and atomically reserve its launch receipt.
+2. Validate harness availability and the Goal intent without creating a Goal.
+3. Validate or prepare the workspace.
+4. Ask the selected harness for a structured new-conversation process plan.
+5. Observe host availability and only then materialise a requested new Goal.
+6. Ask SessionHost to execute the plan.
+7. Persist the execution reference immediately when the host accepts placement.
+8. Poll canonical host/provider observations for exact conversation identity.
+9. Create or resolve the Agent through Universe observation.
+10. Assign it to the requested Goal, or retain it in Inbox.
+11. Mark the receipt complete and return the refreshed projection.
+
+A failure before process placement is saved as a failed receipt and returned as
+the original typed error. Repeating that request ID reports the durable failure
+rather than claiming that a launch was observed. Once process placement has
+been attempted, an unknown outcome remains pending and is never retried
+automatically without host evidence.
 
 A blank-prompt launch may open an immediate temporary host terminal while the
 provider creates its durable conversation. The UI labels that surface as
@@ -110,16 +120,22 @@ becomes an optimistic resume button.
 
 Workspace preparation reports dirty checkout, branch collision and filesystem
 errors before host launch. A worktree created before a later host failure is
-reported for explicit cleanup; Observatory does not delete it automatically.
+reported for explicit cleanup; Observatory does not delete it automatically. A
+new Goal is materialised only after setup and host observation succeed. If the
+subsequent placement attempt fails or has an unknown outcome, that human intent
+is retained rather than automatically deleting or archiving the Goal.
 
 Repositories and worktrees remain Agent metadata and launch context. They do
 not become Systems or Goals.
 
 ## Partial failure and recovery
 
-- Invalid or inaccessible path: reject before provider or host work.
-- Harness unavailable: preserve state and return a bounded explanation.
-- Host unavailable: preserve the receipt and do not claim process creation.
+- Invalid or inaccessible path: store a pre-launch failure and reject before
+  provider or host placement.
+- Harness unavailable: preserve semantic state, store the setup failure and
+  return a bounded explanation.
+- Host unavailable before placement: preserve the failed receipt and do not
+  claim process creation.
 - Host accepts launch but identity is delayed: return pending and continue
   reconciliation without relaunching.
 - Host execution appears without exact provider identity: retain diagnostic

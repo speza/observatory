@@ -80,6 +80,7 @@ const agentIsUncertain = (agent: Pick<Agent, "observationHealth" | "executionPre
 
 const publicAgent = (agent: Agent) => {
   const {
+    execution,
     nativeConversationRef: _nativeConversationRef,
     executionHistory: _executionHistory,
     conflictingExecutions,
@@ -88,6 +89,9 @@ const publicAgent = (agent: Agent) => {
   const state = lifecycleState(agent);
   return {
     ...publicFields,
+    execution: execution
+      ? { hostKind: execution.hostKind, nativeId: execution.nativeId }
+      : undefined,
     lifecycleState: state,
     executionConflictCount: conflictingExecutions.length,
     canResume:

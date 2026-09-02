@@ -594,6 +594,73 @@ describe("Universe", () => {
     expect(universe.snapshot().agents[0]?.conflictingExecutions).toHaveLength(2);
   });
 
+  test("ignores stale provider catalogues and reports only meaningful provider updates", () => {
+    const { universe } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "conversation-provider-order",
+      },
+      displayName: "Provider ordering",
+      observedAt: 1_000_000,
+    });
+    const session = {
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "conversation-provider-order",
+      },
+      observedAt: 2_000_000,
+      resumeEligibility: "same-site" as const,
+    };
+    const fresh = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 2_000_000,
+      complete: true,
+      sessions: [session],
+    });
+    const unchanged = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 2_000_001,
+      complete: false,
+      sessions: [session],
+    });
+    const stale = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 1_500_000,
+      complete: true,
+      sessions: [],
+    });
+
+    expect(fresh.updatedAgentIds).toEqual(["agent-1"]);
+    expect(unchanged.updatedAgentIds).toEqual([]);
+    expect(stale.accepted).toBe(false);
+    expect(stale.error).toContain("Out-of-order codex provider catalogue ignored");
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      providerContinuity: "confirmed",
+      resumeCapability: "eligible",
+      providerObservedAt: 2_000_000,
+    });
+    const unavailable = universe.observe({ kind: "provider-unavailable", harnessId: "codex" });
+    const repeatedUnavailable = universe.observe({
+      kind: "provider-unavailable",
+      harnessId: "codex",
+    });
+    expect(unavailable.updatedAgentIds).toEqual(["agent-1"]);
+    expect(repeatedUnavailable.updatedAgentIds).toEqual([]);
+  });
+
   test("marks a proved conversation execution absent without losing continuity", () => {
     const { universe, clock } = makeUniverse();
     universe.reconcile(hostSnapshot([observedConversation("pane-1", "conversation-a")]));

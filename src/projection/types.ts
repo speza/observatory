@@ -58,8 +58,9 @@ export type AgentLifecycleState =
 
 export interface AgentView extends Omit<
   Agent,
-  "nativeConversationRef" | "executionHistory" | "conflictingExecutions"
+  "execution" | "nativeConversationRef" | "executionHistory" | "conflictingExecutions"
 > {
+  readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind" | "nativeId">;
   readonly goalTitle?: string;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;

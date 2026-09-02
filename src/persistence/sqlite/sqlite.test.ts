@@ -102,7 +102,7 @@ describe("SQLite persistence", () => {
     const store = new SqliteUniverseStore(":memory:");
     expect(
       store.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
-    ).toBe(1);
+    ).toBe(2);
     expect(
       store.db
         .query<{ name: string }, []>(
@@ -158,10 +158,11 @@ describe("SQLite persistence", () => {
     expect(
       store.db
         .query<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_conversations'",
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('provider_catalogue_freshness', 'provider_conversations') ORDER BY name",
         )
-        .all(),
-    ).toHaveLength(1);
+        .all()
+        .map((row) => row.name),
+    ).toEqual(["provider_catalogue_freshness", "provider_conversations"]);
     store.close();
   });
 

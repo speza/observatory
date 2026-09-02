@@ -23,8 +23,10 @@ export interface StoredConversation {
 }
 
 export interface ConversationCatalogueIngestion {
+  readonly accepted: boolean;
   readonly baselineEstablished: boolean;
   readonly newlyObservedHandles: readonly string[];
+  readonly diagnostic?: string;
 }
 
 export interface ConversationCatalogueStore {

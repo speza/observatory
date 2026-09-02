@@ -94,15 +94,18 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
   }
 
   start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError> {
+    let reserved: { readonly requestId: string; readonly intentFingerprint: string } | undefined;
+    let launchAttempted = false;
     return Effect.gen(this, function* () {
       const requestId = yield* this.validateRequestId(intent.requestId);
       const intentFingerprint = fingerprint("start", intent);
       const previous = yield* this.reserveReceipt(requestId, intentFingerprint);
       if (previous) return yield* this.recoverReceipt(previous);
+      reserved = { requestId, intentFingerprint };
       const harnessId = intent.harness.id.trim();
       const harness = yield* this.requireHarness(harnessId);
       yield* this.requireAvailable(harness);
-      const goalId = yield* this.resolveGoal(intent);
+      yield* this.validateGoal(intent);
       const requestedAgentName = agentName(intent);
       const prepared = yield* this.options.workspace
         .prepare(intent.workspace)
@@ -115,6 +118,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         })
         .pipe(Effect.mapError(mapError("harness.plan-start")));
       yield* this.observeHost();
+      const goalId = yield* this.resolveGoal(intent);
+      launchAttempted = true;
       const launched = yield* this.options.host
         .launchExecution({
           workingDirectory: prepared.path,
@@ -200,7 +205,13 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         intentFingerprint,
         recovery,
       );
-    });
+    }).pipe(
+      Effect.catchAll((error) =>
+        reserved && !launchAttempted
+          ? this.rememberPreLaunchFailure(reserved.requestId, reserved.intentFingerprint, error)
+          : Effect.fail(error),
+      ),
+    );
   }
 
   resume(intent: ResumeAgentIntent): Effect.Effect<StartAgentResult, LaunchError> {
@@ -210,11 +221,14 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           launchError("resume.in-flight", "A resume for this Agent is already in progress."),
         );
       this.resumesInFlight.add(intent.agentId);
+      let reserved: { readonly requestId: string; readonly intentFingerprint: string } | undefined;
+      let launchAttempted = false;
       return Effect.gen(this, function* () {
         const requestId = yield* this.validateRequestId(intent.requestId);
         const intentFingerprint = fingerprint("resume", intent);
         const previous = yield* this.reserveReceipt(requestId, intentFingerprint);
         if (previous) return yield* this.recoverReceipt(previous);
+        reserved = { requestId, intentFingerprint };
         const saved = this.options.universe
           .snapshot()
           .agents.find((candidate) => candidate.id === intent.agentId);
@@ -310,6 +324,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             args: intent.args,
           })
           .pipe(Effect.mapError(mapError("harness.plan-resume")));
+        launchAttempted = true;
         const launched = yield* this.options.host
           .launchExecution({
             workingDirectory: saved.worktree,
@@ -395,7 +410,14 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           intentFingerprint,
           recovery,
         );
-      }).pipe(Effect.ensuring(Effect.sync(() => this.resumesInFlight.delete(intent.agentId))));
+      }).pipe(
+        Effect.catchAll((error) =>
+          reserved && !launchAttempted
+            ? this.rememberPreLaunchFailure(reserved.requestId, reserved.intentFingerprint, error)
+            : Effect.fail(error),
+        ),
+        Effect.ensuring(Effect.sync(() => this.resumesInFlight.delete(intent.agentId))),
+      );
     });
   }
 
@@ -486,11 +508,16 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
   }
 
   private recoverReceipt(receipt: LaunchReceipt): Effect.Effect<StartAgentResult, LaunchError> {
-    if (receipt.result.status !== "pending" || !receipt.recovery)
+    if (receipt.result.status !== "pending")
       return Effect.succeed({
         ...receipt.result,
         status: "already-observed",
         message: `Request ${receipt.requestId} was already processed: ${receipt.result.message}`,
+      });
+    if (!receipt.recovery)
+      return Effect.succeed({
+        ...receipt.result,
+        message: `Request ${receipt.requestId} has no proven host outcome and will not be launched again automatically.`,
       });
     return Effect.gen(this, function* () {
       const recovery = receipt.recovery!;
@@ -704,6 +731,36 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       : Effect.fail(
           launchError("launch.rename", renamed.error ?? "The launched Agent could not be named."),
         );
+  }
+
+  private rememberPreLaunchFailure(
+    requestId: string,
+    intentFingerprint: string,
+    error: LaunchError,
+  ): Effect.Effect<never, LaunchError> {
+    return this.remember(
+      {
+        status: "failed",
+        requestId,
+        message: `Launch setup failed before process placement: ${error.message}`,
+      },
+      intentFingerprint,
+    ).pipe(Effect.flatMap(() => Effect.fail(error)));
+  }
+
+  private validateGoal(intent: StartAgentIntent): Effect.Effect<void, LaunchError> {
+    const goalIntent = intent.goal;
+    if (goalIntent.kind === "inbox") return Effect.void;
+    if (goalIntent.kind === "new-goal")
+      return goalIntent.title.trim()
+        ? Effect.void
+        : Effect.fail(launchError("launch.goal", "A new Goal title is required."));
+    const goal = this.options.universe
+      .snapshot()
+      .goals.find((candidate) => candidate.id === goalIntent.goalId);
+    return goal?.status === "active"
+      ? Effect.void
+      : Effect.fail(launchError("launch.goal", "The selected goal is not active."));
   }
 
   private resolveGoal(intent: StartAgentIntent): Effect.Effect<GoalId | undefined, LaunchError> {

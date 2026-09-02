@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
 import { createMockScenario } from "../hosts/mock/scenarios.ts";
 import { FixedClock, makeUniverse } from "../universe/test-support.ts";
@@ -102,6 +105,40 @@ describe("agent launch coordinator", () => {
     expect(universe.snapshot().agents.filter((agent) => agent.provider === "codex")).toHaveLength(
       1,
     );
+  });
+
+  test("coalesces concurrent duplicate requests without launching twice", async () => {
+    const clock = new FixedClock(62_000);
+    const store = new SqliteUniverseStore(":memory:");
+    const { universe } = makeUniverse({ clock, store });
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
+    await Effect.runPromise(host.snapshot()).then((snapshot) => universe.reconcile(snapshot));
+    const intent = {
+      requestId: "concurrent-launch",
+      goal: { kind: "inbox" } as const,
+      workspace: { kind: "existing", path: "/synthetic/project" } as const,
+      harness: { id: "codex" },
+    };
+    const options = {
+      universe,
+      host,
+      harnesses: { agentHarness: (id: string) => (id === "codex" ? codexHarness : undefined) },
+      workspace: new TestWorkspaceProvider(),
+      receipts: store,
+    };
+    const before = (await Effect.runPromise(host.snapshot())).agents.length;
+
+    const results = await Promise.all([
+      Effect.runPromise(createStartAgentCoordinator(options).start(intent)),
+      Effect.runPromise(createStartAgentCoordinator(options).start(intent)),
+    ]);
+
+    expect(results.filter(({ status }) => status === "started")).toHaveLength(1);
+    expect(
+      results.some(({ status }) => status === "pending" || status === "already-observed"),
+    ).toBe(true);
+    expect((await Effect.runPromise(host.snapshot())).agents).toHaveLength(before + 1);
+    store.close();
   });
 
   test("binds provider-owned identity when a later observation reports it", async () => {
@@ -277,6 +314,62 @@ describe("agent launch coordinator", () => {
     });
     expect((await Effect.runPromise(host.snapshot())).agents).toHaveLength(before + 1);
     store.close();
+  });
+
+  test("durably records pre-launch failure without creating a requested Goal", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "observatory-launch-receipt-"));
+    const databasePath = join(directory, "universe.sqlite");
+    const clock = new FixedClock(78_000);
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
+    const unavailableHarness: AgentHarness = {
+      ...codexHarness,
+      availability: () =>
+        Effect.succeed({ available: false, message: "Codex is temporarily unavailable." }),
+    };
+    const intent = {
+      requestId: "failed-before-launch",
+      goal: { kind: "new-goal", title: "Should not be created" } as const,
+      workspace: { kind: "existing", path: "/synthetic/project" } as const,
+      harness: { id: "codex" },
+    };
+    const before = (await Effect.runPromise(host.snapshot())).agents.length;
+    try {
+      const firstStore = new SqliteUniverseStore(databasePath);
+      const firstUniverse = makeUniverse({ clock, store: firstStore }).universe;
+      const first = await Effect.runPromiseExit(
+        createStartAgentCoordinator({
+          universe: firstUniverse,
+          host,
+          harnesses: { agentHarness: () => unavailableHarness },
+          workspace: new TestWorkspaceProvider(),
+          receipts: firstStore,
+        }).start(intent),
+      );
+      expect(Exit.isFailure(first)).toBe(true);
+      expect(firstUniverse.snapshot().goals).toEqual([]);
+      firstStore.close();
+
+      const recoveredStore = new SqliteUniverseStore(databasePath);
+      const recoveredUniverse = makeUniverse({ clock, store: recoveredStore }).universe;
+      const retried = await Effect.runPromise(
+        createStartAgentCoordinator({
+          universe: recoveredUniverse,
+          host,
+          harnesses: { agentHarness: () => unavailableHarness },
+          workspace: new TestWorkspaceProvider(),
+          receipts: recoveredStore,
+        }).start(intent),
+      );
+      expect(retried).toMatchObject({
+        status: "already-observed",
+        requestId: "failed-before-launch",
+      });
+      expect(retried.message).toContain("Launch setup failed before process placement");
+      expect((await Effect.runPromise(host.snapshot())).agents).toHaveLength(before);
+      recoveredStore.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("rejects a reused request id with a different intent", async () => {

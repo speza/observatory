@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { existsSync } from "node:fs";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { positiveIntegerSetting } from "../runtime/config.ts";
 import {
   workspaceError,
   WorkspaceError,
@@ -21,12 +22,15 @@ const MAX_DIFF_BYTES = 750_000;
 const MAX_DIFF_FILES = 120;
 const MAX_FILE_BYTES = 300_000;
 const MAX_COMMAND_STDERR_BYTES = 64_000;
+const MAX_COMMAND_STDOUT_BYTES = 256_000;
+const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 
 export interface WorkspaceCommandOptions {
   /** Maximum number of stdout bytes retained by the command runner. */
   readonly maxStdoutBytes?: number;
   /** Maximum number of stderr bytes retained by the command runner. */
   readonly maxStderrBytes?: number;
+  readonly timeoutMs?: number;
 }
 
 export interface WorkspaceCommandResult {
@@ -35,6 +39,7 @@ export interface WorkspaceCommandResult {
   readonly stderr: string;
   readonly stdoutTruncated?: boolean;
   readonly stderrTruncated?: boolean;
+  readonly timedOut?: boolean;
 }
 
 export interface WorkspaceCommandRunner {
@@ -95,6 +100,13 @@ const readCommandStream = async (
 };
 
 export class BunWorkspaceCommandRunner implements WorkspaceCommandRunner {
+  private readonly timeoutMs = positiveIntegerSetting(
+    "AO_PROCESS_TIMEOUT_MS",
+    process.env.AO_PROCESS_TIMEOUT_MS,
+    DEFAULT_COMMAND_TIMEOUT_MS,
+    { minimum: 100 },
+  );
+
   async run(
     argv: readonly string[],
     cwd?: string,
@@ -106,23 +118,36 @@ export class BunWorkspaceCommandRunner implements WorkspaceCommandRunner {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const stdoutPromise = readCommandStream(process.stdout, options?.maxStdoutBytes);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      process.kill(9);
+    }, options?.timeoutMs ?? this.timeoutMs);
+    const stdoutPromise = readCommandStream(
+      process.stdout,
+      options?.maxStdoutBytes ?? MAX_COMMAND_STDOUT_BYTES,
+    );
     const stderrPromise = readCommandStream(
       process.stderr,
       options?.maxStderrBytes ?? MAX_COMMAND_STDERR_BYTES,
     );
-    const [stdout, stderr, exitCode] = await Promise.all([
-      stdoutPromise,
-      stderrPromise,
-      process.exited,
-    ]);
-    return {
-      exitCode,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      stdoutTruncated: stdout.truncated || undefined,
-      stderrTruncated: stderr.truncated || undefined,
-    };
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        stdoutPromise,
+        stderrPromise,
+        process.exited,
+      ]);
+      return {
+        exitCode: timedOut ? 124 : exitCode,
+        stdout: stdout.text,
+        stderr: stderr.text,
+        stdoutTruncated: stdout.truncated || undefined,
+        stderrTruncated: stderr.truncated || undefined,
+        timedOut: timedOut || undefined,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

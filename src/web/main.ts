@@ -11,6 +11,9 @@ import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
 import { ConversationTracker } from "../conversations/tracker.ts";
 import { AgentObservationCoordinator } from "../agent-observations/coordinator.ts";
+import { configuredLoopbackOrigin, isAllowedWebRequest } from "./security.ts";
+import { positiveIntegerSetting } from "../runtime/config.ts";
+import { startSerializedRefreshLoop } from "./refresh-loop.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -50,7 +53,9 @@ const staticResponse = async (url: URL): Promise<Response> => {
 const program = Effect.scoped(
   Effect.gen(function* () {
     const runtime = createObservatoryRuntime();
-    const port = Number(process.env.AO_WEB_PORT ?? 4310);
+    const port = positiveIntegerSetting("AO_WEB_PORT", process.env.AO_WEB_PORT, 4310, {
+      maximum: 65_535,
+    });
     const configuredWorkspaceLocations = (process.env.AO_WORKSPACE_LOCATIONS ?? "")
       .split(delimiter)
       .map((location) => location.trim())
@@ -102,15 +107,14 @@ const program = Effect.scoped(
       receipts: runtime.store,
       reconcileHost: conversations.observeHost.bind(conversations),
     });
-    const providerRefresh =
-      process.env.AO_HOST === "mock"
-        ? {
-            observedProviders: 0,
-            discoveredConversations: 0,
-            admittedConversations: 0,
-            diagnostics: [],
-          }
-        : yield* conversations.refresh();
+    const providerRefresh = runtime.useMockHost
+      ? {
+          observedProviders: 0,
+          discoveredConversations: 0,
+          admittedConversations: 0,
+          diagnostics: [],
+        }
+      : yield* conversations.refresh();
     const observationRefresh = yield* agentObservations.refresh();
     const initialMessage = yield* initializeObservatoryRuntime(
       runtime,
@@ -124,10 +128,15 @@ const program = Effect.scoped(
       }
     }
     yield* startAgent.refreshPending();
+    const allowedOrigin = configuredLoopbackOrigin(
+      "AO_WEB_ALLOWED_ORIGIN",
+      process.env.AO_WEB_ALLOWED_ORIGIN,
+      `http://127.0.0.1:${port}`,
+    );
     const api = new ObservatoryWebApi(
       runtime.universe,
       runtime.clock,
-      `http://127.0.0.1:${port}`,
+      allowedOrigin,
       runtime.host,
       workspace,
       { coordinator: startAgent, workspace },
@@ -136,50 +145,68 @@ const program = Effect.scoped(
       conversations,
       agentObservations,
     );
-    const refreshMs = Number(process.env.AO_WEB_REFRESH_MS ?? 2_000);
-    const providerRefreshMs = Number(process.env.AO_PROVIDER_REFRESH_MS ?? 60_000);
-    const observationRefreshMs = Number(process.env.AO_OBSERVATION_REFRESH_MS ?? 2_000);
+    const refreshMs = positiveIntegerSetting(
+      "AO_WEB_REFRESH_MS",
+      process.env.AO_WEB_REFRESH_MS,
+      2_000,
+      { minimum: 100 },
+    );
+    const providerRefreshMs = positiveIntegerSetting(
+      "AO_PROVIDER_REFRESH_MS",
+      process.env.AO_PROVIDER_REFRESH_MS,
+      60_000,
+      { minimum: 100 },
+    );
+    const observationRefreshMs = positiveIntegerSetting(
+      "AO_OBSERVATION_REFRESH_MS",
+      process.env.AO_OBSERVATION_REFRESH_MS,
+      2_000,
+      { minimum: 100 },
+    );
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port,
       fetch: (request) => {
+        if (!isAllowedWebRequest(request, allowedOrigin))
+          return new Response("Request origin rejected.", { status: 403 });
         const url = new URL(request.url);
         return url.pathname.startsWith("/api/") ? api.fetch(request) : staticResponse(url);
       },
     });
-    const refresh = (): void => {
-      void Effect.runPromise(runtime.host.snapshot())
-        .then((snapshot) => {
-          conversations.observeHost(snapshot);
-          return Effect.runPromise(startAgent.refreshPending());
-        })
-        .catch((error: Error) => {
-          console.error(`Observatory refresh failed: ${error.message}`);
+    const hostLoop = startSerializedRefreshLoop({
+      intervalMs: refreshMs,
+      refresh: async () => {
+        const snapshot = await Effect.runPromise(runtime.host.snapshot());
+        conversations.observeHost(snapshot);
+        await Effect.runPromise(startAgent.refreshPending());
+      },
+      onError: (message) => console.error(`Observatory refresh failed: ${message}`),
+    });
+    const providerLoop = runtime.useMockHost
+      ? undefined
+      : startSerializedRefreshLoop({
+          intervalMs: providerRefreshMs,
+          refresh: async () => {
+            await Effect.runPromise(conversations.refresh());
+          },
+          onError: (message) => console.error(`Conversation refresh failed: ${message}`),
         });
-    };
-    const timer = setInterval(refresh, refreshMs);
-    const providerTimer =
-      process.env.AO_HOST === "mock"
-        ? undefined
-        : setInterval(() => {
-            void Effect.runPromise(conversations.refresh()).catch((error: Error) => {
-              console.error(`Conversation refresh failed: ${error.message}`);
-            });
-          }, providerRefreshMs);
-    const observationTimer = setInterval(() => {
-      void Effect.runPromise(agentObservations.refresh()).catch((error: Error) => {
-        console.error(`Agent-observation refresh failed: ${error.message}`);
-      });
-    }, observationRefreshMs);
+    const observationLoop = startSerializedRefreshLoop({
+      intervalMs: observationRefreshMs,
+      refresh: async () => {
+        await Effect.runPromise(agentObservations.refresh());
+      },
+      onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
+    });
     console.log(
       `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
 
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
-        clearInterval(timer);
-        if (providerTimer) clearInterval(providerTimer);
-        clearInterval(observationTimer);
+        hostLoop.stop();
+        providerLoop?.stop();
+        observationLoop.stop();
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

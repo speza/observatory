@@ -70,10 +70,7 @@ const AgentFields = {
   execution: Schema.optional(
     Schema.Struct({
       hostKind: Schema.String,
-      hostInstanceId: Schema.String,
       nativeId: Schema.String,
-      hostLocator: Schema.String,
-      observedAt: Schema.Number,
     }),
   ),
   harnessId: Schema.optional(Schema.String),

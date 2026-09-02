@@ -400,6 +400,16 @@ const appendChanges = (previous: UniverseState, next: UniverseState, now: number
   next.changes = [...previous.changes, ...deriveChanges(previous, next, now)];
 };
 
+const changedAgentIds = (previous: readonly Agent[], next: readonly Agent[]): readonly string[] => {
+  const previousById = new Map(previous.map((agent) => [agent.id, JSON.stringify(agent)]));
+  return next
+    .filter((agent) => {
+      const before = previousById.get(agent.id);
+      return before !== undefined && JSON.stringify(agent) !== before;
+    })
+    .map((agent) => agent.id);
+};
+
 const isDuplicateObservation = (agents: readonly HostAgentObservation[]): string | undefined => {
   const seen = new Set<string>();
   for (const agent of agents) {
@@ -946,20 +956,9 @@ export class Universe {
   /** The sole production interface for accepting host and provider observations. */
   observe(observation: UniverseObservation): ReconciliationResult {
     if (observation.kind === "host-executions") return this.reconcile(observation.snapshot);
-    const before = this.state.agents;
-    if (observation.kind === "provider-unavailable")
-      this.markProviderUnavailable(observation.harnessId);
-    else this.reconcileProviderSessions(observation);
-    const updatedAgentIds = this.state.agents
-      .filter((agent, index) => agent !== before[index])
-      .map((agent) => agent.id);
-    return {
-      accepted: true,
-      addedAgentIds: [],
-      updatedAgentIds,
-      staleAgentIds: [],
-      diagnostics: [],
-    };
+    return observation.kind === "provider-unavailable"
+      ? this.markProviderUnavailable(observation.harnessId)
+      : this.reconcileProviderSessions(observation);
   }
 
   /** Discard persisted runtime certainty before the first fresh host observation. */
@@ -986,14 +985,27 @@ export class Universe {
     this.state = next;
   }
 
-  reconcileProviderSessions(options: {
+  private reconcileProviderSessions(options: {
     readonly harnessId: string;
     readonly continuityScopeId: string;
     readonly observedAt: number;
     readonly complete: boolean;
     readonly sessions: readonly ProviderSessionFact[];
-  }): void {
-    const next = cloneUniverseState(this.state);
+  }): ReconciliationResult {
+    const previous = this.state;
+    const latestAcceptedAt = previous.agents.reduce(
+      (latest, agent) =>
+        agent.nativeConversationRef?.harnessId === options.harnessId &&
+        agent.nativeConversationRef.continuityScopeId === options.continuityScopeId
+          ? Math.max(latest, agent.providerObservedAt ?? Number.NEGATIVE_INFINITY)
+          : latest,
+      Number.NEGATIVE_INFINITY,
+    );
+    if (options.observedAt < latestAcceptedAt)
+      return rejectedReconciliation(
+        `Out-of-order ${options.harnessId} provider catalogue ignored: ${options.observedAt} is older than ${latestAcceptedAt}.`,
+      );
+    const next = cloneUniverseState(previous);
     const canonicalAliases = options.sessions.flatMap((session) =>
       (session.nativeConversationAliases ?? []).map((alias) => ({
         alias,
@@ -1067,12 +1079,27 @@ export class Universe {
         worktree: normalizeText(session.workspaceRef) ?? agent.worktree,
       };
     });
-    this.store.save(next);
+    const updatedAgentIds = changedAgentIds(previous.agents, next.agents);
+    try {
+      this.store.save(next);
+    } catch (error) {
+      return rejectedReconciliation(
+        `Provider reconciliation rolled back: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     this.state = next;
+    return {
+      accepted: true,
+      addedAgentIds: [],
+      updatedAgentIds,
+      staleAgentIds: [],
+      diagnostics: [],
+    };
   }
 
-  markProviderUnavailable(harnessId: string): void {
-    const next = cloneUniverseState(this.state);
+  private markProviderUnavailable(harnessId: string): ReconciliationResult {
+    const previous = this.state;
+    const next = cloneUniverseState(previous);
     next.agents = next.agents.map((agent) =>
       agent.harnessId === harnessId && agent.nativeConversationRef
         ? {
@@ -1082,8 +1109,22 @@ export class Universe {
           }
         : agent,
     );
-    this.store.save(next);
+    const updatedAgentIds = changedAgentIds(previous.agents, next.agents);
+    try {
+      this.store.save(next);
+    } catch (error) {
+      return rejectedReconciliation(
+        `Provider availability update rolled back: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     this.state = next;
+    return {
+      accepted: true,
+      addedAgentIds: [],
+      updatedAgentIds,
+      staleAgentIds: [],
+      diagnostics: [],
+    };
   }
 
   execute(command: UniverseCommand): CommandResult {

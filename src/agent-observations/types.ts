@@ -26,14 +26,14 @@ export interface AgentObservationStore {
     capability: AgentObservationCapability,
     receivedAt: number,
     pluginId: string,
-  ): void;
+  ): boolean;
   markObservationSourceUnavailable(
     harnessId: string,
     capability: AgentObservationCapability,
     observedAt: number,
     diagnostic: string,
     pluginId: string,
-  ): void;
+  ): boolean;
   agentObservationSources(): readonly StoredObservationSource[];
   currentAgentObservations(): readonly StoredAgentObservation[];
   agentObservationTransitions(afterSequence: number): readonly AgentEvidenceTransition[];

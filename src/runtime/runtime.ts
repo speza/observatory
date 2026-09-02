@@ -10,6 +10,7 @@ import { SqliteUniverseStore } from "../persistence/sqlite/sqlite-store.ts";
 import { createProjectionModule } from "../projection/projection.ts";
 import { Universe, type ReconciliationResult } from "../universe/universe.ts";
 import type { Clock, IdGenerator } from "../universe/types.ts";
+import { positiveIntegerSetting } from "./config.ts";
 
 export class SystemClock implements Clock {
   now(): number {
@@ -64,7 +65,11 @@ export const createObservatoryRuntime = (): ObservatoryRuntime => {
         return new MockHostAdapter({
           clock,
           scenario,
-          tickMs: Number(process.env.AO_MOCK_TICK_MS ?? scenario.tickMs),
+          tickMs: positiveIntegerSetting(
+            "AO_MOCK_TICK_MS",
+            process.env.AO_MOCK_TICK_MS,
+            scenario.tickMs,
+          ),
         });
       })()
     : new HerdrHostAdapter({ clock });

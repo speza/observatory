@@ -9,10 +9,7 @@ describe("RepositoryStatus", () => {
       id: "agent-1",
       execution: {
         hostKind: "mock",
-        hostInstanceId: "mock:default",
         nativeId: "native-1",
-        hostLocator: "mock:native-1",
-        observedAt: 1,
       },
       continuity: "proved",
       providerContinuity: "confirmed",

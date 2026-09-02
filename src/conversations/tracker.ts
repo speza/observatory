@@ -24,6 +24,7 @@ const HISTORY_ITEMS_PER_HARNESS = 50;
 
 export class ConversationTracker implements ConversationTrackerModule {
   private lastHostSnapshot: HostSnapshot | undefined;
+  private readonly refreshSemaphore = Effect.unsafeMakeSemaphore(1);
 
   constructor(
     private readonly harnesses: {
@@ -35,7 +36,7 @@ export class ConversationTracker implements ConversationTrackerModule {
   ) {}
 
   refresh(): Effect.Effect<ConversationRefreshResult> {
-    return Effect.gen(this, function* () {
+    const operation = Effect.gen(this, function* () {
       const configuredHarnesses = this.harnesses.agentHarnesses();
       const results = yield* Effect.forEach(
         configuredHarnesses,
@@ -58,6 +59,10 @@ export class ConversationTracker implements ConversationTrackerModule {
         discoveredConversations += result.right.sessions.length;
         diagnostics.push(...result.right.diagnostics);
         const ingestion = this.store.reconcileProviderCatalogue(result.right);
+        if (!ingestion.accepted) {
+          if (ingestion.diagnostic) diagnostics.push(ingestion.diagnostic);
+          continue;
+        }
         this.universe.observe({
           kind: "provider-catalogue",
           harnessId: result.right.harnessId,
@@ -86,6 +91,7 @@ export class ConversationTracker implements ConversationTrackerModule {
         diagnostics,
       };
     });
+    return this.refreshSemaphore.withPermits(1)(operation);
   }
 
   history(): readonly ConversationHistoryView[] {

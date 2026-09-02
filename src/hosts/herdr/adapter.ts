@@ -52,8 +52,12 @@ const commandErrorMessage = (result: CommandResult): string | undefined => {
   return stringValue(nonEmptyRecord(payload.error), "message");
 };
 
-const commandFailureMessage = (result: CommandResult, fallback: string): string =>
-  commandErrorMessage(result) ?? (result.stderr.trim() || result.stdout.trim() || fallback);
+const commandFailureMessage = (result: CommandResult, fallback: string): string => {
+  if (result.timedOut) return `${fallback} The Herdr command timed out.`;
+  if (result.stdoutTruncated || result.stderrTruncated)
+    return `${fallback} The Herdr response exceeded the safe output limit.`;
+  return commandErrorMessage(result) ?? (result.stderr.trim() || result.stdout.trim() || fallback);
+};
 
 const createLaunchTrace = (): LaunchTrace => {
   const path = process.env.AO_LAUNCH_LOG?.trim();
@@ -719,7 +723,7 @@ export class HerdrHostAdapter implements SessionHost {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-    if (result.exitCode !== 0) {
+    if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated) {
       return {
         hostKind: "herdr",
         hostInstanceId: HERDR_HOST_INSTANCE_ID,

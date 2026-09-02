@@ -104,6 +104,38 @@ const trackerFixture = (snapshot: () => ProviderSessionSnapshot = () => provider
 };
 
 describe("conversation tracker", () => {
+  test("serializes concurrent provider refreshes", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const store = new SqliteUniverseStore(":memory:");
+    const fixture = makeUniverse({ store });
+    const base = harnessFor(() => providerSnapshot());
+    const delayed: AgentHarness = {
+      ...base,
+      snapshotSessions: () =>
+        Effect.promise(async () => {
+          active += 1;
+          maximumActive = Math.max(maximumActive, active);
+          await Bun.sleep(10);
+          active -= 1;
+          return providerSnapshot();
+        }),
+    };
+    const tracker = new ConversationTracker(
+      {
+        agentHarnesses: () => [delayed],
+        agentHarness: () => delayed,
+      },
+      store,
+      fixture.universe,
+    );
+
+    await Promise.all([Effect.runPromise(tracker.refresh()), Effect.runPromise(tracker.refresh())]);
+
+    expect(maximumActive).toBe(1);
+    store.close();
+  });
+
   test("keeps the first dormant catalogue in history until explicitly added", async () => {
     const fixture = trackerFixture();
 
@@ -126,6 +158,27 @@ describe("conversation tracker", () => {
       displayNameSource: "provider",
       execution: undefined,
       executionPresence: "unknown",
+    });
+    fixture.store.close();
+  });
+
+  test("ignores an older complete catalogue without regressing provider continuity", async () => {
+    let snapshot = providerSnapshot([conversation()], 2_000_000);
+    const fixture = trackerFixture(() => snapshot);
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle);
+
+    snapshot = providerSnapshot([], 1_500_000);
+    const stale = await Effect.runPromise(fixture.tracker.refresh());
+
+    expect(stale.diagnostics).toEqual([
+      "Ignored out-of-order codex catalogue at 1500000; latest accepted observation is 2000000.",
+    ]);
+    expect(fixture.store.conversations()).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      providerContinuity: "confirmed",
+      resumeCapability: "eligible",
+      providerObservedAt: 2_000_000,
     });
     fixture.store.close();
   });
