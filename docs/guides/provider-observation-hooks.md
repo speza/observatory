@@ -1,11 +1,35 @@
 # Provider observation hooks
 
 Observatory can collect bounded provider-native activity from Claude Code,
-Codex and Pi. Claude Code and Codex use small ordered command hooks; Pi uses an
-extension over the same normalising writer. The writer stores only conversation
-identity, coarse activity/tool categories, permission request lifecycle, turn
-completion and compaction lifecycle. It discards prompts, messages, tool
-arguments/results, commands, transcript paths and raw provider payloads.
+Codex and Pi while its control-plane process is running. Claude Code and Codex
+use small command hooks; Pi uses an extension over the same best-effort local
+reporter.
+
+The reporter sends only provider session identity, event name, turn identity
+and tool name. The harness adapter immediately reduces those fields to coarse
+activity/tool categories, permission-request lifecycle, turn completion and
+compaction lifecycle. Prompts, messages, tool arguments/results, commands,
+transcript paths and raw provider payloads are discarded.
+
+## Operating model
+
+The browser may be closed. The Observatory server is expected to remain running
+while supervised Herdr Agents are active:
+
+```text
+provider hook -> authenticated loopback ingress -> harness observation source
+              -> coordinator -> operational SQLite evidence -> projections
+```
+
+Delivery is ephemeral and best effort. The hook uses a 200 ms deadline and
+returns successfully when Observatory or the network endpoint is unavailable.
+There is no hook journal, replay or offline event reconstruction. On restart,
+Herdr restores current execution truth and provider enrichment resumes with the
+next event. Missing provider detail remains unknown.
+
+Events received while Observatory is running are persisted in its bounded
+operational evidence store and remain available to Catch up until acknowledged.
+This is not a complete provider audit history.
 
 ## Install for local dogfooding
 
@@ -21,54 +45,54 @@ The installer merges entries into, rather than replacing:
 - `~/.codex/hooks.json`; and
 - `~/.pi/agent/settings.json`.
 
-It is idempotent and retains existing hooks, packages and extensions. It publishes
-content-addressed bundles under
-`~/.local/share/observatory/hooks/build-<content-hash>/` and records the active
-bundle in `installation.json`; changing branch or moving the checkout cannot
-mutate installed hook code. Rerun the installer explicitly to publish and select
-a new bundle. Codex may ask the operator to
-trust newly added hook commands; review and approve those exact definitions in
-Codex before relying on them.
+It publishes content-addressed bundles under
+`~/.local/share/observatory/hooks/build-<content-hash>/`, creates a user-only
+bearer token under `~/.local/state/observatory/`, and records the selected
+bundle, endpoint and token path in `installation.json`. Existing provider hooks,
+packages and extensions remain intact.
 
-Custom provider roots or outboxes must be supplied to both the harness plugin
-configuration and the installer. The installer accepts `--claude-root`,
-`--codex-root`, `--pi-root`, `--claude-outbox`, `--codex-outbox` and
-`--pi-outbox`.
+The default ingress is:
 
-Normalised JSONL journals live under
-`~/.local/state/observatory/observations/`. A sibling `.configured` marker lets
-the built-in harness report the distinction between an installed-but-empty
-source and one that was never configured. Until the first provider event, and
-after a sufficiently long gap without one, the source reports stale rather than
-claiming healthy delivery. Journals retain complete bounded current state plus
-the latest 1,000 semantic transitions and are compacted atomically. The files
-are local operational cache and must not be committed.
+```text
+http://127.0.0.1:4310/api/provider-observations
+```
 
-Restart the three provider CLIs after installation. Existing provider sessions
-do not replay events that happened before their hook or extension loaded.
+Use `--endpoint` when Observatory runs on another configured loopback port; the
+URL must remain HTTP on `127.0.0.1` with the exact ingress path. Use
+`--token-file` only when Observatory is started with the matching
+`AO_OBSERVATION_TOKEN_FILE`. Custom provider roots use `--claude-root`,
+`--codex-root` and `--pi-root`; configure the harness plugin with the same roots.
 
-Verify the installation and retained journals without changing them:
+Rerunning the installer replaces earlier Observatory journal-writer hook groups
+with the ephemeral reporter. Old files under
+`~/.local/state/observatory/observations/` are ignored and may be deleted after
+confirming the new installation.
+
+Restart Observatory after installation so it loads the version-2 manifest and
+token, then restart the three provider CLIs. Existing provider sessions do not
+replay earlier events.
+
+Verify installation without changing it:
 
 ```sh
 bun run observations:doctor
 ```
 
-The doctor checks the manifest, provider settings, bundles, markers and bounded
-journal health through the same journal interface used by Observatory. It never
-repairs files or claims that hook output is trusted; trust remains `unknown`.
+The doctor checks the manifest, provider settings, bundles and token presence.
+It cannot prove live delivery or provider trust.
 
 ## Remove
 
 There is not yet an automatic uninstaller. Remove only the Observatory command
-hook groups from the Claude and Codex JSON files and remove the installed
-`pi-observation-extension.js` entry from Pi's `extensions` list. Other provider
-hooks and Pi packages are unrelated and must remain intact. Removing the
-`.configured` markers makes Observatory report the sources as not configured on
-its next start.
+hook groups from the Claude and Codex settings and the installed
+`pi-observation-extension.js` entry from Pi's `extensions` list. Do not remove
+unrelated hooks or packages. Remove the Observatory installation manifest to
+make the built-in source report `not-configured` after restart.
 
 ## Evidence boundaries
 
-Hooks provide the event source; Observatory polls the retained journal snapshot for
-reconciliation and restart recovery. A hook never writes SQLite or accepted
-Universe state. Missing, malformed, late or unsupported provider events remain
-explicit uncertainty.
+Hooks never write SQLite or accepted Universe state directly. The authenticated
+ingress dispatches raw bounded fields to the owning harness adapter, then the
+normal coordinator validates and correlates its snapshot. Hook evidence cannot
+admit an Agent, prove process presence or absence, or change accepted lifecycle.
+Malformed, missed, late and unsupported events remain explicit uncertainty.

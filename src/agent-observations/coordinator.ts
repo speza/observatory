@@ -71,7 +71,9 @@ const validCapability = (capability: AgentObservationCapability): boolean => {
       new Set(capability.kinds).size === capability.kinds.length &&
       capability.kinds.every((kind) => kindNames.includes(kind)) &&
       ["hook", "structured-api", "metadata", "mixed"].includes(capability.acquisition) &&
-      ["snapshot", "retained-events-and-snapshot"].includes(capability.delivery) &&
+      ["snapshot", "ephemeral-events-and-snapshot", "retained-events-and-snapshot"].includes(
+        capability.delivery,
+      ) &&
       isBoolean(capability.configured) &&
       freshness.length <= kinds.size &&
       freshness.every(

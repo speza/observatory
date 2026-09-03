@@ -163,6 +163,8 @@ const activatePackage = async (
       const harnessId = harness.harnessId.trim();
       if (!harnessId || harness.describe().harnessId !== harnessId)
         throw new Error("An agent harness has an invalid descriptor identity.");
+      if (harness.observationReceiver && !harness.observationSource)
+        throw new Error("An agent observation receiver requires a matching source.");
       if (harnessIds.has(harnessId))
         throw new Error(`Duplicate agent harness id in plugin: ${harnessId}`);
       harnessIds.add(harnessId);

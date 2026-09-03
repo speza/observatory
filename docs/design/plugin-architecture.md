@@ -131,8 +131,10 @@ optional host capabilities rather than provider policy. See
 
 Provider-native activity, human-input requests, turn outcomes and context
 pressure deepen that same harness capability through a versioned optional
-observation source. The composition root reconciles those bounded observations
-with host, workspace and code-host evidence; deterministic projections consume
-the resulting snapshot. Hooks improve latency but never write persistence or
-accepted Universe state, and missing support remains explicit. See
+observation source and, for live hooks, an optional receiver. The authenticated
+composition-root ingress dispatches bounded events to the owning harness, then
+reconciles its snapshot with host, workspace and code-host evidence.
+Deterministic projections consume the result. Hook delivery is best effort and
+never writes persistence or accepted Universe state directly; missing support
+or delivery remains explicit. See
 [Provider-native Agent observations](../specs/provider-native-agent-observations.md).

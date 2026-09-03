@@ -2,6 +2,7 @@
 
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
+import { readFile, stat } from "node:fs/promises";
 import { delimiter, extname, join, normalize, resolve } from "node:path";
 import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runtime/runtime.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
@@ -11,6 +12,11 @@ import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
 import { ConversationTracker } from "../conversations/tracker.ts";
 import { AgentObservationCoordinator } from "../agent-observations/coordinator.ts";
+import {
+  defaultProviderObservationTokenPath,
+  ProviderObservationIngress,
+  validProviderObservationToken,
+} from "../agent-observations/ingress.ts";
 import { configuredLoopbackOrigin, isAllowedWebRequest } from "./security.ts";
 import { positiveIntegerSetting } from "../runtime/config.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
@@ -150,12 +156,35 @@ const program = Effect.scoped(
       2_000,
       { minimum: 100 },
     );
-    const observationRefreshMs = positiveIntegerSetting(
-      "AO_OBSERVATION_REFRESH_MS",
-      process.env.AO_OBSERVATION_REFRESH_MS,
-      2_000,
-      { minimum: 100 },
-    );
+    const hasPullObservationSource = plugins
+      .agentHarnesses()
+      .some(
+        (harness) =>
+          harness.observationSource !== undefined && harness.observationReceiver === undefined,
+      );
+    const observationRefreshMs = hasPullObservationSource
+      ? positiveIntegerSetting(
+          "AO_OBSERVATION_REFRESH_MS",
+          process.env.AO_OBSERVATION_REFRESH_MS,
+          2_000,
+          { minimum: 100 },
+        )
+      : undefined;
+    const observationTokenPath =
+      process.env.AO_OBSERVATION_TOKEN_FILE ?? defaultProviderObservationTokenPath();
+    const observationToken = yield* Effect.promise(async () => {
+      try {
+        const metadata = await stat(observationTokenPath);
+        if (!metadata.isFile() || metadata.size > 256 || (metadata.mode & 0o077) !== 0) return "";
+        const value = (await readFile(observationTokenPath, "utf8")).trim();
+        return validProviderObservationToken(value) ? value : "";
+      } catch {
+        return "";
+      }
+    });
+    const observationIngress = observationToken
+      ? new ProviderObservationIngress(observationToken, plugins, agentObservations)
+      : undefined;
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port,
@@ -163,6 +192,10 @@ const program = Effect.scoped(
         if (!isAllowedWebRequest(request, allowedOrigin))
           return new Response("Request origin rejected.", { status: 403 });
         const url = new URL(request.url);
+        if (url.pathname === "/api/provider-observations")
+          return (
+            observationIngress?.fetch(request) ?? new Response("Not configured.", { status: 503 })
+          );
         return url.pathname.startsWith("/api/") ? api.fetch(request) : staticResponse(url);
       },
     });
@@ -175,13 +208,16 @@ const program = Effect.scoped(
       },
       onError: (message) => console.error(`Observatory refresh failed: ${message}`),
     });
-    const observationLoop = startSerializedRefreshLoop({
-      intervalMs: observationRefreshMs,
-      refresh: async () => {
-        await Effect.runPromise(agentObservations.refresh());
-      },
-      onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
-    });
+    const observationLoop =
+      observationRefreshMs === undefined
+        ? undefined
+        : startSerializedRefreshLoop({
+            intervalMs: observationRefreshMs,
+            refresh: async () => {
+              await Effect.runPromise(agentObservations.refresh());
+            },
+            onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
+          });
     console.log(
       `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
@@ -189,7 +225,7 @@ const program = Effect.scoped(
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         hostLoop.stop();
-        observationLoop.stop();
+        observationLoop?.stop();
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

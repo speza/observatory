@@ -205,7 +205,7 @@ export const AgentObservationSchema: Schema.Schema<AgentObservation> = Schema.Un
 export interface AgentObservationCapability {
   readonly kinds: readonly AgentObservationKind[];
   readonly acquisition: "hook" | "structured-api" | "metadata" | "mixed";
-  readonly delivery: "snapshot" | "retained-events-and-snapshot";
+  readonly delivery: "snapshot" | "ephemeral-events-and-snapshot" | "retained-events-and-snapshot";
   readonly configured: boolean;
   readonly freshnessSeconds: Partial<Record<AgentObservationKind, number>>;
 }
@@ -249,6 +249,12 @@ export interface AgentObservationSourceV1 {
     readonly afterCursor?: string;
     readonly limit: number;
   }): Effect.Effect<AgentObservationSnapshot, HarnessObservationError>;
+}
+
+export type AgentObservationReceiverInput = Readonly<Record<string, string | number>>;
+
+export interface AgentObservationReceiverV1 {
+  receive(input: AgentObservationReceiverInput): Effect.Effect<number, HarnessObservationError>;
 }
 
 export interface AgentProcessPlan {
@@ -315,6 +321,7 @@ export class HarnessError extends Error {
 export interface AgentHarness {
   readonly harnessId: string;
   readonly observationSource?: AgentObservationSourceV1;
+  readonly observationReceiver?: AgentObservationReceiverV1;
   describe(): AgentHarnessDescriptor;
   availability(): Effect.Effect<HarnessAvailability, HarnessError>;
   snapshotSessions(): Effect.Effect<ProviderSessionSnapshot, HarnessError>;

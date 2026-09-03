@@ -1,77 +1,19 @@
 import { Schema } from "effect";
+import { readFile, stat } from "node:fs/promises";
 import {
-  defaultObservationOutbox,
-  defaultProviderRoot,
+  validObservationEndpoint,
   type ProviderHarnessId,
 } from "./provider-observation-installation.ts";
-import {
-  ProviderObservationJournal,
-  type ProviderLifecycleEvent,
-} from "./provider-observation-journal.ts";
+import { ProviderHookInputSchema, type ProviderHookInput } from "./provider-observation-events.ts";
 
-export const ProviderHookInputSchema = Schema.Struct({
-  hook_event_name: Schema.optional(Schema.String),
-  type: Schema.optional(Schema.String),
-  session_id: Schema.optional(Schema.String),
-  sessionId: Schema.optional(Schema.String),
-  tool_name: Schema.optional(Schema.String),
-  toolName: Schema.optional(Schema.String),
-  turn_id: Schema.optional(Schema.String),
-  turnId: Schema.optional(Schema.String),
-  turn_index: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-  turnIndex: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-});
-export type ProviderHookInput = typeof ProviderHookInputSchema.Type;
+const MAX_HOOK_BODY_BYTES = 32 * 1024;
+const DELIVERY_TIMEOUT_MS = 200;
 
-const normalized = (value: string | undefined): string | undefined => value?.trim() || undefined;
-
-const normalizeProviderEvent = (
-  harnessId: ProviderHarnessId,
-  input: ProviderHookInput,
-): ProviderLifecycleEvent | undefined => {
-  const name = normalized(input.hook_event_name) ?? normalized(input.type);
-  const sessionId = normalized(input.session_id) ?? normalized(input.sessionId);
-  if (!name || !sessionId) return undefined;
-  const toolName = normalized(input.tool_name) ?? normalized(input.toolName);
-  const turnValue = input.turn_index ?? input.turnIndex;
-  const turnId =
-    normalized(input.turn_id) ??
-    normalized(input.turnId) ??
-    (turnValue === undefined ? undefined : normalized(String(turnValue)));
-  const event = (type: ProviderLifecycleEvent["type"]): ProviderLifecycleEvent => ({
-    type,
-    sessionId,
-    toolName,
-    turnId,
-  });
-
-  if (harnessId !== "pi") {
-    if (name === "SessionStart") return event("session-started");
-    if (name === "UserPromptSubmit") return event("turn-started");
-    if (name === "PreToolUse") return event("tool-started");
-    if (name === "PermissionRequest") return event("permission-requested");
-    if (name === "PostToolUse" || name === "PostToolUseFailure") return event("tool-completed");
-    if (name === "PreCompact") return event("compaction-started");
-    if (name === "PostCompact") return event("compaction-completed");
-    if (name === "Stop" || name === "SubagentStop") return event("settled");
-    if (name === "SessionEnd") return event("session-ended");
-    return undefined;
-  }
-  if (name === "session_start") return event("session-started");
-  if (name === "before_agent_start" || name === "agent_start") return event("turn-started");
-  if (name === "tool_execution_start") return event("tool-started");
-  if (name === "tool_execution_end") return event("tool-completed");
-  if (name === "session_before_compact") return event("compaction-started");
-  if (name === "session_compact") return event("compaction-completed");
-  if (name === "agent_settled") return event("settled");
-  if (name === "session_shutdown") return event("session-ended");
-  return undefined;
-};
+export { ProviderHookInputSchema, type ProviderHookInput };
 
 export interface RecordProviderHookOptions {
-  readonly outbox?: string;
-  readonly providerRoot?: string;
-  readonly now?: number;
+  readonly endpoint?: string;
+  readonly tokenFile?: string;
 }
 
 export const recordProviderHook = async (
@@ -79,11 +21,35 @@ export const recordProviderHook = async (
   input: ProviderHookInput,
   options: RecordProviderHookOptions = {},
 ): Promise<number> => {
-  const event = normalizeProviderEvent(harnessId, input);
-  if (!event) return 0;
-  return new ProviderObservationJournal({
-    harnessId,
-    path: options.outbox ?? defaultObservationOutbox(harnessId),
-    root: options.providerRoot ?? defaultProviderRoot(harnessId),
-  }).record(event, options.now);
+  if (!options.endpoint || !validObservationEndpoint(options.endpoint) || !options.tokenFile)
+    return 0;
+  let token: string;
+  try {
+    const metadata = await stat(options.tokenFile);
+    if (!metadata.isFile() || metadata.size > 256 || (metadata.mode & 0o077) !== 0) return 0;
+    token = (await readFile(options.tokenFile, "utf8")).trim();
+  } catch {
+    return 0;
+  }
+  if (!token) return 0;
+  const body = JSON.stringify({ harnessId, input });
+  if (Buffer.byteLength(body, "utf8") > MAX_HOOK_BODY_BYTES) return 0;
+  try {
+    const response = await fetch(options.endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body,
+      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+    });
+    if (!response.ok) return 0;
+    const decoded = Schema.decodeUnknownSync(
+      Schema.parseJson(Schema.Struct({ accepted: Schema.Number })),
+    )(await response.text());
+    return decoded.accepted;
+  } catch {
+    return 0;
+  }
 };

@@ -100,10 +100,21 @@ converge in the Inspector.
 
 ## Host and terminal integration
 
-Herdr is the first live `SessionHost` because it already exposes agent
-inventory, state, worktree provenance, launch, close and terminal operations.
-Only `src/hosts/herdr/` and composition code may know Herdr protocols or native
+Observatory V1 is Herdr-native: Herdr is the required and supported live
+execution host, not merely one interchangeable option that V1 must avoid using
+fully. This is a product support decision, while `SessionHost` remains a
+host-neutral architectural boundary. Herdr already exposes agent inventory,
+state, worktree provenance, launch, close and terminal operations. Only
+`src/hosts/herdr/` and composition code may know Herdr protocols or native
 identifiers.
+
+The authority split is deliberate. Herdr owns execution presence, location,
+coarse runtime state, attachment and closeout revalidation. Provider hooks own
+optional provider-semantic evidence such as human-input requests, turn outcomes
+and context pressure. Hooks cannot admit an Agent, prove process presence or
+absence, complete semantic work, or replace a fresh Herdr check for a sensitive
+operation. Hook delivery is ephemeral and best effort; received observations
+are operational evidence rather than accepted Universe state.
 
 The browser asks the loopback server to open an accepted Agent. The server:
 
@@ -119,24 +130,35 @@ the same capability and remain transient tabs, not Universe objects.
 
 The replacement test remains strict: a future tmux or other host adapter must
 not require changes to Universe, persistence, projection or browser interfaces.
+That testability does not make alternative hosts V1 scope.
+
+Remote execution, distributed host aggregation and an Observatory edge
+collector remain deferred. If remote Herdr becomes supported, the preferred
+direction is one authoritative Observatory. A host-local durable outbox and
+authenticated outbound forwarding should be added only if remote disconnection
+recovery becomes a demonstrated requirement. Running one independent
+Observatory per VM is appropriate only for intentionally separate trust domains;
+federating their semantic Universes is not the default remote-host design.
 
 ## Local transport
 
 The current product is one in-process, single-user application:
 
 ```text
-Browser -> 127.0.0.1 HTTP/SSE -> Universe + SessionHost + SQLite
+Browser -------> 127.0.0.1 HTTP/SSE -> Universe + SessionHost + SQLite
+Provider hooks -> authenticated POST -> harness observation receiver
 ```
 
-Mutation endpoints require exact loopback Origin, JSON content type and an
-explicit intent header. The browser receives narrow projections and operation
-results, never SQLite records, arbitrary filesystem paths or the internal
-command union.
+Browser mutation endpoints require exact loopback Origin, JSON content type and
+an explicit intent header. The separate provider ingress requires a per-install
+bearer token, accepts only bounded JSON and has no CORS. The browser receives
+narrow projections and operation results, never SQLite records, arbitrary
+filesystem paths or the internal command union.
 
-Polling is sufficient for snapshot reconciliation in this walking slice. A
-versioned Unix-socket or subscription transport is deferred until concurrent
-clients or external agent processes create a measured need. Do not introduce a
-daemon merely because the architecture could support one.
+Polling remains the compatibility mechanism for host snapshots and browser
+projection delivery. Provider hooks trigger immediate reconciliation and are not
+polled. A versioned subscription transport is deferred until a measured need;
+do not introduce a daemon merely because the architecture could support one.
 
 ## Toolchain and quality
 

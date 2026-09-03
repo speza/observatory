@@ -29,8 +29,8 @@ const supported = [
 ] as const;
 
 export interface PiObservationOptions {
-  readonly outbox?: string;
-  readonly providerRoot?: string;
+  readonly endpoint?: string;
+  readonly tokenFile?: string;
 }
 
 export const createPiObservationExtension =

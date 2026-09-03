@@ -37,6 +37,8 @@ explicit seams instead of leaking through the model.
   never promoted into accepted semantic truth.
 - Observatory is local-only and single-user. It does not ingest transcripts,
   own agent processes or expose its control plane remotely.
+- V1 requires Herdr for live execution, while Universe, persistence, projections
+  and renderer interfaces remain independent of Herdr protocol and topology.
 
 ## System shape
 
@@ -156,6 +158,18 @@ turn-outcome and context-pressure claims. It correlates observations by exact
 conversation identity, preserves source and freshness, and enriches projections
 without changing accepted semantic state.
 
+Evidence authority remains split by claim axis:
+
+| Claim                                                               | Evidence owner                        | Cannot establish                                          |
+| ------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
+| Execution presence, location, runtime state and terminal capability | `SessionHost`                         | Provider outcome or accepted completion                   |
+| Human-input request, provider turn outcome and context pressure     | `AgentHarness` observation source     | Execution presence, Agent admission or semantic lifecycle |
+| Agent identity, Goal assignment, priority, completion and archive   | Universe commands and human decisions | Fresh external runtime facts                              |
+
+A provider claim may explain or conflict with host state, but does not replace
+it. Missing or conflicting evidence stays explicit, and target-sensitive
+operations obtain their own fresh host revalidation.
+
 Raw provider events, prompts, responses and transcript paths are not retained.
 
 ### `session-launch/` and `workspaces/`
@@ -209,10 +223,12 @@ silently selected.
 ### `web/` and `web/src/`
 
 `src/web/` composes the application and exposes a narrow same-origin loopback
-interface. Every request must use the configured loopback authority; a present
-browser Origin must match it, so DNS rebinding cannot turn read endpoints into a
-cross-origin data channel. Mutation additionally requires JSON, an explicit
-command header and an allow-list of browser commands. Host-backed launch,
+interface. Browser requests must use the configured loopback authority and a
+matching Origin, so DNS rebinding cannot turn read endpoints into a cross-origin
+data channel. Browser mutation additionally requires JSON, an explicit command
+header and an allow-list of commands. The provider-observation ingress is a
+separate POST-only, size-bounded interface authenticated by a user-owned bearer
+token; it accepts no browser credentials or CORS. Host-backed launch,
 closeout and terminal actions use separate typed gateways rather than pretending
 they are synchronous Universe commands.
 
@@ -247,11 +263,13 @@ scope.
 
 1. Poll the selected SessionHost through a serialized, deadline-bounded refresh loop.
 2. Enrich host observations with exact harness evidence where available.
-3. Refresh provider catalogues at startup or on explicit history requests, and
-   refresh metadata observations independently.
-4. Submit typed observations to Universe.
-5. Persist accepted state atomically.
-6. Derive projections and return them to the browser.
+3. Refresh provider catalogues at startup or on explicit history requests.
+4. Receive ephemeral provider hook events through the owning harness and
+   immediately reconcile its bounded observation snapshot.
+5. Submit typed host and catalogue observations to Universe; provider evidence
+   remains in its separate operational store.
+6. Persist accepted state atomically.
+7. Derive projections and return them to the browser.
 
 Out-of-order observations are ignored without regressing accepted state.
 
@@ -285,8 +303,9 @@ storage, but they do not become trusted Observatory state.
 
 ## Security and privacy
 
-- Bind only to loopback and reject foreign HTTP authorities and browser origins.
-- Keep local database and observation journals user-owned.
+- Bind only to loopback; reject foreign browser authorities/origins and require
+  the separate bearer token for provider-observation ingress.
+- Keep the local database and provider-observation delivery token user-owned.
 - Never ingest transcripts by default.
 - Do not expose transcript paths or provider aliases to browser projections.
 - Bound process output and deadlines, terminal dimensions, diffs, search results
@@ -337,7 +356,7 @@ that leakage, repair the seam before adding the integration.
 
 The current architecture does not include:
 
-- a daemon or remote control plane;
+- a daemon, remote control plane or host-local edge collector;
 - an Observatory-owned multiplexer, process runtime or PTY;
 - transcript ingestion or universal provider chat;
 - repositories, worktrees or hosts as organisational topology;

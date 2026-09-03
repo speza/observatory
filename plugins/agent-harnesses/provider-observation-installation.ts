@@ -7,6 +7,26 @@ export type ProviderHarnessId = "claude" | "codex" | "pi";
 
 export const providerHarnessIds = ["claude", "codex", "pi"] as const;
 
+export const validProviderObservationToken = (value: string): boolean =>
+  /^[A-Za-z0-9_-]{43,128}$/u.test(value);
+
+export const validObservationEndpoint = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      url.hostname === "127.0.0.1" &&
+      url.pathname === "/api/provider-observations" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const providerLabel = (harnessId: ProviderHarnessId): string => {
   if (harnessId === "claude") return "Claude Code";
   if (harnessId === "codex") return "Codex";
@@ -19,13 +39,6 @@ export const defaultProviderRoot = (harnessId: ProviderHarnessId, baseHome = hom
   return join(baseHome, ".pi", "agent");
 };
 
-export const defaultObservationOutbox = (
-  harnessId: ProviderHarnessId,
-  baseHome = homedir(),
-): string => join(baseHome, ".local", "state", "observatory", "observations", `${harnessId}.jsonl`);
-
-export const observationMarker = (path: string): string => `${path}.configured`;
-
 export const observationScope = (harnessId: string, root: string): string =>
   createHash("sha256")
     .update(`${harnessId}\u0000${resolve(root)}`)
@@ -37,7 +50,6 @@ export const observationProviderInstance = (harnessId: string, scope: string): s
 
 export interface ProviderObservationConfiguration {
   readonly root: string;
-  readonly outbox: string;
 }
 
 export type ProviderObservationConfigurations = Readonly<
@@ -46,18 +58,9 @@ export type ProviderObservationConfigurations = Readonly<
 
 export const defaultProviderObservationConfigurations = (baseHome = homedir()) =>
   ({
-    claude: {
-      root: defaultProviderRoot("claude", baseHome),
-      outbox: defaultObservationOutbox("claude", baseHome),
-    },
-    codex: {
-      root: defaultProviderRoot("codex", baseHome),
-      outbox: defaultObservationOutbox("codex", baseHome),
-    },
-    pi: {
-      root: defaultProviderRoot("pi", baseHome),
-      outbox: defaultObservationOutbox("pi", baseHome),
-    },
+    claude: { root: defaultProviderRoot("claude", baseHome) },
+    codex: { root: defaultProviderRoot("codex", baseHome) },
+    pi: { root: defaultProviderRoot("pi", baseHome) },
   }) satisfies ProviderObservationConfigurations;
 
 export const providerSettingsPath = (
@@ -75,13 +78,15 @@ export const observationInstallRoot = (baseHome = homedir()): string =>
 export const observationInstallManifest = (baseHome = homedir()): string =>
   join(observationInstallRoot(baseHome), "installation.json");
 
-const ProviderConfigurationSchema = Schema.Struct({ root: Schema.String, outbox: Schema.String });
+const ProviderConfigurationSchema = Schema.Struct({ root: Schema.String });
 export const ProviderObservationInstallManifestSchema = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(2),
   installedAt: Schema.Number,
   buildId: Schema.String,
   commandHook: Schema.String,
   piExtension: Schema.String,
+  endpoint: Schema.String,
+  tokenFile: Schema.String,
   providers: Schema.Struct({
     claude: ProviderConfigurationSchema,
     codex: ProviderConfigurationSchema,

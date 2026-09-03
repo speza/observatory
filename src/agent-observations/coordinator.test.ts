@@ -195,6 +195,52 @@ describe("agent observation coordination", () => {
     expect(withoutPlugin.snapshot().agents[0]?.health).toBe("unavailable");
   });
 
+  test("does not admit, retain or project provider evidence for an untracked conversation", async () => {
+    const store = createMemoryStore();
+    const fixture = makeUniverse({ store });
+    const event = {
+      schemaVersion: 1 as const,
+      observationId: "untracked-request",
+      nativeConversationRef: reference,
+      providerInstanceId: "codex-local-test",
+      kind: "human-input-request" as const,
+      observedAt,
+      source: { mechanism: "hook" as const },
+      payload: {
+        requestId: "request-1",
+        requestKind: "permission" as const,
+        state: "open" as const,
+      },
+    };
+    const coordinator = new AgentObservationCoordinator(
+      {
+        agentHarnesses: () => [
+          harness({
+            schemaVersion: 1,
+            harnessId: "codex",
+            providerInstanceId: "codex-local-test",
+            continuityScopeId: "scope-test",
+            capturedAt: observedAt,
+            complete: true,
+            current: [event],
+            transitions: [event],
+            health: { state: "healthy", diagnostics: [] },
+          }),
+        ],
+      },
+      store,
+      fixture.universe,
+      () => observedAt,
+    );
+
+    expect(await Effect.runPromise(coordinator.refresh())).toMatchObject({ observedSources: 1 });
+    expect(store.currentAgentObservations()).toEqual([]);
+    expect(fixture.universe.snapshot().agents).toEqual([]);
+    expect(coordinator.snapshot().agents).toEqual([]);
+    expect(coordinator.snapshot().transitions).toEqual([]);
+    store.close();
+  });
+
   test("correlates scoped provider evidence to one compatible unscoped managed launch", async () => {
     const store = createMemoryStore();
     const fixture = makeUniverse({ store });

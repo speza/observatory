@@ -7,7 +7,6 @@ import type {
   AgentHarness,
   BoundedProcessRunner,
   OpaqueNativeConversationRef,
-  ProviderSessionSnapshot,
 } from "../plugin-sdk/index.ts";
 import { loadPluginRegistry } from "./registry.ts";
 
@@ -25,7 +24,7 @@ const runner = (exitCode = 0): BoundedProcessRunner => ({
 
 const loadHarnesses = async (
   process = runner(),
-  config?: Readonly<Record<string, string | number>>,
+  config?: Readonly<Record<string, string | number | boolean>>,
 ): Promise<readonly AgentHarness[]> => {
   const registry = await Effect.runPromise(
     loadPluginRegistry({ packages: [{ path: harnessesPath, config }], runner: process }),
@@ -40,42 +39,6 @@ const loadHarnesses = async (
 
 const sessionRef = (harnessId: string, value = "session-123") =>
   ({ harnessId, kind: "id", value }) satisfies OpaqueNativeConversationRef;
-
-const writeObservation = async (
-  path: string,
-  harnessId: string,
-  snapshot: ProviderSessionSnapshot,
-  sessionId: string,
-) => {
-  await writeFile(
-    path,
-    `${JSON.stringify({
-      current: true,
-      observation: {
-        schemaVersion: 1,
-        observationId: `${harnessId}-permission`,
-        nativeConversationRef: {
-          harnessId,
-          continuityScopeId: snapshot.continuityScopeId,
-          kind: "id",
-          value: sessionId,
-        },
-        providerInstanceId: snapshot.providerInstanceId,
-        kind: "human-input-request",
-        observedAt: snapshot.observedAt,
-        source: { mechanism: "hook" },
-        payload: {
-          requestId: "request-safe-id",
-          requestKind: "permission",
-          state: "open",
-          prompt: "SECRET_PROMPT",
-          command: "SECRET_COMMAND",
-        },
-        transcript: "SECRET_TRANSCRIPT_PATH",
-      },
-    })}\n`,
-  );
-};
 
 describe("agent harness plugins", () => {
   test("loads Claude Code, Codex and Pi through the contributed registry", async () => {
@@ -94,8 +57,6 @@ describe("agent harness plugins", () => {
     const claudeRoot = join(root, "claude-projects");
     const codexRoot = join(root, "codex");
     const codexSessions = join(codexRoot, "sessions", "2026", "08", "28");
-    const claudeOutbox = join(root, "claude-observations.jsonl");
-    const codexOutbox = join(root, "codex-observations.jsonl");
     await mkdir(join(claudeRoot, "synthetic-project"), { recursive: true });
     await mkdir(codexSessions, { recursive: true });
     await writeFile(
@@ -165,14 +126,27 @@ describe("agent harness plugins", () => {
       const [claude, codex] = await loadHarnesses(runner(), {
         claudeProjectsRoot: claudeRoot,
         codexRoot,
-        claudeObservationOutbox: claudeOutbox,
-        codexObservationOutbox: codexOutbox,
+        providerObservationsEnabled: true,
         maxSessions: 20,
       });
       const claudeSnapshot = await Effect.runPromise(claude!.snapshotSessions());
       const codexSnapshot = await Effect.runPromise(codex!.snapshotSessions());
-      await writeObservation(claudeOutbox, "claude", claudeSnapshot, "claude-session");
-      await writeObservation(codexOutbox, "codex", codexSnapshot, "codex-session");
+      await Effect.runPromise(
+        claude!.observationReceiver!.receive({
+          hook_event_name: "PermissionRequest",
+          session_id: "claude-session",
+          tool_name: "Bash",
+          prompt: "SECRET_PROMPT",
+        }),
+      );
+      await Effect.runPromise(
+        codex!.observationReceiver!.receive({
+          hook_event_name: "PermissionRequest",
+          session_id: "codex-session",
+          tool_name: "shell",
+          prompt: "SECRET_PROMPT",
+        }),
+      );
       const claudeObservations = await Effect.runPromise(
         claude!.observationSource!.snapshot({ providerInstanceId: "", limit: 20 }),
       );

@@ -120,10 +120,11 @@ status module owns correlation, caching, ambiguity and merge-readiness rules.
 
 `agent-harness` is the second implemented manifest capability. Provider-native
 observation is not a third top-level capability: an `AgentHarness` may expose a
-versioned `observationSource` sub-capability beside its existing catalogue,
-start, resume and continuity methods. Existing harnesses remain valid without
-it. The source returns bounded normalised snapshots through Effect; it receives
-no persistence or Universe handle. See
+versioned `observationSource` sub-capability and an optional live
+`observationReceiver` beside its existing catalogue, start, resume and
+continuity methods. Existing harnesses remain valid without them. The receiver
+normalises bounded events and the source returns snapshots through Effect;
+neither receives a persistence or Universe handle. See
 [Provider-native Agent observations](provider-native-agent-observations.md).
 
 ## Loading and lifecycle

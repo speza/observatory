@@ -1,17 +1,31 @@
 import { Schema } from "effect";
-import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   defaultProviderRoot,
-  defaultObservationOutbox,
   observationInstallManifest,
   observationInstallRoot,
-  observationMarker,
   providerSettingsPath,
+  validObservationEndpoint,
   type ProviderHarnessId,
   type ProviderObservationInstallManifest,
 } from "../plugins/agent-harnesses/provider-observation-installation.ts";
+import {
+  DEFAULT_PROVIDER_OBSERVATION_ENDPOINT,
+  defaultProviderObservationTokenPath,
+  validProviderObservationToken,
+} from "../src/agent-observations/ingress.ts";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | MutableJson;
 interface MutableJson {
@@ -60,17 +74,17 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)
 const commandFor = (
   executable: string,
   harnessId: "claude" | "codex",
-  providerRoot: string,
-  outbox: string,
+  endpoint: string,
+  tokenFile: string,
 ): string =>
   [
     shellQuote(process.execPath),
     shellQuote(executable),
     harnessId,
-    "--provider-root",
-    shellQuote(providerRoot),
-    "--outbox",
-    shellQuote(outbox),
+    "--endpoint",
+    shellQuote(endpoint),
+    "--token-file",
+    shellQuote(tokenFile),
   ].join(" ");
 
 const hookEvents = {
@@ -139,16 +153,26 @@ const installPiExtension = async (path: string, extension: string): Promise<void
   await writeSettings(path, settings);
 };
 
-const ensureOutbox = async (path: string): Promise<void> => {
+const ensureToken = async (path: string): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, "", { flag: "a", mode: 0o600 });
-  await writeFile(observationMarker(path), "", { flag: "a", mode: 0o600 });
+  try {
+    await writeFile(path, randomBytes(32).toString("base64url"), { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (!Schema.is(ErrorCodeSchema)(error) || error.code !== "EEXIST") throw error;
+  }
+  await chmod(path, 0o600);
+  const metadata = await stat(path);
+  if (!metadata.isFile() || metadata.size > 256)
+    throw new Error("The existing observation delivery token is invalid.");
+  const token = (await readFile(path, "utf8")).trim();
+  if (!validProviderObservationToken(token))
+    throw new Error("The existing observation delivery token is invalid.");
 };
 
 const buildInstalledHooks = async (
   installRoot: string,
-  piRoot: string,
-  piOutbox: string,
+  endpoint: string,
+  tokenFile: string,
 ): Promise<{
   readonly buildId: string;
   readonly commandHook: string;
@@ -173,7 +197,7 @@ const buildInstalledHooks = async (
   );
   await writeFile(
     wrapper,
-    `import { createPiObservationExtension } from ${JSON.stringify(piSource)};\nexport default createPiObservationExtension(${JSON.stringify({ outbox: piOutbox, providerRoot: piRoot })});\n`,
+    `import { createPiObservationExtension } from ${JSON.stringify(piSource)};\nexport default createPiObservationExtension(${JSON.stringify({ endpoint, tokenFile })});\n`,
     { mode: 0o600 },
   );
   try {
@@ -212,10 +236,15 @@ const buildInstalledHooks = async (
   };
 };
 
-const argument = (name: string): string | undefined => {
+const stringArgument = (name: string): string | undefined => {
   const index = process.argv.indexOf(name);
   const value = process.argv[index + 1];
-  return index >= 0 && value ? resolve(value) : undefined;
+  return index >= 0 && value ? value : undefined;
+};
+
+const pathArgument = (name: string): string | undefined => {
+  const value = stringArgument(name);
+  return value ? resolve(value) : undefined;
 };
 
 const homeArgument = process.argv.indexOf("--home");
@@ -226,44 +255,45 @@ const targetHome =
 if (!targetHome) throw new Error("A home directory is required.");
 
 const roots = {
-  claude: argument("--claude-root") ?? defaultProviderRoot("claude", targetHome),
-  codex: argument("--codex-root") ?? defaultProviderRoot("codex", targetHome),
-  pi: argument("--pi-root") ?? defaultProviderRoot("pi", targetHome),
+  claude: pathArgument("--claude-root") ?? defaultProviderRoot("claude", targetHome),
+  codex: pathArgument("--codex-root") ?? defaultProviderRoot("codex", targetHome),
+  pi: pathArgument("--pi-root") ?? defaultProviderRoot("pi", targetHome),
 } satisfies Record<ProviderHarnessId, string>;
-const outboxes = {
-  claude: argument("--claude-outbox") ?? defaultObservationOutbox("claude", targetHome),
-  codex: argument("--codex-outbox") ?? defaultObservationOutbox("codex", targetHome),
-  pi: argument("--pi-outbox") ?? defaultObservationOutbox("pi", targetHome),
-} satisfies Record<ProviderHarnessId, string>;
+const endpoint = stringArgument("--endpoint") ?? DEFAULT_PROVIDER_OBSERVATION_ENDPOINT;
+if (!validObservationEndpoint(endpoint))
+  throw new Error("The observation endpoint must be the loopback Observatory ingress URL.");
+const tokenFile = pathArgument("--token-file") ?? defaultProviderObservationTokenPath(targetHome);
+await ensureToken(tokenFile);
 const installed = await buildInstalledHooks(
   observationInstallRoot(targetHome),
-  roots.pi,
-  outboxes.pi,
+  endpoint,
+  tokenFile,
 );
 
 await installCommandHooks(
   providerSettingsPath("claude", targetHome),
   "claude",
-  commandFor(installed.commandHook, "claude", roots.claude, outboxes.claude),
+  commandFor(installed.commandHook, "claude", endpoint, tokenFile),
 );
 await installCommandHooks(
   providerSettingsPath("codex", targetHome),
   "codex",
-  commandFor(installed.commandHook, "codex", roots.codex, outboxes.codex),
+  commandFor(installed.commandHook, "codex", endpoint, tokenFile),
 );
 await installPiExtension(providerSettingsPath("pi", targetHome), installed.piExtension);
-await Promise.all(Object.values(outboxes).map(ensureOutbox));
 
 const manifest: ProviderObservationInstallManifest = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   installedAt: Date.now(),
   buildId: installed.buildId,
   commandHook: installed.commandHook,
   piExtension: installed.piExtension,
+  endpoint,
+  tokenFile,
   providers: {
-    claude: { root: roots.claude, outbox: outboxes.claude },
-    codex: { root: roots.codex, outbox: outboxes.codex },
-    pi: { root: roots.pi, outbox: outboxes.pi },
+    claude: { root: roots.claude },
+    codex: { root: roots.codex },
+    pi: { root: roots.pi },
   },
 };
 await writeSettings(observationInstallManifest(targetHome), manifest);

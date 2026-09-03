@@ -1,11 +1,12 @@
 import { Effect, Schema } from "effect";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   HarnessError,
   type AgentHarness,
+  type AgentObservationReceiverV1,
   type AgentObservationSourceV1,
   type AgentHarnessDescriptor,
   type AgentProcessPlan,
@@ -22,18 +23,22 @@ import {
 } from "../../src/plugin-sdk/index.ts";
 import {
   defaultProviderRoot,
-  defaultObservationOutbox,
-  observationMarker,
+  observationInstallManifest,
   observationProviderInstance,
   observationScope,
+  ProviderObservationInstallManifestSchema,
+  validObservationEndpoint,
+  validProviderObservationToken,
   type ProviderHarnessId,
+  type ProviderObservationInstallManifest,
 } from "./provider-observation-installation.ts";
-import { ProviderObservationJournal } from "./provider-observation-journal.ts";
+import { EphemeralProviderObservationSource } from "./ephemeral-provider-observation-source.ts";
 
 interface HarnessDefinition {
   readonly descriptor: AgentHarnessDescriptor;
   readonly executable: string;
   readonly observationSource: AgentObservationSourceV1;
+  readonly observationReceiver: AgentObservationReceiverV1;
   snapshotSessions(): Promise<ProviderSessionSnapshot>;
   start(request: StartHarnessSessionRequest): AgentProcessPlan;
   resume(request: ResumeHarnessSessionRequest): AgentProcessPlan;
@@ -46,9 +51,7 @@ const ProviderConfigurationSchema = Schema.Struct({
   claudeProjectsRoot: Schema.optional(Schema.String),
   codexRoot: Schema.optional(Schema.String),
   piRoot: Schema.optional(Schema.String),
-  claudeObservationOutbox: Schema.optional(Schema.String),
-  codexObservationOutbox: Schema.optional(Schema.String),
-  piObservationOutbox: Schema.optional(Schema.String),
+  providerObservationsEnabled: Schema.optional(Schema.Boolean),
   maxSessions: Schema.optional(Schema.Number),
 });
 type ProviderConfiguration = typeof ProviderConfigurationSchema.Type;
@@ -107,15 +110,43 @@ const configuredLimit = (value: number | undefined): number =>
 const scopeFor = observationScope;
 const providerInstanceFor = observationProviderInstance;
 
-const configuredOutbox = (
+const installedObservations = (): ProviderObservationInstallManifest | undefined => {
+  try {
+    return Schema.decodeUnknownSync(Schema.parseJson(ProviderObservationInstallManifestSchema))(
+      readFileSync(observationInstallManifest(), "utf8"),
+    );
+  } catch {
+    return undefined;
+  }
+};
+
+const observationInstallationConfigured = (
+  installation: ProviderObservationInstallManifest | undefined,
+): boolean => {
+  if (!installation || !validObservationEndpoint(installation.endpoint)) return false;
+  try {
+    const token = statSync(installation.tokenFile);
+    return (
+      token.isFile() &&
+      token.size <= 256 &&
+      (token.mode & 0o077) === 0 &&
+      statSync(installation.commandHook).isFile() &&
+      statSync(installation.piExtension).isFile() &&
+      validProviderObservationToken(readFileSync(installation.tokenFile, "utf8").trim())
+    );
+  } catch {
+    return false;
+  }
+};
+
+const configuredProviderRoot = (
   harnessId: ProviderHarnessId,
   configured: string | undefined,
-): string | undefined => {
-  const explicit = normalized(configured ?? "");
-  if (explicit) return explicit;
-  const path = defaultObservationOutbox(harnessId);
-  return existsSync(observationMarker(path)) ? path : undefined;
-};
+  installation: ProviderObservationInstallManifest | undefined,
+): string =>
+  normalized(configured ?? "") ??
+  installation?.providers[harnessId].root ??
+  defaultProviderRoot(harnessId);
 
 const timestamp = (value: string | undefined): number | undefined => {
   if (value === undefined) return undefined;
@@ -549,6 +580,7 @@ const continuityFor = (harnessId: string, request: ContinuityRequest): Continuit
 class CliAgentHarness implements AgentHarness {
   readonly harnessId: string;
   readonly observationSource: AgentObservationSourceV1;
+  readonly observationReceiver: AgentObservationReceiverV1;
 
   constructor(
     private readonly definition: HarnessDefinition,
@@ -556,6 +588,7 @@ class CliAgentHarness implements AgentHarness {
   ) {
     this.harnessId = definition.descriptor.harnessId;
     this.observationSource = definition.observationSource;
+    this.observationReceiver = definition.observationReceiver;
   }
 
   describe(): AgentHarnessDescriptor {
@@ -639,90 +672,108 @@ class CliAgentHarness implements AgentHarness {
   }
 }
 
-const claudeDefinition = (config: ProviderConfiguration, now: () => number): HarnessDefinition => ({
-  descriptor: {
+const claudeDefinition = (
+  config: ProviderConfiguration,
+  now: () => number,
+  installation: ProviderObservationInstallManifest | undefined,
+): HarnessDefinition => {
+  const root = configuredProviderRoot("claude", config.claudeProjectsRoot, installation);
+  const observations = new EphemeralProviderObservationSource({
     harnessId: "claude",
-    label: "Claude Code",
-    description: "Anthropic Claude Code CLI",
-  },
-  executable: "claude",
-  observationSource: new ProviderObservationJournal({
-    harnessId: "claude",
-    path: configuredOutbox("claude", config.claudeObservationOutbox),
-    root: normalized(config.claudeProjectsRoot ?? "") ?? defaultProviderRoot("claude"),
+    configured: config.providerObservationsEnabled ?? installation !== undefined,
+    root,
     now,
-  }),
-  snapshotSessions: () =>
-    claudeSnapshot(
-      normalized(config.claudeProjectsRoot ?? "") ?? defaultProviderRoot("claude"),
-      now,
-      configuredLimit(config.maxSessions),
-    ),
-  start: (request) => {
-    const sessionId = randomUUID();
-    const nativeConversationRef = {
+  });
+  return {
+    descriptor: {
       harnessId: "claude",
-      kind: "id",
-      value: sessionId,
-    } satisfies OpaqueNativeConversationRef;
-    return {
+      label: "Claude Code",
+      description: "Anthropic Claude Code CLI",
+    },
+    executable: "claude",
+    observationSource: observations,
+    observationReceiver: observations,
+    snapshotSessions: () => claudeSnapshot(root, now, configuredLimit(config.maxSessions)),
+    start: (request) => {
+      const sessionId = randomUUID();
+      const nativeConversationRef = {
+        harnessId: "claude",
+        kind: "id",
+        value: sessionId,
+      } satisfies OpaqueNativeConversationRef;
+      return {
+        harnessId: "claude",
+        executable: "claude",
+        args: appendPrompt(["--session-id", sessionId, ...(request.args ?? [])], request.prompt),
+        sensitiveArgumentIndexes: [1],
+        nativeConversationRef,
+      };
+    },
+    resume: (request) => ({
       harnessId: "claude",
       executable: "claude",
-      args: appendPrompt(["--session-id", sessionId, ...(request.args ?? [])], request.prompt),
+      args: appendPrompt(
+        ["--resume", request.nativeConversationRef.value, ...(request.args ?? [])],
+        request.prompt,
+      ),
       sensitiveArgumentIndexes: [1],
-      nativeConversationRef,
-    };
-  },
-  resume: (request) => ({
-    harnessId: "claude",
-    executable: "claude",
-    args: appendPrompt(
-      ["--resume", request.nativeConversationRef.value, ...(request.args ?? [])],
-      request.prompt,
-    ),
-    sensitiveArgumentIndexes: [1],
-    nativeConversationRef: request.nativeConversationRef,
-  }),
-});
+      nativeConversationRef: request.nativeConversationRef,
+    }),
+  };
+};
 
-const codexDefinition = (config: ProviderConfiguration, now: () => number): HarnessDefinition => ({
-  descriptor: {
+const codexDefinition = (
+  config: ProviderConfiguration,
+  now: () => number,
+  installation: ProviderObservationInstallManifest | undefined,
+): HarnessDefinition => {
+  const root = configuredProviderRoot("codex", config.codexRoot, installation);
+  const observations = new EphemeralProviderObservationSource({
     harnessId: "codex",
-    label: "Codex",
-    description: "OpenAI Codex CLI",
-  },
-  executable: "codex",
-  observationSource: new ProviderObservationJournal({
-    harnessId: "codex",
-    path: configuredOutbox("codex", config.codexObservationOutbox),
-    root: normalized(config.codexRoot ?? "") ?? defaultProviderRoot("codex"),
+    configured: config.providerObservationsEnabled ?? installation !== undefined,
+    root,
     now,
-  }),
-  snapshotSessions: () =>
-    codexSnapshot(
-      normalized(config.codexRoot ?? "") ?? defaultProviderRoot("codex"),
-      now,
-      configuredLimit(config.maxSessions),
-    ),
-  start: (request) => ({
-    harnessId: "codex",
+  });
+  return {
+    descriptor: {
+      harnessId: "codex",
+      label: "Codex",
+      description: "OpenAI Codex CLI",
+    },
     executable: "codex",
-    args: appendPrompt(request.args ?? [], request.prompt),
-  }),
-  resume: (request) => ({
-    harnessId: "codex",
-    executable: "codex",
-    args: appendPrompt(
-      [...(request.args ?? []), "resume", request.nativeConversationRef.value],
-      request.prompt,
-    ),
-    sensitiveArgumentIndexes: [(request.args?.length ?? 0) + 1],
-    nativeConversationRef: request.nativeConversationRef,
-  }),
-});
+    observationSource: observations,
+    observationReceiver: observations,
+    snapshotSessions: () => codexSnapshot(root, now, configuredLimit(config.maxSessions)),
+    start: (request) => ({
+      harnessId: "codex",
+      executable: "codex",
+      args: appendPrompt(request.args ?? [], request.prompt),
+    }),
+    resume: (request) => ({
+      harnessId: "codex",
+      executable: "codex",
+      args: appendPrompt(
+        [...(request.args ?? []), "resume", request.nativeConversationRef.value],
+        request.prompt,
+      ),
+      sensitiveArgumentIndexes: [(request.args?.length ?? 0) + 1],
+      nativeConversationRef: request.nativeConversationRef,
+    }),
+  };
+};
 
-const piDefinition = (config: ProviderConfiguration, now: () => number): HarnessDefinition => {
-  const root = normalized(config.piRoot ?? "") ?? defaultProviderRoot("pi");
+const piDefinition = (
+  config: ProviderConfiguration,
+  now: () => number,
+  installation: ProviderObservationInstallManifest | undefined,
+): HarnessDefinition => {
+  const root = configuredProviderRoot("pi", config.piRoot, installation);
+  const observations = new EphemeralProviderObservationSource({
+    harnessId: "pi",
+    configured: config.providerObservationsEnabled ?? installation !== undefined,
+    root,
+    now,
+  });
   return {
     descriptor: {
       harnessId: "pi",
@@ -730,12 +781,8 @@ const piDefinition = (config: ProviderConfiguration, now: () => number): Harness
       description: "Pi coding agent CLI",
     },
     executable: "pi",
-    observationSource: new ProviderObservationJournal({
-      harnessId: "pi",
-      path: configuredOutbox("pi", config.piObservationOutbox),
-      root,
-      now,
-    }),
+    observationSource: observations,
+    observationReceiver: observations,
     snapshotSessions: () => piSnapshot(root, now, configuredLimit(config.maxSessions)),
     start: (request) => ({
       harnessId: "pi",
@@ -758,11 +805,24 @@ const piDefinition = (config: ProviderConfiguration, now: () => number): Harness
 export const plugin: ObservatoryPlugin = {
   activate: (context) => {
     const config = Schema.decodeUnknownSync(ProviderConfigurationSchema)(context.config);
+    const installation = installedObservations();
+    const observationsConfigured =
+      config.providerObservationsEnabled ?? observationInstallationConfigured(installation);
+    const observationConfig = { ...config, providerObservationsEnabled: observationsConfigured };
     return {
       agentHarnesses: [
-        new CliAgentHarness(claudeDefinition(config, context.now), context.process),
-        new CliAgentHarness(codexDefinition(config, context.now), context.process),
-        new CliAgentHarness(piDefinition(config, context.now), context.process),
+        new CliAgentHarness(
+          claudeDefinition(observationConfig, context.now, installation),
+          context.process,
+        ),
+        new CliAgentHarness(
+          codexDefinition(observationConfig, context.now, installation),
+          context.process,
+        ),
+        new CliAgentHarness(
+          piDefinition(observationConfig, context.now, installation),
+          context.process,
+        ),
       ],
     };
   },

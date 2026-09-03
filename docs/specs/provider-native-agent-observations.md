@@ -24,10 +24,11 @@ ingest prompts, messages, transcripts, tool inputs or outputs, commands, raw
 terminal output, credentials, or provider payloads.
 
 ```text
-provider hooks / structured API / local metadata
+provider hooks -> authenticated local ingress
+structured API / local metadata -> snapshot source
                        |
                        v
-          AgentHarness observation source
+                 AgentHarness
              Effect at the I/O boundary
                        |
                        v
@@ -125,6 +126,7 @@ the plugin API major-version rules.
 interface AgentHarness {
   // existing lifecycle and continuity methods
   observationSource?: AgentObservationSourceV1;
+  observationReceiver?: AgentObservationReceiverV1;
 }
 
 interface AgentObservationSourceV1 {
@@ -138,7 +140,7 @@ interface AgentObservationSourceV1 {
 interface AgentObservationCapability {
   readonly kinds: readonly AgentObservationKind[];
   readonly acquisition: "hook" | "structured-api" | "metadata" | "mixed";
-  readonly delivery: "snapshot" | "retained-events-and-snapshot";
+  readonly delivery: "snapshot" | "ephemeral-events-and-snapshot" | "retained-events-and-snapshot";
   readonly configured: boolean;
   readonly freshnessSeconds: Partial<Record<AgentObservationKind, number>>;
 }
@@ -170,12 +172,12 @@ interface AgentObservationHealth {
 }
 ```
 
-`current` always returns the latest retained claims in scope. `transitions`
-returns bounded normalised transitions after the cursor, or the retained window
-when no cursor is supplied; it is not a provider event dump. Polling at the
-composition root is sufficient for the first slice. A future optional stream
-may reduce latency only after two providers need it; it must carry the same
-envelopes and must not replace snapshots or reconciliation.
+For the built-in hook receiver, `current` and `transitions` are bounded
+process-local reductions of events received by the running Observatory process.
+The receiver immediately triggers the normal snapshot and reconciliation path;
+it does not write the evidence store. Cursors contain a process-local epoch so
+a restarted source cannot reuse an earlier cursor accidentally. Structured or
+metadata sources may still implement retained snapshots independently.
 
 `complete` is scoped to the source's declared retained state, not to facts the
 provider never emitted. A partial snapshot cannot resolve an open request by
@@ -351,24 +353,24 @@ source scope proves it absent; a partial snapshot never closes it.
 
 ### Missed events, loss and restart
 
-Hooks are asynchronous hints. Matching handlers may run concurrently, async
-handlers may finish out of order, processes can exit before delivery, and a
-provider may not hook every tool path. Correctness therefore requires:
+Hooks are asynchronous, best-effort hints. Matching handlers may run
+concurrently, Observatory may be stopped, processes can exit before delivery,
+and a provider may not hook every path. The reporter therefore uses a short
+deadline and never interrupts the provider when delivery fails.
 
-1. a bounded site-local outbox or source cache where the acquisition mechanism
-   permits it;
-2. idempotent polling with cursors;
-3. a source snapshot after Observatory or plugin restart and after reconnect;
-4. recurring safe provider events to repair identity/activity when available;
-5. complete/partial scope on every snapshot; and
-6. explicit stale/unavailable state when no repair source exists.
+Observatory is expected to remain running while supervised Herdr Agents are
+active, even when the browser is closed. Events received during that period are
+reconciled into the bounded operational evidence store. Events emitted while
+the control plane is unavailable are not replayed or reconstructed. On startup,
+Herdr restores current execution truth, the process-local hook source starts
+empty, and provider enrichment resumes with the next event. A blocked Agent may
+therefore retain actionable Herdr attention while its exact provider reason is
+unknown.
 
-The kernel persists a bounded latest-state cache and enough transition history
-for catch-up. After restart it can render saved evidence as stale while the
-source reconnects, but it cannot call it fresh. Plugin disable, crash, upgrade
-or removal leaves Goals, Agents, assignments and accepted completion intact;
-enrichment becomes unavailable and naturally expires. Re-enabling reconciles a
-fresh snapshot before clearing that state.
+Catch up is complete for accepted semantic changes, but provider transitions
+are only those received while Observatory was running. It is not an audit log.
+Plugin disable, crash, upgrade or removal leaves Goals, Agents, assignments and
+accepted completion intact; enrichment becomes unavailable or expires.
 
 ## Projection rules
 
@@ -430,7 +432,7 @@ Provider-reported tool success is not an independently observed check.
 ### Data minimisation
 
 Adapters translate at acquisition and discard disallowed fields before they
-enter an outbox, log or plugin diagnostic. In particular they must discard:
+enter the operational evidence store, log or plugin diagnostic. In particular they must discard:
 
 - prompt, message, assistant response and question text;
 - transcript paths and transcript contents;
@@ -452,16 +454,18 @@ comes from reviewed hook configuration, the provider-generated scoped session
 id and a local authenticated transport. The UI labels its mechanism as a hook,
 not as independently verified truth.
 
-The preferred local sink is a user-only Unix socket. Loopback HTTP is allowed
-with a per-install bearer secret, strict body/size limits, replay protection and
-no CORS; it must never bind a public interface unauthenticated. Hook setup is
+The implemented local sink is loopback HTTP with a per-install bearer secret,
+strict method, content-type and 32 KiB body limits, serialized reconciliation
+and no CORS. It must never bind a public interface unauthenticated. Hook setup is
 explicit and reviewable. Observatory does not silently rewrite provider
 settings, bypass hook trust or weaken managed policy.
 
-For remote sites, the reporter writes to a bounded durable site outbox and an
-outbound connector authenticates the accepted site and provider instance using
-a scoped token or mutually authenticated channel. Sequence/cursor replay is
-idempotent. Do not expose a public hook endpoint or tunnel a raw Herdr socket.
+Remote sites are not V1 scope. If remote Herdr is later supported, keep one
+authoritative Observatory rather than placing an independent semantic Universe
+in every VM. Start with authenticated outbound best-effort forwarding. Add a
+bounded durable site outbox and acknowledged replay only if remote disconnection
+recovery becomes a demonstrated requirement. Do not expose a public hook
+endpoint or tunnel a raw Herdr socket.
 
 An observation source is read-only. It cannot approve a permission, submit a
 prompt, alter a tool call or issue terminal input. Those controls require a
@@ -536,9 +540,9 @@ requires a setup-composition spike; V1 must not replace an existing status line
 silently. Cost and token fields remain excluded from V1 normalisation.
 
 Claude documents that matching hooks run in parallel. Async hooks can arrive
-late, and hook errors/timeouts commonly fail open. The first implementation
-therefore needs snapshot/outbox and stale behavior; hook presence is not a
-delivery guarantee.
+late, and hook errors/timeouts commonly fail open. The implementation therefore
+treats delivery as best effort and hook presence as no guarantee that every
+event was received.
 
 ### Codex
 
@@ -596,8 +600,8 @@ acquisition boundary needed to dogfood three providers:
 
 - `AgentHarness.observationSource` is available for the built-in Claude Code,
   Codex and Pi harnesses;
-- each source reads a configured, bounded JSONL journal of already normalised
-  records and otherwise reports `not-configured`;
+- each built-in harness exposes a best-effort hook receiver and a bounded
+  process-local observation source, or reports `not-configured`;
 - the kernel validates, deduplicates, correlates and stores current claims,
   transitions, source health and cursors in the operational SQLite cache;
 - attention, catch-up and inspector projections fuse an immutable evidence
@@ -612,21 +616,21 @@ canonical attention ordering and recomputes nested Goal/System counts from the
 fused Agent views. Removing a source marks its saved evidence unavailable.
 Repeated activity transitions are coalesced in catch-up.
 
-The journal is the retained integration boundary. Provider-specific hook
-adapters translate raw Claude Code, Codex and Pi event names into one private
-lifecycle vocabulary; the journal owns schema decoding, exact harness and
-continuity-scope validation, monotonic sequencing, bounded retention,
-ownership-safe locking and atomic compaction. The explicit operator-run
-installer composes with existing provider settings and publishes
-content-addressed bundles; it never replaces unrelated hooks, packages or
-extensions. Missed-event repair beyond retained current state remains future
-work.
+The installed reporters submit bounded fields to an authenticated loopback
+ingress with a 200 ms deadline and fail open when Observatory is unavailable.
+The owning harness adapter translates Claude Code, Codex and Pi event names into
+one private lifecycle vocabulary and holds bounded current claims and
+transitions in process memory. The ingress then invokes the existing coordinator
+snapshot path, which is the only writer of operational evidence. There is no
+hook journal, lock, compaction, file poll or offline replay.
 
-An `AO_PLUGIN_CONFIG` entry for the built-in harness package replaces its
-unconfigured default activation, so `claudeObservationOutbox` and
-`codexObservationOutbox` can be supplied without creating a duplicate plugin.
-`bun run web:mock` loads a mock harness package through the same registry and
-source contract; it does not seed the observation store directly.
+The explicit operator-run installer composes with existing provider settings,
+publishes content-addressed bundles and creates a user-only bearer token. It
+never replaces unrelated hooks, packages or extensions. An `AO_PLUGIN_CONFIG`
+entry may set `providerObservationsEnabled` and custom provider roots without
+creating a duplicate plugin. `bun run web:mock` loads a mock harness package
+through the same source contract; it does not seed the observation store
+directly.
 
 ### Contract and provider evidence
 
@@ -660,10 +664,11 @@ an Agent/Goal record or the `System -> Goal -> Agent` topology.
 - Add an explicit reviewed local reporter and bounded authenticated sink.
 - Translate only the verified event matrix; add status-line context pressure
   only if the Slice 0 coexistence spike succeeds.
-- Add restart, duplicate, late-event, missed-start and hook-disabled smokes.
+- Add duplicate, late-event, missed-start and hook-disabled smokes.
 
-Gate: a real Claude session opens a permission signal, reports response stop
-and recovers after Observatory restart with no transcript or raw payload stored.
+Gate: while Observatory is running, a real Claude session opens a permission
+signal and reports response stop with no transcript or raw payload stored;
+a missed event after restart remains explicitly unknown.
 
 ### Codex reference source (implemented locally)
 
@@ -676,7 +681,7 @@ and recovers after Observatory restart with no transcript or raw payload stored.
 Gate: adding Codex changes only its harness package, configuration and fixtures;
 core vocabulary, storage, attention and renderer code require no provider edit.
 
-Pi reuses the same outbox and vocabulary through its extension lifecycle. It
+Pi reuses the same ephemeral ingress and vocabulary through its extension lifecycle. It
 also supplies a provider-owned session catalogue and exact start/resume plans
 through the existing harness seam; no Pi brand enters the coordinator,
 persistence or projections.
@@ -712,8 +717,8 @@ and rediscover it.
 - Shared source contracts: capabilities, complete/partial snapshots, bounds,
   unsupported kinds, redaction and typed failures.
 - Reconciliation tests: duplicate, revised, out-of-order and late observations;
-  cursor replay; request open/resolve; partial omission; complete-snapshot
-  repair; clock skew; source restart, disable, removal and stale recovery.
+  cursor epochs; request open/resolve; partial omission; clock skew; source
+  restart, disable, removal and stale recovery.
 - Fusion tests: live host + stopped turn, absent host + tool activity, provider
   complete + failing checks and unknown provider + fresh workspace evidence.
 - Projection tests: deterministic attention ordering, catch-up coalescing,
@@ -736,7 +741,7 @@ Release acceptance requires:
    substitutes for diff/check evidence.
 4. No forbidden content appears in fixtures, persistence, diagnostics, API or
    browser projections.
-5. Snapshot repair and stale behavior pass deterministic restart/loss tests.
+5. Process-local cursor reset and explicit missed-event uncertainty pass deterministic restart/loss tests.
 6. Effect is confined to plugin/coordinator/storage I/O; attention, catch-up,
    verification, projection and spatial calculations are pure.
 
@@ -763,8 +768,8 @@ usage analytics, remote service operation or a new host forward.
   turn semantics, and provider observations may exist with no execution.
 - **Persist arbitrary provider JSON.** It defeats data minimisation, stability,
   bounds and deterministic cross-provider behavior.
-- **Build a universal event bus.** V1 needs one pullable capability feeding one
-  coordinator, not arbitrary publishers and subscribers.
+- **Build a universal event bus.** V1 needs one authenticated ingress feeding
+  the existing harness/coordinator path, not arbitrary publishers and subscribers.
 - **Read transcripts to recover missed events.** Transcript formats are
   unstable and contain exactly the content excluded from this slice.
 - **Treat stopped response as completion.** A stopped turn, independently

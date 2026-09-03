@@ -113,14 +113,14 @@ Install the local metadata-only observation hooks and Pi extension with:
 bun run observations:install
 ```
 
-Check the installed bundles and journal health without modifying them:
+Check the installed bundles, endpoint configuration and delivery token without modifying them:
 
 ```sh
 bun run observations:doctor
 ```
 
 See [Provider observation hooks](docs/guides/provider-observation-hooks.md) for
-the retained fields, coexistence and removal boundaries.
+the best-effort delivery, retained fields, coexistence and removal boundaries.
 
 Run the deterministic 12-goal, 75-agent development portfolio:
 
