@@ -12,7 +12,7 @@ import type { StartAgentResult } from "../session-launch/types.ts";
 import type { AgentCloseoutBatchResult } from "../agent-closeout/types.ts";
 import type { AgentRepositoryStatusSnapshot } from "../repositories/types.ts";
 import type { PluginStatus } from "../plugins/registry.ts";
-import type { PortfolioResponse } from "./api.ts";
+import type { PortfolioResponse } from "./portfolio.ts";
 import type { ConversationHistoryView } from "../conversations/types.ts";
 
 export type WebCommand =
@@ -115,6 +115,43 @@ export interface WebPendingLaunchesResponse {
   readonly kind: "pending-launches";
   readonly launches: readonly WebPendingLaunch[];
 }
+
+export interface RendererSubject {
+  readonly type: "system" | "goal" | "agent";
+  readonly id: string;
+}
+
+export interface BrowserProjectionSnapshot {
+  readonly kind: "snapshot";
+  readonly epoch: string;
+  readonly revision: number;
+  readonly generatedAt: number;
+  readonly portfolio: PortfolioResponse;
+  readonly pendingLaunches: readonly WebPendingLaunch[];
+  readonly affected: readonly RendererSubject[];
+  readonly affectedAll: boolean;
+}
+
+export type BrowserProjectionEvent =
+  | BrowserProjectionSnapshot
+  | {
+      readonly kind: "portfolio-replaced";
+      readonly epoch: string;
+      readonly revision: number;
+      readonly generatedAt: number;
+      readonly portfolio: PortfolioResponse;
+      readonly affected: readonly RendererSubject[];
+      readonly affectedAll: boolean;
+    }
+  | {
+      readonly kind: "pending-launches-replaced";
+      readonly epoch: string;
+      readonly revision: number;
+      readonly generatedAt: number;
+      readonly pendingLaunches: readonly WebPendingLaunch[];
+      readonly affected: readonly RendererSubject[];
+      readonly affectedAll: boolean;
+    };
 
 export interface WebResumeAgentRequest {
   readonly requestId: string;

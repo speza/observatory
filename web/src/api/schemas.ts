@@ -291,6 +291,43 @@ export const PortfolioResponseSchema = Schema.Struct({
   catchUp: CatchUp,
 });
 
+const PendingLaunch = Schema.Struct({
+  requestId: Schema.String,
+  harnessId: Schema.String,
+  displayName: Schema.String,
+  goalId: Schema.optional(Schema.String),
+  message: Schema.String,
+});
+const RendererSubject = Schema.Struct({
+  type: Schema.Literal("system", "goal", "agent"),
+  id: Schema.String,
+});
+const ProjectionEventFields = {
+  epoch: Schema.String,
+  revision: Schema.Number,
+  generatedAt: Schema.Number,
+  affected: Schema.Array(RendererSubject),
+  affectedAll: Schema.Boolean,
+};
+export const BrowserProjectionEventSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    ...ProjectionEventFields,
+    portfolio: PortfolioResponseSchema,
+    pendingLaunches: Schema.Array(PendingLaunch),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("portfolio-replaced"),
+    ...ProjectionEventFields,
+    portfolio: PortfolioResponseSchema,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("pending-launches-replaced"),
+    ...ProjectionEventFields,
+    pendingLaunches: Schema.Array(PendingLaunch),
+  }),
+);
+
 export const InspectorProjectionSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("goal-inspector"),
@@ -356,13 +393,7 @@ const StartAgentResult = Schema.Struct({
   workspace: Schema.optional(PreparedWorkspace),
   warnings: Schema.optional(Schema.Array(Schema.String)),
 });
-export const PendingLaunchSchema = Schema.Struct({
-  requestId: Schema.String,
-  harnessId: Schema.String,
-  displayName: Schema.String,
-  goalId: Schema.optional(Schema.String),
-  message: Schema.String,
-});
+export const PendingLaunchSchema = PendingLaunch;
 export const StartAgentResponseSchema = Schema.Struct({
   result: StartAgentResult,
   portfolio: PortfolioResponseSchema,

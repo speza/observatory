@@ -1,12 +1,5 @@
 import { Effect, Schema } from "effect";
-import type {
-  CommandCentreProjection,
-  CatchUpProjection,
-  InspectorProjection,
-  Projection,
-  SearchProjection,
-  UniverseMapProjection,
-} from "../projection/types.ts";
+import type { InspectorProjection, Projection, SearchProjection } from "../projection/types.ts";
 import type { SessionHost } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { Clock } from "../universe/types.ts";
@@ -37,19 +30,10 @@ import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
 import { WebCloseoutError, WebCloseoutGateway } from "./closeout.ts";
 import type { AgentObservationModule } from "../agent-observations/types.ts";
-import {
-  enrichCatchUp,
-  enrichCommandCentre,
-  enrichInspector,
-  enrichMap,
-} from "../agent-observations/projection.ts";
+import { enrichInspector } from "../agent-observations/projection.ts";
+import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
+export type { PortfolioResponse } from "./portfolio.ts";
 import { isAllowedWebRequest } from "./security.ts";
-
-export interface PortfolioResponse {
-  readonly map: UniverseMapProjection;
-  readonly commandCentre: CommandCentreProjection;
-  readonly catchUp: CatchUpProjection;
-}
 
 interface ErrorResponse {
   readonly error: string;
@@ -182,7 +166,17 @@ export class ObservatoryWebApi {
           Schema.decodeUnknownSync(Schema.parseJson(CommandTypeSchema))(body).type ===
           "AcknowledgeCatchUp"
         )
-          this.agentObservations?.acknowledge(this.clock.now());
+          try {
+            this.agentObservations?.acknowledge(this.clock.now());
+          } catch {
+            return json(
+              {
+                error:
+                  "Semantic catch-up was acknowledged, but the provider-evidence checkpoint could not be saved.",
+              },
+              500,
+            );
+          }
         const portfolio = this.portfolio(this.clock.now());
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebCommandResponse);
@@ -310,23 +304,10 @@ export class ObservatoryWebApi {
   }
 
   private portfolio(now: number): PortfolioResponse | Response {
-    const map = this.universe.project({ kind: "universe-map", now });
-    const commandCentre = this.universe.project({ kind: "command-centre", now });
-    const catchUp = this.universe.project({ kind: "catch-up", now });
-    if (
-      map.kind !== "universe-map" ||
-      commandCentre.kind !== "command-centre" ||
-      catchUp.kind !== "catch-up"
-    )
-      return json({ error: "Projection contract mismatch." }, 500);
-    if (!this.agentObservations) return { map, commandCentre, catchUp };
-    const evidence = this.agentObservations.snapshot();
-    const enrichedCommandCentre = enrichCommandCentre(commandCentre, evidence);
-    return {
-      map: enrichMap(map, evidence),
-      commandCentre: enrichedCommandCentre,
-      catchUp: enrichCatchUp(catchUp, evidence, enrichedCommandCentre),
-    };
+    return (
+      projectPortfolio(this.universe, now, this.agentObservations) ??
+      json({ error: "Projection contract mismatch." }, 500)
+    );
   }
 
   private async terminal(request: Request, url: URL): Promise<Response> {

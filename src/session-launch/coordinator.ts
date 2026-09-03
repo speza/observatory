@@ -474,7 +474,10 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             message: "Launch request reserved; host continuity must be inspected before retry.",
           },
         });
-        if (reservation.kind === "reserved") return undefined;
+        if (reservation.kind === "reserved") {
+          this.publishPendingChange(requestId);
+          return undefined;
+        }
         if (reservation.kind === "conflict")
           throw new Error("The request id was already used for a different launch intent.");
         return reservation.receipt;
@@ -494,12 +497,18 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
   ): Effect.Effect<StartAgentResult, LaunchError> {
     return Effect.try({
       try: () => {
-        this.receipts.saveLaunchReceipt({
+        const receipt = {
           requestId: result.requestId,
           intentFingerprint,
           result,
           recovery,
-        });
+        } satisfies LaunchReceipt;
+        const previous = this.receipts
+          .launchReceipts()
+          .find((candidate) => candidate.requestId === result.requestId);
+        this.receipts.saveLaunchReceipt(receipt);
+        if (JSON.stringify(previous) !== JSON.stringify(receipt))
+          this.publishPendingChange(result.requestId);
         return result;
       },
       catch: (error) =>
@@ -508,6 +517,17 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           error instanceof Error ? error.message : "Launch receipt could not be saved.",
         ),
     });
+  }
+
+  private publishPendingChange(requestId: string): void {
+    this.options.events?.publish([
+      {
+        type: "pending-launch-changed",
+        cause: "launch-operation",
+        occurredAt: this.options.now?.() ?? Date.now(),
+        requestIds: [requestId],
+      },
+    ]);
   }
 
   private recoverReceipt(receipt: LaunchReceipt): Effect.Effect<StartAgentResult, LaunchError> {

@@ -3,7 +3,7 @@ import type {
   CommandCentreProjection,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
-import type { PortfolioResponse } from "../../../src/web/api.ts";
+import type { PortfolioResponse } from "../../../src/web/portfolio.ts";
 import { NO_SYSTEM_SCOPE } from "./systemScope.ts";
 
 export interface ScopedPortfolio {

@@ -1,3 +1,7 @@
+import type {
+  ControlPlaneEventSink,
+  UnsequencedControlPlaneEvent,
+} from "../control-plane-events/index.ts";
 import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
 import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
 import {
@@ -399,14 +403,58 @@ const appendChanges = (previous: UniverseState, next: UniverseState, now: number
   next.changes = [...previous.changes, ...deriveChanges(previous, next, now)];
 };
 
-const changedAgentIds = (previous: readonly Agent[], next: readonly Agent[]): readonly string[] => {
-  const previousById = new Map(previous.map((agent) => [agent.id, JSON.stringify(agent)]));
-  return next
-    .filter((agent) => {
-      const before = previousById.get(agent.id);
-      return before !== undefined && JSON.stringify(agent) !== before;
-    })
-    .map((agent) => agent.id);
+const changedRecordIds = <T extends { readonly id: string }>(
+  previous: readonly T[],
+  next: readonly T[],
+): readonly string[] => {
+  const previousById = new Map(previous.map((record) => [record.id, JSON.stringify(record)]));
+  const nextById = new Map(next.map((record) => [record.id, JSON.stringify(record)]));
+  return [...new Set([...previousById.keys(), ...nextById.keys()])]
+    .filter((id) => previousById.get(id) !== nextById.get(id))
+    .sort();
+};
+
+const changedAgentIds = (previous: readonly Agent[], next: readonly Agent[]): readonly string[] =>
+  changedRecordIds(previous, next);
+
+const executionEventAgent = (agent: Agent): string => {
+  const {
+    lastSeenAt: _lastSeenAt,
+    lastObservedAt: _lastObservedAt,
+    executionObservedAt: _executionObservedAt,
+    execution,
+    ...stable
+  } = agent;
+  if (!execution) return JSON.stringify(stable);
+  const { observedAt: _observedAt, ...stableExecution } = execution;
+  return JSON.stringify({ ...stable, execution: stableExecution });
+};
+
+const changedExecutionAgentIds = (
+  previous: readonly Agent[],
+  next: readonly Agent[],
+): readonly string[] => {
+  const previousById = new Map(previous.map((agent) => [agent.id, executionEventAgent(agent)]));
+  const nextById = new Map(next.map((agent) => [agent.id, executionEventAgent(agent)]));
+  return [...new Set([...previousById.keys(), ...nextById.keys()])]
+    .filter((id) => previousById.get(id) !== nextById.get(id))
+    .sort();
+};
+
+const stableHostHealth = ({ lastObservedAt: _lastObservedAt, ...host }: HostHealth): string =>
+  JSON.stringify(host);
+
+const changedHostInstanceIds = (
+  previous: readonly HostHealth[],
+  next: readonly HostHealth[],
+): readonly string[] => {
+  const previousById = new Map(
+    previous.map((host) => [host.hostInstanceId, stableHostHealth(host)]),
+  );
+  const nextById = new Map(next.map((host) => [host.hostInstanceId, stableHostHealth(host)]));
+  return [...new Set([...previousById.keys(), ...nextById.keys()])]
+    .filter((id) => previousById.get(id) !== nextById.get(id))
+    .sort();
 };
 
 const isDuplicateObservation = (agents: readonly HostAgentObservation[]): string | undefined => {
@@ -906,6 +954,7 @@ export class Universe {
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
     private readonly projections: ProjectionModule,
+    private readonly events?: ControlPlaneEventSink,
   ) {
     this.state = store.load();
   }
@@ -932,7 +981,8 @@ export class Universe {
 
   /** Discard persisted runtime certainty before the first fresh host observation. */
   invalidateRuntimeFacts(): void {
-    const next = cloneUniverseState(this.state);
+    const previous = this.state;
+    const next = cloneUniverseState(previous);
     next.agents = next.agents.map((agent) =>
       agent.execution
         ? {
@@ -952,6 +1002,7 @@ export class Universe {
     );
     this.store.save(next);
     this.state = next;
+    this.publishExecutionChanges(previous, next, this.clock.now());
   }
 
   private reconcileProviderSessions(options: {
@@ -1065,6 +1116,7 @@ export class Universe {
       );
     }
     this.state = next;
+    this.publishAgentChanges(previous, next, options.observedAt, "provider-catalogue");
     return {
       accepted: true,
       updatedAgentIds,
@@ -1094,6 +1146,7 @@ export class Universe {
       );
     }
     this.state = next;
+    this.publishAgentChanges(previous, next, this.clock.now(), "provider-catalogue");
     return {
       accepted: true,
       updatedAgentIds,
@@ -1540,7 +1593,9 @@ export class Universe {
         error: `Command rolled back: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    const previous = this.state;
     this.state = next;
+    this.publishSemanticChanges(previous, next, now);
     return result;
   }
 
@@ -1560,13 +1615,101 @@ export class Universe {
         error: `Reconciliation rolled back: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    const previous = this.state;
     this.state = planned.state;
+    this.publishExecutionChanges(previous, planned.state, snapshot.observedAt);
     return {
       accepted: true,
       updatedAgentIds: planned.updatedAgentIds,
       staleAgentIds: planned.staleAgentIds,
       diagnostics: planned.diagnostics,
     };
+  }
+
+  private publishSemanticChanges(previous: UniverseState, next: UniverseState, at: number): void {
+    const semanticSequence = next.changes.at(-1)?.sequence;
+    const systemIds = changedRecordIds(previous.systems, next.systems);
+    const agentIds = changedRecordIds(previous.agents, next.agents);
+    const goalIds = new Set(changedRecordIds(previous.goals, next.goals));
+    for (const agentId of agentIds) {
+      const before = previous.agents.find((agent) => agent.id === agentId);
+      const after = next.agents.find((agent) => agent.id === agentId);
+      if (before?.primaryGoalId) goalIds.add(before.primaryGoalId);
+      if (after?.primaryGoalId) goalIds.add(after.primaryGoalId);
+    }
+    if (
+      JSON.stringify(previous.relatedAgentDismissals) !==
+      JSON.stringify(next.relatedAgentDismissals)
+    )
+      for (const dismissal of [...previous.relatedAgentDismissals, ...next.relatedAgentDismissals])
+        goalIds.add(dismissal.goalId);
+    const events: UnsequencedControlPlaneEvent[] = [];
+    if (systemIds.length > 0)
+      events.push({
+        type: "system-changed",
+        cause: "human-command",
+        occurredAt: at,
+        systemIds,
+        semanticSequence,
+      });
+    if (goalIds.size > 0)
+      events.push({
+        type: "goal-changed",
+        cause: "human-command",
+        occurredAt: at,
+        goalIds: [...goalIds],
+        semanticSequence,
+      });
+    if (agentIds.length > 0)
+      events.push({
+        type: "agent-changed",
+        cause: "human-command",
+        occurredAt: at,
+        agentIds,
+        semanticSequence,
+      });
+    if (JSON.stringify(previous.operatorCheckpoint) !== JSON.stringify(next.operatorCheckpoint))
+      events.push({
+        type: "catch-up-changed",
+        cause: "human-command",
+        occurredAt: at,
+        semanticSequence: next.operatorCheckpoint?.lastSequence ?? semanticSequence ?? 0,
+      });
+    this.events?.publish(events);
+  }
+
+  private publishAgentChanges(
+    previous: UniverseState,
+    next: UniverseState,
+    at: number,
+    cause: "provider-catalogue",
+  ): void {
+    const agentIds = changedRecordIds(previous.agents, next.agents);
+    if (agentIds.length > 0)
+      this.events?.publish([{ type: "agent-changed", cause, occurredAt: at, agentIds }]);
+  }
+
+  private publishExecutionChanges(previous: UniverseState, next: UniverseState, at: number): void {
+    const agentIds = changedExecutionAgentIds(previous.agents, next.agents);
+    const hostInstanceIds = changedHostInstanceIds(previous.hosts, next.hosts);
+    if (agentIds.length === 0 && hostInstanceIds.length === 0) return;
+    const previousStatuses = new Map(
+      previous.hosts.map((host) => [host.hostInstanceId, host.status]),
+    );
+    const nextStatuses = new Map(next.hosts.map((host) => [host.hostInstanceId, host.status]));
+    const availabilityChanged = hostInstanceIds.some(
+      (hostInstanceId) => previousStatuses.get(hostInstanceId) !== nextStatuses.get(hostInstanceId),
+    );
+    this.events?.publish([
+      {
+        type: "execution-evidence-changed",
+        cause: "host-observation",
+        occurredAt: at,
+        agentIds,
+        hostInstanceIds,
+        availabilityChanged,
+      },
+    ]);
   }
 }
 

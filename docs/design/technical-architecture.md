@@ -48,6 +48,7 @@ Browser GUI
     ▼
 Loopback web composition root
     ├── Universe ───────────────► UniverseStore ─► SQLite
+    ├── ControlPlaneEventHub ───► ProjectionPublisher ─► renderer SSE
     ├── Projection / Attention / Spatial
     ├── ConversationTracker ────► AgentHarness plugins
     ├── AgentObservationModule ─► observation-source plugins
@@ -58,12 +59,12 @@ Loopback web composition root
 
 The composition root in `src/web/` is the imperative edge. It runs Effects,
 polls external capabilities, coordinates modules and serves the React client.
-Each current polling loop is serialized and each process-backed observation has
-a deadline, so a slow refresh cannot accumulate overlapping work. Polling is a
-V1 compatibility mechanism rather than the desired long-term host interface;
-event-driven observation can replace it behind the same module seams. The
-browser never imports persistence, the mutable Universe or concrete host
-adapters.
+Each remaining source polling loop is serialized and each process-backed
+observation has a deadline, so a slow refresh cannot accumulate overlapping
+work. The closed process-local `ControlPlaneEventHub` carries committed change
+notifications to a batched `ProjectionPublisher`; the browser receives complete
+revisioned projections over SSE instead of polling. The browser never imports
+persistence, the mutable Universe or concrete host adapters.
 
 ## Module ownership
 
@@ -232,6 +233,13 @@ token; it accepts no browser credentials or CORS. Host-backed launch,
 closeout and terminal actions use separate typed gateways rather than pretending
 they are synchronous Universe commands.
 
+The `ProjectionPublisher` subscribes to typed post-persistence events from
+Universe and the provider-observation and launch coordinators. It batches
+concurrent changes, derives each affected portfolio once, and fans cached
+complete replacements to bounded SSE subscribers. Initial and reconnect
+snapshots repair missed process-local events. Projection schemas remain
+transport-neutral and renderers do not replay domain events.
+
 `web/src/` owns presentation-only state: selection, viewport, zoom, active lens,
 theme, dialogs and terminal tabs. It renders native SVG/CSS and xterm.js. It
 never reads SQLite or concrete host/provider protocols.
@@ -268,8 +276,11 @@ scope.
    immediately reconcile its bounded observation snapshot.
 5. Submit typed host and catalogue observations to Universe; provider evidence
    remains in its separate operational store.
-6. Persist accepted state atomically.
-7. Derive projections and return them to the browser.
+6. Persist accepted state atomically, then publish an authority-specific typed
+   event.
+7. Batch concurrent events and derive each affected renderer projection once.
+8. Deliver revisioned complete snapshots or replacements to renderers over SSE;
+   repair reconnects with current snapshots.
 
 Out-of-order observations are ignored without regressing accepted state.
 
@@ -287,7 +298,7 @@ handoff or linked-terminal capabilities remain explicit.
 
 Universe records semantic changes with a monotonic sequence. Projection groups
 changes since the durable operator checkpoint by System, Goal or Inbox. Only
-explicit acknowledgement advances the checkpoint; browser polling does not.
+explicit acknowledgement advances the checkpoint; projection delivery does not.
 Retention and compaction of acknowledged history remain an explicit post-V1
 decision; the current clean-break store does not yet bound that table.
 

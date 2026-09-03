@@ -1,4 +1,5 @@
 import { Effect, Either, Schema } from "effect";
+import type { ControlPlaneEventSink } from "../control-plane-events/index.ts";
 import type {
   AgentHarness,
   AgentObservation,
@@ -22,13 +23,14 @@ const MAX_NATIVE_VALUE_LENGTH = 1_000;
 const MAX_CURSOR_LENGTH = 500;
 const MAX_DIAGNOSTICS = 16;
 const MAX_DIAGNOSTIC_LENGTH = 300;
-const kindNames: readonly string[] = [
+const kindNames: readonly AgentObservation["kind"][] = [
   "activity",
   "human-input-request",
   "turn-outcome",
   "context-pressure",
 ];
 const kinds = new Set(kindNames);
+const kindNameSet = new Set<string>(kindNames);
 const toolCategories = new Set([
   "read",
   "write",
@@ -78,7 +80,7 @@ const validCapability = (capability: AgentObservationCapability): boolean => {
       freshness.length <= kinds.size &&
       freshness.every(
         ([kind, seconds]) =>
-          kindNames.includes(kind) &&
+          kindNameSet.has(kind) &&
           capability.kinds.some((supported) => supported === kind) &&
           Number.isFinite(seconds) &&
           seconds > 0 &&
@@ -215,6 +217,7 @@ export class AgentObservationCoordinator implements AgentObservationModule {
     private readonly store: AgentObservationStore,
     private readonly universe: Universe,
     private readonly now: () => number,
+    private readonly events?: ControlPlaneEventSink,
   ) {}
 
   refresh() {
@@ -238,6 +241,16 @@ export class AgentObservationCoordinator implements AgentObservationModule {
         { concurrency: "unbounded" },
       );
       const diagnostics: string[] = [];
+      const changedAgentIds = new Set<string>();
+      const changedKinds = new Set<AgentObservation["kind"]>();
+      const markHarnessChanged = (
+        harnessId: string,
+        supportedKinds: readonly AgentObservation["kind"][],
+      ): void => {
+        for (const agent of this.universe.snapshot().agents)
+          if (agent.harnessId === harnessId) changedAgentIds.add(agent.id);
+        for (const kind of supportedKinds) changedKinds.add(kind);
+      };
       let observedSources = 0;
       for (const [index, result] of results.entries()) {
         const harness = sources[index]!;
@@ -253,38 +266,41 @@ export class AgentObservationCoordinator implements AgentObservationModule {
         if (!capabilityAvailable || !validCapability(capability)) {
           const diagnostic = `${harness.describe().label} returned an invalid observation capability.`;
           diagnostics.push(diagnostic);
-          this.store.markObservationSourceUnavailable(
+          const changed = this.store.markObservationSourceUnavailable(
             harness.harnessId,
             fallbackCapability,
             this.now(),
             diagnostic,
             pluginId,
           );
+          if (changed) markHarnessChanged(harness.harnessId, kindNames);
           continue;
         }
         if (Either.isLeft(result)) {
           const diagnostic = result.left.message.slice(0, 300);
           diagnostics.push(diagnostic);
-          this.store.markObservationSourceUnavailable(
+          const changed = this.store.markObservationSourceUnavailable(
             harness.harnessId,
             capability,
             this.now(),
             diagnostic,
             pluginId,
           );
+          if (changed) markHarnessChanged(harness.harnessId, capability.kinds);
           continue;
         }
         const snapshot = result.right;
         if (!validSnapshot(snapshot, harness, this.now())) {
           const diagnostic = `${harness.describe().label} returned an invalid observation snapshot.`;
           diagnostics.push(diagnostic);
-          this.store.markObservationSourceUnavailable(
+          const changed = this.store.markObservationSourceUnavailable(
             harness.harnessId,
             capability,
             this.now(),
             diagnostic,
             pluginId,
           );
+          if (changed) markHarnessChanged(harness.harnessId, capability.kinds);
           continue;
         }
         const validCurrent = snapshot.current.filter((item) =>
@@ -326,26 +342,32 @@ export class AgentObservationCoordinator implements AgentObservationModule {
           diagnostics.push(
             `${harness.describe().label} discarded ${rejected} invalid observations.`,
           );
-        const accepted = this.store.reconcileAgentObservations(
+        const reconciliation = this.store.reconcileAgentObservations(
           { ...snapshot, current, transitions },
           capability,
           this.now(),
           pluginId,
         );
-        if (!accepted) {
+        if (!reconciliation.accepted) {
           diagnostics.push(
             `${harness.describe().label} returned an out-of-order observation snapshot; it was ignored.`,
           );
           continue;
         }
         observedSources += 1;
+        if (reconciliation.sourceChanged) markHarnessChanged(harness.harnessId, capability.kinds);
+        for (const observation of reconciliation.changedObservations) {
+          const agentId = this.universe.resolveAgentId(observation.nativeConversationRef);
+          if (agentId) changedAgentIds.add(agentId);
+          changedKinds.add(observation.kind);
+        }
       }
       const activeHarnessIds = new Set(sources.map(({ harnessId }) => harnessId));
       for (const previous of this.store.agentObservationSources()) {
         if (activeHarnessIds.has(previous.harnessId) || previous.health.state === "unavailable")
           continue;
         const diagnostic = `${previous.harnessId} observation source is no longer loaded.`;
-        this.store.markObservationSourceUnavailable(
+        const changed = this.store.markObservationSourceUnavailable(
           previous.harnessId,
           previous.capability,
           this.now(),
@@ -353,7 +375,18 @@ export class AgentObservationCoordinator implements AgentObservationModule {
           previous.pluginId,
         );
         diagnostics.push(diagnostic);
+        if (changed) markHarnessChanged(previous.harnessId, previous.capability.kinds);
       }
+      if (changedAgentIds.size > 0 && changedKinds.size > 0)
+        this.events?.publish([
+          {
+            type: "provider-evidence-changed",
+            cause: "provider-observation",
+            occurredAt: this.now(),
+            agentIds: [...changedAgentIds],
+            kinds: [...changedKinds],
+          },
+        ]);
       return { observedSources, diagnostics };
     });
   }
@@ -414,6 +447,14 @@ export class AgentObservationCoordinator implements AgentObservationModule {
   }
 
   acknowledge(at: number): number {
-    return this.store.acknowledgeAgentObservations(at);
+    const sequence = this.store.acknowledgeAgentObservations(at);
+    this.events?.publish([
+      {
+        type: "catch-up-changed",
+        cause: "provider-observation",
+        occurredAt: at,
+      },
+    ]);
+    return sequence;
   }
 }

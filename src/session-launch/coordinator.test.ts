@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
+import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,11 +78,16 @@ describe("agent launch coordinator", () => {
     await Effect.runPromise(host.snapshot()).then((snapshot) => universe.reconcile(snapshot));
     const goal = universe.execute({ type: "CreateGoal", title: "Launch proof" });
     expect(goal.ok).toBe(true);
+    const events = new ControlPlaneEventHub();
+    const received: ControlPlaneEvent[] = [];
+    events.subscribe((batch) => received.push(...batch));
     const coordinator = createStartAgentCoordinator({
       universe,
       host,
       harnesses: { agentHarness: (id) => (id === "codex" ? codexHarness : undefined) },
       workspace: new TestWorkspaceProvider(),
+      events,
+      now: () => clock.now(),
     });
     const intent = {
       requestId: "launch-coordinator-test",
@@ -100,6 +106,15 @@ describe("agent launch coordinator", () => {
       displayName: "coordinator agent",
       displayNameSource: "human",
     });
+    expect(
+      received
+        .filter((event) => event.type === "pending-launch-changed")
+        .map((event) => event.requestIds),
+    ).toEqual([
+      ["launch-coordinator-test"],
+      ["launch-coordinator-test"],
+      ["launch-coordinator-test"],
+    ]);
     const second = await Effect.runPromise(coordinator.start(intent));
     expect(second.status).toBe("already-observed");
     expect(universe.snapshot().agents.filter((agent) => agent.provider === "codex")).toHaveLength(

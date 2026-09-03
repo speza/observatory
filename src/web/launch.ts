@@ -48,6 +48,16 @@ const WebResumeAgentRequestSchema: Schema.Schema<WebResumeAgentRequest> = Schema
   prompt: OptionalPrompt,
 });
 
+export const pendingLaunchView = (
+  launch: ReturnType<StartAgentCoordinator["pendingLaunches"]>[number],
+): WebPendingLaunch => ({
+  requestId: launch.requestId,
+  harnessId: launch.harnessId,
+  displayName: launch.displayName,
+  goalId: launch.goalId,
+  message: launch.message,
+});
+
 export class WebLaunchError extends Error {
   constructor(
     message: string,
@@ -125,7 +135,7 @@ export class WebLaunchGateway {
     if (refresh) await Effect.runPromise(this.coordinator.refreshPending());
     return {
       kind: "pending-launches",
-      launches: this.coordinator.pendingLaunches().map(this.pendingView),
+      launches: this.coordinator.pendingLaunches().map(pendingLaunchView),
     };
   }
 
@@ -133,7 +143,7 @@ export class WebLaunchGateway {
     const launch = this.coordinator
       .pendingLaunches()
       .find((candidate) => candidate.requestId === requestId);
-    return launch ? this.pendingView(launch) : undefined;
+    return launch ? pendingLaunchView(launch) : undefined;
   }
 
   async start(encoded: string) {
@@ -173,14 +183,4 @@ export class WebLaunchGateway {
       );
     }
   }
-
-  private readonly pendingView = (
-    launch: ReturnType<StartAgentCoordinator["pendingLaunches"]>[number],
-  ): WebPendingLaunch => ({
-    requestId: launch.requestId,
-    harnessId: launch.harnessId,
-    displayName: launch.displayName,
-    goalId: launch.goalId,
-    message: launch.message,
-  });
 }

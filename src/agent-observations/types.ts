@@ -19,6 +19,12 @@ export interface StoredObservationSource {
   readonly capturedAt: number;
 }
 
+export interface AgentObservationReconciliation {
+  readonly accepted: boolean;
+  readonly sourceChanged: boolean;
+  readonly changedObservations: readonly AgentObservation[];
+}
+
 export interface AgentObservationStore {
   observationSource(harnessId: string): StoredObservationSource | undefined;
   reconcileAgentObservations(
@@ -26,7 +32,7 @@ export interface AgentObservationStore {
     capability: AgentObservationCapability,
     receivedAt: number,
     pluginId: string,
-  ): boolean;
+  ): AgentObservationReconciliation;
   markObservationSourceUnavailable(
     harnessId: string,
     capability: AgentObservationCapability,

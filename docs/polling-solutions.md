@@ -6,6 +6,8 @@ Date: 2026-09-02
 
 Depends on: [Observatory polling analysis](polling-analysis.md)
 
+Detailed proposal: [Control-plane events and browser projection delivery](specs/control-plane-events-and-projection-delivery.md)
+
 ## Accepted provider-observation decision
 
 Provider hooks now use best-effort authenticated loopback delivery while the
@@ -44,31 +46,31 @@ actions.
 
 ## Remaining pollers
 
-1. Browser portfolio, every 2 seconds.
-2. Browser pending launches, every 2 seconds.
-3. SessionHost/Herdr snapshot, every 2 seconds.
-4. Bounded post-launch Herdr snapshots, every 250 ms for one operation.
+The browser portfolio and pending-launch two-second loops have been replaced by
+typed control-plane events and renderer projection SSE. The remaining recurring
+external-source poll is the SessionHost/Herdr snapshot every 2 seconds.
 
-Provider catalogues remain startup/request-driven rather than recurring.
+There is also a bounded post-launch Herdr snapshot every 250 ms for one operation
+and a 30-second disconnected-renderer safety refresh. Provider catalogues remain
+startup/request-driven rather than recurring.
 
-## Option A: browser projection versions
+## Implemented browser projection delivery
 
-Expose a monotonically increasing server projection version or ETag. Browser
-requests can receive `304 Not Modified` or a small unchanged response rather
-than the complete portfolio.
+Owning modules publish bounded typed events only after their state changes
+persist. A closed process-local event hub orders those events. The web projection
+publisher batches concurrent changes, computes shared transport-neutral
+projections once, and sends complete revisioned snapshot or replacement events
+over SSE.
 
-This preserves the current request lifecycle and reconnect behaviour while
-reducing serialization, transfer and React replacement. Timers still wake.
+The renderer does not replay domain events or reproduce projection logic. A new
+or reconnected client receives current complete state. A disconnected client
+uses the existing bounded snapshot endpoints every 30 seconds until SSE recovers.
 
-## Option B: server-to-browser invalidation
-
-Extend the existing SSE infrastructure with a portfolio-invalidated message.
-The browser then requests the normal bounded projection. Keep a slow safety
-refresh or version comparison for reconnect repair.
-
-The notification must carry no mutable domain payload. One coalesced
-invalidation is preferable to reproducing every internal change as browser
-events.
+Complete replacements are deliberate for the first implementation. Projection
+deltas remain deferred until payload measurements justify their additional
+identity, ordering, deletion and recovery rules. Renderer-resource invalidation
+was rejected as the foundation because it discards authority-specific meaning
+needed by other control-plane consumers.
 
 ## Option C: Herdr change notification plus safety sweep
 
@@ -97,12 +99,13 @@ Without a supported Herdr notification interface, adapt the snapshot interval:
 This reduces subprocess spawning without introducing a speculative stream seam.
 The adapter must preserve serialized execution and complete-scope uncertainty.
 
-## Option E: pending-launch invalidation
+## Implemented pending-launch delivery
 
 The pending-launch view is local durable state. Start, retry, completion and
-dismissal already pass through known coordinators, so those operations can
-invalidate the browser view directly. A separate two-second poll is probably
-unnecessary once browser invalidation exists.
+dismissal pass through the owning coordinator, which now publishes typed
+`pending-launch-changed` events after receipt writes. The projection publisher
+delivers the resulting current view, so no separate two-second browser poll is
+needed.
 
 ## Rejected shortcuts
 
@@ -117,15 +120,14 @@ unnecessary once browser invalidation exists.
 
 ## Recommended sequence
 
-1. Dogfood ephemeral hooks and verify that Herdr waiting/blocked state is useful
-   when a provider event is intentionally missed.
-2. Add browser projection versioning or invalidation to remove duplicate full
-   portfolio work.
-3. Fold pending-launch updates into the same browser invalidation path.
-4. Measure Herdr subprocess cost and latency.
-5. Use a supported Herdr notification stream if one exists; otherwise add
+1. Dogfood the implemented control-plane event and renderer projection stream
+   under parallel provider, command, launch and host changes.
+2. Measure renderer projection calculation, serialization, stream volume and
+   reconnect behaviour before adding deltas.
+3. Measure Herdr subprocess cost and latency.
+4. Use a supported Herdr notification stream if one exists; otherwise add
    adaptive polling before inventing another host interface.
-6. Exercise startup, host loss, target reuse and long-running server behaviour.
+5. Exercise startup, host loss, target reuse and long-running server behaviour.
 
 ## Success criteria
 

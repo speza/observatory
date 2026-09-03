@@ -31,6 +31,7 @@ import type {
 } from "../../plugin-sdk/index.ts";
 import type {
   AgentEvidenceTransition,
+  AgentObservationReconciliation,
   AgentObservationStore,
   StoredAgentObservation,
   StoredObservationSource,
@@ -295,6 +296,22 @@ const conversationHandle = (
     .update(`${harnessId}\u0000${continuityScopeId}\u0000${kind}\u0000${value}`)
     .digest("hex")
     .slice(0, 24)}`;
+
+const observationEventValue = (observation: StoredAgentObservation): string => {
+  const { receivedAt: _receivedAt, ...value } = observation;
+  return JSON.stringify(value);
+};
+
+const observationSourceEventValue = (source: StoredObservationSource | undefined): string => {
+  if (!source) return "missing";
+  return JSON.stringify({
+    pluginId: source.pluginId,
+    providerInstanceId: source.providerInstanceId,
+    continuityScopeId: source.continuityScopeId,
+    capability: source.capability,
+    health: { state: source.health.state, diagnostics: source.health.diagnostics },
+  });
+};
 
 const observationStorageKey = (observation: AgentObservation): string =>
   createHash("sha256")
@@ -744,15 +761,18 @@ export class SqliteUniverseStore
     capability: AgentObservationCapability,
     receivedAt: number,
     pluginId: string,
-  ): boolean {
+  ): AgentObservationReconciliation {
     return this.db.transaction(() => {
       const previous = this.observationSource(snapshot.harnessId);
+      const previousCurrent = this.currentAgentObservations().filter(
+        (observation) => observation.nativeConversationRef.harnessId === snapshot.harnessId,
+      );
       if (
         previous?.providerInstanceId === snapshot.providerInstanceId &&
         previous.continuityScopeId === snapshot.continuityScopeId &&
         snapshot.capturedAt < previous.capturedAt
       )
-        return false;
+        return { accepted: false, sourceChanged: false, changedObservations: [] };
       this.db
         .prepare(`
           INSERT INTO agent_observation_sources (
@@ -818,21 +838,49 @@ export class SqliteUniverseStore
           harness_id, observation_id, revision, observation_json, received_at
         ) VALUES (?, ?, ?, ?, ?)
       `);
-      for (const observation of snapshot.transitions)
-        transition.run(
+      const changed = new Map<string, AgentObservation>();
+      for (const observation of snapshot.transitions) {
+        const result = transition.run(
           snapshot.harnessId,
           observationStorageKey(observation),
           observation.revision ?? 0,
           JSON.stringify(observation),
           receivedAt,
         );
+        if (result.changes > 0) changed.set(observationStorageKey(observation), observation);
+      }
       this.db.exec(`
         DELETE FROM agent_observation_transitions
         WHERE sequence NOT IN (
           SELECT sequence FROM agent_observation_transitions ORDER BY sequence DESC LIMIT 5000
         );
       `);
-      return true;
+      const nextCurrent = this.currentAgentObservations().filter(
+        (observation) => observation.nativeConversationRef.harnessId === snapshot.harnessId,
+      );
+      const previousById = new Map(
+        previousCurrent.map((observation) => [
+          observationStorageKey(observation),
+          observationEventValue(observation),
+        ]),
+      );
+      const nextById = new Map(
+        nextCurrent.map((observation) => [
+          observationStorageKey(observation),
+          observationEventValue(observation),
+        ]),
+      );
+      for (const observation of [...previousCurrent, ...nextCurrent]) {
+        const key = observationStorageKey(observation);
+        if (previousById.get(key) !== nextById.get(key)) changed.set(key, observation);
+      }
+      return {
+        accepted: true,
+        sourceChanged:
+          observationSourceEventValue(previous) !==
+          observationSourceEventValue(this.observationSource(snapshot.harnessId)),
+        changedObservations: [...changed.values()],
+      };
     })();
   }
 
@@ -867,7 +915,10 @@ export class SqliteUniverseStore
         existing?.cursor ?? null,
         observedAt,
       );
-    return true;
+    return (
+      observationSourceEventValue(existing) !==
+      observationSourceEventValue(this.observationSource(harnessId))
+    );
   }
 
   currentAgentObservations(): readonly StoredAgentObservation[] {

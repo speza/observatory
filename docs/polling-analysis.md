@@ -18,11 +18,14 @@ event transport.
 
 ## Executive summary
 
-Observatory currently has three steady-state polling loops:
+Observatory's built-in configuration now has one steady-state external-source
+polling loop: the server snapshots the selected `SessionHost` every 2 seconds.
 
-1. the browser fetches the portfolio every 2 seconds;
-2. the browser fetches pending launches every 2 seconds; and
-3. the server snapshots the selected `SessionHost` every 2 seconds.
+The browser receives renderer-ready projection snapshots and replacements over
+SSE. A disconnected stream uses a 30-second HTTP safety refresh; connected
+browsers do not poll portfolio or pending-launch endpoints. A process-local
+30-second projection refresh updates time-derived presentation while subscribers
+exist, but performs no external acquisition.
 
 Provider conversation catalogues refresh at startup and on explicit Conversation
 history requests. Built-in provider hook observations arrive through an
@@ -32,17 +35,17 @@ configured observation refresh loop because it has no receiver to wake
 reconciliation. There is also one bounded operation-local Herdr poll after
 launch.
 
-| Poll                          | Default interval | Work performed                                                |
-| ----------------------------- | ---------------: | ------------------------------------------------------------- |
-| Browser portfolio             |        2 seconds | Fetch and rebuild the complete browser portfolio              |
-| Browser pending launches      |        2 seconds | Fetch durable pending-launch receipts                         |
-| Session host                  |        2 seconds | Spawn `herdr api snapshot`, translate and reconcile inventory |
-| Herdr post-launch observation | 250 milliseconds | Snapshot until the launched pane is recognised, bounded       |
+| Poll or timed recovery                                 | Default interval | Work performed                                                |
+| ------------------------------------------------------ | ---------------: | ------------------------------------------------------------- |
+| Session host                                           |        2 seconds | Spawn `herdr api snapshot`, translate and reconcile inventory |
+| Disconnected browser safety refresh                    |       30 seconds | Fetch portfolio and pending state until SSE recovers          |
+| Renderer time-derived refresh (not source acquisition) |       30 seconds | Rebuild cached projections for connected renderers            |
+| Herdr post-launch observation                          | 250 milliseconds | Snapshot until the launched pane is recognised, bounded       |
 
-For one open browser tab and no pending launch, defaults produce approximately
-30 portfolio requests, 30 pending-launch requests and 30 Herdr snapshot
-subprocesses per minute. Closing the browser removes both browser loops while the
-server continues observing Herdr and receiving hook events.
+For a connected browser and no pending launch, defaults produce no recurring
+portfolio or pending-launch HTTP requests. The server still performs about 30
+Herdr snapshot subprocesses per minute. Closing the browser stops renderer time
+refresh while the server continues observing Herdr and receiving hook events.
 
 ## Current end-to-end data flow
 
@@ -65,9 +68,10 @@ Herdr inventory
     -> Universe host reconciliation
     -> pending-launch recovery
 
-Universe + evidence store
-    -> browser `/api/portfolio` every 2 seconds
-    -> deterministic projections
+Universe + evidence store + launch receipts
+    -> committed typed control-plane events
+    -> batched server-side renderer projections
+    -> SSE snapshot/replacement stream
     -> React state
 ```
 
@@ -93,22 +97,23 @@ not include:
 - a timeout that bounds work; or
 - the bounded post-launch wait.
 
-## Browser portfolio polling
+## Renderer projection delivery
 
-The browser requests the complete portfolio every two seconds while mounted.
-The server builds deterministic projections from already reconciled Universe,
-operational observation and repository state. This does not trigger Herdr or
-provider catalogue acquisition.
+Universe, provider-evidence and pending-launch modules publish bounded typed
+events only after accepted writes. A process-local event hub assigns an epoch
+and sequence. The web projection publisher batches concurrent events for 250 ms,
+rebuilds affected deterministic projections once, and fans cached complete
+projection replacements out over SSE.
 
-Cost grows with the projected portfolio and browser tab count. The main
-duplicated work is serialization, transfer, validation and React state
-replacement when the projection has not changed.
+A new renderer receives one complete snapshot. Slow renderers retain only the
+latest replacement and reconnect with another complete snapshot; they do not
+replay control-plane history. The browser validates projection schemas and never
+reduces domain events itself.
 
-## Browser pending-launch polling
-
-The browser independently requests pending launch receipts every two seconds.
-It does this even when no launch exists. This loop reads local durable state; it
-does not poll Herdr itself.
+The former portfolio and pending-launch two-second timers are removed. While SSE
+is disconnected, one 30-second safety timer fetches both existing snapshot
+endpoints. This preserves repair without making fallback polling the normal
+delivery path.
 
 ## Session-host polling
 
@@ -182,15 +187,13 @@ proven managed launch.
 
 ## Current duplicated and idle work
 
-The remaining obvious duplication is:
+The remaining obvious repeated external work is full Herdr subprocess snapshots
+when inventory is unchanged. The browser's former unchanged portfolio and empty
+pending-launch retrieval loops no longer exist.
 
-1. unchanged browser portfolio retrieval;
-2. empty pending-launch retrieval; and
-3. full Herdr subprocess snapshots when inventory is unchanged.
-
-The former provider-journal read/parse loop no longer exists. Built-in provider
-hooks now perform work only when provider events occur. A polling loop exists
-only when a loaded observation source exposes no live receiver.
+The former provider-journal read/parse loop also no longer exists. Built-in
+provider hooks perform work only when provider events occur. A provider polling
+loop exists only when a loaded observation source exposes no live receiver.
 
 ## Failure and uncertainty
 
@@ -205,9 +208,9 @@ only when a loaded observation source exposes no live receiver.
 
 ## Current conclusion
 
-With the built-in live sources, Observatory now has three recurring pollers
-rather than four. The highest-cost
-backend poll is Herdr because it launches a subprocess and establishes execution
-correctness. Browser polling duplicates local projection delivery. Provider
-semantic enrichment is event-driven and best effort, with no journal,
-filesystem polling or offline reconstruction.
+With the built-in live sources and a connected renderer, Observatory now has one
+recurring external-source poller: SessionHost. It remains the highest-cost and
+most correctness-sensitive loop because it launches a Herdr subprocess and
+establishes execution presence and absence. Browser delivery and provider
+semantic enrichment are event-driven, with complete snapshot recovery and no
+provider journal, filesystem polling or offline reconstruction.

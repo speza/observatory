@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { ControlPlaneEventSink } from "../control-plane-events/index.ts";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { HerdrHostAdapter } from "../hosts/herdr/adapter.ts";
@@ -53,7 +54,7 @@ const createReconcile = (
     return `${hostLabel} refreshed · ${snapshot.agents.length} executions · ${result.updatedAgentIds.length} tracked updates · ${result.staleAgentIds.length} absent`;
   });
 
-export const createObservatoryRuntime = (): ObservatoryRuntime => {
+export const createObservatoryRuntime = (events?: ControlPlaneEventSink): ObservatoryRuntime => {
   const clock = new SystemClock();
   const databasePath = process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
@@ -73,7 +74,7 @@ export const createObservatoryRuntime = (): ObservatoryRuntime => {
         });
       })()
     : new HerdrHostAdapter({ clock });
-  const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule());
+  const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule(), events);
   universe.invalidateRuntimeFacts();
   const reconcile = createReconcile(host, universe);
   return {

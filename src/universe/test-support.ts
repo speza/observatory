@@ -1,3 +1,4 @@
+import type { ControlPlaneEventSink } from "../control-plane-events/index.ts";
 import { createProjectionModule } from "../projection/projection.ts";
 import type { HostSnapshot } from "../hosts/types.ts";
 import { Universe, type ReconciliationResult } from "./universe.ts";
@@ -60,13 +61,20 @@ export const makeUniverse = <TStore extends UniverseStore = MemoryStore>(options
   readonly state?: UniverseState;
   readonly clock?: FixedClock;
   readonly store?: TStore;
+  readonly events?: ControlPlaneEventSink;
 }): UniverseFixture<TStore> => {
   // SAFETY: The fallback is only used when no caller-owned store is supplied;
   // otherwise the generic store is exactly the value passed in options.store.
   const store = (options?.store ?? new MemoryStore(options?.state)) as TStore;
   const clock = options?.clock ?? new FixedClock(1_000_000);
   return {
-    universe: new Universe(store, clock, new SequenceIds(), createProjectionModule()),
+    universe: new Universe(
+      store,
+      clock,
+      new SequenceIds(),
+      createProjectionModule(),
+      options?.events,
+    ),
     store,
     clock,
   };

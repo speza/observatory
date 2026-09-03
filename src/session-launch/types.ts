@@ -1,4 +1,5 @@
 import type { Effect } from "effect";
+import type { ControlPlaneEventSink } from "../control-plane-events/index.ts";
 import type { HostSnapshot, SessionHost } from "../hosts/types.ts";
 import type { AgentHarness, OpaqueNativeConversationRef } from "../plugin-sdk/index.ts";
 import type { ReconciliationResult, Universe } from "../universe/universe.ts";
@@ -116,4 +117,6 @@ export interface StartAgentCoordinatorOptions {
   readonly workspace: WorkspaceProvider;
   readonly receipts?: LaunchReceiptStore;
   readonly reconcileHost?: (snapshot: HostSnapshot) => ReconciliationResult;
+  readonly events?: ControlPlaneEventSink;
+  readonly now?: () => number;
 }

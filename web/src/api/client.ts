@@ -21,6 +21,7 @@ import type {
   WebAgentRepositoryStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
+  BrowserProjectionEvent,
 } from "../../../src/web/protocol.ts";
 import { Schema } from "effect";
 import {
@@ -33,6 +34,7 @@ import {
   CloseoutResponseSchema,
   WorkingTreeDiffResponseSchema,
   AgentRepositoryStatusResponseSchema,
+  BrowserProjectionEventSchema,
 } from "./schemas.ts";
 
 const TerminalOpenSchema = Schema.Struct({ sessionId: Schema.String, message: Schema.String });
@@ -120,6 +122,11 @@ const responseFor = async (path: string, signal?: AbortSignal): Promise<Response
   if (!response.ok) throw new Error(`Observatory request failed (${response.status}).`);
   return response;
 };
+
+export const projectionEventsUrl = (): string => "/api/projections/events";
+
+export const decodeBrowserProjectionEvent = (value: string): BrowserProjectionEvent =>
+  Schema.decodeUnknownSync(Schema.parseJson(BrowserProjectionEventSchema))(value);
 
 export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioResponse> => {
   const response = await responseFor("/api/portfolio", signal);

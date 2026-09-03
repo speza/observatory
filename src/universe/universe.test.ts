@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import { createProjectionModule } from "../projection/projection.ts";
 import { createEmptyUniverse } from "./universe.ts";
 import {
@@ -42,6 +43,26 @@ const observedConversation = (
 });
 
 describe("Universe", () => {
+  test("publishes committed changes but not failed writes or timestamp-only host refreshes", () => {
+    const events = new ControlPlaneEventHub();
+    const received: ControlPlaneEvent[] = [];
+    events.subscribe((batch) => received.push(...batch));
+    const { universe, store } = makeUniverse({ events });
+
+    universe.execute({ type: "CreateSystem", title: "System" });
+    expect(received.map((event) => event.type)).toEqual(["system-changed"]);
+
+    store.failNextSave = true;
+    universe.execute({ type: "RenameSystem", systemId: "system-1", title: "Failed" });
+    expect(received).toHaveLength(1);
+
+    universe.observe({ kind: "host-executions", snapshot: hostSnapshot([], 1_000_000) });
+    expect(received.at(-1)?.type).toBe("execution-evidence-changed");
+    const afterInitialHost = received.length;
+    universe.observe({ kind: "host-executions", snapshot: hostSnapshot([], 2_000_000) });
+    expect(received).toHaveLength(afterInitialHost);
+  });
+
   test("preserves a universe that contains systems but no goals or agents", () => {
     const { universe, store, clock } = makeUniverse();
     universe.execute({ type: "CreateSystem", title: "Long-running system" });

@@ -4,6 +4,7 @@ import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
 import { readFile, stat } from "node:fs/promises";
 import { delimiter, extname, join, normalize, resolve } from "node:path";
+import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runtime/runtime.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { LocalWorkspaceProvider } from "../workspaces/local.ts";
@@ -19,6 +20,9 @@ import {
 } from "../agent-observations/ingress.ts";
 import { configuredLoopbackOrigin, isAllowedWebRequest } from "./security.ts";
 import { positiveIntegerSetting } from "../runtime/config.ts";
+import { pendingLaunchView } from "./launch.ts";
+import { projectPortfolio } from "./portfolio.ts";
+import { ProjectionPublisher } from "./projection-publisher.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
 
 const contentTypes = {
@@ -58,7 +62,8 @@ const staticResponse = async (url: URL): Promise<Response> => {
 
 const program = Effect.scoped(
   Effect.gen(function* () {
-    const runtime = createObservatoryRuntime();
+    const events = new ControlPlaneEventHub();
+    const runtime = createObservatoryRuntime(events);
     const port = positiveIntegerSetting("AO_WEB_PORT", process.env.AO_WEB_PORT, 4310, {
       maximum: 65_535,
     });
@@ -104,6 +109,7 @@ const program = Effect.scoped(
       runtime.store,
       runtime.universe,
       () => runtime.clock.now(),
+      events,
     );
     const startAgent = createStartAgentCoordinator({
       universe: runtime.universe,
@@ -112,6 +118,8 @@ const program = Effect.scoped(
       workspace,
       receipts: runtime.store,
       reconcileHost: conversations.observeHost.bind(conversations),
+      events,
+      now: () => runtime.clock.now(),
     });
     const providerRefresh = runtime.useMockHost
       ? {
@@ -138,6 +146,22 @@ const program = Effect.scoped(
       process.env.AO_WEB_ALLOWED_ORIGIN,
       `http://127.0.0.1:${port}`,
     );
+    const projectionPublisher = new ProjectionPublisher({
+      events,
+      projectPortfolio: () => {
+        const portfolio = projectPortfolio(
+          runtime.universe,
+          runtime.clock.now(),
+          agentObservations,
+        );
+        if (!portfolio) throw new Error("Projection contract mismatch.");
+        return portfolio;
+      },
+      pendingLaunches: () => startAgent.pendingLaunches().map(pendingLaunchView),
+      now: () => runtime.clock.now(),
+      allowedOrigin,
+      onError: (message) => console.error(message),
+    });
     const api = new ObservatoryWebApi(
       runtime.universe,
       runtime.clock,
@@ -188,6 +212,7 @@ const program = Effect.scoped(
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port,
+      idleTimeout: 30,
       fetch: (request) => {
         if (!isAllowedWebRequest(request, allowedOrigin))
           return new Response("Request origin rejected.", { status: 403 });
@@ -196,6 +221,7 @@ const program = Effect.scoped(
           return (
             observationIngress?.fetch(request) ?? new Response("Not configured.", { status: 503 })
           );
+        if (url.pathname === "/api/projections/events") return projectionPublisher.stream(request);
         return url.pathname.startsWith("/api/") ? api.fetch(request) : staticResponse(url);
       },
     });
@@ -226,6 +252,7 @@ const program = Effect.scoped(
       Effect.promise(async () => {
         hostLoop.stop();
         observationLoop?.stop();
+        projectionPublisher.close();
         await api.close();
         void runningServer.stop(true);
         runtime.store.close?.();

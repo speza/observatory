@@ -17,7 +17,6 @@ import {
   executeCommand,
   fetchInspector,
   fetchConversationHistory,
-  fetchPendingLaunches,
   fetchSearch,
   resumeWebAgent,
   addConversation,
@@ -106,19 +105,19 @@ export const App = (): React.JSX.Element => {
   >([]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const load = (refresh: boolean): void => {
-      void fetchPendingLaunches({ refresh, signal: controller.signal })
-        .then((response) => setPendingLaunches(response.launches))
-        .catch(() => undefined);
-    };
-    load(true);
-    const timer = window.setInterval(() => load(false), 2_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, []);
+    if (portfolio.pendingLaunches) setPendingLaunches(portfolio.pendingLaunches);
+  }, [portfolio.pendingLaunches]);
+
+  useEffect(() => {
+    if (
+      selection &&
+      (portfolio.affectedAll ||
+        portfolio.affected?.some(
+          (subject) => subject.type === selection.type && subject.id === selection.id,
+        ))
+    )
+      setInspectorRevision((value) => value + 1);
+  }, [portfolio.affected, portfolio.affectedAll, selection]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -174,13 +173,13 @@ export const App = (): React.JSX.Element => {
   };
 
   useEffect(() => {
-    if (!selection) {
-      setInspector(undefined);
-      setInspectorError(undefined);
-      return;
-    }
-    const controller = new AbortController();
     setInspector(undefined);
+    setInspectorError(undefined);
+  }, [selection]);
+
+  useEffect(() => {
+    if (!selection) return;
+    const controller = new AbortController();
     setInspectorError(undefined);
     void fetchInspector(selection.type, selection.id, controller.signal)
       .then(setInspector)

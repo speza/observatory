@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
 import { FixedClock, makeUniverse } from "../../../src/universe/test-support.ts";
-import { PortfolioResponseSchema, SearchProjectionSchema } from "./schemas.ts";
+import {
+  BrowserProjectionEventSchema,
+  PortfolioResponseSchema,
+  SearchProjectionSchema,
+} from "./schemas.ts";
 
 const portfolioAt = (generatedAt: number) => {
   const { universe } = makeUniverse({ clock: new FixedClock(generatedAt) });
@@ -25,6 +29,24 @@ describe("browser API response schemas", () => {
 
     expect(decoded.map.host).toBeUndefined();
     expect(decoded.commandCentre.host).toBeUndefined();
+  });
+
+  test("decodes renderer projection stream snapshots", () => {
+    const decode = Schema.decodeUnknownSync(Schema.parseJson(BrowserProjectionEventSchema));
+    expect(
+      decode(
+        JSON.stringify({
+          kind: "snapshot",
+          epoch: "epoch-1",
+          revision: 1,
+          generatedAt: 1_000,
+          portfolio: portfolioAt(1_000),
+          pendingLaunches: [],
+          affected: [],
+          affectedAll: false,
+        }),
+      ).kind,
+    ).toBe("snapshot");
   });
 
   test("rejects malformed nested projection data", () => {

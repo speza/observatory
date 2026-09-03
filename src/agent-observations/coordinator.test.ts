@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import type { AgentHarness, AgentObservationSnapshot } from "../plugin-sdk/index.ts";
 import { createMemoryStore } from "../persistence/sqlite/sqlite-store.ts";
 import { enrichCatchUp, enrichCommandCentre, enrichInspector, enrichMap } from "./projection.ts";
@@ -114,11 +115,15 @@ describe("agent observation coordination", () => {
       health: { state: "healthy", lastSuccessfulAt: observedAt, diagnostics: [] },
     };
     const provider = harness(sourceSnapshot);
+    const events = new ControlPlaneEventHub();
+    const received: ControlPlaneEvent[] = [];
+    events.subscribe((batch) => received.push(...batch));
     const coordinator = new AgentObservationCoordinator(
       { agentHarnesses: () => [provider] },
       store,
       fixture.universe,
       () => observedAt,
+      events,
     );
     const acceptedBefore = fixture.universe.snapshot();
 
@@ -127,6 +132,16 @@ describe("agent observation coordination", () => {
       diagnostics: [],
     });
     expect(fixture.universe.snapshot()).toEqual(acceptedBefore);
+    expect(received).toMatchObject([
+      {
+        type: "provider-evidence-changed",
+        agentIds: ["agent-1"],
+        kinds: ["activity", "context-pressure", "human-input-request", "turn-outcome"],
+      },
+    ]);
+    received.length = 0;
+    await Effect.runPromise(coordinator.refresh());
+    expect(received).toEqual([]);
 
     const evidence = coordinator.snapshot();
     const commandCentre = fixture.universe.project({ kind: "command-centre", now: observedAt });
@@ -180,6 +195,7 @@ describe("agent observation coordination", () => {
     ).toMatchObject({ reason: "provider-stale", requiresHumanInput: false });
 
     coordinator.acknowledge(observedAt + 1);
+    expect(received).toMatchObject([{ type: "catch-up-changed", cause: "provider-observation" }]);
     expect(coordinator.snapshot().transitions).toEqual([]);
     expect(store.agentObservationTransitions(0)).toEqual([]);
 
