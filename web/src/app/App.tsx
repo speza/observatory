@@ -600,8 +600,8 @@ export const App = (): React.JSX.Element => {
         <div className="masthead__brand">
           <ObservatoryLogo className="brandmark" />
           <div className="identity">
-            <p className="overline">OBSERVATORY / FIELD SURVEY 01</p>
-            <h1>A measured view of work in motion</h1>
+            <p className="overline">OBSERVATORY</p>
+            <h1>A live map of work in motion</h1>
           </div>
         </div>
         <nav aria-label="Portfolio controls">
