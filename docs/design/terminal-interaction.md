@@ -124,6 +124,17 @@ receives ordinary keyboard input, paste and scroll. Opening, switching or
 closing tabs must not mutate Atlas selection, camera, inspector or durable
 state.
 
+The deck header also switches between Agents without returning to Atlas.
+Previous/next controls cycle through recently opened Agents followed by other
+Agents with observed executions, and a searchable picker opens beneath its
+left-aligned trigger and exposes the same set with Goal and lifecycle context. Agent switching changes the renderer-local
+selection but preserves the Atlas camera. While a primary or companion surface
+connects and settles its initial dimensions, an opaque loading mask prevents
+intermediate xterm layout from flashing; the mask clears after the first
+rendered frame or a bounded empty-terminal fallback. An observed execution is
+only a candidate: the server still resolves the Agent and validates current
+terminal access on every open.
+
 Workspace review opens as a full-width, read-only Git diff. Changed files form
 one vertically scrollable series of collapsible sections so review remains
 usable when its width is constrained. The human may open the terminal beside

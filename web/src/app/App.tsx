@@ -38,6 +38,7 @@ import { PendingLaunchTerminal } from "../agents/PendingLaunchTerminal.tsx";
 import { ConversationHistoryDialog } from "../agents/ConversationHistoryDialog.tsx";
 import { SearchPalette, searchResultAction } from "../search/SearchPalette.tsx";
 import { TerminalDeck } from "../terminal/TerminalDeck.tsx";
+import { orderTerminalAgents } from "../terminal/terminalAgents.ts";
 import { SystemDialog } from "../systems/SystemDialog.tsx";
 import { SystemsOverview } from "../systems/SystemsOverview.tsx";
 import { ThemeToggle } from "../shared/ThemeToggle.tsx";
@@ -80,6 +81,7 @@ export const App = (): React.JSX.Element => {
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
+  const [recentTerminalAgentIds, setRecentTerminalAgentIds] = useState<readonly string[]>([]);
   const [terminalLaunch, setTerminalLaunch] = useState<WebPendingLaunch>();
   const [closeoutAgent, setCloseoutAgent] = useState<AgentView>();
   const [diffAgent, setDiffAgent] = useState<AgentView>();
@@ -222,6 +224,15 @@ export const App = (): React.JSX.Element => {
   const scopedCommandCentre = scopedPortfolio?.commandCentre;
   const scopedMap = scopedPortfolio?.map;
   const working = scopedPortfolio?.workingAgentCount ?? 0;
+  const terminalAgents = useMemo(
+    () =>
+      orderTerminalAgents(
+        data ? agentsFor(data.commandCentre) : [],
+        recentTerminalAgentIds,
+        terminalAgent,
+      ),
+    [data, recentTerminalAgentIds, terminalAgent],
+  );
 
   const issueCamera = (type: AtlasCameraCommand["type"], target?: Selection): void => {
     cameraNonce.current += 1;
@@ -346,11 +357,20 @@ export const App = (): React.JSX.Element => {
       ? agentsFor(data.commandCentre).find((agent) => agent.id === selection.id)
       : undefined;
 
-  const openSelectedTerminal = (): void => {
-    if (!selectedAgent) return;
+  const switchTerminalAgent = (agent: AgentView): void => {
     setTerminalLaunch(undefined);
-    setTerminalAgent(selectedAgent);
+    setTerminalAgent(agent);
+    setSelection({ type: "agent", id: agent.id });
     setSidePanel(undefined);
+  };
+
+  const openAgentTerminal = (agent: AgentView): void => {
+    setRecentTerminalAgentIds((current) => [agent.id, ...current.filter((id) => id !== agent.id)]);
+    switchTerminalAgent(agent);
+  };
+
+  const openSelectedTerminal = (): void => {
+    if (selectedAgent) openAgentTerminal(selectedAgent);
   };
 
   const openWorkspaceReview = (agent: AgentView): void => {
@@ -827,11 +847,7 @@ export const App = (): React.JSX.Element => {
               await runCommand({ type: "SetGoalMapPosition", goalId, position });
             }}
             onSelect={select}
-            onOpenTerminal={(agent) => {
-              setTerminalLaunch(undefined);
-              setTerminalAgent(agent);
-              setSidePanel(undefined);
-            }}
+            onOpenTerminal={openAgentTerminal}
             onReviewChanges={openWorkspaceReview}
             onClearSelection={() => {
               setSelection(undefined);
@@ -902,7 +918,7 @@ export const App = (): React.JSX.Element => {
             onCommand={runCommand}
             onCloseAndArchive={runCloseout}
             projection={inspector}
-            onOpenTerminal={setTerminalAgent}
+            onOpenTerminal={openAgentTerminal}
             onPullRequestChange={recordPullRequest}
             onRetry={() => setInspectorRevision((value) => value + 1)}
             onReviewChanges={openWorkspaceReview}
@@ -946,9 +962,10 @@ export const App = (): React.JSX.Element => {
       ) : null}
       {terminalAgent ? (
         <TerminalDeck
-          agent={terminalAgent}
-          key={terminalAgent.id}
+          agent={terminalAgents.find((agent) => agent.id === terminalAgent.id) ?? terminalAgent}
+          agents={terminalAgents}
           onClose={() => setTerminalAgent(undefined)}
+          onSwitchAgent={switchTerminalAgent}
           theme={theme}
         />
       ) : null}

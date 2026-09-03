@@ -159,10 +159,13 @@ filesystem access to the browser.
 
 ### Terminal deck
 
-The terminal deck renders host-owned terminal streams. It preserves Atlas
-selection and viewport while the operator inspects or interacts with an Agent.
-Linked shell or sibling-Agent surfaces are transient host capabilities, not new
-durable Agents.
+The terminal deck renders host-owned terminal streams. It preserves the Atlas
+viewport while the operator inspects or interacts with an Agent. Previous/next
+controls and a searchable picker switch directly among Agents with observed
+executions; switching updates the background selection without moving the
+camera. Access is still validated freshly when a terminal opens. Linked shell
+or sibling-Agent surfaces are transient host capabilities, not new durable
+Agents.
 
 ## Primary workflows
 

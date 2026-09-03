@@ -42,20 +42,55 @@
 }
 
 .terminal-deck__identity {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  justify-content: start;
   min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e7decb;
+  text-align: left;
+  cursor: pointer;
 }
 
-.terminal-deck__identity h2 {
+.terminal-deck__identity:hover,
+.terminal-deck__identity:focus-visible,
+.terminal-deck__identity[aria-expanded="true"] {
+  border-color: #525148;
+  background: #20231f;
+}
+
+.terminal-deck__identity:disabled {
+  cursor: default;
+}
+
+.terminal-deck__identity:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.terminal-deck__identity strong {
+  max-width: min(520px, 48vw);
   overflow: hidden;
-  margin: 2px 0 0;
+  font-family: "Fraunces", Georgia, serif;
   font-size: 21px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.terminal-deck__identity .overline {
+.terminal-deck__identity > span:last-child {
+  margin-left: 9px;
   color: #aaa696;
+  font-size: 13px;
+}
+
+.terminal-deck__identity .overline {
+  grid-column: 1 / -1;
+  color: #aaa696;
+  font-family: "DM Mono", ui-monospace, monospace;
   font-size: 10px;
 }
 
@@ -208,6 +243,11 @@
   box-shadow: 0 0 0 2px rgb(168 148 207 / 16%);
 }
 
+.terminal-deck__tab-dot--attention {
+  background: #e3ae55;
+  box-shadow: 0 0 0 2px rgb(227 174 85 / 18%);
+}
+
 .terminal-deck__hint {
   align-self: center;
   flex: 0 0 auto;
@@ -269,6 +309,12 @@
   box-shadow: 10px 12px 0 rgb(0 0 0 / 30%);
 }
 
+.terminal-deck__agent-picker {
+  top: 64px;
+  right: auto;
+  left: 16px;
+}
+
 .terminal-deck__picker header {
   display: flex;
   align-items: center;
@@ -283,6 +329,32 @@
   font-family: "Fraunces", Georgia, serif;
   font-size: 20px;
   font-weight: 500;
+}
+
+.terminal-deck__picker-search {
+  display: block;
+  padding: 10px 12px;
+  border-bottom: 1px solid #3c4039;
+}
+
+.terminal-deck__picker-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid #525148;
+  outline: none;
+  background: #141714;
+  color: #e7decb;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.terminal-deck__picker-search input:focus {
+  border-color: #d68163;
+}
+
+.terminal-deck__picker-search input::placeholder {
+  color: #77776d;
 }
 
 .terminal-deck__picker-list {
@@ -307,7 +379,8 @@
 }
 
 .terminal-deck__picker-item:hover,
-.terminal-deck__picker-item:focus-visible {
+.terminal-deck__picker-item:focus-visible,
+.terminal-deck__picker-item[aria-current="true"] {
   background: #292d28;
 }
 
@@ -416,6 +489,7 @@
 }
 
 .terminal-surface__viewport {
+  position: relative;
   min-width: 0;
   min-height: 0;
   padding: 8px 10px;
@@ -436,6 +510,52 @@
 .terminal-surface__frame .xterm {
   height: 100%;
   padding: 8px 18px 10px;
+}
+
+.terminal-surface__mask {
+  position: absolute;
+  z-index: 2;
+  inset: 8px 10px;
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  border: 1px solid #343830;
+  background: #181a17;
+  color: #aaa696;
+  text-align: center;
+}
+
+.terminal-surface__mask::before {
+  width: 88px;
+  height: 2px;
+  margin: 0 auto 8px;
+  background: linear-gradient(90deg, #343830 0 35%, #d68163 50%, #343830 65% 100%);
+  background-size: 220% 100%;
+  content: "";
+  animation: terminal-mask-progress 1.1s linear infinite;
+}
+
+.terminal-surface__mask strong {
+  max-width: min(520px, 70vw);
+  overflow: hidden;
+  color: #e7decb;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes terminal-mask-progress {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-surface__mask::before {
+    animation: none;
+  }
 }
 
 .terminal-surface > footer {
@@ -912,7 +1032,8 @@
     min-height: 56px;
     padding: 8px 12px;
   }
-  .terminal-deck__identity h2 {
+  .terminal-deck__identity strong {
+    max-width: 32vw;
     font-size: 18px;
   }
   .terminal-deck__hint {
@@ -921,6 +1042,11 @@
   .terminal-deck__picker {
     top: 104px;
     right: 12px;
+  }
+  .terminal-deck__agent-picker {
+    top: 56px;
+    right: auto;
+    left: 12px;
   }
   .diff-review-backdrop {
     padding: 0;

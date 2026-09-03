@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { AgentView } from "../../../src/projection/types.ts";
@@ -66,6 +72,7 @@ export const TerminalSurface = ({
 }: TerminalSurfaceProps): React.JSX.Element => {
   const label = launch?.displayName ?? agent?.displayName ?? "Starting agent";
   const target = launch ? { requestId: launch.requestId } : { agentId: agent.id };
+  const openingStatus = `Opening ${link?.label ?? label}${link ? " companion" : " terminal"}…`;
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -73,9 +80,13 @@ export const TerminalSurface = ({
   const socketRef = useRef<WebSocket | null>(null);
   const sendMessageRef = useRef<(message: WebTerminalClientMessage) => void>(() => undefined);
   const activeRef = useRef(active);
-  const [status, setStatus] = useState(
-    `Opening ${link?.label ?? label}${link ? " companion" : " terminal"}…`,
-  );
+  const [status, setStatus] = useState(openingStatus);
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    setReady(false);
+    setStatus(openingStatus);
+  }, [agent?.id, launch?.requestId, link?.id, openingStatus]);
 
   const scrollTerminal = (request: WebTerminalScrollRequest): void => {
     sendMessageRef.current({ kind: "scroll", ...request });
@@ -133,9 +144,24 @@ export const TerminalSurface = ({
     let lastDeliveryId: number | undefined;
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let fallbackRevealTimer: ReturnType<typeof setTimeout> | undefined;
+    let settledRevealTimer: ReturnType<typeof setTimeout> | undefined;
+    let revealFrame: number | undefined;
+    let revealScheduled = false;
     const queuedMessages: string[] = [];
     let observer: ResizeObserver | undefined;
     let disposed = false;
+
+    const revealTerminal = (): void => {
+      if (disposed || revealScheduled) return;
+      revealScheduled = true;
+      if (fallbackRevealTimer) clearTimeout(fallbackRevealTimer);
+      settledRevealTimer = setTimeout(() => {
+        revealFrame = window.requestAnimationFrame(() => {
+          if (!disposed) setReady(true);
+        });
+      }, 120);
+    };
 
     const sendMessage = (message: WebTerminalClientMessage): void => {
       if (!sessionId || !activeRef.current) return;
@@ -192,7 +218,7 @@ export const TerminalSurface = ({
             }
             lastDeliveryId = parsed.deliveryId;
             if (parsed.full) terminal.reset();
-            terminal.write(decodeFrame(parsed.bytes));
+            terminal.write(decodeFrame(parsed.bytes), revealTerminal);
           } catch {
             setStatus("Terminal stream returned an invalid frame.");
           }
@@ -206,6 +232,9 @@ export const TerminalSurface = ({
             if (socket !== candidate) return;
             reconnectAttempts = 0;
             setStatus(opened.message);
+            const settledDimensions = fitTerminal(terminal, fit);
+            sendMessage({ kind: "resize", ...settledDimensions });
+            fallbackRevealTimer = setTimeout(revealTerminal, 450);
             for (const message of queuedMessages.splice(0)) candidate.send(message);
           });
           candidate.addEventListener("message", receive);
@@ -234,6 +263,9 @@ export const TerminalSurface = ({
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (fallbackRevealTimer) clearTimeout(fallbackRevealTimer);
+      if (settledRevealTimer) clearTimeout(settledRevealTimer);
+      if (revealFrame !== undefined) window.cancelAnimationFrame(revealFrame);
       observer?.disconnect();
       socket?.close();
       socketRef.current = null;
@@ -281,8 +313,18 @@ export const TerminalSurface = ({
           </button>
         </header>
       ) : null}
-      <div className="terminal-surface__viewport" onWheelCapture={handleWheel}>
+      <div
+        aria-busy={!ready}
+        className={`terminal-surface__viewport${ready ? " is-ready" : " is-preparing"}`}
+        onWheelCapture={handleWheel}
+      >
         <div className="terminal-surface__frame" ref={host} />
+        {!ready ? (
+          <div aria-live="polite" className="terminal-surface__mask">
+            <span className="overline">TERMINAL CONNECTION</span>
+            <strong>{status}</strong>
+          </div>
+        ) : null}
       </div>
       <footer
         aria-live="polite"
