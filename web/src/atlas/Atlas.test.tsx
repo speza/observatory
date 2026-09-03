@@ -90,9 +90,13 @@ describe("production web Atlas", () => {
         ),
       })),
     };
+    const pullRequestAgent = projection.goals[0]?.agents[0];
+    expect(pullRequestAgent).toBeDefined();
+    const pullRequestUrl = "https://github.com/acme/observatory/pull/42";
     const markup = renderToStaticMarkup(
       createElement(Atlas, {
         projection,
+        pullRequestUrls: new Map(pullRequestAgent ? [[pullRequestAgent.id, pullRequestUrl]] : []),
         reservedLeft: 0,
         reservedRight: 0,
         onOpenTerminal: () => undefined,
@@ -124,6 +128,9 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__quick-actions");
     expect(markup).toContain("Open terminal");
     expect(markup).toContain("Review changes");
+    expect(markup).toContain("Open pull request on GitHub");
+    expect(markup).toContain(`href="${pullRequestUrl}"`);
+    expect(markup).toContain('target="_blank"');
     expect(markup).not.toContain("goal__halo");
     expect(markup).not.toContain("goal__quiet-field");
     expect(markup).not.toContain("goal__contour");

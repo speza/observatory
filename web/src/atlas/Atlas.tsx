@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { GitCompareArrows, Terminal } from "lucide-react";
+import { GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
 import type { AgentView, UniverseMapProjection } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
@@ -62,6 +62,7 @@ interface AtlasProps {
   ) => void | Promise<void>;
   readonly onOpenTerminal?: (agent: AgentView) => void;
   readonly onReviewChanges?: (agent: AgentView) => void;
+  readonly pullRequestUrls?: ReadonlyMap<string, string>;
   readonly onSelect: (selection: Selection) => void;
 }
 
@@ -104,6 +105,7 @@ export const Atlas = ({
   onMoveGoal,
   onOpenTerminal,
   onReviewChanges,
+  pullRequestUrls,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
   const {
@@ -457,6 +459,9 @@ export const Atlas = ({
                     agent.executionPresence === "live" && onOpenTerminal !== undefined;
                   const canReview =
                     agent.attention?.action === "review" && onReviewChanges !== undefined;
+                  const pullRequestUrl = pullRequestUrls?.get(agent.id);
+                  const reviewActionX = canOpenTerminal ? 48 : 74;
+                  const pullRequestActionX = 74 - (canOpenTerminal ? 26 : 0) - (canReview ? 26 : 0);
                   const state = stateLabel(agent);
                   const card = presentAgentCard(agent);
                   const style: AgentStyle = {
@@ -589,8 +594,32 @@ export const Atlas = ({
                           y={-AGENT_CARD_HEIGHT / 2 - 4}
                         />
                       </g>
-                      {canOpenTerminal || canReview ? (
+                      {canOpenTerminal || canReview || pullRequestUrl ? (
                         <g className="agent__quick-actions">
+                          {pullRequestUrl ? (
+                            <a
+                              aria-label={`Open ${agent.displayName} pull request on GitHub`}
+                              className="agent__quick-action"
+                              href={pullRequestUrl}
+                              onClick={(event) => event.stopPropagation()}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onFocus={focusAgent}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <title>Open pull request on GitHub</title>
+                              <rect height="20" rx="3" width="22" x={pullRequestActionX} y="27" />
+                              <GitPullRequest
+                                aria-hidden="true"
+                                height="14"
+                                strokeWidth="1.8"
+                                width="14"
+                                x={pullRequestActionX + 4}
+                                y="30"
+                              />
+                            </a>
+                          ) : null}
                           {canReview ? (
                             <g
                               aria-label={`Review ${agent.displayName} changes`}
@@ -609,13 +638,13 @@ export const Atlas = ({
                               tabIndex={0}
                             >
                               <title>Review changes</title>
-                              <rect height="20" rx="3" width="22" x="48" y="27" />
+                              <rect height="20" rx="3" width="22" x={reviewActionX} y="27" />
                               <GitCompareArrows
                                 aria-hidden="true"
                                 height="14"
                                 strokeWidth="1.8"
                                 width="14"
-                                x="52"
+                                x={reviewActionX + 4}
                                 y="30"
                               />
                             </g>
