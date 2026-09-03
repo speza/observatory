@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentView,
   CommandCentreProjection,
@@ -82,6 +82,9 @@ export const App = (): React.JSX.Element => {
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
   const [terminalLaunch, setTerminalLaunch] = useState<WebPendingLaunch>();
   const [diffAgent, setDiffAgent] = useState<AgentView>();
+  const [pullRequestUrls, setPullRequestUrls] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
   const [inspector, setInspector] = useState<InspectorProjection>();
   const [inspectorError, setInspectorError] = useState<string>();
   const [inspectorRevision, setInspectorRevision] = useState(0);
@@ -354,6 +357,16 @@ export const App = (): React.JSX.Element => {
     setTerminalAgent(undefined);
     setTerminalLaunch(undefined);
   };
+
+  const recordPullRequest = useCallback((agentId: string, url: string | undefined): void => {
+    setPullRequestUrls((current) => {
+      if (current.get(agentId) === url) return current;
+      const next = new Map(current);
+      if (url) next.set(agentId, url);
+      else next.delete(agentId);
+      return next;
+    });
+  }, []);
 
   const resumeAgent = async (agent: AgentView): Promise<void> => {
     setCommandPending(true);
@@ -812,6 +825,7 @@ export const App = (): React.JSX.Element => {
               setSidePanel(undefined);
             }}
             projection={scopedMap}
+            pullRequestUrls={pullRequestUrls}
             reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 430 : 0}
             reservedRight={0}
             selection={selection}
@@ -876,6 +890,7 @@ export const App = (): React.JSX.Element => {
             onCloseAndArchive={runCloseout}
             projection={inspector}
             onOpenTerminal={setTerminalAgent}
+            onPullRequestChange={recordPullRequest}
             onRetry={() => setInspectorRevision((value) => value + 1)}
             onReviewChanges={openWorkspaceReview}
             onResume={resumeAgent}

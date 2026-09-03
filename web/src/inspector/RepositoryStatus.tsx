@@ -7,6 +7,7 @@ import { GitHubMark } from "../shared/GitHubMark.tsx";
 
 interface RepositoryStatusProps {
   readonly agent: AgentView;
+  readonly onPullRequestChange?: (agentId: string, url: string | undefined) => void;
   readonly onReviewChanges: (agent: AgentView) => void;
 }
 
@@ -55,6 +56,7 @@ const checkoutSummary = (
 
 export const RepositoryStatus = ({
   agent,
+  onPullRequestChange,
   onReviewChanges,
 }: RepositoryStatusProps): React.JSX.Element => {
   const [snapshot, setSnapshot] = useState<WebAgentRepositoryStatusResponse | undefined>(() =>
@@ -75,6 +77,13 @@ export const RepositoryStatus = ({
       .then((nextSnapshot) => {
         snapshotCache.set(agent.id, { snapshot: nextSnapshot, storedAt: Date.now() });
         setSnapshot(nextSnapshot);
+        const pullRequest =
+          nextSnapshot.git?.repository.host === "github.com" &&
+          nextSnapshot.pullRequests.length === 1 &&
+          nextSnapshot.pullRequests[0]?.association === "confirmed"
+            ? nextSnapshot.pullRequests[0]
+            : undefined;
+        onPullRequestChange?.(agent.id, pullRequest?.url);
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
@@ -84,7 +93,7 @@ export const RepositoryStatus = ({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [agent.id, revision]);
+  }, [agent.id, onPullRequestChange, revision]);
 
   const pullRequest = snapshot?.pullRequests.length === 1 ? snapshot.pullRequests[0] : undefined;
   const checkout = snapshot ? checkoutSummary(snapshot) : undefined;

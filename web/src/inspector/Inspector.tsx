@@ -18,6 +18,7 @@ interface InspectorProps {
   readonly onCloseAndArchive: (agentIds: readonly string[]) => Promise<boolean>;
   readonly onClose: () => void;
   readonly onOpenTerminal: (agent: AgentView) => void;
+  readonly onPullRequestChange?: (agentId: string, url: string | undefined) => void;
   readonly onRetry: () => void;
   readonly onReviewChanges: (agent: AgentView) => void;
   readonly onResume: (agent: AgentView) => Promise<void>;
@@ -46,6 +47,7 @@ export const Inspector = ({
   onCloseAndArchive,
   onClose,
   onOpenTerminal,
+  onPullRequestChange,
   onRetry,
   onReviewChanges,
   onResume,
@@ -289,6 +291,7 @@ export const Inspector = ({
           <RepositoryStatus
             agent={projection.agent}
             key={projection.agent.id}
+            onPullRequestChange={onPullRequestChange}
             onReviewChanges={onReviewChanges}
           />
           {projection.agent.providerEvidence ? (
