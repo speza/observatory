@@ -5,18 +5,15 @@ import type { AgentView } from "../../../src/projection/types.ts";
 import {
   boundWebTerminalDimensions,
   type WebPendingLaunch,
+  type WebTerminalClientMessage,
   type WebTerminalLink,
   type WebTerminalScrollRequest,
 } from "../../../src/web/protocol.ts";
 import {
   openWebTerminal,
-  parseWebTerminalEvent,
+  parseWebTerminalMessage,
   releaseWebTerminal,
-  resizeWebTerminal,
-  sendWebTerminalBytes,
-  sendWebTerminalInput,
-  sendWebTerminalScroll,
-  webTerminalEventsUrl,
+  webTerminalSocketUrl,
 } from "../api/client.ts";
 import { isModifiedTerminalKey, modifiedTerminalInput } from "./terminalKeyboard.ts";
 
@@ -41,6 +38,9 @@ const decodeFrame = (value: string): Uint8Array => {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 };
+
+const MAX_QUEUED_TERMINAL_MESSAGES = 512;
+const MAX_TERMINAL_RECONNECT_DELAY_MS = 2_000;
 
 const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
   fit.fit();
@@ -70,17 +70,15 @@ export const TerminalSurface = ({
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const sessionRef = useRef<string | undefined>(undefined);
+  const socketRef = useRef<WebSocket | null>(null);
+  const sendMessageRef = useRef<(message: WebTerminalClientMessage) => void>(() => undefined);
   const activeRef = useRef(active);
   const [status, setStatus] = useState(
     `Opening ${link?.label ?? label}${link ? " companion" : " terminal"}…`,
   );
 
   const scrollTerminal = (request: WebTerminalScrollRequest): void => {
-    const sessionId = sessionRef.current;
-    if (!sessionId) return;
-    void sendWebTerminalScroll(sessionId, request).catch((error) =>
-      setStatus(error instanceof Error ? error.message : "Terminal scroll failed."),
-    );
+    sendMessageRef.current({ kind: "scroll", ...request });
   };
 
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
@@ -101,11 +99,8 @@ export const TerminalSurface = ({
     if (!active || !terminal || !fit) return;
     const dimensions = fitTerminal(terminal, fit);
     terminal.focus();
-    const sessionId = sessionRef.current;
-    if (!sessionId || resizeMode === "preserve") return;
-    void resizeWebTerminal(sessionId, dimensions).catch((error) =>
-      setStatus(error instanceof Error ? error.message : "Terminal resize failed."),
-    );
+    if (resizeMode === "preserve") return;
+    sendMessageRef.current({ kind: "resize", ...dimensions });
   }, [active, resizeMode]);
 
   useEffect(() => {
@@ -133,24 +128,35 @@ export const TerminalSurface = ({
     const dimensions = fitTerminal(terminal, fit);
     if (activeRef.current) terminal.focus();
     let sessionId: string | undefined;
-    let events: EventSource | undefined;
+    let socket: WebSocket | undefined;
+    let terminalClosed = false;
+    let lastDeliveryId: number | undefined;
+    let reconnectAttempts = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const queuedMessages: string[] = [];
     let observer: ResizeObserver | undefined;
     let disposed = false;
 
-    const sendInput = (value: string): void => {
+    const sendMessage = (message: WebTerminalClientMessage): void => {
       if (!sessionId || !activeRef.current) return;
-      void sendWebTerminalInput(sessionId, value).catch((error) =>
-        setStatus(error instanceof Error ? error.message : "Terminal input failed."),
-      );
+      const encoded = JSON.stringify(message);
+      if (socket?.readyState === WebSocket.OPEN) socket.send(encoded);
+      else if (!terminalClosed && queuedMessages.length < MAX_QUEUED_TERMINAL_MESSAGES)
+        queuedMessages.push(encoded);
+      else if (queuedMessages.length >= MAX_QUEUED_TERMINAL_MESSAGES)
+        setStatus("Terminal input paused while reconnecting.");
+    };
+    sendMessageRef.current = sendMessage;
+
+    const sendInput = (value: string): void => {
+      sendMessage({ kind: "input", value });
     };
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (isModifiedTerminalKey(event)) {
         const modifiedInput = modifiedTerminalInput(event);
         if (modifiedInput && sessionId && activeRef.current)
-          void sendWebTerminalBytes(sessionId, modifiedInput).catch((error) => {
-            setStatus(error instanceof Error ? error.message : "Terminal input failed.");
-          });
+          sendMessage({ kind: "bytes", bytes: Array.from(modifiedInput) });
         return false;
       }
       if (event.type !== "keydown" || (event.key !== "PageUp" && event.key !== "PageDown"))
@@ -171,31 +177,51 @@ export const TerminalSurface = ({
         }
         sessionId = opened.sessionId;
         sessionRef.current = sessionId;
-        setStatus(opened.message);
-        events = new EventSource(webTerminalEventsUrl(sessionId));
         const receive = (event: MessageEvent<string>): void => {
           try {
-            const message = parseWebTerminalEvent(event.data);
-            if (message.kind === "closed") {
-              setStatus(message.reason ?? "Terminal closed.");
-              events?.close();
+            const parsed = parseWebTerminalMessage(event.data);
+            if (parsed.kind === "error") {
+              setStatus(parsed.message);
               return;
             }
-            if (message.full) terminal.reset();
-            terminal.write(decodeFrame(message.bytes));
+            if (parsed.kind === "closed") {
+              if (parsed.deliveryId !== undefined) lastDeliveryId = parsed.deliveryId;
+              terminalClosed = true;
+              setStatus(parsed.reason ?? "Terminal closed.");
+              return;
+            }
+            lastDeliveryId = parsed.deliveryId;
+            if (parsed.full) terminal.reset();
+            terminal.write(decodeFrame(parsed.bytes));
           } catch {
             setStatus("Terminal stream returned an invalid frame.");
           }
         };
-        const disconnect = (): void => setStatus("Terminal stream disconnected.");
-        events.addEventListener("message", receive);
-        events.addEventListener("error", disconnect);
+        const connectSocket = (): void => {
+          if (disposed || terminalClosed || !sessionId) return;
+          const candidate = new WebSocket(webTerminalSocketUrl(sessionId, lastDeliveryId));
+          socket = candidate;
+          socketRef.current = candidate;
+          candidate.addEventListener("open", () => {
+            if (socket !== candidate) return;
+            reconnectAttempts = 0;
+            setStatus(opened.message);
+            for (const message of queuedMessages.splice(0)) candidate.send(message);
+          });
+          candidate.addEventListener("message", receive);
+          candidate.addEventListener("close", () => {
+            if (disposed || terminalClosed || socket !== candidate) return;
+            socketRef.current = null;
+            setStatus("Terminal stream reconnecting…");
+            const delay = Math.min(MAX_TERMINAL_RECONNECT_DELAY_MS, 250 * 2 ** reconnectAttempts++);
+            reconnectTimer = setTimeout(connectSocket, delay);
+          });
+        };
+        connectSocket();
         observer = new ResizeObserver(() => {
           const resized = fitTerminal(terminal, fit);
-          if (!sessionId || resizeMode === "preserve" || !activeRef.current) return;
-          void resizeWebTerminal(sessionId, resized).catch((error) =>
-            setStatus(error instanceof Error ? error.message : "Terminal resize failed."),
-          );
+          if (resizeMode === "preserve" || !activeRef.current) return;
+          sendMessage({ kind: "resize", ...resized });
         });
         observer.observe(element);
       })
@@ -207,15 +233,18 @@ export const TerminalSurface = ({
 
     return () => {
       disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       observer?.disconnect();
-      events?.close();
+      socket?.close();
+      socketRef.current = null;
+      sendMessageRef.current = () => undefined;
       sessionRef.current = undefined;
       terminalRef.current = null;
       fitRef.current = null;
       input.dispose();
       fit.dispose();
       terminal.dispose();
-      if (sessionId) void releaseWebTerminal(sessionId);
+      if (sessionId) void releaseWebTerminal(sessionId).catch(() => undefined);
     };
   }, [agent?.id, launch?.requestId, link?.id, resizeMode]);
 

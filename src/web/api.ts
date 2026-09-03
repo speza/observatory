@@ -21,12 +21,17 @@ import type {
   WebWorkingTreeDiffResponse,
   WebTerminalActionResponse,
   WebTerminalOpenResponse,
+  WebTerminalServerMessage,
   WebAgentRepositoryStatusResponse,
   WebPluginStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
 } from "./protocol.ts";
-import { WebTerminalError, WebTerminalGateway } from "./terminal.ts";
+import {
+  WebTerminalError,
+  WebTerminalGateway,
+  type WebTerminalSocketConnection,
+} from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
 import { WebCloseoutError, WebCloseoutGateway } from "./closeout.ts";
 import type { AgentObservationModule } from "../agent-observations/types.ts";
@@ -298,6 +303,15 @@ export class ObservatoryWebApi {
     return json({ error: "Not found." }, 404);
   }
 
+  connectTerminalSocket(
+    sessionId: string,
+    send: (message: WebTerminalServerMessage) => void,
+    afterDeliveryId?: number,
+  ): WebTerminalSocketConnection {
+    if (!this.terminals) throw new WebTerminalError("Terminal transport is unavailable.", 501);
+    return this.terminals.connect(sessionId, send, afterDeliveryId);
+  }
+
   async close(): Promise<void> {
     await this.terminals?.closeAll();
     if (this.plugins) await Effect.runPromise(this.plugins.close());
@@ -324,7 +338,7 @@ export class ObservatoryWebApi {
           : json({ error: "Terminal transport failed." }, 500);
       }
     }
-    const match = /^\/api\/terminal\/([^/]+)\/(events|input|resize|release)$/u.exec(url.pathname);
+    const match = /^\/api\/terminal\/([^/]+)\/release$/u.exec(url.pathname);
     if (url.pathname === "/api/terminal/open") {
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       const rejected = this.rejectMutation(request);
@@ -338,26 +352,12 @@ export class ObservatoryWebApi {
       }
     }
     if (!match) return json({ error: "Not found." }, 404);
-    const [, sessionId, action] = match;
-    if (!sessionId || !action) return json({ error: "Not found." }, 404);
-    if (action === "events") {
-      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
-      try {
-        return this.terminals.events(sessionId);
-      } catch (error) {
-        return error instanceof WebTerminalError
-          ? this.terminalError(error)
-          : json({ error: "Terminal transport failed." }, 500);
-      }
-    }
+    const [, sessionId] = match;
+    if (!sessionId) return json({ error: "Not found." }, 404);
     if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
     const rejected = this.rejectMutation(request);
     if (rejected) return rejected;
     try {
-      if (action === "input")
-        return json(await this.terminals.input(sessionId, await request.text()));
-      if (action === "resize")
-        return json(await this.terminals.resize(sessionId, await request.text()));
       return json(await this.terminals.release(sessionId));
     } catch (error) {
       return error instanceof WebTerminalError

@@ -2,7 +2,7 @@
 
 Status: accepted web-only V1 implementation decision
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Related: [Observatory technical architecture](technical-architecture.md)
 
@@ -27,20 +27,20 @@ SessionHost-owned PTY and pane
     │ generic terminal frames
     ▼
 loopback terminal gateway
-    │ SSE frames / same-origin actions
+    │ ordered bidirectional WebSocket
     ▼
 xterm.js browser surface
     ▼
 human
 ```
 
-| User action              | Observatory sends         | Owner             |
-| ------------------------ | ------------------------- | ----------------- |
-| Key or paste             | `terminal.input`          | Agent application |
-| Resize visible terminal  | `terminal.resize`         | Host PTY          |
-| Wheel or PageUp/PageDown | `terminal.scroll`         | Host viewport     |
-| Close a terminal tab     | `terminal.release`        | Host controller   |
-| Receive output           | `terminal.frame` over SSE | Host → browser    |
+| User action              | Observatory sends               | Owner             |
+| ------------------------ | ------------------------------- | ----------------- |
+| Key or paste             | `terminal.input`                | Agent application |
+| Resize visible terminal  | `terminal.resize`               | Host PTY          |
+| Wheel or PageUp/PageDown | `terminal.scroll`               | Host viewport     |
+| Close a terminal tab     | `terminal.release`              | Host controller   |
+| Receive output           | `terminal.frame` over WebSocket | Host → browser    |
 
 Agent input and host scrolling are different capabilities. Sending PageUp or
 mouse escape bytes to an Agent cannot reliably browse host scrollback: a
@@ -57,12 +57,30 @@ server:
 2. asks `SessionHost` for fresh `AgentAccess`;
 3. opens the generic terminal capability;
 4. stores a random process-local session handle;
-5. streams bounded replay and live frames over SSE; and
-6. accepts only narrow same-origin input, resize, scroll and release requests.
+5. upgrades the random session handle to an origin-checked WebSocket;
+6. streams bounded, delivery-numbered replay and live frames over that socket; and
+7. accepts only narrow input, byte-input, resize and scroll messages over the
+   same ordered connection.
 
 The handle is a local capability, not remote authentication. The server binds
 to loopback, validates mutation Origin and intent, revalidates linked execution
 handles before use, and releases all open sessions during shutdown.
+
+The HTTP open action remains the capability exchange because terminal targets
+must be resolved and validated before the browser receives a session handle.
+After that, one WebSocket carries both directions of interactive traffic. This
+avoids a request and JSON response for each xterm.js input event and preserves
+input ordering. A dropped socket reconnects to the same process-local session
+within a bounded grace period and requests only frames after its last delivery
+identifier. If bounded replay can no longer fill that gap, the gateway fails
+closed instead of presenting a corrupt terminal. HTTP release handles explicit
+browser cleanup; the grace period handles browsers that disappear before that
+request completes.
+
+Server output observes WebSocket backpressure. Once Bun queues a frame, later
+frames remain in a bounded application queue until `drain`; a dropped send or
+queue overflow closes the transport so the delivery-numbered reconnect path can
+recover it without silently omitting terminal bytes.
 
 Conceptually, terminal input remains host-neutral:
 

@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
 Status: implemented V1 architecture
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Related documents:
 
@@ -288,8 +288,9 @@ Out-of-order observations are ignored without regressing accepted state.
 
 The browser requests access for a selected Agent. The host returns an opaque,
 fingerprinted target and proven capabilities. The server opens a host-owned
-terminal stream, bounds dimensions and input, and relays frames over loopback.
-Release detaches the browser; it does not terminate the Agent.
+terminal stream, bounds dimensions and input, and relays ordered input and
+frames over one origin-checked loopback WebSocket. Release detaches the browser;
+it does not terminate the Agent.
 
 Scrolling is a host viewport action, not fabricated keyboard input. Unsupported
 handoff or linked-terminal capabilities remain explicit.

@@ -2,7 +2,7 @@
 
 Status: accepted for the web-only V1 product
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
@@ -24,7 +24,7 @@ Browser renderer          React with native SVG/CSS
 Browser terminal          xterm.js over host-owned streams
 Build/dev server          Vite
 Live agent host           Herdr (required for live mode)
-Current local transport   Loopback HTTP + SSE
+Current local transport   Loopback HTTP + SSE + WebSocket terminals
 ```
 
 The former OpenTUI client was retired on 2026-08-27. Its experiments remain
@@ -120,8 +120,8 @@ The browser asks the loopback server to open an accepted Agent. The server:
 
 1. re-resolves generic `AgentAccess` through `SessionHost`;
 2. opens a host-owned terminal with bounded dimensions;
-3. emits frames over SSE using a random process-local handle;
-4. accepts same-origin input, resize, scroll and release actions; and
+3. upgrades a random process-local handle to an origin-checked WebSocket;
+4. carries ordered frames, input, resize and scroll messages over that socket; and
 5. releases all sessions on shutdown.
 
 xterm.js renders those frames in the browser. It does not persist terminal
@@ -145,7 +145,10 @@ federating their semantic Universes is not the default remote-host design.
 The current product is one in-process, single-user application:
 
 ```text
-Browser -------> 127.0.0.1 HTTP/SSE -> Universe + SessionHost + SQLite
+Browser -------> 127.0.0.1 HTTP mutations + SSE projections + terminal WebSockets
+                                      |
+                                      v
+                         Universe + SessionHost + SQLite
 Provider hooks -> authenticated POST -> harness observation receiver
 ```
 

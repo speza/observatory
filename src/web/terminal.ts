@@ -15,16 +15,19 @@ import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import {
   WEB_TERMINAL_DIMENSION_LIMITS,
   type WebTerminalActionResponse,
+  type WebTerminalClientMessage,
   type WebTerminalEvent,
   type WebTerminalLink,
   type WebTerminalLinksResponse,
   type WebTerminalOpenResponse,
   type WebTerminalScrollRequest,
+  type WebTerminalServerMessage,
 } from "./protocol.ts";
 
 const MAX_TERMINAL_BODY_BYTES = 65_536;
 const MAX_REPLAY_EVENTS = 128;
 const MAX_LINK_HANDLES = 256;
+const TERMINAL_RECONNECT_GRACE_MS = 15_000;
 const SessionId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
 const LinkId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
 const Dimensions = Schema.Struct({
@@ -48,9 +51,11 @@ const OpenRequest = Schema.Struct({
   linkId: Schema.optional(LinkId),
 });
 const TextInputRequest = Schema.Struct({
+  kind: Schema.Literal("input"),
   value: Schema.String.pipe(Schema.maxLength(32_768)),
 });
 const BytesInputRequest = Schema.Struct({
+  kind: Schema.Literal("bytes"),
   bytes: Schema.Array(Schema.Number.pipe(Schema.int(), Schema.between(0, 255))).pipe(
     Schema.minItems(1),
     Schema.maxItems(32_768),
@@ -62,14 +67,30 @@ const ScrollInputRequest = Schema.Struct({
   lines: Schema.Number.pipe(Schema.int(), Schema.between(1, 512)),
   source: Schema.Literal("wheel", "page-key"),
 });
-const InputRequest = Schema.Union(TextInputRequest, BytesInputRequest, ScrollInputRequest);
+const ResizeRequest = Schema.Struct({
+  kind: Schema.Literal("resize"),
+  columns: Dimensions.fields.columns,
+  rows: Dimensions.fields.rows,
+});
+const SocketRequest = Schema.Union(
+  TextInputRequest,
+  BytesInputRequest,
+  ScrollInputRequest,
+  ResizeRequest,
+);
 
 interface ActiveTerminal {
   readonly terminal: HostedTerminalSession;
   readonly replay: WebTerminalEvent[];
   readonly listeners: Set<(event: WebTerminalEvent) => void>;
+  nextDeliveryId: number;
+  releaseTimer?: ReturnType<typeof setTimeout>;
   closed: boolean;
 }
+
+type PendingTerminalEvent =
+  | Omit<Extract<WebTerminalEvent, { readonly kind: "frame" }>, "deliveryId">
+  | Omit<Extract<WebTerminalEvent, { readonly kind: "closed" }>, "deliveryId">;
 
 interface LinkHandle {
   readonly agentId: string;
@@ -97,10 +118,10 @@ const decode = <A>(schema: Schema.Schema<A>, text: string): A => {
   }
 };
 
-const encodedEvent = (event: WebTerminalEvent): Uint8Array =>
-  new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
-const terminalHeartbeat = new TextEncoder().encode(": keepalive\n\n");
-const noOperation = (): void => undefined;
+export interface WebTerminalSocketConnection {
+  receive(message: string): Promise<void>;
+  close(): Promise<void>;
+}
 
 export class WebTerminalGateway {
   private readonly sessions = new Map<string, ActiveTerminal>();
@@ -195,6 +216,7 @@ export class WebTerminalGateway {
         terminal: opened.terminal,
         replay: [],
         listeners: new Set(),
+        nextDeliveryId: 1,
         closed: false,
       };
       this.sessions.set(sessionId, active);
@@ -221,69 +243,84 @@ export class WebTerminalGateway {
     );
   }
 
-  events(rawSessionId: string): Response {
+  connect(
+    rawSessionId: string,
+    send: (message: WebTerminalServerMessage) => void,
+    afterDeliveryId?: number,
+  ): WebTerminalSocketConnection {
     const sessionId = this.validSessionId(rawSessionId);
     const active = this.session(sessionId);
-    let unsubscribe = noOperation;
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-    const stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        for (const event of active.replay) {
-          controller.enqueue(encodedEvent(event));
-          if (event.kind === "closed") {
-            controller.close();
-            return;
-          }
-        }
-        const listener = (event: WebTerminalEvent): void => {
-          controller.enqueue(encodedEvent(event));
-          if (event.kind === "closed") {
-            unsubscribe();
-            controller.close();
-          }
-        };
-        active.listeners.add(listener);
-        unsubscribe = () => {
-          active.listeners.delete(listener);
-          if (heartbeat) clearInterval(heartbeat);
-        };
-        heartbeat = setInterval(() => controller.enqueue(terminalHeartbeat), 5_000);
-      },
-      cancel: () => unsubscribe(),
-    });
-    return new Response(stream, {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "text/event-stream; charset=utf-8",
-        connection: "keep-alive",
-        "x-content-type-options": "nosniff",
-      },
-    });
-  }
+    this.cancelScheduledRelease(active);
+    const listener = (event: WebTerminalEvent): void => send(event);
+    const oldestDeliveryId = active.replay[0]?.deliveryId;
+    const latestDeliveryId = active.nextDeliveryId - 1;
+    if (afterDeliveryId !== undefined && afterDeliveryId > latestDeliveryId)
+      throw new WebTerminalError("Terminal reconnect cursor is invalid.", 400);
+    if (
+      oldestDeliveryId !== undefined &&
+      (afterDeliveryId === undefined
+        ? oldestDeliveryId > 1
+        : afterDeliveryId < oldestDeliveryId - 1)
+    )
+      throw new WebTerminalError("Terminal reconnect history expired; reopen the terminal.", 409);
+    for (const event of active.replay) {
+      if (afterDeliveryId === undefined || (event.deliveryId ?? 0) > afterDeliveryId) send(event);
+    }
+    if (!active.closed) active.listeners.add(listener);
+    let closed = false;
+    let pending = Promise.resolve();
 
-  async input(rawSessionId: string, body: string): Promise<WebTerminalActionResponse> {
-    const active = this.session(this.validSessionId(rawSessionId));
-    const request = decode(InputRequest, body);
-    const input: Parameters<HostedTerminalSession["send"]>[0] =
-      "value" in request
-        ? { kind: "text", value: request.value }
-        : "bytes" in request
-          ? { kind: "bytes", value: Uint8Array.from(request.bytes) }
-          : (request satisfies WebTerminalScrollRequest);
-    return this.action(active.terminal.send(input));
-  }
-
-  async resize(rawSessionId: string, body: string): Promise<WebTerminalActionResponse> {
-    const active = this.session(this.validSessionId(rawSessionId));
-    return this.action(active.terminal.resize(decode(Dimensions, body)));
+    return {
+      receive: (message) => {
+        if (closed) return pending;
+        pending = pending
+          .then(() => this.socketAction(active, decode(SocketRequest, message)))
+          .catch((error: Error) => {
+            send({
+              kind: "error",
+              message:
+                error instanceof WebTerminalError
+                  ? error.message
+                  : "The host terminal action failed.",
+            });
+          });
+        return pending;
+      },
+      close: async () => {
+        if (closed) return pending;
+        closed = true;
+        active.listeners.delete(listener);
+        await pending;
+        if (this.sessions.get(sessionId) !== active || active.listeners.size > 0) return;
+        this.scheduleRelease(sessionId, active);
+      },
+    };
   }
 
   async release(rawSessionId: string): Promise<WebTerminalActionResponse> {
     const sessionId = this.validSessionId(rawSessionId);
     const active = this.session(sessionId);
+    this.cancelScheduledRelease(active);
     const result = await this.action(active.terminal.release());
     this.sessions.delete(sessionId);
     return result;
+  }
+
+  private async socketAction(
+    active: ActiveTerminal,
+    request: WebTerminalClientMessage,
+  ): Promise<void> {
+    if (request.kind === "resize") {
+      await this.action(active.terminal.resize({ columns: request.columns, rows: request.rows }));
+      return;
+    }
+    const input: Parameters<HostedTerminalSession["send"]>[0] =
+      request.kind === "input"
+        ? { kind: "text", value: request.value }
+        : request.kind === "bytes"
+          ? { kind: "bytes", value: Uint8Array.from(request.bytes) }
+          : (request satisfies WebTerminalScrollRequest);
+    await this.action(active.terminal.send(input));
   }
 
   async closeAll(): Promise<void> {
@@ -372,7 +409,7 @@ export class WebTerminalGateway {
               this.publish(active, { kind: "closed", reason: event.reason });
               return;
             }
-            const message: WebTerminalEvent = {
+            const message: PendingTerminalEvent = {
               kind: "frame",
               bytes: Buffer.from(event.frame.bytes).toString("base64"),
             };
@@ -392,18 +429,39 @@ export class WebTerminalGateway {
       if (!active.closed)
         this.publish(active, { kind: "closed", reason: "Terminal stream failed." });
     } finally {
-      if (active.closed && active.listeners.size === 0) this.sessions.delete(sessionId);
+      if (active.closed && active.listeners.size === 0) this.scheduleRelease(sessionId, active);
     }
   }
 
-  private publish(active: ActiveTerminal, event: WebTerminalEvent): void {
+  private publish(active: ActiveTerminal, pendingEvent: PendingTerminalEvent): void {
     if (active.closed) return;
+    const deliveryId = active.nextDeliveryId++;
+    const event: WebTerminalEvent =
+      pendingEvent.kind === "frame"
+        ? { ...pendingEvent, deliveryId }
+        : { ...pendingEvent, deliveryId };
     active.replay.push(event);
     if (active.replay.length > MAX_REPLAY_EVENTS)
       active.replay.splice(0, active.replay.length - MAX_REPLAY_EVENTS);
     if (event.kind === "closed") active.closed = true;
     for (const listener of active.listeners) listener(event);
     if (event.kind === "closed") active.listeners.clear();
+  }
+
+  private scheduleRelease(sessionId: string, active: ActiveTerminal): void {
+    if (active.releaseTimer) return;
+    active.releaseTimer = setTimeout(() => {
+      active.releaseTimer = undefined;
+      if (this.sessions.get(sessionId) !== active || active.listeners.size > 0) return;
+      void this.release(sessionId).catch(() => this.sessions.delete(sessionId));
+    }, TERMINAL_RECONNECT_GRACE_MS);
+    active.releaseTimer.unref?.();
+  }
+
+  private cancelScheduledRelease(active: ActiveTerminal): void {
+    if (!active.releaseTimer) return;
+    clearTimeout(active.releaseTimer);
+    active.releaseTimer = undefined;
   }
 
   private validSessionId(raw: string): string {

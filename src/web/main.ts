@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { BunRuntime } from "@effect/platform-bun";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { readFile, stat } from "node:fs/promises";
 import { delimiter, extname, join, normalize, resolve } from "node:path";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
@@ -9,6 +9,8 @@ import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runti
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { LocalWorkspaceProvider } from "../workspaces/local.ts";
 import { ObservatoryWebApi } from "./api.ts";
+import type { WebTerminalServerMessage } from "./protocol.ts";
+import { WebTerminalError, type WebTerminalSocketConnection } from "./terminal.ts";
 import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry.ts";
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";
 import { ConversationTracker } from "../conversations/tracker.ts";
@@ -42,6 +44,63 @@ const contentTypeFor = (path: string): string => {
 };
 
 const staticRoot = normalize(join(import.meta.dir, "../../web/dist"));
+const terminalSocketPath = /^\/api\/terminal\/([^/]+)\/socket$/u;
+
+interface TerminalSocketData {
+  sessionId: string;
+  afterDeliveryId?: number;
+  connection?: WebTerminalSocketConnection;
+  outbound: string[];
+  outboundBytes: number;
+  backpressured: boolean;
+  closeAfterFlush?: { code: number; reason: string };
+}
+
+const MAX_TERMINAL_SOCKET_QUEUE_BYTES = 1_048_576;
+
+const closeTerminalSocketAfterFlush = (
+  socket: Bun.ServerWebSocket<TerminalSocketData>,
+  code: number,
+  reason: string,
+): void => {
+  socket.data.closeAfterFlush = { code, reason };
+  if (!socket.data.backpressured && socket.data.outbound.length === 0) socket.close(code, reason);
+};
+
+const sendTerminalSocketMessage = (
+  socket: Bun.ServerWebSocket<TerminalSocketData>,
+  message: WebTerminalServerMessage,
+): void => {
+  const encoded = JSON.stringify(message);
+  if (socket.data.backpressured || socket.data.outbound.length > 0) {
+    socket.data.outbound.push(encoded);
+    socket.data.outboundBytes += encoded.length;
+    if (socket.data.outboundBytes > MAX_TERMINAL_SOCKET_QUEUE_BYTES)
+      socket.close(1013, "Terminal client is too slow");
+    return;
+  }
+  const result = socket.send(encoded);
+  if (result === 0) socket.close(1011, "Terminal delivery failed");
+  else if (result === -1) socket.data.backpressured = true;
+};
+
+const drainTerminalSocket = (socket: Bun.ServerWebSocket<TerminalSocketData>): void => {
+  socket.data.backpressured = false;
+  while (!socket.data.backpressured) {
+    const encoded = socket.data.outbound.shift();
+    if (encoded === undefined) break;
+    socket.data.outboundBytes -= encoded.length;
+    const result = socket.send(encoded);
+    if (result === 0) {
+      socket.close(1011, "Terminal delivery failed");
+      return;
+    }
+    if (result === -1) socket.data.backpressured = true;
+  }
+  const close = socket.data.closeAfterFlush;
+  if (!socket.data.backpressured && socket.data.outbound.length === 0 && close)
+    socket.close(close.code, close.reason);
+};
 
 const staticResponse = async (url: URL): Promise<Response> => {
   const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
@@ -209,20 +268,81 @@ const program = Effect.scoped(
     const observationIngress = observationToken
       ? new ProviderObservationIngress(observationToken, plugins, agentObservations)
       : undefined;
-    const server = Bun.serve({
+    const server = Bun.serve<TerminalSocketData>({
       hostname: "127.0.0.1",
       port,
       idleTimeout: 30,
-      fetch: (request) => {
+      fetch: (request, runningServer) => {
         if (!isAllowedWebRequest(request, allowedOrigin))
           return new Response("Request origin rejected.", { status: 403 });
         const url = new URL(request.url);
+        const terminalSocket = terminalSocketPath.exec(url.pathname);
+        if (terminalSocket) {
+          const sessionId = terminalSocket[1];
+          const rawAfterDeliveryId = url.searchParams.get("after");
+          const afterDeliveryId =
+            rawAfterDeliveryId === null ? undefined : Number(rawAfterDeliveryId);
+          if (
+            !sessionId ||
+            (afterDeliveryId !== undefined &&
+              (!Number.isSafeInteger(afterDeliveryId) || afterDeliveryId < 0)) ||
+            !runningServer.upgrade(request, {
+              data: {
+                sessionId,
+                afterDeliveryId,
+                outbound: [],
+                outboundBytes: 0,
+                backpressured: false,
+              },
+            })
+          )
+            return new Response("Terminal WebSocket upgrade failed.", { status: 400 });
+          return;
+        }
         if (url.pathname === "/api/provider-observations")
           return (
             observationIngress?.fetch(request) ?? new Response("Not configured.", { status: 503 })
           );
         if (url.pathname === "/api/projections/events") return projectionPublisher.stream(request);
         return url.pathname.startsWith("/api/") ? api.fetch(request) : staticResponse(url);
+      },
+      websocket: {
+        open: (socket) => {
+          try {
+            socket.data.connection = api.connectTerminalSocket(
+              socket.data.sessionId,
+              (message) => {
+                sendTerminalSocketMessage(socket, message);
+                if (message.kind === "closed")
+                  closeTerminalSocketAfterFlush(socket, 1000, "Terminal closed");
+              },
+              socket.data.afterDeliveryId,
+            );
+          } catch (error) {
+            sendTerminalSocketMessage(socket, {
+              kind: "closed",
+              reason:
+                error instanceof WebTerminalError ? error.message : "Terminal transport failed.",
+            });
+            closeTerminalSocketAfterFlush(socket, 1008, "Terminal unavailable");
+          }
+        },
+        message: (socket, message) => {
+          if (Schema.is(Schema.String)(message)) {
+            void socket.data.connection?.receive(message);
+            return;
+          }
+          sendTerminalSocketMessage(socket, {
+            kind: "error",
+            message: "Terminal messages must be JSON text.",
+          });
+        },
+        drain: (socket) => {
+          drainTerminalSocket(socket);
+        },
+        close: (socket) => {
+          void socket.data.connection?.close().catch(() => undefined);
+        },
       },
     });
     const hostLoop = startSerializedRefreshLoop({

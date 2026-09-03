@@ -190,6 +190,20 @@ export interface WebTerminalOpenResponse {
   readonly message: string;
 }
 
+export type WebTerminalClientMessage =
+  | { readonly kind: "input"; readonly value: string }
+  | { readonly kind: "bytes"; readonly bytes: readonly number[] }
+  | ({ readonly kind: "scroll" } & WebTerminalScrollRequest)
+  | {
+      readonly kind: "resize";
+      readonly columns: number;
+      readonly rows: number;
+    };
+
+export type WebTerminalServerMessage =
+  | WebTerminalEvent
+  | { readonly kind: "error"; readonly message: string };
+
 /** Bounded generously enough for full-screen terminals on modern high-resolution displays. */
 export const WEB_TERMINAL_DIMENSION_LIMITS = {
   minColumns: 1,
@@ -257,10 +271,11 @@ export interface WebTerminalScrollRequest {
 export type WebTerminalEvent =
   | {
       readonly kind: "frame";
+      readonly deliveryId: number;
       readonly bytes: string;
       readonly columns?: number;
       readonly rows?: number;
       readonly sequence?: number;
       readonly full?: boolean;
     }
-  | { readonly kind: "closed"; readonly reason?: string };
+  | { readonly kind: "closed"; readonly deliveryId?: number; readonly reason?: string };

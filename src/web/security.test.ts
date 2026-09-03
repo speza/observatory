@@ -49,7 +49,7 @@ describe("loopback web request security", () => {
     ).toBe(false);
   });
 
-  test("rejects foreign browser origins for reads and terminal event streams", async () => {
+  test("rejects foreign browser origins for reads and terminal socket paths", async () => {
     const fixture = makeUniverse();
     const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://127.0.0.1:4310");
     const request = (path: string): Promise<Response> =>
@@ -61,7 +61,7 @@ describe("loopback web request security", () => {
 
     expect((await request("/api/portfolio")).status).toBe(403);
     expect(
-      (await request("/api/terminal/00000000-0000-0000-0000-000000000000/events")).status,
+      (await request("/api/terminal/00000000-0000-0000-0000-000000000000/socket")).status,
     ).toBe(403);
   });
 

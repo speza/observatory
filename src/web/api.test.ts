@@ -26,6 +26,7 @@ import type {
   WebStartAgentResponse,
   WebTerminalLinksResponse,
   WebTerminalOpenResponse,
+  WebTerminalServerMessage,
   WebWorkingTreeDiffResponse,
 } from "./protocol.ts";
 
@@ -693,50 +694,61 @@ describe("ObservatoryWebApi", () => {
     expect(opened.status).toBe(200);
     const openedBody: WebTerminalOpenResponse = await opened.json();
     const sessionId = openedBody.sessionId;
-    const events = await api.fetch(
-      new Request(`http://localhost/api/terminal/${sessionId}/events`),
+    await Bun.sleep(1);
+    const socketMessages: WebTerminalServerMessage[] = [];
+    const connection = api.connectTerminalSocket(sessionId, (message) =>
+      socketMessages.push(message),
     );
-    const first = await events.body?.getReader().read();
-    expect(new TextDecoder().decode(first?.value)).toContain("frame");
+    expect(socketMessages.some((message) => message.kind === "frame")).toBe(true);
+    await connection.receive(JSON.stringify({ kind: "input", value: "hello" }));
+    await connection.receive(
+      JSON.stringify({
+        kind: "bytes",
+        bytes: [0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75],
+      }),
+    );
+    await connection.receive(
+      JSON.stringify({
+        kind: "scroll",
+        direction: "up",
+        lines: 12,
+        source: "page-key",
+      }),
+    );
+    await connection.receive(JSON.stringify({ kind: "resize", columns: 100, rows: 30 }));
+    await connection.receive(JSON.stringify({ kind: "bytes", bytes: [256] }));
+    expect(socketMessages.at(-1)).toEqual({
+      kind: "error",
+      message: "Terminal request does not match the contract.",
+    });
     expect(
       (
         await mutation(`/api/terminal/${sessionId}/input`, {
-          value: "hello",
+          value: "legacy input",
         })
       ).status,
-    ).toBe(200);
+    ).toBe(404);
+    const lastDeliveryId = Math.max(
+      ...socketMessages.flatMap((message) =>
+        message.kind === "error" || message.deliveryId === undefined ? [] : [message.deliveryId],
+      ),
+    );
+    await connection.close();
+    const resumedMessages: WebTerminalServerMessage[] = [];
+    const resumedConnection = api.connectTerminalSocket(
+      sessionId,
+      (message) => resumedMessages.push(message),
+      lastDeliveryId,
+    );
+    expect(resumedMessages).toEqual([]);
+    await resumedConnection.receive(JSON.stringify({ kind: "input", value: "resumed" }));
+    await Bun.sleep(1);
     expect(
-      (
-        await mutation(`/api/terminal/${sessionId}/input`, {
-          bytes: [0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75],
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await mutation(`/api/terminal/${sessionId}/input`, {
-          bytes: [256],
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await mutation(`/api/terminal/${sessionId}/input`, {
-          kind: "scroll",
-          direction: "up",
-          lines: 12,
-          source: "page-key",
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await mutation(`/api/terminal/${sessionId}/resize`, {
-          columns: 100,
-          rows: 30,
-        })
-      ).status,
-    ).toBe(200);
+      resumedMessages.some(
+        (message) => message.kind === "frame" && message.deliveryId > lastDeliveryId,
+      ),
+    ).toBe(true);
+    await resumedConnection.close();
     expect((await mutation(`/api/terminal/${sessionId}/release`, {})).status).toBe(200);
 
     const linkedOpened = await mutation("/api/terminal/open", {

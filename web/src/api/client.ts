@@ -17,11 +17,11 @@ import type {
   WebTerminalLink,
   WebTerminalLinksResponse,
   WebTerminalOpenResponse,
-  WebTerminalScrollRequest,
   WebAgentRepositoryStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
   BrowserProjectionEvent,
+  WebTerminalServerMessage,
 } from "../../../src/web/protocol.ts";
 import { Schema } from "effect";
 import {
@@ -87,13 +87,22 @@ const TerminalActionSchema = Schema.Struct({ ok: Schema.Literal(true), message: 
 const TerminalEventSchema: Schema.Schema<WebTerminalEvent> = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("frame"),
+    deliveryId: Schema.Number,
     bytes: Schema.String,
     columns: Schema.optional(Schema.Number),
     rows: Schema.optional(Schema.Number),
     sequence: Schema.optional(Schema.Number),
     full: Schema.optional(Schema.Boolean),
   }),
-  Schema.Struct({ kind: Schema.Literal("closed"), reason: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal("closed"),
+    deliveryId: Schema.optional(Schema.Number),
+    reason: Schema.optional(Schema.String),
+  }),
+);
+const TerminalServerMessageSchema: Schema.Schema<WebTerminalServerMessage> = Schema.Union(
+  TerminalEventSchema,
+  Schema.Struct({ kind: Schema.Literal("error"), message: Schema.String }),
 );
 const ConversationHistoryItemSchema = Schema.Struct({
   handle: Schema.String,
@@ -362,50 +371,6 @@ export const fetchTerminalLinks = async (
   return Schema.decodeUnknownSync(TerminalLinksSchema)(await response.json());
 };
 
-export const sendWebTerminalInput = async (
-  sessionId: string,
-  value: string,
-): Promise<WebTerminalActionResponse> => {
-  const response = await terminalMutation(
-    `/api/terminal/${encodeURIComponent(sessionId)}/input`,
-    JSON.stringify({ value }),
-  );
-  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
-};
-
-export const sendWebTerminalBytes = async (
-  sessionId: string,
-  bytes: Uint8Array,
-): Promise<WebTerminalActionResponse> => {
-  const response = await terminalMutation(
-    `/api/terminal/${encodeURIComponent(sessionId)}/input`,
-    JSON.stringify({ bytes: Array.from(bytes) }),
-  );
-  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
-};
-
-export const sendWebTerminalScroll = async (
-  sessionId: string,
-  request: WebTerminalScrollRequest,
-): Promise<WebTerminalActionResponse> => {
-  const response = await terminalMutation(
-    `/api/terminal/${encodeURIComponent(sessionId)}/input`,
-    JSON.stringify({ kind: "scroll", ...request }),
-  );
-  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
-};
-
-export const resizeWebTerminal = async (
-  sessionId: string,
-  dimensions: { readonly columns: number; readonly rows: number },
-): Promise<WebTerminalActionResponse> => {
-  const response = await terminalMutation(
-    `/api/terminal/${encodeURIComponent(sessionId)}/resize`,
-    JSON.stringify(dimensions),
-  );
-  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
-};
-
 export const releaseWebTerminal = async (sessionId: string): Promise<WebTerminalActionResponse> => {
   const response = await terminalMutation(
     `/api/terminal/${encodeURIComponent(sessionId)}/release`,
@@ -414,8 +379,15 @@ export const releaseWebTerminal = async (sessionId: string): Promise<WebTerminal
   return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
 };
 
-export const webTerminalEventsUrl = (sessionId: string): string =>
-  `/api/terminal/${encodeURIComponent(sessionId)}/events`;
+export const webTerminalSocketUrl = (sessionId: string, afterDeliveryId?: number): string => {
+  const url = new URL(
+    `/api/terminal/${encodeURIComponent(sessionId)}/socket`,
+    window.location.href,
+  );
+  if (afterDeliveryId !== undefined) url.searchParams.set("after", String(afterDeliveryId));
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+};
 
-export const parseWebTerminalEvent = (text: string): WebTerminalEvent =>
-  Schema.decodeUnknownSync(Schema.parseJson(TerminalEventSchema))(text);
+export const parseWebTerminalMessage = (text: string): WebTerminalServerMessage =>
+  Schema.decodeUnknownSync(Schema.parseJson(TerminalServerMessageSchema))(text);
