@@ -2150,6 +2150,16 @@ button {
   color: #fff8ec;
   background: var(--accent);
 }
+.close-agent-dialog__warning {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.close-agent-dialog .goal-dialog__body > p:first-child {
+  margin: 0;
+  line-height: 1.5;
+}
 
 .launch-notice {
   position: absolute;

@@ -99,6 +99,7 @@ describe("production web Atlas", () => {
         pullRequestUrls: new Map(pullRequestAgent ? [[pullRequestAgent.id, pullRequestUrl]] : []),
         reservedLeft: 0,
         reservedRight: 0,
+        onCloseAndArchive: () => undefined,
         onOpenTerminal: () => undefined,
         onReviewChanges: () => undefined,
         onSelect: () => undefined,
@@ -127,6 +128,9 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__working-circuit");
     expect(markup).toContain("agent__quick-actions");
     expect(markup).toContain("Open terminal");
+    expect(markup).toContain("Close &amp; archive");
+    expect(markup).toContain("Close and archive ");
+    expect(markup).toContain("agent__quick-action--destructive");
     expect(markup).toContain("Review changes");
     expect(markup).toContain("Open pull request on GitHub");
     expect(markup).toContain(`href="${pullRequestUrl}"`);

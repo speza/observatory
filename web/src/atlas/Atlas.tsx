@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
+import { ArchiveX, GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
 import type { AgentView, UniverseMapProjection } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
@@ -60,6 +60,7 @@ interface AtlasProps {
     goalId: string,
     position: { readonly x: number; readonly y: number },
   ) => void | Promise<void>;
+  readonly onCloseAndArchive?: (agent: AgentView) => void;
   readonly onOpenTerminal?: (agent: AgentView) => void;
   readonly onReviewChanges?: (agent: AgentView) => void;
   readonly pullRequestUrls?: ReadonlyMap<string, string>;
@@ -103,6 +104,7 @@ export const Atlas = ({
   onClearSelection,
   onFocusSelection,
   onMoveGoal,
+  onCloseAndArchive,
   onOpenTerminal,
   onReviewChanges,
   pullRequestUrls,
@@ -457,11 +459,14 @@ export const Atlas = ({
                   const agentSelected = selection?.type === "agent" && selection.id === agent.id;
                   const canOpenTerminal =
                     agent.executionPresence === "live" && onOpenTerminal !== undefined;
+                  const canCloseAndArchive =
+                    agent.executionPresence === "live" && onCloseAndArchive !== undefined;
                   const canReview =
                     agent.attention?.action === "review" && onReviewChanges !== undefined;
                   const pullRequestUrl = pullRequestUrls?.get(agent.id);
                   const reviewActionX = canOpenTerminal ? 48 : 74;
                   const pullRequestActionX = 74 - (canOpenTerminal ? 26 : 0) - (canReview ? 26 : 0);
+                  const closeActionX = pullRequestActionX - (pullRequestUrl === undefined ? 0 : 26);
                   const state = stateLabel(agent);
                   const card = presentAgentCard(agent);
                   const style: AgentStyle = {
@@ -594,7 +599,7 @@ export const Atlas = ({
                           y={-AGENT_CARD_HEIGHT / 2 - 4}
                         />
                       </g>
-                      {canOpenTerminal || canReview || pullRequestUrl ? (
+                      {canOpenTerminal || canCloseAndArchive || canReview || pullRequestUrl ? (
                         <g className="agent__quick-actions">
                           {pullRequestUrl ? (
                             <a
@@ -645,6 +650,35 @@ export const Atlas = ({
                                 strokeWidth="1.8"
                                 width="14"
                                 x={reviewActionX + 4}
+                                y="30"
+                              />
+                            </g>
+                          ) : null}
+                          {canCloseAndArchive ? (
+                            <g
+                              aria-label={`Close and archive ${agent.displayName}`}
+                              className="agent__quick-action agent__quick-action--destructive"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onCloseAndArchive?.(agent);
+                              }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onFocus={focusAgent}
+                              onKeyDown={(event) =>
+                                runQuickAction(event, () => onCloseAndArchive?.(agent))
+                              }
+                              onPointerDown={(event) => event.stopPropagation()}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <title>Close &amp; archive</title>
+                              <rect height="20" rx="3" width="22" x={closeActionX} y="27" />
+                              <ArchiveX
+                                aria-hidden="true"
+                                height="14"
+                                strokeWidth="1.8"
+                                width="14"
+                                x={closeActionX + 4}
                                 y="30"
                               />
                             </g>

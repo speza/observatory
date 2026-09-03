@@ -21,6 +21,7 @@ import {
   resumeWebAgent,
   addConversation,
 } from "../api/client.ts";
+import { CloseAgentDialog } from "../agents/CloseAgentDialog.tsx";
 import { AttentionQueue } from "../attention/AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand } from "../atlas/Atlas.tsx";
 import type { Selection } from "./selection.ts";
@@ -80,6 +81,7 @@ export const App = (): React.JSX.Element => {
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
   const [terminalLaunch, setTerminalLaunch] = useState<WebPendingLaunch>();
+  const [closeoutAgent, setCloseoutAgent] = useState<AgentView>();
   const [diffAgent, setDiffAgent] = useState<AgentView>();
   const [pullRequestUrls, setPullRequestUrls] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
@@ -414,6 +416,7 @@ export const App = (): React.JSX.Element => {
         !newGoalOpen &&
         !systemDialogOpen &&
         !conversationHistoryOpen &&
+        !closeoutAgent &&
         !terminalAgent &&
         !terminalLaunch
       ) {
@@ -427,6 +430,10 @@ export const App = (): React.JSX.Element => {
         if (searchOpen) {
           setSearchOpen(false);
           setSearchQuery("");
+          return;
+        }
+        if (closeoutAgent) {
+          if (!commandPending) setCloseoutAgent(undefined);
           return;
         }
         if (shortcutsOpen) {
@@ -480,6 +487,7 @@ export const App = (): React.JSX.Element => {
         systemDialogOpen ||
         searchOpen ||
         conversationHistoryOpen ||
+        closeoutAgent ||
         terminalAgent ||
         terminalLaunch ||
         shortcutsOpen ||
@@ -572,6 +580,8 @@ export const App = (): React.JSX.Element => {
     systemDialogOpen,
     searchOpen,
     conversationHistoryOpen,
+    closeoutAgent,
+    commandPending,
     selection,
     selectedAgent,
     setSetting,
@@ -808,6 +818,10 @@ export const App = (): React.JSX.Element => {
         ) : view === "atlas" && scopedMap ? (
           <Atlas
             cameraCommand={cameraCommand}
+            onCloseAndArchive={(agent) => {
+              setCommandError(undefined);
+              setCloseoutAgent(agent);
+            }}
             onFocusSelection={setSelection}
             onMoveGoal={async (goalId, position) => {
               await runCommand({ type: "SetGoalMapPosition", goalId, position });
@@ -904,6 +918,29 @@ export const App = (): React.JSX.Element => {
           Motion {motion ? "on" : "off"}
         </button>
       </section>
+      {closeoutAgent ? (
+        <CloseAgentDialog
+          agent={closeoutAgent}
+          error={commandError}
+          onCancel={() => {
+            if (!commandPending) {
+              setCloseoutAgent(undefined);
+              setCommandError(undefined);
+            }
+          }}
+          onConfirm={async () => {
+            const closedAgentId = closeoutAgent.id;
+            if (!(await runCloseout([closedAgentId]))) return;
+            setCloseoutAgent(undefined);
+            if (selection?.type === "agent" && selection.id === closedAgentId) {
+              setSelection(undefined);
+              setSidePanel(undefined);
+            }
+            if (terminalAgent?.id === closedAgentId) setTerminalAgent(undefined);
+          }}
+          pending={commandPending}
+        />
+      ) : null}
       {diffAgent ? (
         <WorkspaceReview agent={diffAgent} onClose={() => setDiffAgent(undefined)} theme={theme} />
       ) : null}
