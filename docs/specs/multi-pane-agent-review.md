@@ -582,8 +582,11 @@ Conceptually:
 
 ```text
 GET /api/review?agentId=...&refresh=0|1
-GET /api/review/file?agentId=...&snapshotId=...&fileId=...&view=source|baseline|diff
+GET /api/review/file?agentId=...&snapshotId=...&fileId=...&view=source|baseline
 ```
+
+Diff views use the bounded hunks already returned in the review snapshot, not a
+second file read.
 
 The exact path shape may change, but the browser contract remains:
 

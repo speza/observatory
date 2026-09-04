@@ -139,7 +139,7 @@ export interface WorkspaceReviewSnapshot {
   readonly diagnostics: readonly string[];
 }
 
-export type WorkspaceReviewFileView = "source" | "baseline" | "diff";
+export type WorkspaceReviewFileView = "source" | "baseline";
 
 export interface WorkspaceReviewFileRequest {
   readonly workspacePath: string;
@@ -157,7 +157,6 @@ export interface WorkspaceReviewFileSnapshot {
   readonly status: "available" | "stale" | "missing" | "binary" | "oversized" | "unavailable";
   readonly language?: string;
   readonly content?: string;
-  readonly hunks?: readonly string[];
   readonly truncated: boolean;
   readonly generatedAt: number;
   readonly message?: string;

@@ -157,7 +157,7 @@ const treeRows = (
 
 const availableViews = (
   file: WorkspaceDiffFile | undefined,
-): readonly WorkspaceReviewFileView[] => {
+): readonly (WorkspaceReviewFileView | "diff")[] => {
   if (!file) return ["source"];
   if (file.status === "deleted") return ["diff", "baseline"];
   if (file.status === "added" || file.status === "untracked") return ["source", "diff"];
@@ -191,7 +191,7 @@ export const WorkspaceReview = ({
       : location.surface === "files"
         ? location.file?.id
         : undefined;
-  const fileView: WorkspaceReviewFileView =
+  const fileView: WorkspaceReviewFileView | "diff" =
     location.surface === "changes"
       ? "diff"
       : location.surface === "files"

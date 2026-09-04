@@ -465,6 +465,13 @@ describe("ObservatoryWebApi", () => {
     expect(review.changes).not.toHaveProperty("worktree");
     expect(fileResponse.status).toBe(200);
     expect(file).toMatchObject({ displayPath: "src/main.ts", content: "export {};" });
+
+    const diffResponse = await api.fetch(
+      new Request(
+        `http://localhost/api/review/file?agentId=${encodeURIComponent(agent.id)}&snapshotId=${review.snapshotId}&fileId=file-1&view=diff`,
+      ),
+    );
+    expect(diffResponse.status).toBe(400);
   });
 
   test("serves repository status by trusted agent id without accepting repository inputs", async () => {

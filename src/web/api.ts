@@ -307,9 +307,7 @@ export class ObservatoryWebApi {
           const fileId = url.searchParams.get("fileId")?.trim();
           const requestedView = url.searchParams.get("view")?.trim();
           const view: WorkspaceReviewFileView | undefined =
-            requestedView === "source" || requestedView === "baseline" || requestedView === "diff"
-              ? requestedView
-              : undefined;
+            requestedView === "source" || requestedView === "baseline" ? requestedView : undefined;
           if (!snapshotId || !fileId || !view)
             return json({ error: "A valid snapshot, file and view are required." }, 400);
           return json(

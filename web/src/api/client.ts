@@ -204,7 +204,7 @@ export const fetchWorkspaceReviewFile = async (
   agentId: string,
   snapshotId: string,
   fileId: string,
-  view: "source" | "baseline" | "diff",
+  view: "source" | "baseline",
   signal?: AbortSignal,
 ): Promise<WebWorkspaceReviewFileResponse> => {
   const query = new URLSearchParams({ agentId, snapshotId, fileId, view });

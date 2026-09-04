@@ -290,7 +290,8 @@ Out-of-order observations are ignored without regressing accepted state.
 
 The browser opens a review by accepted Agent ID. The server resolves its trusted
 worktree and returns a bounded tracked/non-ignored file index, working-tree diff
-and opaque process-local handles. Selected Source, Baseline and Diff reads
+and opaque process-local handles. Diff views use the hunks already in that
+snapshot; only Source and Baseline require selected-file reads. Those reads
 revalidate the Agent worktree and review revision; source reads validate and
 consume the same file descriptor and recheck the revision afterward. Concurrent
 changes therefore become stale rather than mixing observations. A truncated

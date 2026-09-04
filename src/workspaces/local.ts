@@ -600,7 +600,7 @@ const workspaceRevision = async (
 
 interface StoredReviewFile {
   readonly path: string;
-  readonly change?: WorkspaceDiffFile;
+  readonly change?: Pick<WorkspaceDiffFile, "status" | "oldPath">;
 }
 
 interface StoredReviewSnapshot {
@@ -885,7 +885,10 @@ export class LocalWorkspaceProvider
             changedDescendants: 0,
             contentKind: change?.binary ? "binary" : "unknown",
           });
-          storedFiles.set(id, { path: filePath, change });
+          storedFiles.set(id, {
+            path: filePath,
+            change: change ? { status: change.status, oldPath: change.oldPath } : undefined,
+          });
         }
 
         const snapshotId = randomUUID();
@@ -969,24 +972,6 @@ export class LocalWorkspaceProvider
         const revision = await workspaceRevision(this.runner, snapshot.root);
         if (!revision?.complete || revision.value !== snapshot.revision)
           return result("stale", "The workspace changed. Refresh review before reading this file.");
-
-        if (request.view === "diff") {
-          if (!file.change)
-            return result("unavailable", "This file has no working-tree change against HEAD.");
-          if (file.change.binary) return result("binary", "Binary diff content is not displayed.");
-          return {
-            kind: "workspace-review-file",
-            snapshotId: request.snapshotId,
-            fileId: request.fileId,
-            displayPath: file.path,
-            view: "diff",
-            status: "available",
-            language: languageForPath(file.path),
-            hunks: file.change.hunks,
-            truncated: false,
-            generatedAt: now,
-          } satisfies WorkspaceReviewFileSnapshot;
-        }
 
         if (request.view === "baseline") {
           const baselinePath = file.change?.oldPath ?? file.path;
