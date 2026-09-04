@@ -1,5 +1,12 @@
 # OpenTUI visual-fidelity spike — disposable
 
+Status: historical evidence only. The OpenTUI product direction was retired;
+the executable, package manifest, lockfile and TypeScript configuration have
+been deleted. The descriptions and controls below document the experiment,
+not a supported application. See [VERDICT.md](./VERDICT.md) for its findings
+and [technology decisions](../../docs/design/technology-decisions.md) for the
+current web-only direction.
+
 This is a deliberately narrow, throwaway visual experiment. It is not a
 product surface and must not grow into one. The older
 `prototypes/opentui-rendering-spike/` is frozen; this directory explores a
@@ -44,21 +51,7 @@ use:
 8. The result is plausibly preferable to a flat sidebar for catch-up and
    attention triage, not merely more visually novel.
 
-## Run
-
-From the repository root:
-
-```sh
-cd prototypes/opentui-visual-fidelity
-bun install
-bun run start
-```
-
-Also available:
-
-```sh
-bun run typecheck
-```
+## Historical controls
 
 Controls: `j`/`k` or arrows select a session, Enter focuses its path, `i`
 toggles the inspector, `+`/`-` zoom, `h`/`l`/`u`/`d` pan, `r` resets the

@@ -2,7 +2,10 @@
 
 Date: 2026-08-21
 
-## Exact run instructions
+## Historical run instructions
+
+The executable has been removed following retirement of the OpenTUI direction.
+These commands record the original experiment, not a current runnable workflow.
 
 ```sh
 cd prototypes/opentui-visual-fidelity

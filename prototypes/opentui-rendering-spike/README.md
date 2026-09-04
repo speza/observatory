@@ -1,5 +1,12 @@
 # Disposable AO Observatory OpenTUI rendering spike
 
+Status: historical evidence only. The OpenTUI product direction was retired;
+the executable, package manifest, lockfile and TypeScript configuration have
+been deleted. The descriptions and controls below document the experiment,
+not a supported application. See [VERDICT.md](./VERDICT.md) for its findings
+and [technology decisions](../../docs/design/technology-decisions.md) for the
+current web-only direction.
+
 > **THROWAWAY EXPERIMENT — do not promote this code.**
 >
 > This is an isolated, in-memory rendering POC for deciding whether native
@@ -7,16 +14,9 @@
 > terminal-browser. It deliberately excludes persistence, the AO control plane,
 > Herdr, session discovery, and production abstractions.
 
-## Run
+## Historical fixture
 
-From this directory:
-
-```sh
-bun install
-bun run start
-```
-
-The install command is intentionally local to this prototype. The app starts
+The app started
 with a deterministic 21-record fixture: 3 goals and 9 tracked sessions in the
 default map, plus 4 repository and 5 worktree execution records kept for an
 optional lens. Observation changes are simulated at 10Hz.

@@ -9,7 +9,10 @@ Dependency exercised: `@opentui/core@0.4.5`
 Fixture: deterministic, 21 records: 12 primary map nodes (3 goals and 9
 tracked sessions) plus 9 execution records (4 repositories and 5 worktrees)
 
-## Exact run instructions
+## Historical run instructions
+
+The executable has been removed following retirement of the OpenTUI direction.
+These commands record the original experiment, not a current runnable workflow.
 
 ```sh
 cd prototypes/opentui-rendering-spike

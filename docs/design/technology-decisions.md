@@ -28,8 +28,9 @@ Current local transport   Loopback HTTP + SSE + WebSocket terminals
 ```
 
 The former OpenTUI client was retired on 2026-08-27. Its experiments remain
-useful historical evidence, but OpenTUI is no longer an application dependency
-or technology direction. A future CLI may launch the server, report status or
+as written historical evidence; their executables and package configurations
+have been removed. OpenTUI is no longer an application dependency or technology
+direction. A future CLI may launch the server, report status or
 submit structured commands; it must not become a second interactive client.
 
 This is a product-development decision, not a commitment to implement a native
@@ -158,10 +159,10 @@ bearer token, accepts only bounded JSON and has no CORS. The browser receives
 narrow projections and operation results, never SQLite records, arbitrary
 filesystem paths or the internal command union.
 
-Polling remains the compatibility mechanism for host snapshots and browser
-projection delivery. Provider hooks trigger immediate reconciliation and are not
-polled. A versioned subscription transport is deferred until a measured need;
-do not introduce a daemon merely because the architecture could support one.
+Host snapshots are polled. Browser projections use revisioned SSE replacements,
+with HTTP refresh for startup and recovery; provider hooks trigger immediate
+reconciliation and are not polled. This transport remains in the existing Bun
+process; it does not require a daemon.
 
 ## Toolchain and quality
 

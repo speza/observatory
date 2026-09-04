@@ -50,7 +50,9 @@ architecture overview.
 ## Historical evidence
 
 Disposable UI and rendering investigations live under [`prototypes/`](../prototypes/).
-They are evidence for decisions, not maintained product code. Superseded specs,
+They are evidence for decisions, not maintained product code. The retired
+OpenTUI experiments retain their findings but no runnable implementations or
+package dependencies. Superseded specs,
 future-scope proposals, dated reviews and one-off manual test records remain
 available through Git history rather than competing with current documentation.
 
