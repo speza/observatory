@@ -221,18 +221,18 @@ const program = Effect.scoped(
       allowedOrigin,
       onError: (message) => console.error(message),
     });
-    const api = new ObservatoryWebApi(
-      runtime.universe,
-      runtime.clock,
+    const api = new ObservatoryWebApi({
+      universe: runtime.universe,
+      clock: runtime.clock,
       allowedOrigin,
-      runtime.host,
-      workspace,
-      { coordinator: startAgent, workspace },
+      host: runtime.host,
+      launch: { coordinator: startAgent, workspace },
       repositoryStatus,
       plugins,
       conversations,
       agentObservations,
-    );
+      workspaceReview: workspace,
+    });
     const refreshMs = positiveIntegerSetting(
       "AO_WEB_REFRESH_MS",
       process.env.AO_WEB_REFRESH_MS,

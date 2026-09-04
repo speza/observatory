@@ -6,6 +6,8 @@ import type {
   WorkspaceBrowser,
   WorkspaceChoice,
   WorkspaceDiffSnapshot,
+  WorkspaceReviewFileSnapshot,
+  WorkspaceReviewSnapshot,
   WorkspaceSelection,
 } from "../workspaces/types.ts";
 import type { StartAgentResult } from "../session-launch/types.ts";
@@ -161,11 +163,14 @@ export interface WebResumeAgentRequest {
 
 export type WebResumeAgentResponse = WebStartAgentResponse;
 
-export interface WebWorkingTreeDiffResponse extends WorkspaceDiffSnapshot {
+export interface WebWorkspaceReviewResponse extends Omit<WorkspaceReviewSnapshot, "changes"> {
   readonly agentId: string;
   readonly agentName: string;
   readonly goalTitle?: string;
+  readonly changes: Omit<WorkspaceDiffSnapshot, "worktree">;
 }
+
+export type WebWorkspaceReviewFileResponse = WorkspaceReviewFileSnapshot;
 
 export type WebAgentRepositoryStatusResponse = AgentRepositoryStatusSnapshot;
 

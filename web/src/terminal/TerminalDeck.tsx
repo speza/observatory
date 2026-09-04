@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { AgentView } from "../../../src/projection/types.ts";
 import type { WebTerminalLink } from "../../../src/web/protocol.ts";
 import { fetchTerminalLinks } from "../api/client.ts";
+import type { TerminalAppearance } from "../settings/browserSettings.ts";
 import { TerminalSurface, type TerminalTheme } from "./TerminalSurface.tsx";
 import { cycleTerminalAgent, filterTerminalAgents } from "./terminalAgents.ts";
 
@@ -17,9 +18,14 @@ export interface TerminalDeckProps {
   readonly onClose: () => void;
   readonly onSwitchAgent?: (agent: AgentView) => void;
   readonly theme: TerminalTheme;
+  readonly terminalAppearance: TerminalAppearance;
+  readonly onTerminalAppearanceChange: (appearance: TerminalAppearance) => void;
 }
 
 const primaryTab: TerminalTab = { id: "primary" };
+const terminalAppearances: readonly TerminalAppearance[] = ["application", "light", "dark"];
+const terminalAppearanceLabel = (appearance: TerminalAppearance): string =>
+  appearance === "application" ? "Auto" : appearance === "light" ? "Light" : "Dark";
 
 export const TerminalDeck = ({
   agent,
@@ -28,6 +34,8 @@ export const TerminalDeck = ({
   onClose,
   onSwitchAgent,
   theme,
+  terminalAppearance,
+  onTerminalAppearanceChange,
 }: TerminalDeckProps): React.JSX.Element => {
   const [tabs, setTabs] = useState<readonly TerminalTab[]>([primaryTab]);
   const [activeTabId, setActiveTabId] = useState(primaryTab.id);
@@ -50,6 +58,11 @@ export const TerminalDeck = ({
   }, [agent.id]);
 
   const canSwitchAgent = Boolean(onSwitchAgent) && agents.length > 1;
+  const terminalTheme = terminalAppearance === "application" ? theme : terminalAppearance;
+  const cycleTerminalAppearance = (): void => {
+    const index = terminalAppearances.indexOf(terminalAppearance);
+    onTerminalAppearanceChange(terminalAppearances[(index + 1) % terminalAppearances.length]!);
+  };
   const filteredAgents = useMemo(
     () => filterTerminalAgents(agents, agentQuery),
     [agentQuery, agents],
@@ -157,7 +170,7 @@ export const TerminalDeck = ({
   return (
     <section
       aria-label={`${agent.displayName} terminal deck`}
-      className={`terminal-deck${embedded ? " terminal-deck--embedded" : " terminal-deck--standalone"}`}
+      className={`terminal-deck terminal-deck--${terminalTheme}${embedded ? " terminal-deck--embedded" : " terminal-deck--standalone"}`}
       onKeyDownCapture={handleDeckKeyDown}
     >
       <header className="terminal-deck__header">
@@ -197,6 +210,15 @@ export const TerminalDeck = ({
             type="button"
           >
             →
+          </button>
+          <button
+            aria-label={`Terminal appearance: ${terminalAppearanceLabel(terminalAppearance)}. Activate to change.`}
+            className="terminal-deck__theme"
+            onClick={cycleTerminalAppearance}
+            title="Terminal appearance: follow application, light, or dark"
+            type="button"
+          >
+            {terminalAppearanceLabel(terminalAppearance)}
           </button>
           <button
             aria-expanded={pickerOpen}
@@ -271,7 +293,7 @@ export const TerminalDeck = ({
                 onClose={() => closeTab(tab.id)}
                 resizeMode="fit"
                 showHeader={false}
-                theme={theme}
+                theme={terminalTheme}
               />
             </div>
           );

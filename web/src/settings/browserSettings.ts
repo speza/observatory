@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Schema } from "effect";
 
 export type Theme = "light" | "dark";
+export type TerminalAppearance = "application" | "light" | "dark";
 export type View = "atlas" | "ledger";
 
 export type BrowserSettings = Readonly<{
   theme: Theme;
+  terminalAppearance: TerminalAppearance;
   motion: boolean;
   view: View;
 }>;
@@ -21,7 +23,7 @@ type BrowserSettingsControl = Readonly<{
 }>;
 
 const SETTINGS_KEY = "observatory.browser-settings";
-const StoredBrowserSettingsSchema = Schema.Struct({
+const StoredBrowserSettingsV1Schema = Schema.Struct({
   version: Schema.Literal(1),
   settings: Schema.Struct({
     theme: Schema.Literal("light", "dark"),
@@ -29,12 +31,22 @@ const StoredBrowserSettingsSchema = Schema.Struct({
     view: Schema.Literal("atlas", "ledger"),
   }),
 });
+const StoredBrowserSettingsV2Schema = Schema.Struct({
+  version: Schema.Literal(2),
+  settings: Schema.Struct({
+    theme: Schema.Literal("light", "dark"),
+    terminalAppearance: Schema.Literal("application", "light", "dark"),
+    motion: Schema.Boolean,
+    view: Schema.Literal("atlas", "ledger"),
+  }),
+});
 const decodeStoredBrowserSettings = Schema.decodeUnknownSync(
-  Schema.parseJson(StoredBrowserSettingsSchema),
+  Schema.parseJson(Schema.Union(StoredBrowserSettingsV1Schema, StoredBrowserSettingsV2Schema)),
 );
 
 const defaultBrowserSettings = (): BrowserSettings => ({
   theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+  terminalAppearance: "application",
   motion: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   view: "atlas",
 });
@@ -55,7 +67,10 @@ export const readBrowserSettings = (
   try {
     const encoded = storage.getItem(SETTINGS_KEY);
     if (!encoded) return defaults;
-    return decodeStoredBrowserSettings(encoded).settings;
+    const stored = decodeStoredBrowserSettings(encoded);
+    return stored.version === 1
+      ? { ...stored.settings, terminalAppearance: "application" }
+      : stored.settings;
   } catch {
     return defaults;
   }
@@ -67,7 +82,7 @@ export const writeBrowserSettings = (
 ): void => {
   if (!storage) return;
   try {
-    storage.setItem(SETTINGS_KEY, JSON.stringify({ version: 1, settings }));
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ version: 2, settings }));
   } catch {
     // Browser privacy and quota policies can disable local storage. Settings remain in memory.
   }

@@ -11,8 +11,8 @@ import {
 } from "../universe/test-support.ts";
 import type {
   PreparedWorkspace,
-  WorkspaceDiffReader,
   WorkspaceProvider,
+  WorkspaceReviewReader,
   WorkspaceSelection,
 } from "../workspaces/types.ts";
 import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
@@ -27,7 +27,7 @@ import type {
   WebTerminalLinksResponse,
   WebTerminalOpenResponse,
   WebTerminalServerMessage,
-  WebWorkingTreeDiffResponse,
+  WebWorkspaceReviewResponse,
 } from "./protocol.ts";
 
 type TerminalTestBody =
@@ -81,17 +81,12 @@ describe("ObservatoryWebApi", () => {
       },
       observeHost: (snapshot) => admitObservedConversationsAndReconcile(fixture.universe, snapshot),
     };
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
       conversations,
-    );
+    });
 
     const listed = await api.fetch(
       new Request("http://localhost/api/conversations/history?refresh=1"),
@@ -172,16 +167,14 @@ describe("ObservatoryWebApi", () => {
       harnesses: plugins,
       workspace,
     });
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
       host,
-      undefined,
-      { coordinator, workspace },
-      undefined,
+      launch: { coordinator, workspace },
       plugins,
-    );
+    });
 
     const optionsResponse = await api.fetch(new Request("http://localhost/api/launch/options"));
     const options: WebLaunchOptionsResponse = await optionsResponse.json();
@@ -312,7 +305,11 @@ describe("ObservatoryWebApi", () => {
       true,
     );
 
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
     const response = await api.fetch(new Request("http://localhost/api/portfolio"));
     const body: PortfolioResponse = await response.json();
 
@@ -332,7 +329,11 @@ describe("ObservatoryWebApi", () => {
         priority: "P0",
       }).ok,
     ).toBe(true);
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
 
     const inspector = await api.fetch(
       new Request("http://localhost/api/inspector?type=goal&id=goal-a"),
@@ -358,7 +359,11 @@ describe("ObservatoryWebApi", () => {
         }).ok,
       ).toBe(true);
     }
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
 
     const found = await api.fetch(new Request("http://localhost/api/search?q=%20atlas%20"));
     const missing = await api.fetch(new Request("http://localhost/api/search?q=%20%20"));
@@ -374,71 +379,92 @@ describe("ObservatoryWebApi", () => {
     expect(tooLong.status).toBe(400);
   });
 
-  test("serves a diff by trusted agent id without accepting a browser path", async () => {
+  test("serves bounded review files through issued handles without accepting paths", async () => {
     const fixture = makeUniverse();
     admitObservedConversationsAndReconcile(
       fixture.universe,
       hostSnapshot([
         {
-          nativeId: "native-a",
-          displayName: "Atlas",
+          nativeId: "native-review",
+          displayName: "Review agent",
           runtimeState: "working",
           runtimeStateSource: "test",
-          hostLocator: "test:native-a",
-          worktree: "/observed/worktree",
+          hostLocator: "test:native-review",
+          worktree: "/trusted/worktree",
           observedAt: fixture.clock.now(),
         },
       ]),
     );
-    const agent = fixture.universe.snapshot().agents[0];
-    if (!agent) throw new Error("Expected reconciled agent.");
-    const reader: WorkspaceDiffReader = {
-      inspectWorkingTree: (path, now) =>
+    const agent = fixture.universe.snapshot().agents[0]!;
+    const reader: WorkspaceReviewReader = {
+      inspectWorkspace: (path, now) =>
         Effect.succeed({
-          kind: "working-tree-diff",
-          status: "changed",
-          worktree: path,
+          kind: "workspace-review",
+          snapshotId: "review-1",
+          generatedAt: now,
+          status: "complete",
           repository: "observatory",
           branch: "main",
-          files: [
+          head: "abcdef012345",
+          tree: [
             {
-              path: "src/main.ts",
-              status: "modified",
-              additions: 2,
-              deletions: 1,
-              binary: false,
-              oldFile: { fileName: "src/main.ts", fileLang: "typescript", content: "old\n" },
-              newFile: { fileName: "src/main.ts", fileLang: "typescript", content: "new\n" },
-              hunks: ["--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new"],
+              id: "file-1",
+              name: "main.ts",
+              kind: "file",
+              changedDescendants: 0,
+              change: "modified",
             },
           ],
-          additions: 2,
-          deletions: 1,
+          treeComplete: true,
+          changes: {
+            kind: "working-tree-diff",
+            status: "changed",
+            worktree: path,
+            files: [],
+            additions: 1,
+            deletions: 1,
+            truncated: false,
+            generatedAt: now,
+          },
+          diagnostics: [],
+        }),
+      readWorkspaceReviewFile: (request, now) =>
+        Effect.succeed({
+          kind: "workspace-review-file",
+          snapshotId: request.snapshotId,
+          fileId: request.fileId,
+          displayPath: "src/main.ts",
+          view: request.view,
+          status: "available",
+          content: "export {};",
           truncated: false,
           generatedAt: now,
         }),
     };
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
-      undefined,
-      reader,
-    );
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      workspaceReview: reader,
+    });
 
-    const response = await api.fetch(
+    const reviewResponse = await api.fetch(
       new Request(
-        `http://localhost/api/diff?agentId=${encodeURIComponent(agent.id)}&path=/etc/passwd`,
+        `http://localhost/api/review?agentId=${encodeURIComponent(agent.id)}&path=/etc/passwd`,
       ),
     );
-    const body: WebWorkingTreeDiffResponse = await response.json();
-    const missing = await api.fetch(new Request("http://localhost/api/diff"));
+    const review: WebWorkspaceReviewResponse = await reviewResponse.json();
+    const fileResponse = await api.fetch(
+      new Request(
+        `http://localhost/api/review/file?agentId=${encodeURIComponent(agent.id)}&snapshotId=${review.snapshotId}&fileId=file-1&view=source&path=/etc/passwd`,
+      ),
+    );
+    const file = await fileResponse.json();
 
-    expect(response.status).toBe(200);
-    expect(body.agentId).toBe(agent.id);
-    expect(body.worktree).toBe("/observed/worktree");
-    expect(body.files[0]?.path).toBe("src/main.ts");
-    expect(missing.status).toBe(400);
+    expect(reviewResponse.status).toBe(200);
+    expect(review.changes).not.toHaveProperty("worktree");
+    expect(fileResponse.status).toBe(200);
+    expect(file).toMatchObject({ displayPath: "src/main.ts", content: "export {};" });
   });
 
   test("serves repository status by trusted agent id without accepting repository inputs", async () => {
@@ -472,15 +498,12 @@ describe("ObservatoryWebApi", () => {
           plugins: [],
         }),
     };
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
-      undefined,
-      undefined,
-      undefined,
-      reader,
-    );
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      repositoryStatus: reader,
+    });
 
     const response = await api.fetch(
       new Request(
@@ -496,7 +519,11 @@ describe("ObservatoryWebApi", () => {
 
   test("requires same-origin JSON with an explicit command header", async () => {
     const fixture = makeUniverse();
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
     const body = JSON.stringify({ type: "CreateGoal", title: "A goal", priority: "P1" });
 
     const noOrigin = await api.fetch(
@@ -548,7 +575,11 @@ describe("ObservatoryWebApi", () => {
     );
     const agentId = fixture.universe.snapshot().agents[0]?.id;
     if (!agentId) throw new Error("Expected reconciled agent.");
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
     const command = async (body: WebCommand): Promise<Response> =>
       api.fetch(
         new Request("http://localhost/api/commands", {
@@ -622,7 +653,11 @@ describe("ObservatoryWebApi", () => {
 
   test("rejects malformed, unsupported, and domain-invalid commands", async () => {
     const fixture = makeUniverse();
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
     const request = (body: string): Promise<Response> =>
       api.fetch(
         new Request("http://localhost/api/commands", {
@@ -654,7 +689,12 @@ describe("ObservatoryWebApi", () => {
       .snapshot()
       .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
     if (!agent) throw new Error("Expected the deterministic mock agent.");
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
     const mutation = (path: string, body: TerminalTestBody): Promise<Response> =>
       api.fetch(
         new Request(`http://localhost${path}`, {
@@ -817,14 +857,13 @@ describe("ObservatoryWebApi", () => {
       listChoices: () => Effect.succeed([]),
       prepare: () => Effect.die("not used"),
     };
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
       host,
-      undefined,
-      { coordinator, workspace },
-    );
+      launch: { coordinator, workspace },
+    });
 
     const opened = await api.fetch(
       new Request("http://localhost/api/terminal/open", {
@@ -877,17 +916,13 @@ describe("ObservatoryWebApi", () => {
       .snapshot()
       .agents.find((candidate) => candidate.execution?.nativeId === "mock-p01");
     if (!agent) throw new Error("Expected the deterministic mock Agent.");
-    const api = new ObservatoryWebApi(
-      fixture.universe,
-      fixture.clock,
-      "http://localhost",
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
       host,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       conversations,
-    );
+    });
 
     const response = await api.fetch(
       new Request("http://localhost/api/closeout/close", {
@@ -935,7 +970,12 @@ describe("ObservatoryWebApi", () => {
     );
     const agent = fixture.universe.snapshot().agents[0];
     if (!agent) throw new Error("Expected a deterministic mock agent.");
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
     const response = await api.fetch(
       new Request("http://localhost/api/terminal/open", {
         method: "POST",
@@ -957,7 +997,12 @@ describe("ObservatoryWebApi", () => {
   test("does not enable closeout without the canonical conversation observer", async () => {
     const fixture = makeUniverse();
     const host = new MockHostAdapter({ clock: fixture.clock });
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://localhost", host);
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
 
     const response = await api.fetch(
       new Request("http://localhost/api/closeout/close", {

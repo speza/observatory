@@ -10,6 +10,7 @@ Depends on:
 - [Plugin architecture](../design/plugin-architecture.md)
 - [Plugin system](observatory-plugin-system.md)
 - [Feature roadmap](observatory-feature-roadmap.md)
+- [Multi-pane Agent review](multi-pane-agent-review.md)
 
 ## Decision
 
@@ -67,11 +68,16 @@ Built-in, synthetic and external packages use the same plugin manifest and
 capability interface. Disabling or breaking a plugin leaves local Git evidence
 and trusted Universe state intact.
 
-### Workspace diff reader
+### Workspace review reader
 
-Working-tree review is a separate bounded read-only interface. The selected
-Agent ID resolves the trusted worktree server-side. Diff output, file count,
-file size and untracked-file reads are bounded before projection to the browser.
+The accepted [multi-pane Agent review](multi-pane-agent-review.md) slice deepens
+working-tree review into one bounded read-only module for changed-file diffs,
+tracked/non-ignored file indexing and selected source/baseline reads. The
+selected Agent ID resolves the trusted worktree server-side, and subsequent file
+reads use server-issued opaque handles rather than browser-supplied paths.
+Output, tree size, file count, file content and diff size remain bounded before
+projection to the browser. The existing narrower diff reader is replaced during
+that slice rather than retained behind a pass-through layer.
 
 ## Correlation rules
 

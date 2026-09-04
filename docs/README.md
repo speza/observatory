@@ -35,6 +35,13 @@ architecture overview.
 - [Plugin system](specs/observatory-plugin-system.md)
 - [Repository status and code-host plugins](specs/agent-repository-and-code-host-plugins.md)
 
+## Active product specifications and investigations
+
+- [Multi-pane Agent review](specs/multi-pane-agent-review.md) — accepted next
+  slice for bounded file, source, diff, evidence and terminal review.
+- [Structured conversation interaction](specs/structured-conversation-interaction.md) —
+  feasibility and stop gates for an optional native conversation surface.
+
 ## Guides and operations
 
 - [Plugin contributor guide](guides/plugin-contributor.md)

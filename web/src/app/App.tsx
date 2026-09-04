@@ -69,7 +69,8 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 export const App = (): React.JSX.Element => {
   const portfolio = usePortfolio();
   const { settings, setSetting, updateSetting } = useBrowserSettings();
-  const { motion, theme, view } = settings;
+  const { motion, terminalAppearance, theme, view } = settings;
+  const terminalTheme = terminalAppearance === "application" ? theme : terminalAppearance;
   const [sidePanel, setSidePanel] = useState<SidePanel>();
   const [selection, setSelection] = useState<Selection>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -958,7 +959,13 @@ export const App = (): React.JSX.Element => {
         />
       ) : null}
       {diffAgent ? (
-        <WorkspaceReview agent={diffAgent} onClose={() => setDiffAgent(undefined)} theme={theme} />
+        <WorkspaceReview
+          agent={diffAgent}
+          onClose={() => setDiffAgent(undefined)}
+          onTerminalAppearanceChange={(appearance) => setSetting("terminalAppearance", appearance)}
+          terminalAppearance={terminalAppearance}
+          theme={theme}
+        />
       ) : null}
       {terminalAgent ? (
         <TerminalDeck
@@ -966,6 +973,8 @@ export const App = (): React.JSX.Element => {
           agents={terminalAgents}
           onClose={() => setTerminalAgent(undefined)}
           onSwitchAgent={switchTerminalAgent}
+          onTerminalAppearanceChange={(appearance) => setSetting("terminalAppearance", appearance)}
+          terminalAppearance={terminalAppearance}
           theme={theme}
         />
       ) : null}
@@ -974,7 +983,7 @@ export const App = (): React.JSX.Element => {
           key={terminalLaunch.requestId}
           launch={terminalLaunch}
           onClose={() => setTerminalLaunch(undefined)}
-          theme={theme}
+          theme={terminalTheme}
         />
       ) : null}
       {newGoalOpen ? (

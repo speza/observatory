@@ -25,7 +25,7 @@ button {
 }
 
 .app {
-  --masthead-height: 88px;
+  --masthead-height: 58px;
   --paper: #d7d8d2;
   --paper-deep: #c7cac4;
   --paper-panel: rgba(232, 232, 225, 0.96);
@@ -431,10 +431,10 @@ button {
 .masthead {
   height: var(--masthead-height);
   display: grid;
-  grid-template-columns: minmax(300px, auto) minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 20px;
-  padding: 0 30px;
+  gap: 14px;
+  padding: 0 18px;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
   background: color-mix(in srgb, var(--paper) 90%, transparent);
@@ -447,12 +447,12 @@ button {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 10px;
 }
 
 .brandmark {
-  width: 32px;
-  height: 32px;
+  width: 27px;
+  height: 27px;
   flex: 0 0 auto;
   color: var(--ink);
 }
@@ -466,15 +466,17 @@ button {
   fill: var(--accent);
 }
 .identity .overline {
-  margin: 0 0 4px;
-  font-size: 10px;
+  margin: 0;
   color: var(--muted);
+  font-size: 10px;
 }
 .identity h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 400;
-  letter-spacing: -0.03em;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .visually-hidden {
@@ -493,12 +495,12 @@ button {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 12px;
+  gap: 7px;
+  font-size: 11px;
 }
 .system-scope select {
-  width: 150px;
-  height: 36px;
+  width: 148px;
+  height: 32px;
   padding: 0 30px 0 10px;
   border: 1px solid var(--hairline);
   color: var(--ink);
@@ -522,8 +524,8 @@ button {
 .masthead__actions button,
 .masthead__tools button,
 .masthead__utility button {
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -599,15 +601,12 @@ button {
 
 @media (max-width: 1600px) {
   .masthead {
-    grid-template-columns: minmax(240px, auto) minmax(0, 1fr) auto auto;
-    gap: 12px;
-    padding-inline: 20px;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    gap: 10px;
+    padding-inline: 14px;
   }
   .masthead__brand {
-    gap: 16px;
-  }
-  .identity h1 {
-    font-size: 18px;
+    gap: 8px;
   }
   .masthead nav {
     gap: 6px;

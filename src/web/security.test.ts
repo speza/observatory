@@ -51,7 +51,7 @@ describe("loopback web request security", () => {
 
   test("rejects foreign browser origins for reads and terminal socket paths", async () => {
     const fixture = makeUniverse();
-    const api = new ObservatoryWebApi(fixture.universe, fixture.clock, "http://127.0.0.1:4310");
+    const api = new ObservatoryWebApi({ universe: fixture.universe, clock: fixture.clock });
     const request = (path: string): Promise<Response> =>
       api.fetch(
         new Request(`http://127.0.0.1:4310${path}`, {
@@ -72,21 +72,21 @@ describe("loopback web request security", () => {
       hostname: "127.0.0.1",
       port: 0,
       fetch: (request): Promise<Response> =>
-        new ObservatoryWebApi(
-          fixture.universe,
-          fixture.clock,
-          `http://127.0.0.1:${server.port}`,
-        ).fetch(request),
+        new ObservatoryWebApi({
+          universe: fixture.universe,
+          clock: fixture.clock,
+          allowedOrigin: `http://127.0.0.1:${server.port}`,
+        }).fetch(request),
     });
     running.push(server);
     const headers = { host: "attacker.example" };
     const portfolio = await fetch(`http://127.0.0.1:${server.port}/api/portfolio`, { headers });
-    const diff = await fetch(`http://127.0.0.1:${server.port}/api/diff?agentId=agent-1`, {
+    const review = await fetch(`http://127.0.0.1:${server.port}/api/review?agentId=agent-1`, {
       headers,
     });
 
     expect(portfolio.status).toBe(403);
-    expect(diff.status).toBe(403);
+    expect(review.status).toBe(403);
     expect(await portfolio.text()).not.toContain("universe-map");
   });
 });

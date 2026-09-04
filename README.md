@@ -167,7 +167,8 @@ The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 - selected-Agent repository and code-host status through contributed plugins;
 - host-synchronised close and archive;
 - host-owned primary and linked terminals rendered with xterm.js; and
-- bounded, read-only working-tree diff review.
+- multi-pane, read-only workspace review with bounded repository files,
+  source/baseline views, working-tree diffs, evidence and terminal context.
 
 The application is local-only and single-user. The server binds to loopback and
 rejects foreign HTTP authorities and browser origins. It does not ingest

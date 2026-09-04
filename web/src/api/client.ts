@@ -11,7 +11,8 @@ import type {
   WebResumeAgentRequest,
   WebResumeAgentResponse,
   WebWorkspaceBrowserResponse,
-  WebWorkingTreeDiffResponse,
+  WebWorkspaceReviewFileResponse,
+  WebWorkspaceReviewResponse,
   WebTerminalActionResponse,
   WebTerminalEvent,
   WebTerminalLink,
@@ -32,7 +33,8 @@ import {
   StartAgentResponseSchema,
   PendingLaunchesResponseSchema,
   CloseoutResponseSchema,
-  WorkingTreeDiffResponseSchema,
+  WorkspaceReviewFileResponseSchema,
+  WorkspaceReviewResponseSchema,
   AgentRepositoryStatusResponseSchema,
   BrowserProjectionEventSchema,
 } from "./schemas.ts";
@@ -187,13 +189,29 @@ export const fetchSearch = async (
   return Schema.decodeUnknownSync(SearchProjectionSchema)(await response.json());
 };
 
-export const fetchWorkingTreeDiff = async (
+export const fetchWorkspaceReview = async (
   agentId: string,
   signal?: AbortSignal,
-): Promise<WebWorkingTreeDiffResponse> => {
-  const response = await responseFor(`/api/diff?agentId=${encodeURIComponent(agentId)}`, signal);
-  const body = Schema.decodeUnknownSync(WorkingTreeDiffResponseSchema)(await response.json());
-  if (body.agentId !== agentId) throw new Error("Observatory returned an invalid workspace diff.");
+): Promise<WebWorkspaceReviewResponse> => {
+  const response = await responseFor(`/api/review?agentId=${encodeURIComponent(agentId)}`, signal);
+  const body = Schema.decodeUnknownSync(WorkspaceReviewResponseSchema)(await response.json());
+  if (body.agentId !== agentId)
+    throw new Error("Observatory returned an invalid workspace review.");
+  return body;
+};
+
+export const fetchWorkspaceReviewFile = async (
+  agentId: string,
+  snapshotId: string,
+  fileId: string,
+  view: "source" | "baseline" | "diff",
+  signal?: AbortSignal,
+): Promise<WebWorkspaceReviewFileResponse> => {
+  const query = new URLSearchParams({ agentId, snapshotId, fileId, view });
+  const response = await responseFor(`/api/review/file?${query.toString()}`, signal);
+  const body = Schema.decodeUnknownSync(WorkspaceReviewFileResponseSchema)(await response.json());
+  if (body.snapshotId !== snapshotId || body.fileId !== fileId || body.view !== view)
+    throw new Error("Observatory returned an invalid workspace file.");
   return body;
 };
 

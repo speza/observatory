@@ -441,10 +441,9 @@ const DiffFile = Schema.Struct({
   newFile: Schema.optional(DiffFileContent),
   hunks: Schema.Array(Schema.String),
 });
-export const WorkingTreeDiffResponseSchema = Schema.Struct({
+const WorkingTreeDiffFields = {
   kind: Schema.Literal("working-tree-diff"),
   status: Schema.Literal("clean", "changed", "not-git", "unavailable"),
-  worktree: Schema.String,
   repository: Schema.optional(Schema.String),
   branch: Schema.optional(Schema.String),
   head: Schema.optional(Schema.String),
@@ -454,9 +453,52 @@ export const WorkingTreeDiffResponseSchema = Schema.Struct({
   truncated: Schema.Boolean,
   generatedAt: Schema.Number,
   message: Schema.optional(Schema.String),
+} as const;
+const WorkingTreeDiffSnapshotSchema = Schema.Struct({
+  ...WorkingTreeDiffFields,
+  worktree: Schema.String,
+});
+
+const ReviewTreeEntry = Schema.Struct({
+  id: Schema.String,
+  parentId: Schema.optional(Schema.String),
+  name: Schema.String,
+  kind: Schema.Literal("directory", "file"),
+  change: Schema.optional(
+    Schema.Literal("added", "modified", "deleted", "renamed", "copied", "untracked"),
+  ),
+  changedDescendants: Schema.Number,
+  contentKind: Schema.optional(Schema.Literal("text", "binary", "oversized", "unknown")),
+});
+export const WorkspaceReviewResponseSchema = Schema.Struct({
+  kind: Schema.Literal("workspace-review"),
+  snapshotId: Schema.String,
+  generatedAt: Schema.Number,
+  status: Schema.Literal("complete", "partial", "unavailable", "not-git"),
+  repository: Schema.optional(Schema.String),
+  branch: Schema.optional(Schema.String),
+  head: Schema.optional(Schema.String),
+  tree: Schema.Array(ReviewTreeEntry),
+  treeComplete: Schema.Boolean,
+  changes: Schema.Struct(WorkingTreeDiffFields),
+  diagnostics: Schema.Array(Schema.String),
   agentId: Schema.String,
   agentName: Schema.String,
   goalTitle: Schema.optional(Schema.String),
+});
+export const WorkspaceReviewFileResponseSchema = Schema.Struct({
+  kind: Schema.Literal("workspace-review-file"),
+  snapshotId: Schema.String,
+  fileId: Schema.String,
+  displayPath: Schema.String,
+  view: Schema.Literal("source", "baseline", "diff"),
+  status: Schema.Literal("available", "stale", "missing", "binary", "oversized", "unavailable"),
+  language: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.String),
+  hunks: Schema.optional(Schema.Array(Schema.String)),
+  truncated: Schema.Boolean,
+  generatedAt: Schema.Number,
+  message: Schema.optional(Schema.String),
 });
 
 const RepositoryIdentity = Schema.Struct({
@@ -504,7 +546,7 @@ export const AgentRepositoryStatusResponseSchema = Schema.Struct({
       upstream: Schema.optional(Schema.String),
       ahead: Schema.optional(Schema.Number),
       behind: Schema.optional(Schema.Number),
-      diff: WorkingTreeDiffResponseSchema.omit("agentId", "agentName", "goalTitle"),
+      diff: WorkingTreeDiffSnapshotSchema,
     }),
   ),
   pullRequests: Schema.Array(RepositoryPullRequest),

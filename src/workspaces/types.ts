@@ -110,3 +110,67 @@ export interface WorkspaceDiffReader {
     now: number,
   ): Effect.Effect<WorkspaceDiffSnapshot, WorkspaceError>;
 }
+
+export type WorkspaceReviewContentKind = "text" | "binary" | "oversized" | "unknown";
+
+/** One browser-safe entry in a bounded repository index. */
+export interface WorkspaceReviewTreeEntry {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly name: string;
+  readonly kind: "directory" | "file";
+  readonly change?: WorkspaceDiffFileStatus;
+  readonly changedDescendants: number;
+  readonly contentKind?: WorkspaceReviewContentKind;
+}
+
+/** A coherent, process-local review capability over one trusted workspace. */
+export interface WorkspaceReviewSnapshot {
+  readonly kind: "workspace-review";
+  readonly snapshotId: string;
+  readonly generatedAt: number;
+  readonly status: "complete" | "partial" | "unavailable" | "not-git";
+  readonly repository?: string;
+  readonly branch?: string;
+  readonly head?: string;
+  readonly tree: readonly WorkspaceReviewTreeEntry[];
+  readonly treeComplete: boolean;
+  readonly changes: WorkspaceDiffSnapshot;
+  readonly diagnostics: readonly string[];
+}
+
+export type WorkspaceReviewFileView = "source" | "baseline" | "diff";
+
+export interface WorkspaceReviewFileRequest {
+  readonly workspacePath: string;
+  readonly snapshotId: string;
+  readonly fileId: string;
+  readonly view: WorkspaceReviewFileView;
+}
+
+export interface WorkspaceReviewFileSnapshot {
+  readonly kind: "workspace-review-file";
+  readonly snapshotId: string;
+  readonly fileId: string;
+  readonly displayPath: string;
+  readonly view: WorkspaceReviewFileView;
+  readonly status: "available" | "stale" | "missing" | "binary" | "oversized" | "unavailable";
+  readonly language?: string;
+  readonly content?: string;
+  readonly hunks?: readonly string[];
+  readonly truncated: boolean;
+  readonly generatedAt: number;
+  readonly message?: string;
+}
+
+/** Read-only workspace review; callers resolve accepted Agent paths before use. */
+export interface WorkspaceReviewReader {
+  inspectWorkspace(
+    path: string,
+    now: number,
+  ): Effect.Effect<WorkspaceReviewSnapshot, WorkspaceError>;
+  readWorkspaceReviewFile(
+    request: WorkspaceReviewFileRequest,
+    now: number,
+  ): Effect.Effect<WorkspaceReviewFileSnapshot, WorkspaceError>;
+}

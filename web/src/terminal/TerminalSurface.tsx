@@ -48,6 +48,21 @@ const decodeFrame = (value: string): Uint8Array => {
 const MAX_QUEUED_TERMINAL_MESSAGES = 512;
 const MAX_TERMINAL_RECONNECT_DELAY_MS = 2_000;
 
+const terminalThemeFor = (theme: TerminalTheme) =>
+  theme === "dark"
+    ? {
+        background: "#181a17",
+        foreground: "#e7decb",
+        cursor: "#d68163",
+        selectionBackground: "#4b3a31",
+      }
+    : {
+        background: "#e8e8e1",
+        foreground: "#303735",
+        cursor: "#e14b2d",
+        selectionBackground: "#c8cbc4",
+      };
+
 const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
   fit.fit();
   const dimensions = boundWebTerminalDimensions({
@@ -117,19 +132,15 @@ export const TerminalSurface = ({
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const terminalTheme =
-      theme === "dark"
-        ? { background: "#181a17", foreground: "#e7decb", cursor: "#d68163" }
-        : { background: "#181a17", foreground: "#f2ead8", cursor: "#d68163" };
     const terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
       cursorBlink: true,
       fontFamily: '"DM Mono", ui-monospace, monospace',
-      fontSize: 14,
-      lineHeight: 1.15,
+      fontSize: 13,
+      lineHeight: 1.18,
       scrollback: 5_000,
-      theme: terminalTheme,
+      theme: terminalThemeFor(theme),
     });
     const fit = new FitAddon();
     terminalRef.current = terminal;
@@ -283,17 +294,14 @@ export const TerminalSurface = ({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.options.theme =
-      theme === "dark"
-        ? { background: "#181a17", foreground: "#e7decb", cursor: "#d68163" }
-        : { background: "#181a17", foreground: "#f2ead8", cursor: "#d68163" };
+    terminal.options.theme = terminalThemeFor(theme);
   }, [theme]);
 
   return (
     <section
       aria-hidden={!active}
       aria-label={`${link?.label ?? label} terminal`}
-      className={`terminal-surface${embedded ? " terminal-surface--embedded" : ""}${launch ? " terminal-surface--pending" : ""}${showHeader ? "" : " terminal-surface--compact"}`}
+      className={`terminal-surface terminal-surface--${theme}${embedded ? " terminal-surface--embedded" : ""}${launch ? " terminal-surface--pending" : ""}${showHeader ? "" : " terminal-surface--compact"}`}
       data-active={active ? "true" : "false"}
     >
       {showHeader ? (

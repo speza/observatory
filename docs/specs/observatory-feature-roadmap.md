@@ -40,7 +40,7 @@ agent work.
 | Metadata-only provider observations                   | Implemented | Activity, input, outcome and context evidence             |
 | Host-owned primary and linked terminals               | Implemented | Mock and Herdr stream contract tests                      |
 | Repository and code-host status                       | Implemented | Bounded local reader and plugin evidence                  |
-| Working-tree diff review                              | Implemented | Trusted Agent lookup and bounded diff tests               |
+| Multi-pane workspace review                           | Initial     | Bounded tree, source/baseline, diff and opaque handles    |
 | Host-synchronised close and archive                   | Implemented | Revalidation and failure-path tests                       |
 | Search and browser preference retention               | Implemented | Browser and projection tests                              |
 | Related-Agent evidence projection                     | Core only   | Deterministic projection exists; product workflow pending |
@@ -88,18 +88,22 @@ sustained use against disposable real Agents.
 
 ## Next: deepen trust and spatial meaning
 
-1. Define a typed verification and handoff evidence contract.
-2. Add failed-check, stalled, returned-result and downstream-blocker decisions
+1. Iterate the initial
+   [multi-pane Agent review workspace](multi-pane-agent-review.md) through real
+   reviews, then add draggable pane sizing, file tabs and syntax-aware source
+   presentation only where they improve review.
+2. Define a typed verification and handoff evidence contract.
+3. Add failed-check, stalled, returned-result and downstream-blocker decisions
    without creating one queue item per raw claim.
-3. Complete the human-controlled flow from reported result to inspect, revise,
+4. Complete the human-controlled flow from reported result to inspect, revise,
    accept, close or archive.
-4. Add the Related-Agent review/adopt/dismiss workflow over the existing
+5. Add the Related-Agent review/adopt/dismiss workflow over the existing
    projection; never auto-assign from weak similarity.
-5. Introduce only the typed delegation, result, dependency or integration
+6. Introduce only the typed delegation, result, dependency or integration
    relationships that improve concrete supervision tasks.
-6. Surface cross-Agent workspace overlap and integration risk as evidence, not
+7. Surface cross-Agent workspace overlap and integration risk as evidence, not
    new organisational nodes.
-7. Add explicit semantic-density controls only if focus and Ledger do not solve
+8. Add explicit semantic-density controls only if focus and Ledger do not solve
    realistic Atlas density.
 
 ## Later: broaden only after evidence
@@ -108,6 +112,10 @@ sustained use against disposable real Agents.
   broaden the Universe model.
 - Consider richer read-only provider or code-host facts when they improve a
   measured decision workflow.
+- Run the feasibility and stop gates for
+  [structured conversation interaction](structured-conversation-interaction.md)
+  before committing to a native conversation surface; do not infer it from
+  terminal output or begin with a universal chat interface.
 - Consider remote observation or another client only after an explicit product
   decision and a concrete local limitation.
 - Consider narrow automation only when its authority, preview, reversibility and

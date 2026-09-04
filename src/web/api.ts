@@ -3,7 +3,11 @@ import type { InspectorProjection, Projection, SearchProjection } from "../proje
 import type { SessionHost } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { Clock } from "../universe/types.ts";
-import type { WorkspaceDiffReader, WorkspaceProvider } from "../workspaces/types.ts";
+import type {
+  WorkspaceProvider,
+  WorkspaceReviewFileView,
+  WorkspaceReviewReader,
+} from "../workspaces/types.ts";
 import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
 import type { PluginRegistry } from "../plugins/registry.ts";
@@ -18,7 +22,8 @@ import type {
   WebStartAgentResponse,
   WebWorkspaceBrowserResponse,
   WebTerminalLinksResponse,
-  WebWorkingTreeDiffResponse,
+  WebWorkspaceReviewFileResponse,
+  WebWorkspaceReviewResponse,
   WebTerminalActionResponse,
   WebTerminalOpenResponse,
   WebTerminalServerMessage,
@@ -61,7 +66,8 @@ type WebResponse =
   | WebPendingLaunchesResponse
   | WebStartAgentResponse
   | WebWorkspaceBrowserResponse
-  | WebWorkingTreeDiffResponse
+  | WebWorkspaceReviewResponse
+  | WebWorkspaceReviewFileResponse
   | WebTerminalOpenResponse
   | WebTerminalLinksResponse
   | WebTerminalActionResponse
@@ -86,27 +92,56 @@ const targetType = (value: string | null): "goal" | "agent" | undefined => {
   return undefined;
 };
 
+export interface ObservatoryWebApiOptions {
+  readonly universe: Universe;
+  readonly clock: Clock;
+  readonly allowedOrigin?: string;
+  readonly host?: SessionHost;
+  readonly launch?: {
+    readonly coordinator: StartAgentCoordinator;
+    readonly workspace: WorkspaceProvider;
+  };
+  readonly repositoryStatus?: AgentRepositoryStatusReader;
+  readonly plugins?: PluginRegistry;
+  readonly conversations?: ConversationTrackerModule;
+  readonly agentObservations?: AgentObservationModule;
+  readonly workspaceReview?: WorkspaceReviewReader;
+}
+
 export class ObservatoryWebApi {
+  private readonly universe: Universe;
+  private readonly clock: Clock;
+  private readonly allowedOrigin: string;
+  private readonly repositoryStatus: AgentRepositoryStatusReader | undefined;
+  private readonly plugins: PluginRegistry | undefined;
+  private readonly conversations: ConversationTrackerModule | undefined;
+  private readonly agentObservations: AgentObservationModule | undefined;
+  private readonly workspaceReview: WorkspaceReviewReader | undefined;
   private readonly commands: WebCommandGateway;
   private readonly terminals: WebTerminalGateway | undefined;
   private readonly launch: WebLaunchGateway | undefined;
   private readonly closeout: WebCloseoutGateway | undefined;
 
-  constructor(
-    private readonly universe: Universe,
-    private readonly clock: Clock,
-    private readonly allowedOrigin = "http://127.0.0.1:4310",
-    host?: SessionHost,
-    private readonly diffReader?: WorkspaceDiffReader,
-    launch?: {
-      readonly coordinator: StartAgentCoordinator;
-      readonly workspace: WorkspaceProvider;
-    },
-    private readonly repositoryStatus?: AgentRepositoryStatusReader,
-    private readonly plugins?: PluginRegistry,
-    private readonly conversations?: ConversationTrackerModule,
-    private readonly agentObservations?: AgentObservationModule,
-  ) {
+  constructor({
+    universe,
+    clock,
+    allowedOrigin = "http://127.0.0.1:4310",
+    host,
+    launch,
+    repositoryStatus,
+    plugins,
+    conversations,
+    agentObservations,
+    workspaceReview,
+  }: ObservatoryWebApiOptions) {
+    this.universe = universe;
+    this.clock = clock;
+    this.allowedOrigin = allowedOrigin;
+    this.repositoryStatus = repositoryStatus;
+    this.plugins = plugins;
+    this.conversations = conversations;
+    this.agentObservations = agentObservations;
+    this.workspaceReview = workspaceReview;
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
     this.closeout =
@@ -257,46 +292,55 @@ export class ObservatoryWebApi {
       }
     }
 
-    if (url.pathname === "/api/diff") {
+    if (url.pathname === "/api/review" || url.pathname === "/api/review/file") {
       const agentId = url.searchParams.get("agentId")?.trim();
       if (!agentId) return json({ error: "An agent id is required." }, 400);
+      if (!this.workspaceReview) return json({ error: "Workspace review is unavailable." }, 501);
       const snapshot = this.universe.snapshot();
       const agent = snapshot.agents.find((candidate) => candidate.id === agentId);
       if (!agent) return json({ error: "Agent not found." }, 404);
-      if (!this.diffReader)
-        return json({ error: "Workspace diff inspection is unavailable." }, 501);
-      if (!agent.worktree) {
-        return json({
-          kind: "working-tree-diff",
-          agentId: agent.id,
-          agentName: agent.displayName,
-          goalTitle: snapshot.goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
-          status: "unavailable",
-          worktree: "",
-          repository: agent.repository,
-          branch: agent.branch,
-          files: [],
-          additions: 0,
-          deletions: 0,
-          truncated: false,
-          generatedAt: now,
-          message: "This agent has not reported a workspace path.",
-        } satisfies WebWorkingTreeDiffResponse);
-      }
+      if (!agent.worktree)
+        return json({ error: "This Agent has not reported a workspace path." }, 409);
       try {
-        const diff = await Effect.runPromise(
-          this.diffReader.inspectWorkingTree(agent.worktree, now),
+        if (url.pathname === "/api/review/file") {
+          const snapshotId = url.searchParams.get("snapshotId")?.trim();
+          const fileId = url.searchParams.get("fileId")?.trim();
+          const requestedView = url.searchParams.get("view")?.trim();
+          const view: WorkspaceReviewFileView | undefined =
+            requestedView === "source" || requestedView === "baseline" || requestedView === "diff"
+              ? requestedView
+              : undefined;
+          if (!snapshotId || !fileId || !view)
+            return json({ error: "A valid snapshot, file and view are required." }, 400);
+          return json(
+            await Effect.runPromise(
+              this.workspaceReview.readWorkspaceReviewFile(
+                {
+                  workspacePath: agent.worktree,
+                  snapshotId,
+                  fileId,
+                  view,
+                },
+                now,
+              ),
+            ),
+          );
+        }
+        const review = await Effect.runPromise(
+          this.workspaceReview.inspectWorkspace(agent.worktree, now),
         );
+        const { worktree: _worktree, ...changes } = review.changes;
         return json({
-          ...diff,
+          ...review,
+          changes,
           agentId: agent.id,
           agentName: agent.displayName,
           goalTitle: snapshot.goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
-          repository: agent.repository ?? diff.repository,
-          branch: agent.branch ?? diff.branch,
-        } satisfies WebWorkingTreeDiffResponse);
+          repository: agent.repository ?? review.repository,
+          branch: agent.branch ?? review.branch,
+        } satisfies WebWorkspaceReviewResponse);
       } catch {
-        return json({ error: "Workspace diff inspection failed." }, 503);
+        return json({ error: "Workspace review failed." }, 503);
       }
     }
 

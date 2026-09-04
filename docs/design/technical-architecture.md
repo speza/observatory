@@ -186,8 +186,10 @@ idempotent operation. It coordinates:
 
 Launch receipts prevent ordinary retries from creating duplicate processes.
 A pending launch is visible but is not a phantom Agent. Workspace inspection is
-bounded and read-only; browser callers provide trusted Agent IDs rather than
-filesystem paths for diff review.
+bounded and read-only. The multi-pane review path resolves trusted Agent
+worktrees server-side, issues process-local snapshot and file handles, and
+provides bounded repository indexing, source/baseline reads and diffs without
+accepting browser filesystem paths.
 
 ### `agent-closeout/`
 
@@ -283,6 +285,24 @@ scope.
    repair reconnects with current snapshots.
 
 Out-of-order observations are ignored without regressing accepted state.
+
+### Workspace review
+
+The browser opens a review by accepted Agent ID. The server resolves its trusted
+worktree and returns a bounded tracked/non-ignored file index, working-tree diff
+and opaque process-local handles. Selected Source, Baseline and Diff reads
+revalidate the Agent worktree and review revision; source reads validate and
+consume the same file descriptor and recheck the revision afterward. Concurrent
+changes therefore become stale rather than mixing observations. A truncated
+diff yields partial review evidence without invalidating safe file capabilities.
+Source and diff content remains ephemeral and is excluded from SQLite,
+projections and diagnostics.
+
+The renderer coordinates Changes, Files, Evidence and Terminal panes through a
+discriminated presentation state while keeping repository and file identity out
+of durable topology. Collapsed changes defer syntax and diff construction, and
+only the active layout is built. Terminal context continues through the
+independent `SessionHost` gateway.
 
 ### Terminal access
 

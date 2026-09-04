@@ -5,7 +5,12 @@ import {
   type BrowserSettings,
 } from "./browserSettings.ts";
 
-const defaults: BrowserSettings = { theme: "light", motion: false, view: "atlas" };
+const defaults: BrowserSettings = {
+  theme: "light",
+  terminalAppearance: "application",
+  motion: false,
+  view: "atlas",
+};
 
 const memoryStorage = (initial?: string) => {
   let value = initial ?? null;
@@ -21,14 +26,33 @@ const memoryStorage = (initial?: string) => {
 describe("browser settings", () => {
   test("round-trips the versioned settings record", () => {
     const storage = memoryStorage();
-    const settings: BrowserSettings = { theme: "dark", motion: true, view: "ledger" };
+    const settings: BrowserSettings = {
+      theme: "dark",
+      terminalAppearance: "light",
+      motion: true,
+      view: "ledger",
+    };
 
     writeBrowserSettings(settings, storage);
 
     expect(readBrowserSettings(defaults, storage)).toEqual(settings);
     expect(storage.value()).toBe(
-      '{"version":1,"settings":{"theme":"dark","motion":true,"view":"ledger"}}',
+      '{"version":2,"settings":{"theme":"dark","terminalAppearance":"light","motion":true,"view":"ledger"}}',
     );
+  });
+
+  test("migrates the prior settings record to application-following terminals", () => {
+    expect(
+      readBrowserSettings(
+        defaults,
+        memoryStorage('{"version":1,"settings":{"theme":"dark","motion":true,"view":"ledger"}}'),
+      ),
+    ).toEqual({
+      theme: "dark",
+      terminalAppearance: "application",
+      motion: true,
+      view: "ledger",
+    });
   });
 
   test("uses current defaults for missing, malformed, or unsupported records", () => {
@@ -37,7 +61,9 @@ describe("browser settings", () => {
     expect(
       readBrowserSettings(
         defaults,
-        memoryStorage('{"version":2,"settings":{"theme":"dark","motion":true,"view":"ledger"}}'),
+        memoryStorage(
+          '{"version":3,"settings":{"theme":"dark","terminalAppearance":"dark","motion":true,"view":"ledger"}}',
+        ),
       ),
     ).toEqual(defaults);
     expect(
