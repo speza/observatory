@@ -40,6 +40,7 @@ import {
 } from "./schemas.ts";
 
 const TerminalOpenSchema = Schema.Struct({ sessionId: Schema.String, message: Schema.String });
+const RealtimeSpeechTokenSchema = Schema.Struct({ token: Schema.String });
 const LaunchGoalSchema = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
@@ -336,6 +337,17 @@ export const resumeWebAgent = async (
   if (!response.ok)
     throw new Error(await errorMessage(response, `Agent resume failed (${response.status}).`));
   return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
+};
+
+export const fetchRealtimeSpeechToken = async (): Promise<string> => {
+  const response = await fetch("/api/speech-to-text", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ao-command": "1" },
+    body: "{}",
+  });
+  if (!response.ok)
+    throw new Error(await errorMessage(response, `Speech input failed (${response.status}).`));
+  return Schema.decodeUnknownSync(RealtimeSpeechTokenSchema)(await response.json()).token;
 };
 
 const terminalMutation = async (path: string, body: string): Promise<Response> => {

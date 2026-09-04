@@ -148,6 +148,17 @@ bun run dev
 
 The Vite client runs on port 4310 and proxies the loopback API on port 4311.
 
+To try the disposable realtime voice-input prototype in an embedded terminal,
+provide an ElevenLabs API key to the API process:
+
+```sh
+ELEVENLABS_API_KEY=... bun run dev:api
+bun run dev
+```
+
+The browser receives only a 15-minute single-use Scribe token. Live partial text
+is shown over the terminal; committed text is inserted without pressing Enter.
+
 ## Current capabilities
 
 - durable human-owned Systems and Goals, with Goal priority, completion and archive;

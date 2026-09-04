@@ -44,6 +44,7 @@ import { enrichInspector } from "../agent-observations/projection.ts";
 import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
 export type { PortfolioResponse } from "./portfolio.ts";
 import { isAllowedWebRequest } from "./security.ts";
+import type { SpeechToTextPrototype } from "./speech-to-text-prototype.ts";
 
 interface ErrorResponse {
   readonly error: string;
@@ -106,6 +107,7 @@ export interface ObservatoryWebApiOptions {
   readonly conversations?: ConversationTrackerModule;
   readonly agentObservations?: AgentObservationModule;
   readonly workspaceReview?: WorkspaceReviewReader;
+  readonly speechToText?: SpeechToTextPrototype;
 }
 
 export class ObservatoryWebApi {
@@ -117,6 +119,7 @@ export class ObservatoryWebApi {
   private readonly conversations: ConversationTrackerModule | undefined;
   private readonly agentObservations: AgentObservationModule | undefined;
   private readonly workspaceReview: WorkspaceReviewReader | undefined;
+  private readonly speechToText: SpeechToTextPrototype | undefined;
   private readonly commands: WebCommandGateway;
   private readonly terminals: WebTerminalGateway | undefined;
   private readonly launch: WebLaunchGateway | undefined;
@@ -133,6 +136,7 @@ export class ObservatoryWebApi {
     conversations,
     agentObservations,
     workspaceReview,
+    speechToText,
   }: ObservatoryWebApiOptions) {
     this.universe = universe;
     this.clock = clock;
@@ -142,6 +146,7 @@ export class ObservatoryWebApi {
     this.conversations = conversations;
     this.agentObservations = agentObservations;
     this.workspaceReview = workspaceReview;
+    this.speechToText = speechToText;
     this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
     this.closeout =
@@ -167,6 +172,8 @@ export class ObservatoryWebApi {
     const now = this.clock.now();
 
     if (url.pathname.startsWith("/api/terminal/")) return this.terminal(request, url);
+
+    if (url.pathname === "/api/speech-to-text") return this.transcribeSpeech(request);
 
     if (url.pathname.startsWith("/api/launch/")) return this.agentLaunch(request, url);
 
@@ -366,6 +373,15 @@ export class ObservatoryWebApi {
       projectPortfolio(this.universe, now, this.agentObservations) ??
       json({ error: "Projection contract mismatch." }, 500)
     );
+  }
+
+  private async transcribeSpeech(request: Request): Promise<Response> {
+    if (!this.speechToText)
+      return json({ error: "Speech input is not configured on this Observatory." }, 501);
+    if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+    const rejected = this.rejectMutation(request);
+    if (rejected) return rejected;
+    return this.speechToText.createRealtimeToken();
   }
 
   private async terminal(request: Request, url: URL): Promise<Response> {

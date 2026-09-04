@@ -5,6 +5,13 @@ import {
   useState,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import {
+  CommitStrategy,
+  RealtimeEvents,
+  Scribe,
+  type RealtimeConnection,
+} from "@elevenlabs/client";
+import { Mic, Square } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { AgentView } from "../../../src/projection/types.ts";
@@ -16,6 +23,7 @@ import {
   type WebTerminalScrollRequest,
 } from "../../../src/web/protocol.ts";
 import {
+  fetchRealtimeSpeechToken,
   openWebTerminal,
   parseWebTerminalMessage,
   releaseWebTerminal,
@@ -93,10 +101,99 @@ export const TerminalSurface = ({
   const fitRef = useRef<FitAddon | null>(null);
   const sessionRef = useRef<string | undefined>(undefined);
   const socketRef = useRef<WebSocket | null>(null);
+  const speechRef = useRef<RealtimeConnection | null>(null);
+  const speechStoppingRef = useRef(false);
+  const speechCloseTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const sendMessageRef = useRef<(message: WebTerminalClientMessage) => void>(() => undefined);
   const activeRef = useRef(active);
   const [status, setStatus] = useState(openingStatus);
   const [ready, setReady] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [speechPreview, setSpeechPreview] = useState<string>();
+
+  const stopSpeech = (): void => {
+    const connection = speechRef.current;
+    setListening(false);
+    if (!connection) {
+      setSpeechPreview(undefined);
+      return;
+    }
+    speechStoppingRef.current = true;
+    setSpeechPreview("Finishing…");
+    const close = (): void => {
+      if (speechRef.current === connection) speechRef.current = null;
+      speechStoppingRef.current = false;
+      speechCloseTimerRef.current = undefined;
+      connection.close();
+      setSpeechPreview(undefined);
+    };
+    try {
+      connection.commit();
+      speechCloseTimerRef.current = window.setTimeout(close, 500);
+    } catch {
+      close();
+    }
+    terminalRef.current?.focus();
+  };
+
+  const toggleSpeech = async (): Promise<void> => {
+    if (speechRef.current) {
+      stopSpeech();
+      return;
+    }
+    try {
+      setSpeechPreview("Connecting…");
+      const token = await fetchRealtimeSpeechToken();
+      const connection = Scribe.connect({
+        token,
+        modelId: "scribe_v2_realtime",
+        commitStrategy: CommitStrategy.VAD,
+        microphone: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      speechRef.current = connection;
+      speechStoppingRef.current = false;
+      connection.on(RealtimeEvents.SESSION_STARTED, () => {
+        if (speechRef.current !== connection || speechStoppingRef.current) return;
+        setListening(true);
+        setSpeechPreview("Listening…");
+      });
+      connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, ({ text }) => {
+        if (speechRef.current === connection && !speechStoppingRef.current)
+          setSpeechPreview(text);
+      });
+      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, ({ text }) => {
+        if (speechRef.current !== connection) return;
+        if (text.trim()) sendMessageRef.current({ kind: "input", value: text });
+        if (!speechStoppingRef.current) setSpeechPreview("Listening…");
+      });
+      connection.on(RealtimeEvents.ERROR, () => {
+        if (speechRef.current !== connection) return;
+        speechRef.current = null;
+        speechStoppingRef.current = false;
+        if (speechCloseTimerRef.current) clearTimeout(speechCloseTimerRef.current);
+        speechCloseTimerRef.current = undefined;
+        setListening(false);
+        setSpeechPreview("Speech connection failed.");
+        connection.close();
+      });
+      connection.on(RealtimeEvents.CLOSE, () => {
+        if (speechRef.current !== connection) return;
+        speechRef.current = null;
+        speechStoppingRef.current = false;
+        if (speechCloseTimerRef.current) clearTimeout(speechCloseTimerRef.current);
+        speechCloseTimerRef.current = undefined;
+        setListening(false);
+        setSpeechPreview(undefined);
+      });
+    } catch (error) {
+      setListening(false);
+      setSpeechPreview(error instanceof Error ? error.message : "Microphone unavailable.");
+    }
+  };
 
   useLayoutEffect(() => {
     setReady(false);
@@ -280,6 +377,11 @@ export const TerminalSurface = ({
       observer?.disconnect();
       socket?.close();
       socketRef.current = null;
+      if (speechCloseTimerRef.current) clearTimeout(speechCloseTimerRef.current);
+      speechCloseTimerRef.current = undefined;
+      speechRef.current?.close();
+      speechRef.current = null;
+      speechStoppingRef.current = false;
       sendMessageRef.current = () => undefined;
       sessionRef.current = undefined;
       terminalRef.current = null;
@@ -327,6 +429,12 @@ export const TerminalSurface = ({
         onWheelCapture={handleWheel}
       >
         <div className="terminal-surface__frame" ref={host} />
+        {speechPreview ? (
+          <div aria-live="polite" className="terminal-surface__speech-preview">
+            <span className={listening ? "is-listening" : undefined} />
+            {speechPreview}
+          </div>
+        ) : null}
         {!ready ? (
           <div aria-live="polite" className="terminal-surface__mask">
             <span className="overline">TERMINAL CONNECTION</span>
@@ -339,12 +447,29 @@ export const TerminalSurface = ({
         className={showHeader ? undefined : "terminal-surface__footer--compact"}
       >
         <span>{status}</span>
-        {showHeader ? (
-          <small>
-            {resizeMode === "preserve" ? "Host size preserved · " : ""}
-            Wheel / PageUp / PageDown scroll the host viewport
-          </small>
-        ) : null}
+        <div className="terminal-surface__footer-actions">
+          {showHeader ? (
+            <small>
+              {resizeMode === "preserve" ? "Host size preserved · " : ""}
+              Wheel / PageUp / PageDown scroll the host viewport
+            </small>
+          ) : null}
+          <button
+            aria-label={listening ? "Stop voice input" : "Start voice input"}
+            className={listening ? "is-listening" : undefined}
+            disabled={!ready}
+            onClick={() => void toggleSpeech()}
+            title="Realtime voice input (prototype)"
+            type="button"
+          >
+            {listening ? (
+              <Square aria-hidden="true" size={12} />
+            ) : (
+              <Mic aria-hidden="true" size={14} />
+            )}
+            <span>{listening ? "Stop" : "Voice"}</span>
+          </button>
+        </div>
       </footer>
     </section>
   );

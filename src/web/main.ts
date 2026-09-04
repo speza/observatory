@@ -26,6 +26,7 @@ import { pendingLaunchView } from "./launch.ts";
 import { projectPortfolio } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
+import { SpeechToTextPrototype } from "./speech-to-text-prototype.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -221,6 +222,9 @@ const program = Effect.scoped(
       allowedOrigin,
       onError: (message) => console.error(message),
     });
+    const speechToText = process.env.ELEVENLABS_API_KEY?.trim()
+      ? new SpeechToTextPrototype(process.env.ELEVENLABS_API_KEY.trim())
+      : undefined;
     const api = new ObservatoryWebApi({
       universe: runtime.universe,
       clock: runtime.clock,
@@ -232,6 +236,7 @@ const program = Effect.scoped(
       conversations,
       agentObservations,
       workspaceReview: workspace,
+      speechToText,
     });
     const refreshMs = positiveIntegerSetting(
       "AO_WEB_REFRESH_MS",
