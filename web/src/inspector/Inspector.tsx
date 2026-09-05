@@ -185,7 +185,10 @@ export const Inspector = ({
             ) : null}
             {confirming === "goal" ? (
               <div className="confirm-action">
-                <p>Archive this completed goal? It will leave active projections.</p>
+                <p>
+                  Archive this completed goal? Live or uncertain executions will stay visible.
+                  Archiving does not stop them.
+                </p>
                 <button
                   disabled={commandPending}
                   onClick={() => {
@@ -245,10 +248,19 @@ export const Inspector = ({
               >
                 <option value="">Unassigned inbox</option>
                 {commandCentre.goals
-                  .filter((candidate) => candidate.status === "active")
+                  .filter(
+                    (candidate) =>
+                      candidate.status === "active" ||
+                      candidate.id === projection.agent.primaryGoalId,
+                  )
                   .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
+                    <option
+                      disabled={candidate.status !== "active"}
+                      key={candidate.id}
+                      value={candidate.id}
+                    >
                       {candidate.priority} · {candidate.title}
+                      {candidate.status !== "active" ? ` · ${candidate.status}` : ""}
                     </option>
                   ))}
               </select>

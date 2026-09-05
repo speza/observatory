@@ -330,6 +330,8 @@ export class SqliteUniverseStore
   implements UniverseStore, LaunchReceiptStore, ConversationCatalogueStore, AgentObservationStore
 {
   readonly db: Database;
+  private savedRows = new Map<string, Map<string | number, (string | number | null)[]>>();
+  private savedRevision = "";
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -496,16 +498,21 @@ export class SqliteUniverseStore
 
   save(state: UniverseState): void {
     const write = this.db.transaction(() => {
-      this.db.exec(
-        "DELETE FROM related_agent_dismissals; DELETE FROM agents; DELETE FROM goals; DELETE FROM systems; DELETE FROM hosts; DELETE FROM universe_changes; DELETE FROM operator_checkpoint;",
-      );
-      const system = this.db.prepare(
-        "INSERT INTO systems (id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      if (this.storageRevision() !== this.savedRevision) this.savedRows.clear();
+      // Rows may move between parents, and execution identities may swap. Check
+      // references against the complete snapshot at commit, not an intermediate row.
+      this.db.exec("PRAGMA defer_foreign_keys = ON");
+      const system = this.prepareSnapshotTable(
+        "systems",
+        "id, title, description, created_at, updated_at",
+        ["id"],
       );
       for (const row of state.systems)
         system.run(row.id, row.title, row.description ?? null, row.createdAt, row.updatedAt);
-      const goal = this.db.prepare(
-        "INSERT INTO goals (id, system_id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      const goal = this.prepareSnapshotTable(
+        "goals",
+        "id, system_id, title, description, priority, status, created_at, updated_at, completed_at, archived_at, map_x, map_y, map_pinned",
+        ["id"],
       );
       for (const row of state.goals) {
         goal.run(
@@ -524,8 +531,10 @@ export class SqliteUniverseStore
           row.mapPositionPinned ? 1 : 0,
         );
       }
-      const agent = this.db.prepare(
-        "INSERT INTO agents (id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      const agent = this.prepareSnapshotTable(
+        "agents",
+        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
+        ["id"],
       );
       for (const row of state.agents) {
         agent.run(
@@ -567,8 +576,10 @@ export class SqliteUniverseStore
           row.archivedAt ?? null,
         );
       }
-      const host = this.db.prepare(
-        "INSERT INTO hosts (host_kind, host_instance_id, status, last_observed_at, last_error, diagnostic_count) VALUES (?, ?, ?, ?, ?, ?)",
+      const host = this.prepareSnapshotTable(
+        "hosts",
+        "host_kind, host_instance_id, status, last_observed_at, last_error, diagnostic_count",
+        ["host_instance_id"],
       );
       for (const row of state.hosts)
         host.run(
@@ -579,13 +590,17 @@ export class SqliteUniverseStore
           row.lastError ?? null,
           row.diagnosticCount,
         );
-      const dismissal = this.db.prepare(
-        "INSERT INTO related_agent_dismissals (goal_id, agent_id, dismissed_at) VALUES (?, ?, ?)",
+      const dismissal = this.prepareSnapshotTable(
+        "related_agent_dismissals",
+        "goal_id, agent_id, dismissed_at",
+        ["goal_id", "agent_id"],
       );
       for (const row of state.relatedAgentDismissals ?? [])
         dismissal.run(row.goalId, row.agentId, row.dismissedAt);
-      const change = this.db.prepare(
-        "INSERT INTO universe_changes (sequence, occurred_at, outcome, target_type, target_id, goal_id, summary) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      const change = this.prepareSnapshotTable(
+        "universe_changes",
+        "sequence, occurred_at, outcome, target_type, target_id, goal_id, summary",
+        ["sequence"],
       );
       for (const row of state.changes)
         change.run(
@@ -597,14 +612,95 @@ export class SqliteUniverseStore
           row.goalId ?? null,
           row.summary,
         );
+      const checkpoint = this.prepareSnapshotTable(
+        "operator_checkpoint",
+        "singleton, last_sequence, acknowledged_at",
+        ["singleton"],
+      );
       if (state.operatorCheckpoint)
-        this.db
-          .prepare(
-            "INSERT INTO operator_checkpoint (singleton, last_sequence, acknowledged_at) VALUES (1, ?, ?)",
-          )
-          .run(state.operatorCheckpoint.lastSequence, state.operatorCheckpoint.acknowledgedAt);
+        checkpoint.run(
+          1,
+          state.operatorCheckpoint.lastSequence,
+          state.operatorCheckpoint.acknowledgedAt,
+        );
+      const tables = [system, goal, agent, host, dismissal, change, checkpoint];
+      for (const table of tables) table.finish();
+      if (this.db.query("PRAGMA foreign_key_check").get())
+        throw new Error("FOREIGN KEY constraint failed");
+      return {
+        rows: new Map(tables.map((table) => [table.name, table.rows])),
+        revision: this.storageRevision(),
+      };
     });
-    write();
+    const saved = write.immediate();
+    // A caller-owned outer transaction can still roll back after this save.
+    // Never cache its uncommitted result. Failed writes never publish bookkeeping.
+    if (!this.db.inTransaction) {
+      this.savedRows = saved.rows;
+      this.savedRevision = saved.revision;
+    } else {
+      this.savedRows.clear();
+      this.savedRevision = "";
+    }
+  }
+
+  private storageRevision(): string {
+    const changes = this.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+    const version = this.db
+      .query<{ data_version: number }, []>("PRAGMA data_version")
+      .get()!.data_version;
+    return `${changes}:${version}`;
+  }
+
+  private prepareSnapshotTable(table: string, columnList: string, keys: readonly string[]) {
+    // Only static identifiers from save() enter SQL. Compare storage bindings,
+    // not load()'s normalized domain objects. Cache values never alias caller state.
+    const columns = columnList.split(", ");
+    const keyIndexes = keys.map((key) => columns.indexOf(key));
+    type Value = string | number | null;
+    const keyOf = (row: readonly Value[]) =>
+      keys.length === 1
+        ? (row[keyIndexes[0]!] ?? "null")
+        : JSON.stringify(keyIndexes.map((index) => row[index]));
+    const previous =
+      this.savedRows.get(table) ??
+      new Map(
+        this.db
+          .query<Record<string, Value>, []>(`SELECT ${columnList} FROM ${table}`)
+          .all()
+          .map((record) => {
+            const row = columns.map((column) => record[column]!);
+            return [keyOf(row), row];
+          }),
+      );
+    const insert = this.db.prepare(
+      `INSERT INTO ${table} (${columnList}) VALUES (${columns.map(() => "?").join(", ")})`,
+    );
+    const remove = this.db.prepare(
+      `DELETE FROM ${table} WHERE ${keys.map((key) => `${key} IS ?`).join(" AND ")}`,
+    );
+    const pending: Value[][] = [];
+    const rows = new Map<string | number, Value[]>();
+    return {
+      name: table,
+      rows,
+      run: (...row: Value[]) => {
+        const key = keyOf(row);
+        if (rows.has(key)) throw new Error(`Duplicate snapshot key in ${table}`);
+        rows.set(key, row);
+        const stored = previous.get(key);
+        if (stored && row.every((value, index) => value === stored[index])) return;
+        if (stored) remove.run(...keyIndexes.map((index) => stored[index]!));
+        pending.push(row);
+      },
+      finish: () => {
+        for (const [key, row] of previous)
+          if (!rows.has(key)) remove.run(...keyIndexes.map((index) => row[index]!));
+        // Delete all changed/removed identities before inserting, so swaps obey
+        // the live execution unique index without rewriting unchanged Agents.
+        for (const row of pending) insert.run(...row);
+      },
+    };
   }
 
   close(): void {
@@ -950,14 +1046,22 @@ export class SqliteUniverseStore
     return row ? { sequence: row.last_sequence, acknowledgedAt: row.acknowledged_at } : undefined;
   }
 
-  acknowledgeAgentObservations(at: number): number {
+  acknowledgeAgentObservations(throughSequence: number, at: number): number {
     const latestTransition =
       this.db
         .query<{ sequence: number }, []>(
           "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_observation_transitions",
         )
         .get()?.sequence ?? 0;
-    const sequence = Math.max(this.observationCheckpoint()?.sequence ?? 0, latestTransition);
+    const previousSequence = this.observationCheckpoint()?.sequence ?? 0;
+    if (
+      !Number.isSafeInteger(throughSequence) ||
+      throughSequence < 0 ||
+      throughSequence > Math.max(previousSequence, latestTransition)
+    )
+      throw new Error("Invalid provider-evidence sequence boundary.");
+    if (throughSequence <= previousSequence) return previousSequence;
+    const sequence = throughSequence;
     this.db.transaction(() => {
       this.db
         .prepare(`

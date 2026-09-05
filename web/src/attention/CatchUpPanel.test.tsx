@@ -10,6 +10,7 @@ describe("CatchUpPanel", () => {
       generatedAt: 10_000,
       sinceAt: 1_000,
       throughSequence: 12,
+      evidenceThroughSequence: 5,
       transitionCount: 7,
       pending: true,
       counts: { attention: 1, finished: 1, new: 0, changed: 1, stale: 0 },

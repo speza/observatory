@@ -36,6 +36,251 @@ const observation = {
 };
 
 describe("SQLite persistence", () => {
+  test("unchanged long history has zero mutations; append, edits and truncation preserve the save contract", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const state = store.load();
+      state.changes = Array.from({ length: 10_000 }, (_, index) => ({
+        sequence: index + 1,
+        occurredAt: index,
+        outcome: "changed",
+        targetType: "goal",
+        targetId: "goal",
+        summary: "Synthetic history",
+      }));
+      store.save(state);
+      const count = () => store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+      let before = count();
+      store.save(structuredClone(state));
+      expect(count() - before).toBe(0);
+      // Triggers prove that no operation touches an existing historical prefix.
+      store.db.exec(`
+        CREATE TEMP TRIGGER protect_history_delete BEFORE DELETE ON universe_changes
+        BEGIN SELECT RAISE(ABORT, 'history prefix deleted'); END;
+        CREATE TEMP TRIGGER protect_history_update BEFORE UPDATE ON universe_changes
+        BEGIN SELECT RAISE(ABORT, 'history prefix updated'); END;
+      `);
+      state.changes.push({ ...state.changes[0]!, sequence: 10_001 });
+      before = count();
+      store.save(state);
+      expect(count() - before).toBe(1);
+      store.db.exec("DROP TRIGGER protect_history_delete; DROP TRIGGER protect_history_update;");
+      state.changes[0] = { ...state.changes[0]!, summary: "Explicit replacement", goalId: "goal" };
+      state.changes.pop();
+      store.save(state);
+      expect(store.load().changes).toEqual(state.changes);
+      state.changes[0] = { ...state.changes[0], goalId: undefined };
+      store.save(state);
+      expect(store.load().changes).toEqual(state.changes);
+      expect(() =>
+        store.save({ ...state, changes: [state.changes[0]!, state.changes[0]!] }),
+      ).toThrow("Duplicate snapshot key");
+      store.save(state);
+      expect(store.load().changes).toEqual(state.changes);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("changed rows, identity swaps, optional clearing and actual removals round-trip atomically", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const setup = makeUniverse({ store });
+      setup.universe.execute({ type: "CreateSystem", title: "System" });
+      setup.universe.execute({ type: "CreateGoal", title: "Goal", systemId: "system-1" });
+      admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
+      setup.universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+      setup.universe.execute({
+        type: "DismissRelatedAgents",
+        goalId: "goal-1",
+        agentIds: ["agent-1"],
+      });
+      const state = store.load();
+      state.agents.push({
+        ...state.agents[0]!,
+        id: "agent-2",
+        execution: { ...state.agents[0]!.execution!, nativeId: "pane-2" },
+      });
+      state.operatorCheckpoint = { lastSequence: 1, acknowledgedAt: 100 };
+      store.save(state);
+      const before = store.load();
+      const count = () => store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+      const unchangedCount = count();
+      store.save(before);
+      expect(count() - unchangedCount).toBe(0);
+      const refreshed = structuredClone(before);
+      refreshed.hosts[0] = { ...refreshed.hosts[0]!, lastObservedAt: 1_000_001 };
+      store.save(refreshed);
+      expect(count() - unchangedCount).toBe(2);
+      store.save(before);
+      const next = structuredClone(before);
+      next.systems[0] = { ...next.systems[0]!, title: "Changed system" };
+      next.goals[0] = { ...next.goals[0]!, title: "Changed goal" };
+      next.agents[0] = { ...next.agents[0]!, execution: before.agents[1]!.execution };
+      next.agents[1] = { ...next.agents[1]!, execution: before.agents[0]!.execution };
+      next.hosts[0] = { ...next.hosts[0]!, lastError: "Synthetic error" };
+      next.relatedAgentDismissals[0] = {
+        ...next.relatedAgentDismissals[0]!,
+        dismissedAt: 1_000_001,
+      };
+      next.changes[0] = { ...next.changes[0]!, summary: "Changed history" };
+      next.operatorCheckpoint = { lastSequence: 2, acknowledgedAt: 101 };
+      // Last table fails after all seven semantic tables have been touched.
+      store.db.exec(`CREATE TEMP TRIGGER fail_checkpoint BEFORE INSERT ON operator_checkpoint
+        BEGIN SELECT RAISE(ABORT, 'late failure'); END;`);
+      expect(() => store.save(next)).toThrow("late failure");
+      expect(store.load()).toEqual(before);
+      store.db.exec("DROP TRIGGER fail_checkpoint");
+      store.save(next);
+      expect(store.load()).toEqual(next);
+      const invalid = structuredClone(next);
+      invalid.systems = [];
+      expect(() => store.save(invalid)).toThrow("FOREIGN KEY");
+      expect(store.load()).toEqual(next);
+      const duplicateExecution = structuredClone(next);
+      duplicateExecution.agents[1] = {
+        ...duplicateExecution.agents[1]!,
+        execution: duplicateExecution.agents[0]!.execution,
+      };
+      expect(() => store.save(duplicateExecution)).toThrow("UNIQUE");
+      expect(store.load()).toEqual(next);
+      store.save(next);
+      next.systems = [];
+      next.goals = [];
+      next.relatedAgentDismissals = [];
+      next.hosts = [];
+      next.operatorCheckpoint = undefined;
+      next.agents = [
+        {
+          ...next.agents[0],
+          primaryGoalId: undefined,
+          execution: undefined,
+          executionObservedAt: undefined,
+          executionContainer: undefined,
+          repository: undefined,
+          branch: undefined,
+          worktree: undefined,
+          provider: undefined,
+        },
+      ];
+      store.save(next);
+      expect(store.load()).toEqual(next);
+      next.agents = [];
+      next.changes = [];
+      store.save(next);
+      expect(store.load()).toEqual(next);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("bookkeeping recovers after outer rollback, reset and writes from another connection", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-save-cache-"));
+    const path = join(directory, "universe.sqlite");
+    const store = new SqliteUniverseStore(path);
+    try {
+      const setup = makeUniverse({ store });
+      setup.universe.execute({ type: "CreateGoal", title: "Stable" });
+      const before = store.load();
+      const next = structuredClone(before);
+      next.goals[0] = { ...next.goals[0]!, title: "Next" };
+      expect(() =>
+        store.db.transaction(() => {
+          store.save(next);
+          throw new Error("outer rollback");
+        })(),
+      ).toThrow("outer rollback");
+      expect(store.load()).toEqual(before);
+      store.save(next);
+      expect(store.load()).toEqual(next);
+      store.resetAllState();
+      store.save(next);
+      expect(store.load()).toEqual(next);
+      const other = new SqliteUniverseStore(path);
+      try {
+        other.save(before);
+      } finally {
+        other.close();
+      }
+      store.save(next);
+      expect(store.load()).toEqual(next);
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("restart and routine saves preserve both explicit checkpoints and newer unread events", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-save-checkpoints-"));
+    const path = join(directory, "universe.sqlite");
+    let store = new SqliteUniverseStore(path);
+    try {
+      const setup = makeUniverse({ store });
+      setup.universe.execute({ type: "CreateGoal", title: "Seen" });
+      setup.universe.execute({ type: "RenameGoal", goalId: "goal-1", title: "Unread" });
+      setup.universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 1 });
+      const claims = [1, 2].map((sequence) => ({
+        schemaVersion: 1 as const,
+        observationId: `event-${sequence}`,
+        nativeConversationRef: {
+          harnessId: "codex",
+          continuityScopeId: "scope",
+          kind: "id",
+          value: "synthetic",
+        },
+        providerInstanceId: "test",
+        kind: "activity" as const,
+        observedAt: sequence,
+        source: { mechanism: "hook" as const },
+        payload: { phase: "idle" as const },
+      }));
+      store.reconcileAgentObservations(
+        {
+          schemaVersion: 1,
+          harnessId: "codex",
+          providerInstanceId: "test",
+          continuityScopeId: "scope",
+          capturedAt: 2,
+          complete: true,
+          current: claims,
+          transitions: claims,
+          health: { state: "healthy", diagnostics: [] },
+        },
+        {
+          kinds: ["activity"],
+          acquisition: "hook",
+          delivery: "retained-events-and-snapshot",
+          configured: true,
+          freshnessSeconds: { activity: 120 },
+        },
+        2,
+        "test-plugin",
+      );
+      store.acknowledgeAgentObservations(1, 3);
+      const state = store.load();
+      store.save(state);
+      store.close();
+      store = new SqliteUniverseStore(path);
+      const count = () => store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()!.n;
+      const restartCount = count();
+      store.save(state);
+      expect(count() - restartCount).toBe(0);
+      expect(store.load()).toEqual(state);
+      expect(store.observationCheckpoint()).toEqual({ sequence: 1, acknowledgedAt: 3 });
+      expect(store.agentObservationTransitions(0).map((event) => event.sequence)).toEqual([2]);
+      expect(store.currentAgentObservations()).toHaveLength(2);
+      expect(
+        makeUniverse({ store }).universe.project({ kind: "catch-up", now: setup.clock.now() }),
+      ).toMatchObject({ pending: true, transitionCount: 1 });
+      const before = count();
+      store.save(state);
+      expect(count() - before).toBe(0);
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("persists accepted goals, assignments and host observations across store restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "ao-v0-sqlite-"));
     const databasePath = join(directory, "universe.sqlite");
@@ -256,12 +501,19 @@ describe("SQLite persistence", () => {
       const first = new SqliteUniverseStore(databasePath);
       const setup = makeUniverse({ store: first });
       setup.universe.execute({ type: "CreateGoal", title: "Persist catch-up" });
-      setup.universe.execute({ type: "AcknowledgeCatchUp" });
+      setup.universe.execute({ type: "RenameGoal", goalId: "goal-1", title: "Unseen change" });
+      setup.universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 1 });
       first.close();
 
       const second = new SqliteUniverseStore(databasePath);
-      expect(second.load().changes).toHaveLength(1);
+      expect(second.load().changes).toHaveLength(2);
       expect(second.load().operatorCheckpoint?.lastSequence).toBe(1);
+      expect(
+        makeUniverse({ store: second }).universe.project({
+          kind: "catch-up",
+          now: setup.clock.now(),
+        }),
+      ).toMatchObject({ pending: true, transitionCount: 1 });
       second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

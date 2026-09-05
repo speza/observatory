@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import type { AgentHarness, AgentObservationSnapshot } from "../plugin-sdk/index.ts";
-import { createMemoryStore } from "../persistence/sqlite/sqlite-store.ts";
+import { createMemoryStore, SqliteUniverseStore } from "../persistence/sqlite/sqlite-store.ts";
+import { ObservatoryWebApi } from "../web/api.ts";
+import type { PortfolioResponse } from "../web/portfolio.ts";
+import type { WebCommandResponse } from "../web/protocol.ts";
 import { enrichCatchUp, enrichCommandCentre, enrichInspector, enrichMap } from "./projection.ts";
 import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
 import { AgentObservationCoordinator } from "./coordinator.ts";
@@ -47,6 +53,184 @@ const harness = (snapshot: AgentObservationSnapshot): AgentHarness => ({
 });
 
 describe("agent observation coordination", () => {
+  test("API checkpoints displayed evidence only, survives retries and preserves newer evidence across restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-evidence-checkpoint-"));
+    const path = join(directory, "test.sqlite");
+    const store = new SqliteUniverseStore(path);
+    try {
+      const fixture = makeUniverse({ store });
+      expect(
+        fixture.universe.execute({
+          type: "AddConversation",
+          admissionSource: "provider-catalogue",
+          resumeEligibility: "same-site",
+          harnessId: "codex",
+          nativeConversationRef: reference,
+          displayName: "Synthetic agent",
+          observedAt,
+        }).ok,
+      ).toBe(true);
+      const event = {
+        schemaVersion: 1 as const,
+        observationId: "request",
+        nativeConversationRef: reference,
+        providerInstanceId: "codex-local-test",
+        kind: "human-input-request" as const,
+        observedAt,
+        source: { mechanism: "hook" as const },
+        payload: {
+          requestId: "request",
+          requestKind: "permission" as const,
+          state: "open" as const,
+        },
+      };
+      let source: AgentObservationSnapshot = {
+        schemaVersion: 1,
+        harnessId: "codex",
+        providerInstanceId: "codex-local-test",
+        continuityScopeId: "scope-test",
+        capturedAt: observedAt,
+        complete: true,
+        current: [event],
+        transitions: [event],
+        health: { state: "healthy", diagnostics: [] },
+      };
+      const harnesses = { agentHarnesses: () => [harness(source)] };
+      const coordinator = new AgentObservationCoordinator(harnesses, store, fixture.universe, () =>
+        fixture.clock.now(),
+      );
+      await Effect.runPromise(coordinator.refresh());
+      let failAcknowledgement = true;
+      const api = new ObservatoryWebApi({
+        universe: fixture.universe,
+        clock: fixture.clock,
+        allowedOrigin: "http://localhost",
+        agentObservations: {
+          refresh: () => coordinator.refresh(),
+          snapshot: () => coordinator.snapshot(),
+          acknowledge: (sequence, at) => {
+            if (failAcknowledgement) {
+              failAcknowledgement = false;
+              throw new Error("Injected provider checkpoint failure");
+            }
+            return coordinator.acknowledge(sequence, at);
+          },
+        },
+      });
+      const displayed: PortfolioResponse = await (
+        await api.fetch(new Request("http://localhost/api/portfolio"))
+      ).json();
+      expect(displayed.catchUp.evidenceThroughSequence).toBe(1);
+      const nextEvent = {
+        ...event,
+        revision: 1,
+        observedAt: observedAt + 1,
+        payload: { ...event.payload, state: "resolved" as const },
+      };
+      source = {
+        ...source,
+        capturedAt: observedAt + 1,
+        current: [nextEvent],
+        transitions: [nextEvent],
+      };
+      await Effect.runPromise(coordinator.refresh());
+      fixture.universe.execute({
+        type: "RenameAgent",
+        agentId: "agent-1",
+        displayName: "Unseen rename",
+      });
+      const acknowledge = (throughSequence: number, evidenceThroughSequence: number) =>
+        api.fetch(
+          new Request("http://localhost/api/commands", {
+            method: "POST",
+            headers: {
+              origin: "http://localhost",
+              "x-ao-command": "1",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              type: "AcknowledgeCatchUp",
+              throughSequence,
+              evidenceThroughSequence,
+            }),
+          }),
+        );
+      const before = fixture.universe.snapshot();
+      expect((await acknowledge(displayed.catchUp.throughSequence, 3)).status).toBe(409);
+      expect(fixture.universe.snapshot()).toEqual(before);
+      expect(store.observationCheckpoint()).toBeUndefined();
+      for (const boundary of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 3]) {
+        expect(() => coordinator.acknowledge(boundary, observedAt)).toThrow(
+          "Invalid provider-evidence sequence boundary",
+        );
+        expect(store.observationCheckpoint()).toBeUndefined();
+      }
+      expect(
+        (
+          await acknowledge(
+            displayed.catchUp.throughSequence,
+            displayed.catchUp.evidenceThroughSequence,
+          )
+        ).status,
+      ).toBe(500);
+      expect(fixture.universe.snapshot().operatorCheckpoint?.lastSequence).toBe(
+        displayed.catchUp.throughSequence,
+      );
+      expect(store.observationCheckpoint()).toBeUndefined();
+      const responses = await Promise.all([
+        acknowledge(displayed.catchUp.throughSequence, displayed.catchUp.evidenceThroughSequence),
+        acknowledge(displayed.catchUp.throughSequence, displayed.catchUp.evidenceThroughSequence),
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      const bodies: WebCommandResponse[] = await Promise.all(
+        responses.map((response) => response.json()),
+      );
+      for (const body of bodies) {
+        expect(body.portfolio.catchUp).toMatchObject({
+          pending: true,
+          transitionCount: 1,
+          evidenceTransitionCount: 1,
+          evidenceThroughSequence: 2,
+        });
+      }
+      const checkpoint = store.observationCheckpoint();
+      fixture.clock.value += 1_000;
+      expect((await acknowledge(0, 0)).status).toBe(200);
+      expect(store.observationCheckpoint()).toEqual(checkpoint);
+      expect(store.agentObservationTransitions(0).map((item) => item.sequence)).toEqual([2]);
+      store.close();
+      const restartedStore = new SqliteUniverseStore(path);
+      try {
+        const restarted = makeUniverse({ store: restartedStore });
+        const resumed = new AgentObservationCoordinator(
+          harnesses,
+          restartedStore,
+          restarted.universe,
+          () => fixture.clock.now(),
+        );
+        expect(resumed.snapshot()).toMatchObject({
+          throughSequence: 2,
+          checkpoint: { sequence: 1 },
+          transitions: [{ sequence: 2 }],
+        });
+        expect(
+          restarted.universe.project({ kind: "catch-up", now: fixture.clock.now() }),
+        ).toMatchObject({ pending: true, transitionCount: 1 });
+        resumed.acknowledge(2, fixture.clock.now());
+        const finalCheckpoint = restartedStore.observationCheckpoint();
+        resumed.acknowledge(1, fixture.clock.now() + 1);
+        expect(restartedStore.observationCheckpoint()).toEqual(finalCheckpoint);
+        expect(resumed.snapshot()).toMatchObject({ throughSequence: 2, transitions: [] });
+        expect(restartedStore.currentAgentObservations()).toHaveLength(1);
+      } finally {
+        restartedStore.close();
+      }
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("persists, correlates and projects provider evidence without changing accepted state", async () => {
     const store = createMemoryStore();
     const fixture = makeUniverse({ store });
@@ -194,7 +378,7 @@ describe("agent observation coordination", () => {
       }).attention.items[0],
     ).toMatchObject({ reason: "provider-stale", requiresHumanInput: false });
 
-    coordinator.acknowledge(observedAt + 1);
+    coordinator.acknowledge(evidence.throughSequence, observedAt + 1);
     expect(received).toMatchObject([{ type: "catch-up-changed", cause: "provider-observation" }]);
     expect(coordinator.snapshot().transitions).toEqual([]);
     expect(store.agentObservationTransitions(0)).toEqual([]);
@@ -701,6 +885,7 @@ describe("agent observation coordination", () => {
         kind: "catch-up",
         generatedAt: observedAt,
         throughSequence: 0,
+        evidenceThroughSequence: 0,
         transitionCount: 0,
         pending: false,
         subjects: [],
@@ -709,6 +894,7 @@ describe("agent observation coordination", () => {
       {
         generatedAt: observedAt,
         agents: [],
+        throughSequence: 3,
         transitions: [activity(1, "using-tool"), activity(2, "idle"), activity(3, "using-tool")],
       },
     );

@@ -90,6 +90,40 @@ current clean-break schema and atomic Universe snapshots. It also implements
 narrow stores used by conversation tracking, launch receipts and provider
 observations.
 
+`save(state)` remains an authoritative full snapshot, not an append-only command:
+new semantic events are appended without touching their prefix, but explicit
+record edits (including an existing sequence), omitted records and cleared
+optional values must also persist. The adapter compares normalized SQL bindings
+for all seven semantic tables and replaces only changed rows (delete + insert),
+inserting new rows and deleting actual omissions. Unchanged rows have no SQLite
+mutations. There is no implicit history retention or compaction policy.
+
+An immediate transaction keeps comparison and writes on one database revision.
+Foreign-key checks are deferred during row replacement, then explicitly checked
+before completion; changed execution identities are all removed before insertion
+so valid swaps satisfy the unique index. Assignments, dismissals, semantic history
+and the semantic checkpoint still commit or roll back together. Provider
+catalogues, observations, their checkpoint and launch receipts retain separate
+ownership and are not included in semantic snapshot writes.
+
+The adapter caches committed SQL bindings, never caller-owned domain objects.
+`total_changes()` and `data_version` invalidate this cache after same-connection
+writes (including reset or failed writes) or another connection's commit. Cache
+publication follows successful commit only; saves inside a caller-owned outer
+transaction discard the cache because that transaction may still roll back.
+Restart reconstructs bindings from SQLite on the first save. This optimizes disk
+writes, not the Universe history representation: each save still scans and builds
+bindings for the full history, with O(history) time and memory; cache invalidation
+also requires reading stored rows. Provider writes conservatively invalidate the
+semantic cache too.
+
+`bun run scripts/benchmark-sqlite-save.ts` measures synthetic, file-backed,
+identical one-Goal snapshots at 0/10k/100k retained events. It seeds outside the
+measurement and reports five individual `performance.now()` durations, their
+median, and SQLite `total_changes()` deltas without triggers. These are store
+measurements, not observed live terminal latency. Regression tests use mutation
+counts and prefix-protection triggers rather than timing thresholds.
+
 Schema compatibility is explicit: an incompatible experimental database is
 reset rather than silently guessed into the current model.
 
@@ -216,6 +250,17 @@ observations.
 
 Renderers consume projections; they do not reproduce domain rules.
 
+The command-centre projection retains archived Goals as context containers only
+for unresolved execution exceptions (live, conflict, or unknown with a retained
+execution reference), including archived Agents. Atlas, code-context lenses,
+System aggregates and renderer selection all consume that same Goal/Agent
+shape. Confirmed absence removes the exception; missing observations do not.
+Attention composes the archived-running lifecycle claim with blocked/waiting or
+runtime-complete evidence, and exposes uncertainty as Monitor rather than live
+work. Archive status and assignment are never rewritten to make work visible;
+terminal access still requires fresh SessionHost validation. This is a derived
+visibility policy, not a durable schema or host-protocol change.
+
 ### `repositories/`
 
 `AgentRepositoryStatusReader` resolves bounded local Git facts from the selected
@@ -321,6 +366,27 @@ handoff or linked-terminal capabilities remain explicit.
 Universe records semantic changes with a monotonic sequence. Projection groups
 changes since the durable operator checkpoint by System, Goal or Inbox. Only
 explicit acknowledgement advances the checkpoint; projection delivery does not.
+Agent trajectory summaries consult typed current Agent state before interpreting
+a generic `changed` transition as recovery. Renames, descriptions and assignments
+cannot resolve blocked/waiting or uncertain observations. Current lifecycle
+attention comes from the shared attention evaluator, so an archive marker cannot
+turn a later metadata change into a finished summary while execution remains
+unresolved. The durable historical transitions are not rewritten and display
+strings are never semantic evidence.
+
+Catch-up projections carry independent `throughSequence` (Universe) and
+`evidenceThroughSequence` (provider observations) boundaries. The browser sends
+both from the projection it rendered. The web composition root validates the
+provider boundary before submitting the semantic command, then acknowledges each
+stream through its owning module. Boundaries must be non-negative safe integers
+no higher than the available stream boundary. Checkpoints advance monotonically;
+older requests and retries preserve the checkpoint timestamp and leave newer
+changes unread. Provider deletion is restricted to the acknowledged prefix and
+does not delete current evidence. Both checkpoints use existing SQLite records.
+
+The two writes remain independent: a provider save failure after semantic success
+is reported explicitly, and retrying the same boundaries safely completes the
+provider acknowledgement without swallowing later semantic or provider changes.
 Retention and compaction of acknowledged history remain an explicit post-V1
 decision; the current clean-break store does not yet bound that table.
 

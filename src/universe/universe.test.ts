@@ -1163,6 +1163,34 @@ describe("Universe", () => {
     expect(universe.snapshot()).toEqual(before);
   });
 
+  test("validates and monotonically acknowledges only the requested boundary", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Displayed" });
+    universe.execute({ type: "RenameGoal", goalId: "goal-1", title: "Newer" });
+    const before = universe.snapshot();
+    for (const throughSequence of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 3]) {
+      expect(universe.execute({ type: "AcknowledgeCatchUp", throughSequence }).ok).toBe(false);
+      expect(universe.snapshot()).toEqual(before);
+    }
+    expect(universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 1 })).toEqual({
+      ok: true,
+      checkpointSequence: 1,
+    });
+    const checkpoint = universe.snapshot().operatorCheckpoint;
+    clock.value += 1_000;
+    for (const throughSequence of [1, 0, 1]) {
+      expect(universe.execute({ type: "AcknowledgeCatchUp", throughSequence })).toEqual({
+        ok: true,
+        checkpointSequence: 1,
+      });
+      expect(universe.snapshot().operatorCheckpoint).toEqual(checkpoint);
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        pending: true,
+        transitionCount: 1,
+      });
+    }
+  });
+
   test("records deterministic semantic changes and acknowledges a durable catch-up cursor", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Catch up", priority: "P2" });
@@ -1178,7 +1206,7 @@ describe("Universe", () => {
       "Agent returned live · worker",
       "Assignment changed · worker → Catch up",
     ]);
-    expect(universe.execute({ type: "AcknowledgeCatchUp" })).toEqual({
+    expect(universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 4 })).toEqual({
       ok: true,
       checkpointSequence: 4,
     });

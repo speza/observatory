@@ -46,7 +46,7 @@ export interface AgentObservationStore {
   observationCheckpoint():
     | { readonly sequence: number; readonly acknowledgedAt: number }
     | undefined;
-  acknowledgeAgentObservations(at: number): number;
+  acknowledgeAgentObservations(throughSequence: number, at: number): number;
 }
 
 export interface AgentEvidenceTransition {
@@ -68,6 +68,7 @@ export interface AgentEvidence {
 
 export interface AgentEvidenceSnapshot {
   readonly generatedAt: number;
+  readonly throughSequence: number;
   readonly agents: readonly AgentEvidence[];
   readonly transitions: readonly (AgentEvidenceTransition & { readonly agentId: string })[];
   readonly checkpoint?: { readonly sequence: number; readonly acknowledgedAt: number };
@@ -79,5 +80,5 @@ export interface AgentObservationModule {
     readonly diagnostics: readonly string[];
   }>;
   snapshot(): AgentEvidenceSnapshot;
-  acknowledge(at: number): number;
+  acknowledge(throughSequence: number, at: number): number;
 }

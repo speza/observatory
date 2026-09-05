@@ -276,6 +276,7 @@ const CatchUp = Schema.Struct({
   generatedAt: Schema.Number,
   sinceAt: Schema.optional(Schema.Number),
   throughSequence: Schema.Number,
+  evidenceThroughSequence: Schema.Number,
   transitionCount: Schema.Number,
   pending: Schema.Boolean,
   subjects: Schema.Array(CatchUpSubject),

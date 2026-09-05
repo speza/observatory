@@ -291,6 +291,7 @@ export interface CatchUpProjection {
   readonly generatedAt: number;
   readonly sinceAt?: number;
   readonly throughSequence: number;
+  readonly evidenceThroughSequence: number;
   readonly transitionCount: number;
   readonly pending: boolean;
   readonly subjects: readonly CatchUpSubject[];

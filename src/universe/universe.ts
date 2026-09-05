@@ -128,7 +128,7 @@ export type UniverseCommand =
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly AgentId[] }
   | { readonly type: "CompleteGoal"; readonly goalId: GoalId }
   | { readonly type: "ArchiveGoal"; readonly goalId: GoalId }
-  | { readonly type: "AcknowledgeCatchUp" };
+  | { readonly type: "AcknowledgeCatchUp"; readonly throughSequence: number };
 
 export interface CommandResult {
   readonly ok: boolean;
@@ -1576,7 +1576,16 @@ export class Universe {
         break;
       }
       case "AcknowledgeCatchUp": {
-        const checkpointSequence = next.changes.at(-1)?.sequence ?? 0;
+        const checkpointSequence = command.throughSequence;
+        if (
+          !Number.isSafeInteger(checkpointSequence) ||
+          checkpointSequence < 0 ||
+          checkpointSequence > (next.changes.at(-1)?.sequence ?? 0)
+        )
+          return { ok: false, error: "Invalid catch-up sequence boundary." };
+        const previousSequence = next.operatorCheckpoint?.lastSequence ?? 0;
+        if (checkpointSequence <= previousSequence)
+          return { ok: true, checkpointSequence: previousSequence };
         next.operatorCheckpoint = { lastSequence: checkpointSequence, acknowledgedAt: now };
         result = { ok: true, checkpointSequence };
         break;

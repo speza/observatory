@@ -659,6 +659,14 @@ subscriber eventually receives the latest state, not every animation step.
 The projection channel guarantees current-state convergence while connected or
 reconnected. It does not guarantee that every operational transition was shown.
 
+Projection epoch/revision cursors are delivery ordering only, not Catch-up
+acknowledgement authority. Catch-up carries separate durable semantic and
+provider-evidence sequence boundaries; the browser must echo the boundaries of
+the rendered Catch-up projection on explicit acknowledgement. Receiving a newer
+server event during that request must not advance either checkpoint past those
+boundaries. Stale retries are monotonic no-ops, not acknowledgements of the
+latest server state.
+
 ## Security and privacy
 
 - Use the configured loopback browser authority and existing Origin/Host checks.

@@ -241,13 +241,19 @@ interface GoalLocalBounds {
   readonly bottom: number;
 }
 
-const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
+export const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
   const radius = goalRadius(goal);
   const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
   const orbitWidth =
-    Math.max(0, ...orbits.map((orbit) => Math.abs(orbit.x))) + AGENT_CARD_WIDTH / 2 + 4;
+    Math.max(
+      AGENT_CARD_WIDTH / 2,
+      ...orbits.map((orbit) => Math.max(Math.abs(orbit.x) + AGENT_CARD_WIDTH / 2, orbit.radiusX)),
+    ) + 4;
   const orbitHeight =
-    Math.max(0, ...orbits.map((orbit) => Math.abs(orbit.y))) + AGENT_CARD_HEIGHT / 2 + 4;
+    Math.max(
+      AGENT_CARD_HEIGHT / 2,
+      ...orbits.map((orbit) => Math.max(Math.abs(orbit.y) + AGENT_CARD_HEIGHT / 2, orbit.radiusY)),
+    ) + 4;
   const titleLines = linesFor(goal.title);
   const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
   return {

@@ -40,7 +40,7 @@ export const scopePortfolio = (
     commandCentre,
     map,
     workingAgentCount: agentsFor(commandCentre).filter(
-      (agent) => agent.runtimeState === "working" && agent.hostHealth === "live",
+      (agent) => agent.runtimeState === "working" && agent.executionPresence === "live",
     ).length,
   };
 };

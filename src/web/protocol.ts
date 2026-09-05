@@ -57,7 +57,11 @@ export type WebCommand =
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly string[] }
   | { readonly type: "CompleteGoal"; readonly goalId: string }
   | { readonly type: "ArchiveGoal"; readonly goalId: string }
-  | { readonly type: "AcknowledgeCatchUp" };
+  | {
+      readonly type: "AcknowledgeCatchUp";
+      readonly throughSequence: number;
+      readonly evidenceThroughSequence: number;
+    };
 
 export interface WebCommandResponse {
   readonly result: CommandResult;

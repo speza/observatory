@@ -12,7 +12,7 @@ import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
 import type { PluginRegistry } from "../plugins/registry.ts";
 import type { ConversationTrackerModule } from "../conversations/types.ts";
-import { WebCommandError, WebCommandGateway } from "./commands.ts";
+import { WebCommandError, decodeWebCommand } from "./commands.ts";
 import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
 import type {
   WebCommandResponse,
@@ -56,7 +56,6 @@ const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
 });
-const CommandTypeSchema = Schema.Struct({ type: Schema.String });
 
 type WebResponse =
   | PortfolioResponse
@@ -117,7 +116,6 @@ export class ObservatoryWebApi {
   private readonly conversations: ConversationTrackerModule | undefined;
   private readonly agentObservations: AgentObservationModule | undefined;
   private readonly workspaceReview: WorkspaceReviewReader | undefined;
-  private readonly commands: WebCommandGateway;
   private readonly terminals: WebTerminalGateway | undefined;
   private readonly launch: WebLaunchGateway | undefined;
   private readonly closeout: WebCloseoutGateway | undefined;
@@ -142,7 +140,6 @@ export class ObservatoryWebApi {
     this.conversations = conversations;
     this.agentObservations = agentObservations;
     this.workspaceReview = workspaceReview;
-    this.commands = new WebCommandGateway(universe);
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
     this.closeout =
       host && conversations
@@ -200,14 +197,18 @@ export class ObservatoryWebApi {
         return json({ error: "Commands require application/json." }, 415);
       try {
         const body = await request.text();
-        const result = this.commands.execute(body);
-        if (!result.ok) return json({ error: result.error ?? "Command rejected." }, 409);
+        const command = decodeWebCommand(body);
         if (
-          Schema.decodeUnknownSync(Schema.parseJson(CommandTypeSchema))(body).type ===
-          "AcknowledgeCatchUp"
+          command.type === "AcknowledgeCatchUp" &&
+          command.evidenceThroughSequence >
+            (this.agentObservations?.snapshot().throughSequence ?? 0)
         )
+          return json({ error: "Invalid provider-evidence sequence boundary." }, 409);
+        const result = this.universe.execute(command);
+        if (!result.ok) return json({ error: result.error ?? "Command rejected." }, 409);
+        if (command.type === "AcknowledgeCatchUp")
           try {
-            this.agentObservations?.acknowledge(this.clock.now());
+            this.agentObservations?.acknowledge(command.evidenceThroughSequence, this.clock.now());
           } catch {
             return json(
               {

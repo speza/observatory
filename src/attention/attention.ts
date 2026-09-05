@@ -145,11 +145,17 @@ export const evaluateAttention = (
   hosts: readonly HostHealth[] = [],
 ): AttentionProjection => {
   const priorities = goalPriorities(goals);
+  const archivedGoalIds = new Set(
+    goals.filter((goal) => goal.status === "archived").map((goal) => goal.id),
+  );
   const items: AttentionItem[] = [];
 
   for (const agent of agents) {
     const priority = priorities.get(agent.primaryGoalId ?? "") ?? "P3";
-    if (agent.archivedAt !== undefined && agent.executionPresence === "live") {
+    if (
+      (agent.archivedAt !== undefined || archivedGoalIds.has(agent.primaryGoalId ?? "")) &&
+      agent.executionPresence === "live"
+    ) {
       const startedAt = agent.lastSeenAt;
       items.push({
         id: `${agent.id}:archived-running`,
@@ -166,9 +172,10 @@ export const evaluateAttention = (
         priority,
         runtimeState: agent.runtimeState,
         explanation:
-          "This archived conversation has a live execution. Restore it or stop the execution.",
+          agent.archivedAt !== undefined
+            ? "This archived conversation has a live execution. Review it and explicitly close the execution when appropriate."
+            : "This Agent's Goal is archived, but its execution is still live. Review ongoing work and explicitly close it when appropriate; Goal archive does not stop execution.",
       });
-      continue;
     }
     const currentReason =
       agent.executionPresence === "live" ? attentionReason(agent.runtimeState) : undefined;
@@ -237,7 +244,11 @@ export const evaluateAttention = (
       });
     }
 
-    if (agent.observationHealth !== "fresh" || agent.executionPresence === "unknown") {
+    if (
+      agent.observationHealth !== "fresh" ||
+      agent.executionPresence === "unknown" ||
+      agent.executionPresence === "conflict"
+    ) {
       const sourceLabel = displayHostKind(agent.execution?.hostKind ?? "host");
       const startedAt = agent.lastSeenAt;
       items.push({
@@ -254,7 +265,10 @@ export const evaluateAttention = (
         ageMs: age(now, startedAt),
         priority,
         runtimeState: agent.runtimeState,
-        explanation: `The last ${sourceLabel} observation is ${agent.hostHealth}; the last known ${agent.runtimeState} state is not current.`,
+        explanation:
+          agent.executionPresence === "conflict"
+            ? `${sourceLabel} reports conflicting executions for this Agent. Resolve execution identity before acting on a host target.`
+            : `The last ${sourceLabel} observation is ${agent.hostHealth}; the last known ${agent.runtimeState} state is not current.`,
       });
     }
   }

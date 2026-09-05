@@ -544,6 +544,7 @@ export const enrichCatchUp = (
   return {
     ...projection,
     pending: projection.pending || snapshot.transitions.length > 0,
+    evidenceThroughSequence: snapshot.throughSequence,
     evidenceTransitionCount: snapshot.transitions.length,
     subjects: [...subjects.values()]
       .map(({ agentIds: _agentIds, ...subject }) => subject)

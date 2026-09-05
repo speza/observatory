@@ -406,6 +406,21 @@ completed, failure, compaction and context entering a higher band. It coalesces
 repeated activity/tool events and delivery retries. Checkpoint acknowledgement
 remains an explicit human action; provider events cannot advance it.
 
+The immutable evidence snapshot exposes its `throughSequence`, including the
+previous checkpoint when its unread tail is empty. Catch-up enrichment transports
+that boundary as `evidenceThroughSequence`, separate from the Universe sequence.
+It describes the bounded received evidence represented by the projection's
+summaries, counts and drill-downs, including coalesced routine activity; it is not
+a claim of complete provider history. The browser echoes this displayed boundary
+when marking caught up. Newer observations remain unread even if they arrive
+before the acknowledgement is handled.
+
+The coordinator/store accept an explicit non-negative safe-integer boundary,
+reject future boundaries and monotonically advance the existing durable
+checkpoint. Repeated or older acknowledgements do not change its timestamp.
+Only transitions at or below that checkpoint are deleted; current claims and
+newer transitions survive acknowledgement and restart.
+
 ### Inspector
 
 The Agent inspector may show current safe activity, open request kind, reported

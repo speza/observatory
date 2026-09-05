@@ -356,24 +356,150 @@ describe("projections", () => {
     expect(projection.results[1]?.context).toBe("agent · Other");
   });
 
-  test("does not surface attention for agents hidden under archived goals", () => {
+  test.each(["blocked", "waiting", "working", "done"] as const)(
+    "retains actionable %s work under archived goals",
+    (runtimeState) => {
+      const { universe } = makeUniverse();
+      universe.execute({ type: "CreateGoal", title: "Archived goal" });
+      admitObservedConversationsAndReconcile(
+        universe,
+        hostSnapshot([observation("pane", "Named worker", runtimeState)]),
+      );
+      universe.execute({
+        type: "AssignAgent",
+        agentId: "agent-1",
+        goalId: "goal-1",
+      });
+      expect(universe.execute({ type: "CompleteGoal", goalId: "goal-1" }).ok).toBe(true);
+      expect(universe.execute({ type: "ArchiveGoal", goalId: "goal-1" }).ok).toBe(true);
+      const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+      if (projection.kind !== "command-centre") throw new Error("wrong projection");
+      expect(projection.counts.attention).toBe(1);
+      expect(projection.counts.agents).toBe(1);
+      expect(projection.goals[0]).toMatchObject({
+        status: "archived",
+        agents: [
+          {
+            id: "agent-1",
+            displayName: "Named worker",
+            executionPresence: "live",
+            primaryGoalId: "goal-1",
+          },
+        ],
+      });
+      const item = projection.attention.items[0];
+      expect(item?.reason).toBe(
+        runtimeState === "working"
+          ? "archived-running"
+          : runtimeState === "done"
+            ? "runtime-complete"
+            : runtimeState,
+      );
+      expect(JSON.stringify(item)).toContain("Goal is archived");
+      expect(
+        universe.project({
+          kind: "inspector",
+          now: 1_001_000,
+          target: { type: "agent", id: "agent-1" },
+        }),
+      ).toMatchObject({
+        agent: projection.goals[0]?.agents[0],
+      });
+      expect(universe.project({ kind: "universe-map", now: 1_001_000 })).toMatchObject({
+        goals: [{ status: "archived", agents: [{ id: "agent-1" }] }],
+        counts: { agents: 1, attention: 1 },
+      });
+      expect(universe.project({ kind: "code-contexts", now: 1_001_000 })).toMatchObject({
+        contexts: [{ agents: [{ id: "agent-1" }] }],
+      });
+      expect(universe.snapshot().agents[0]?.archivedAt).toBeUndefined();
+    },
+  );
+
+  test.each(["restart", "unavailable", "partial", "conflict"] as const)(
+    "retains %s execution evidence as uncertainty until confirmed ended",
+    (mode) => {
+      const { universe } = makeUniverse();
+      universe.execute({ type: "CreateGoal", title: "Archived goal" });
+      const snapshot = hostSnapshot([observation("pane", "Uncertain worker", "blocked")]);
+      admitObservedConversationsAndReconcile(universe, snapshot);
+      universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+      universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
+      universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
+      if (mode === "restart") universe.invalidateRuntimeFacts();
+      else if (mode === "conflict") {
+        const first = snapshot.agents[0]!;
+        universe.reconcile({
+          ...snapshot,
+          observedAt: 1_001_000,
+          agents: [
+            { ...first, observedAt: 1_001_000 },
+            {
+              ...first,
+              nativeId: "other-pane",
+              hostLocator: "opaque:other-pane",
+              observedAt: 1_001_000,
+            },
+          ],
+        });
+      } else {
+        // A partial snapshot must not promote previously uncertain facts to live.
+        if (mode === "partial") universe.invalidateRuntimeFacts();
+        universe.reconcile({
+          ...hostSnapshot([], 1_001_000),
+          available: mode !== "unavailable",
+          complete: false,
+        });
+      }
+      const projection = universe.project({ kind: "command-centre", now: 1_002_000 });
+      if (projection.kind !== "command-centre") throw new Error("wrong projection");
+      expect(projection.counts.agents).toBe(1);
+      expect(projection.counts.attention).toBe(0);
+      expect(projection.goals[0]?.staleCount).toBe(1);
+      expect(projection.goals[0]?.agents[0]?.executionPresence).toBe(
+        mode === "conflict" ? "conflict" : "unknown",
+      );
+      expect(projection.attention.items.find((item) => item.agentId === "agent-1")).toMatchObject({
+        reason: "runtime-unknown",
+        requiresHumanInput: false,
+      });
+      universe.reconcile(hostSnapshot([], 1_003_000));
+      expect(universe.project({ kind: "command-centre", now: 1_003_000 })).toMatchObject({
+        goals: [],
+        counts: { agents: 0, attention: 0 },
+      });
+      expect(universe.snapshot().goals[0]?.status).toBe("archived");
+    },
+  );
+
+  test("does not expose archived goals for never-observed or confirmed-ended Agents", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Archived goal" });
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: "test",
+      nativeConversationRef: { harnessId: "test", kind: "id", value: "never-observed" },
+      displayName: "Never observed",
+      observedAt: 1_000_000,
+    });
     admitObservedConversationsAndReconcile(
       universe,
-      hostSnapshot([observation("pane", "blocked", "blocked")]),
+      hostSnapshot([observation("pane", "Ended worker")]),
     );
-    universe.execute({
-      type: "AssignAgent",
-      agentId: "agent-1",
-      goalId: "goal-1",
-    });
+    for (const agentId of ["agent-1", "agent-2"])
+      universe.execute({ type: "AssignAgent", agentId, goalId: "goal-1" });
+    universe.reconcile(hostSnapshot([], 1_001_000));
     universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
     universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
-    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
-    if (projection.kind !== "command-centre") throw new Error("wrong projection");
-    expect(projection.counts.attention).toBe(0);
-    expect(projection.attention.items).toHaveLength(0);
+    expect(universe.project({ kind: "command-centre", now: 1_002_000 })).toMatchObject({
+      goals: [],
+      attention: { items: [] },
+      counts: { agents: 0 },
+    });
+    expect(
+      universe.project({ kind: "command-centre", now: 1_002_000, includeArchived: true }),
+    ).toMatchObject({ goals: [{ status: "archived" }], counts: { agents: 2 } });
   });
 
   test("surfaces a live archived Agent as attention without restoring it", () => {
@@ -386,8 +512,9 @@ describe("projections", () => {
 
     const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
-    expect(projection.unassigned).toHaveLength(0);
-    expect(projection.counts.agents).toBe(0);
+    expect(projection.unassigned).toHaveLength(1);
+    expect(projection.unassigned[0]?.displayName).toBe("archived worker");
+    expect(projection.counts.agents).toBe(1);
     expect(projection.attention.items).toMatchObject([
       { agentId: "agent-1", reason: "archived-running", requiresHumanInput: true },
     ]);
@@ -496,7 +623,7 @@ describe("projections", () => {
       hostSnapshot([observation("pane", "worker", "working")]),
     );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
-    universe.execute({ type: "AcknowledgeCatchUp" });
+    universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 4 });
 
     clock.value += 1_000;
     universe.execute({ type: "SetGoalPriority", goalId: "goal-1", priority: "P0" });
@@ -529,6 +656,123 @@ describe("projections", () => {
     ]);
   });
 
+  test.each(["blocked", "waiting"] as const)(
+    "metadata does not resolve %s attention",
+    (runtimeState) => {
+      const { universe, clock } = makeUniverse();
+      universe.execute({ type: "CreateGoal", title: "Catch up" });
+      admitObservedConversationsAndReconcile(
+        universe,
+        hostSnapshot([observation("pane", "worker", "working")]),
+      );
+      universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+      universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 4 });
+      clock.value += 1_000;
+      universe.reconcile(hostSnapshot([observation("pane", "worker", runtimeState)], clock.now()));
+      universe.execute({ type: "RenameAgent", agentId: "agent-1", displayName: "Renamed" });
+      universe.execute({
+        type: "SetAgentDescription",
+        agentId: "agent-1",
+        description: "Metadata",
+      });
+      universe.execute({ type: "UnassignAgent", agentId: "agent-1" });
+      expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+        counts: { attention: 1 },
+      });
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        counts: { attention: 1 },
+        subjects: [{ summaries: [{ kind: "attention" }] }],
+      });
+    },
+  );
+
+  test.each(["agent", "goal"] as const)(
+    "metadata preserves unresolved execution under an archived %s",
+    (target) => {
+      const { universe, clock } = makeUniverse();
+      universe.execute({ type: "CreateGoal", title: "Archived context" });
+      admitObservedConversationsAndReconcile(
+        universe,
+        hostSnapshot([observation("pane", "worker", "working")]),
+      );
+      universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+      if (target === "agent") universe.execute({ type: "ArchiveAgent", agentId: "agent-1" });
+      else {
+        universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
+        universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
+      }
+      const displayed = universe.project({ kind: "catch-up", now: clock.now() });
+      if (displayed.kind !== "catch-up") throw new Error("Wrong projection");
+      universe.execute({
+        type: "AcknowledgeCatchUp",
+        throughSequence: displayed.throughSequence,
+      });
+      universe.execute({ type: "RenameAgent", agentId: "agent-1", displayName: "Renamed" });
+      expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+        counts: { attention: 1 },
+      });
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        counts: { attention: 1, finished: 0 },
+        subjects: [{ summaries: [{ kind: "attention" }] }],
+      });
+      clock.value += 1_000;
+      universe.reconcile(hostSnapshot([observation("pane", "worker", "blocked")], clock.now()));
+      universe.execute({ type: "SetAgentDescription", agentId: "agent-1", description: "Blocked" });
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        counts: { attention: 1, finished: 0 },
+        subjects: [{ summaries: [{ kind: "attention" }] }],
+      });
+      universe.invalidateRuntimeFacts();
+      universe.execute({ type: "SetAgentDescription", agentId: "agent-1", description: "Unknown" });
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        counts: { stale: 1, attention: 0, finished: 0 },
+        subjects: [{ summaries: [{ kind: "stale" }] }],
+      });
+    },
+  );
+
+  test("metadata preserves uncertainty until fresh host recovery", () => {
+    const { universe, clock } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "working")]),
+    );
+    universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 2 });
+    clock.value += 1_000;
+    universe.reconcile({ ...hostSnapshot([], clock.now()), available: false, complete: false });
+    universe.execute({ type: "RenameAgent", agentId: "agent-1", displayName: "Renamed" });
+    universe.execute({
+      type: "SetAgentDescription",
+      agentId: "agent-1",
+      description: "Still uncertain",
+    });
+    expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+      counts: { stale: 1 },
+      subjects: [{ summaries: [{ kind: "stale" }] }],
+    });
+    clock.value += 1_000;
+    universe.reconcile({ ...hostSnapshot([], clock.now()), complete: false });
+    universe.execute({
+      type: "SetAgentDescription",
+      agentId: "agent-1",
+      description: "Partial is not recovery",
+    });
+    expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+      counts: { stale: 1 },
+      subjects: [{ summaries: [{ kind: "stale" }] }],
+    });
+    clock.value += 1_000;
+    universe.reconcile(hostSnapshot([observation("pane", "worker", "working")], clock.now()));
+    universe.execute({ type: "SetAgentDescription", agentId: "agent-1", description: "Recovered" });
+    const recovered = universe.project({ kind: "catch-up", now: clock.now() });
+    expect(recovered).toMatchObject({
+      counts: { stale: 0 },
+      subjects: [{ summaries: [{ kind: "stale-resolved" }] }],
+    });
+    if (recovered.kind !== "catch-up") throw new Error("Wrong projection");
+    expect(recovered.subjects[0]?.transitions.some((item) => item.outcome === "stale")).toBe(true);
+  });
+
   test("synthesises resolved attention from one Agent trajectory", () => {
     const { universe, clock } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Resolve operator input" });
@@ -537,7 +781,7 @@ describe("projections", () => {
       hostSnapshot([observation("pane", "worker", "working")]),
     );
     universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
-    universe.execute({ type: "AcknowledgeCatchUp" });
+    universe.execute({ type: "AcknowledgeCatchUp", throughSequence: 4 });
 
     clock.value += 1_000;
     admitObservedConversationsAndReconcile(
@@ -549,6 +793,11 @@ describe("projections", () => {
       universe,
       hostSnapshot([observation("pane", "worker", "idle")], clock.now()),
     );
+    universe.execute({
+      type: "RenameAgent",
+      agentId: "agent-1",
+      displayName: "Resolved and renamed",
+    });
 
     const projection = universe.project({ kind: "catch-up", now: clock.now() });
     if (projection.kind !== "catch-up") throw new Error("wrong projection");
@@ -560,6 +809,11 @@ describe("projections", () => {
         label: "1 Agent no longer needs judgment",
       },
     ]);
-    expect(projection.subjects[0]?.transitionCount).toBe(2);
+    expect(projection.subjects[0]?.transitionCount).toBe(3);
+    expect(projection.subjects[0]?.transitions.map((item) => item.outcome)).toEqual([
+      "changed",
+      "changed",
+      "attention",
+    ]);
   });
 });

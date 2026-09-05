@@ -52,7 +52,7 @@ const observations = (refreshes: { count: number }): AgentObservationModule => (
     refreshes.count += 1;
     return Effect.succeed({ observedSources: 1, diagnostics: [] });
   },
-  snapshot: () => ({ generatedAt: 1, agents: [], transitions: [] }),
+  snapshot: () => ({ generatedAt: 1, throughSequence: 0, agents: [], transitions: [] }),
   acknowledge: () => 0,
 });
 

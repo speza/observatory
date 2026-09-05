@@ -8,6 +8,62 @@ import {
 import { Inspector } from "./Inspector.tsx";
 
 describe("Inspector", () => {
+  test("shows the selected archived assignment without offering archived destinations", () => {
+    const { universe, clock } = makeUniverse();
+    for (const title of ["Archived assignment", "Other archived goal"])
+      universe.execute({ type: "CreateGoal", title });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          nativeId: "live",
+          displayName: "Named worker",
+          runtimeState: "blocked",
+          runtimeStateSource: "test",
+          hostLocator: "opaque:live",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    for (const goalId of ["goal-1", "goal-2"]) {
+      universe.execute({ type: "CompleteGoal", goalId });
+      universe.execute({ type: "ArchiveGoal", goalId });
+    }
+    const projection = universe.project({
+      kind: "inspector",
+      now: clock.now(),
+      target: { type: "agent", id: "agent-1" },
+    });
+    const commandCentre = universe.project({
+      kind: "command-centre",
+      now: clock.now(),
+      includeArchived: true,
+    });
+    if (commandCentre.kind !== "command-centre" || projection.kind !== "agent-inspector")
+      throw new Error("Wrong projection");
+    const markup = renderToStaticMarkup(
+      <Inspector
+        commandCentre={commandCentre}
+        projection={projection}
+        commandPending={false}
+        onClose={() => {}}
+        onCloseAndArchive={async () => true}
+        onCommand={async () => undefined}
+        onOpenTerminal={() => {}}
+        onRetry={() => {}}
+        onReviewChanges={() => {}}
+        onResume={async () => {}}
+      />,
+    );
+    expect(markup).toContain(
+      '<option disabled="" value="goal-1" selected="">P2 · Archived assignment · archived</option>',
+    );
+    expect(markup).not.toContain("Other archived goal");
+    expect(markup).toContain("Open terminal");
+    expect(markup).toContain("Goal is archived");
+  });
+
   test("shows bounded operational IDs without duplicating repository facts", () => {
     const fixture = makeUniverse();
     admitObservedConversationsAndReconcile(

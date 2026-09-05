@@ -78,6 +78,11 @@ const agentIsUncertain = (agent: Pick<Agent, "observationHealth" | "executionPre
   agent.executionPresence === "unknown" ||
   agent.executionPresence === "conflict";
 
+const hasUnresolvedExecution = (agent: Agent): boolean =>
+  agent.executionPresence === "live" ||
+  agent.executionPresence === "conflict" ||
+  (agent.executionPresence === "unknown" && agent.execution !== undefined);
+
 const publicAgent = (agent: Agent) => {
   const {
     execution,
@@ -111,16 +116,15 @@ const projectCommandCentre = (
   now: number,
   includeArchived = false,
 ): CommandCentreProjection => {
-  const projectedAgents = state.agents.filter(
-    (agent) => includeArchived || agent.archivedAt === undefined,
-  );
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
-  const attentionAgents = state.agents.filter(
+  const projectedAgents = state.agents.filter(
     (agent) =>
-      (includeArchived || agent.archivedAt === undefined || agent.executionPresence === "live") &&
-      (includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived"),
+      includeArchived ||
+      hasUnresolvedExecution(agent) ||
+      (agent.archivedAt === undefined &&
+        goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived"),
   );
-  const attention = evaluateAttention(now, state.goals, attentionAgents, state.hosts);
+  const attention = evaluateAttention(now, state.goals, projectedAgents, state.hosts);
   const attentionByAgent = byAttention(attention.items);
   const views = projectedAgents.map((agent): AgentView => {
     return {
@@ -131,7 +135,12 @@ const projectCommandCentre = (
   });
 
   const goalViews = state.goals
-    .filter((goal) => includeArchived || goal.status !== "archived")
+    .filter(
+      (goal) =>
+        includeArchived ||
+        goal.status !== "archived" ||
+        views.some((agent) => agent.primaryGoalId === goal.id),
+    )
     .map((goal): GoalView => {
       const agents = views.filter((agent) => agent.primaryGoalId === goal.id).sort(compareAgents);
       return {
@@ -146,14 +155,14 @@ const projectCommandCentre = (
         return right.attentionCount - left.attentionCount;
       if (priorityRank(left.priority) !== priorityRank(right.priority))
         return priorityRank(left.priority) - priorityRank(right.priority);
-      if (left.status !== right.status) return left.status === "completed" ? 1 : -1;
+      if (left.status !== right.status) {
+        const rank = { active: 0, completed: 1, archived: 2 };
+        return rank[left.status] - rank[right.status];
+      }
       return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
     });
 
   const unassigned = views.filter((agent) => !agent.primaryGoalId).sort(compareAgents);
-  const visibleAgents = views.filter(
-    (agent) => includeArchived || goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived",
-  );
   const systems = (state.systems ?? [])
     .map((system): SystemView => {
       const goals = goalViews.filter((goal) => goal.systemId === system.id);
@@ -163,7 +172,7 @@ const projectCommandCentre = (
         goals,
         agentCount: agents.length,
         workingCount: agents.filter(
-          (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
+          (agent) => agent.executionPresence === "live" && agent.runtimeState === "working",
         ).length,
         attentionCount: goals.reduce((total, goal) => total + goal.attentionCount, 0),
         staleCount: goals.reduce((total, goal) => total + goal.staleCount, 0),
@@ -185,11 +194,11 @@ const projectCommandCentre = (
     counts: {
       goals: goalViews.length,
       systems: systems.length,
-      agents: visibleAgents.length,
+      agents: views.length,
       attention: attention.currentCount,
       uncertainty: attention.uncertaintyCount,
       unassigned: unassigned.length,
-      stale: visibleAgents.filter(agentIsUncertain).length,
+      stale: views.filter(agentIsUncertain).length,
     },
   };
 };
@@ -633,10 +642,32 @@ const catchUpOutcomeRank = {
   changed: 4,
 } satisfies Record<UniverseChange["outcome"], number>;
 
-const catchUpSummaryKind = (changes: readonly UniverseChange[]): CatchUpSummaryKind => {
+const catchUpOutcome = (
+  change: UniverseChange,
+  agent: Agent | undefined,
+  attention: AttentionItem | undefined,
+): UniverseChange["outcome"] => {
+  if (change.outcome !== "changed" || !agent) return change.outcome;
+  if (agentIsUncertain(agent)) return "stale";
+  if (agent.executionPresence === "live" && agent.runtimeState === "done") return "finished";
+  if (attention?.requiresHumanInput) return "attention";
+  if (agent.archivedAt !== undefined) return "finished";
+  if (agent.runtimeState === "unknown" && agent.executionPresence !== "absent") return "stale";
+  return "changed";
+};
+
+const catchUpSummaryKind = (
+  changes: readonly UniverseChange[],
+  agent: Agent | undefined,
+  attention: AttentionItem | undefined,
+): CatchUpSummaryKind => {
   const latest = changes.at(-1);
   if (!latest) return "changed";
-  if (latest.outcome !== "changed") return latest.outcome;
+  const outcome = catchUpOutcome(latest, agent, attention);
+  if (outcome !== "changed") return outcome;
+  // A generic metadata event is not resolution evidence. Current typed Agent
+  // state must establish recovery; historical transitions remain untouched.
+  if (!agent) return "changed";
   if (changes.slice(0, -1).some((item) => item.outcome === "attention"))
     return "attention-resolved";
   if (changes.slice(0, -1).some((item) => item.outcome === "stale")) return "stale-resolved";
@@ -701,6 +732,7 @@ const projectCatchUp = (
   state: {
     readonly systems?: readonly System[];
     readonly goals: readonly Goal[];
+    readonly agents: readonly Agent[];
     readonly changes: readonly UniverseChange[];
     readonly operatorCheckpoint?: OperatorCheckpoint;
   },
@@ -708,6 +740,10 @@ const projectCatchUp = (
 ): CatchUpProjection => {
   const lastSequence = state.operatorCheckpoint?.lastSequence ?? 0;
   const unread = state.changes.filter((item) => item.sequence > lastSequence);
+  const agents = new Map(state.agents.map((agent) => [agent.id, agent]));
+  const attentionByAgent = byAttention(evaluateAttention(now, state.goals, state.agents).items);
+  const agentFor = (item: UniverseChange) =>
+    item.targetType === "agent" ? agents.get(item.targetId) : undefined;
   const latestByTarget = new Map<string, UniverseChange>();
   for (const item of unread) latestByTarget.set(`${item.targetType}:${item.targetId}`, item);
   const counts: CatchUpProjection["counts"] = {
@@ -717,7 +753,8 @@ const projectCatchUp = (
     finished: 0,
     stale: 0,
   };
-  for (const item of latestByTarget.values()) counts[item.outcome] += 1;
+  for (const item of latestByTarget.values())
+    counts[catchUpOutcome(item, agentFor(item), attentionByAgent.get(item.targetId))] += 1;
 
   const goals = new Map(state.goals.map((goal) => [goal.id, goal]));
   const systems = new Map((state.systems ?? []).map((system) => [system.id, system]));
@@ -748,7 +785,11 @@ const projectCatchUp = (
       for (const trajectory of trajectories.values()) {
         const latest = trajectory.at(-1);
         if (!latest) continue;
-        const kind = catchUpSummaryKind(trajectory);
+        const kind = catchUpSummaryKind(
+          trajectory,
+          agentFor(latest),
+          attentionByAgent.get(latest.targetId),
+        );
         const key = `${kind}:${latest.targetType}`;
         const existing = summaryCounts.get(key);
         if (existing) existing.count += 1;
@@ -767,6 +808,10 @@ const projectCatchUp = (
         }));
       const latest = [...trajectories.values()]
         .flatMap((trajectory) => trajectory.at(-1) ?? [])
+        .map((item) => ({
+          ...item,
+          outcome: catchUpOutcome(item, agentFor(item), attentionByAgent.get(item.targetId)),
+        }))
         .sort(
           (left, right) =>
             catchUpOutcomeRank[left.outcome] - catchUpOutcomeRank[right.outcome] ||
@@ -798,6 +843,7 @@ const projectCatchUp = (
     kind: "catch-up",
     generatedAt: now,
     throughSequence: state.changes.at(-1)?.sequence ?? 0,
+    evidenceThroughSequence: 0,
     transitionCount: unread.length,
     pending: unread.length > 0,
     subjects,
@@ -829,7 +875,9 @@ const projectInspector = (
   now: number,
   target: { readonly type: "goal" | "agent"; readonly id: string },
 ): InspectorProjection => {
-  const activeAgents = state.agents.filter((agent) => agent.archivedAt === undefined);
+  const activeAgents = state.agents.filter(
+    (agent) => agent.archivedAt === undefined || hasUnresolvedExecution(agent),
+  );
   const attention = evaluateAttention(now, state.goals, activeAgents, state.hosts);
   if (target.type === "goal") {
     const goal = state.goals.find((candidate) => candidate.id === target.id);

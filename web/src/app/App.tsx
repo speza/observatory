@@ -362,7 +362,6 @@ export const App = (): React.JSX.Element => {
     setTerminalLaunch(undefined);
     setTerminalAgent(agent);
     setSelection({ type: "agent", id: agent.id });
-    setSidePanel(undefined);
   };
 
   const openAgentTerminal = (agent: AgentView): void => {
@@ -838,6 +837,7 @@ export const App = (): React.JSX.Element => {
           />
         ) : view === "atlas" && scopedMap ? (
           <Atlas
+            key={selectedSystemId}
             cameraCommand={cameraCommand}
             onCloseAndArchive={(agent) => {
               setCommandError(undefined);
@@ -857,7 +857,7 @@ export const App = (): React.JSX.Element => {
             projection={scopedMap}
             pullRequestUrls={pullRequestUrls}
             reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 430 : 0}
-            reservedRight={0}
+            reservedRight={selection && sidePanel === "inspector" ? 428 : 0}
             selection={selection}
             theme={theme}
             motion={motion}
@@ -889,7 +889,11 @@ export const App = (): React.JSX.Element => {
         {sidePanel === "catch-up" ? (
           <CatchUpPanel
             onAcknowledge={async () => {
-              const response = await runCommand({ type: "AcknowledgeCatchUp" });
+              const response = await runCommand({
+                type: "AcknowledgeCatchUp",
+                throughSequence: data.catchUp.throughSequence,
+                evidenceThroughSequence: data.catchUp.evidenceThroughSequence,
+              });
               if (response) setSidePanel(undefined);
             }}
             onClose={() => setSidePanel(undefined)}

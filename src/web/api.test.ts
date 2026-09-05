@@ -650,12 +650,51 @@ describe("ObservatoryWebApi", () => {
     expect((await command({ type: "ArchiveAgent", agentId })).status).toBe(200);
     expect((await command({ type: "CompleteGoal", goalId })).status).toBe(200);
     const archived = await command({ type: "ArchiveGoal", goalId });
-    const acknowledged = await command({ type: "AcknowledgeCatchUp" });
+    const archivedBody: WebCommandResponse = await archived.json();
+    const acknowledged = await command({
+      type: "AcknowledgeCatchUp",
+      throughSequence: archivedBody.portfolio.catchUp.throughSequence,
+      evidenceThroughSequence: archivedBody.portfolio.catchUp.evidenceThroughSequence,
+    });
     const acknowledgedBody: WebCommandResponse = await acknowledged.json();
 
     expect(archived.status).toBe(200);
     expect(acknowledgedBody.portfolio.catchUp.pending).toBe(false);
     expect(fixture.universe.snapshot().goals[0]?.status).toBe("archived");
+  });
+
+  test("acknowledges the displayed semantic boundary, not newer changes", async () => {
+    const fixture = makeUniverse();
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
+    fixture.universe.execute({ type: "CreateGoal", title: "Displayed" });
+    const displayed = fixture.universe.project({ kind: "catch-up", now: fixture.clock.now() });
+    if (displayed.kind !== "catch-up") throw new Error("Wrong projection");
+    fixture.universe.execute({ type: "RenameGoal", goalId: "goal-1", title: "Unseen" });
+    const response = await api.fetch(
+      new Request("http://localhost/api/commands", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost",
+          "x-ao-command": "1",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "AcknowledgeCatchUp",
+          throughSequence: displayed.throughSequence,
+          evidenceThroughSequence: 0,
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body: WebCommandResponse = await response.json();
+    expect(body.portfolio.catchUp).toMatchObject({ pending: true, transitionCount: 1 });
+    expect(fixture.universe.snapshot().operatorCheckpoint?.lastSequence).toBe(
+      displayed.throughSequence,
+    );
   });
 
   test("rejects malformed, unsupported, and domain-invalid commands", async () => {
@@ -679,6 +718,45 @@ describe("ObservatoryWebApi", () => {
       );
 
     expect((await request("not-json")).status).toBe(400);
+    const before = fixture.universe.snapshot();
+    const invalidBoundaries = [
+      {},
+      { throughSequence: 0 },
+      { evidenceThroughSequence: 0 },
+      { throughSequence: -1, evidenceThroughSequence: 0 },
+      { throughSequence: 0, evidenceThroughSequence: 0.5 },
+      { throughSequence: Number.MAX_SAFE_INTEGER + 1, evidenceThroughSequence: 0 },
+    ];
+    const rejected = await Promise.all(
+      invalidBoundaries.map((fields) =>
+        request(JSON.stringify({ type: "AcknowledgeCatchUp", ...fields })),
+      ),
+    );
+    expect(rejected.map((response) => response.status)).toEqual(invalidBoundaries.map(() => 400));
+    expect(fixture.universe.snapshot()).toEqual(before);
+    expect(
+      (
+        await request(
+          JSON.stringify({
+            type: "AcknowledgeCatchUp",
+            throughSequence: 1,
+            evidenceThroughSequence: 0,
+          }),
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await request(
+          JSON.stringify({
+            type: "AcknowledgeCatchUp",
+            throughSequence: 0,
+            evidenceThroughSequence: 1,
+          }),
+        )
+      ).status,
+    ).toBe(409);
+    expect(fixture.universe.snapshot()).toEqual(before);
     expect((await request(JSON.stringify({ type: "SetGoalMapPosition" }))).status).toBe(400);
     expect((await request(JSON.stringify({ type: "ArchiveGoal", goalId: "missing" }))).status).toBe(
       409,

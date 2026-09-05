@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import type { Universe, UniverseCommand } from "../universe/universe.ts";
 import type { WebCommand } from "./protocol.ts";
 
 const MAX_COMMAND_BYTES = 16_384;
@@ -9,6 +8,7 @@ const Title = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240));
 const Description = Schema.String.pipe(Schema.maxLength(8_000));
 const Priority = Schema.Literal("P0", "P1", "P2", "P3");
 const MapCoordinate = Schema.Number.pipe(Schema.finite(), Schema.between(-10_000, 10_000));
+const Sequence = Schema.Number.pipe(Schema.int(), Schema.between(0, Number.MAX_SAFE_INTEGER));
 
 const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
   Schema.Struct({
@@ -73,7 +73,11 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
   }),
   Schema.Struct({ type: Schema.Literal("CompleteGoal"), goalId: Id }),
   Schema.Struct({ type: Schema.Literal("ArchiveGoal"), goalId: Id }),
-  Schema.Struct({ type: Schema.Literal("AcknowledgeCatchUp") }),
+  Schema.Struct({
+    type: Schema.Literal("AcknowledgeCatchUp"),
+    throughSequence: Sequence,
+    evidenceThroughSequence: Sequence,
+  }),
 );
 
 export class WebCommandError extends Error {
@@ -85,7 +89,7 @@ export class WebCommandError extends Error {
   }
 }
 
-const decodeCommand = (text: string): WebCommand => {
+export const decodeWebCommand = (text: string): WebCommand => {
   if (text.length > MAX_COMMAND_BYTES) throw new WebCommandError("Command body is too large.", 413);
   try {
     return Schema.decodeUnknownSync(Schema.parseJson(WebCommandSchema))(text);
@@ -93,12 +97,3 @@ const decodeCommand = (text: string): WebCommand => {
     throw new WebCommandError("Command body does not match the web command contract.", 400);
   }
 };
-
-export class WebCommandGateway {
-  constructor(private readonly universe: Universe) {}
-
-  execute(encoded: string) {
-    const command: UniverseCommand = decodeCommand(encoded);
-    return this.universe.execute(command);
-  }
-}

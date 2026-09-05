@@ -443,11 +443,15 @@ export class AgentObservationCoordinator implements AgentObservationModule {
         const agentId = this.universe.resolveAgentId(transition.observation.nativeConversationRef);
         return agentId ? [{ ...transition, agentId }] : [];
       });
-    return { generatedAt, agents, transitions, checkpoint };
+    const throughSequence = transitions.reduce(
+      (sequence, item) => Math.max(sequence, item.sequence),
+      checkpoint?.sequence ?? 0,
+    );
+    return { generatedAt, throughSequence, agents, transitions, checkpoint };
   }
 
-  acknowledge(at: number): number {
-    const sequence = this.store.acknowledgeAgentObservations(at);
+  acknowledge(throughSequence: number, at: number): number {
+    const sequence = this.store.acknowledgeAgentObservations(throughSequence, at);
     this.events?.publish([
       {
         type: "catch-up-changed",

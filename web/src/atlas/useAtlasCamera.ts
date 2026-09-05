@@ -10,11 +10,15 @@ import {
 import type { UniverseMapProjection } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
 import {
+  AGENT_CARD_HEIGHT,
+  AGENT_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
   goalAgentPoints,
+  goalLocalBounds,
   selectionBelongsToFocus,
   type AtlasCameraCommand,
+  type AtlasContentBounds,
 } from "./atlasGeometry.ts";
 
 interface Size {
@@ -33,13 +37,34 @@ interface AtlasLayout {
   readonly centreY: number;
   readonly fitCamera: Camera;
   readonly goalSpacingScale: number;
-  readonly worldX: number;
-  readonly worldY: number;
 }
 
 const MINIMUM_ZOOM = 0.12;
 const MAXIMUM_ZOOM = 2.8;
 const MAXIMUM_FIT_ZOOM = 1.15;
+
+export const fitAtlasBounds = (
+  bounds: AtlasContentBounds,
+  size: Size,
+  reservedLeft: number,
+  reservedRight: number,
+  maximumZoom = MAXIMUM_FIT_ZOOM,
+): Camera => {
+  const zoom = Math.min(
+    maximumZoom,
+    Math.max(1, size.width - reservedLeft - reservedRight - 96) /
+      Math.max(1, bounds.maximumX - bounds.minimumX),
+    Math.max(1, size.height - 144) / Math.max(1, bounds.maximumY - bounds.minimumY),
+  );
+  return {
+    zoom,
+    panX:
+      reservedLeft +
+      (size.width - reservedLeft - reservedRight) / 2 -
+      ((bounds.minimumX + bounds.maximumX) / 2) * zoom,
+    panY: size.height / 2 - ((bounds.minimumY + bounds.maximumY) / 2) * zoom,
+  };
+};
 
 const atlasLayout = (
   projection: UniverseMapProjection,
@@ -49,25 +74,11 @@ const atlasLayout = (
 ): AtlasLayout => {
   const goalSpacingScale = atlasGoalSpacingScale(projection);
   const bounds = atlasContentBounds(projection, goalSpacingScale);
-  const availableWidth = Math.max(1, size.width - reservedLeft - reservedRight - 96);
-  const availableHeight = Math.max(1, size.height - 144);
-  const contentWidth = Math.max(1, bounds.maximumX - bounds.minimumX);
-  const contentHeight = Math.max(1, bounds.maximumY - bounds.minimumY);
   return {
     centreX: reservedLeft + (size.width - reservedLeft - reservedRight) / 2,
     centreY: size.height / 2,
-    fitCamera: {
-      zoom: Math.min(
-        MAXIMUM_FIT_ZOOM,
-        availableWidth / contentWidth,
-        availableHeight / contentHeight,
-      ),
-      panX: 0,
-      panY: 0,
-    },
+    fitCamera: fitAtlasBounds(bounds, size, reservedLeft, reservedRight),
     goalSpacingScale,
-    worldX: (bounds.minimumX + bounds.maximumX) / 2,
-    worldY: (bounds.minimumY + bounds.maximumY) / 2,
   };
 };
 
@@ -116,6 +127,7 @@ export const useAtlasCamera = ({
   );
   const handledCameraCommand = useRef<number | undefined>(undefined);
   const cameraAdjusted = useRef(false);
+  const autoFocus = useRef(false);
   const [size, setSize] = useState<Size>({ width: 1200, height: 760 });
   const layout = useMemo(
     () => atlasLayout(projection, size, reservedLeft, reservedRight),
@@ -125,9 +137,11 @@ export const useAtlasCamera = ({
   const [isPanning, setIsPanning] = useState(false);
   const [focusedSelection, setFocusedSelection] = useState<Selection>();
 
+  // A data refresh is not a navigation request. In particular it must not
+  // recenter an unchanged camera when another Goal extends the global bounds.
   useEffect(() => {
     if (!cameraAdjusted.current) setCamera(layout.fitCamera);
-  }, [layout]);
+  }, [size, reservedLeft, reservedRight]);
 
   useEffect(() => {
     if (!selectionBelongsToFocus(focusedSelection, selection, projection)) {
@@ -147,8 +161,8 @@ export const useAtlasCamera = ({
   }, []);
 
   const screenPoint = (point: { readonly x: number; readonly y: number }) => ({
-    x: layout.centreX + point.x * layout.goalSpacingScale - layout.worldX,
-    y: layout.centreY + point.y * layout.goalSpacingScale - layout.worldY,
+    x: point.x * layout.goalSpacingScale,
+    y: point.y * layout.goalSpacingScale,
   });
 
   const pointForSelection = (target: Selection | undefined) => {
@@ -172,17 +186,46 @@ export const useAtlasCamera = ({
     target?: Selection,
   ): void => {
     cameraAdjusted.current = true;
-    setFocusedSelection(target ?? selection);
-    const nextZoom = 1.45;
-    setCamera({
-      zoom: nextZoom,
-      panX: -(point.x - layout.centreX) * nextZoom,
-      panY: -(point.y - layout.centreY) * nextZoom,
-    });
+    autoFocus.current = true;
+    const next = target ?? selection;
+    setFocusedSelection(next);
+    const goal =
+      next?.type === "goal"
+        ? projection.goals.find((candidate) => candidate.id === next.id)
+        : undefined;
+    const bounds = goal
+      ? goalLocalBounds(goal)
+      : {
+          left: AGENT_CARD_WIDTH / 2 + 4,
+          right: AGENT_CARD_WIDTH / 2 + 4,
+          top: AGENT_CARD_HEIGHT / 2 + 4,
+          bottom: AGENT_CARD_HEIGHT / 2 + 4,
+        };
+    setCamera(
+      fitAtlasBounds(
+        {
+          minimumX: point.x - bounds.left,
+          maximumX: point.x + bounds.right,
+          minimumY: point.y - bounds.top,
+          maximumY: point.y + bounds.bottom,
+        },
+        size,
+        reservedLeft,
+        reservedRight,
+        1.45,
+      ),
+    );
   };
+
+  useEffect(() => {
+    if (!autoFocus.current || !focusedSelection) return;
+    const point = pointForSelection(focusedSelection);
+    if (point) focusPoint(point, focusedSelection);
+  }, [size, reservedLeft, reservedRight, projection, focusedSelection]);
 
   const resetCamera = (): void => {
     cameraAdjusted.current = false;
+    autoFocus.current = false;
     setCamera(layout.fitCamera);
   };
   const reset = (): void => {
@@ -190,16 +233,23 @@ export const useAtlasCamera = ({
     resetCamera();
   };
 
-  const zoomIn = (): void =>
+  const zoomBy = (factor: number): void =>
     setCamera((current) => {
       cameraAdjusted.current = true;
-      return { ...current, zoom: Math.min(MAXIMUM_ZOOM, current.zoom * 1.2) };
+      autoFocus.current = false;
+      const zoom = Math.max(
+        Math.min(MINIMUM_ZOOM, layout.fitCamera.zoom, current.zoom),
+        Math.min(MAXIMUM_ZOOM, current.zoom * factor),
+      );
+      const ratio = zoom / current.zoom;
+      return {
+        zoom,
+        panX: layout.centreX - (layout.centreX - current.panX) * ratio,
+        panY: layout.centreY - (layout.centreY - current.panY) * ratio,
+      };
     });
-  const zoomOut = (): void =>
-    setCamera((current) => {
-      cameraAdjusted.current = true;
-      return { ...current, zoom: Math.max(MINIMUM_ZOOM, current.zoom / 1.2) };
-    });
+  const zoomIn = (): void => zoomBy(1.2);
+  const zoomOut = (): void => zoomBy(1 / 1.2);
 
   useEffect(() => {
     if (!cameraCommand || handledCameraCommand.current === cameraCommand.nonce) return;
@@ -221,6 +271,7 @@ export const useAtlasCamera = ({
         return;
       case "pan": {
         cameraAdjusted.current = true;
+        autoFocus.current = false;
         setCamera((current) => ({
           ...current,
           panX: current.panX + cameraCommand.dx,
@@ -237,6 +288,7 @@ export const useAtlasCamera = ({
     if (target instanceof Element && target.closest('[role="button"]')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     cameraAdjusted.current = true;
+    autoFocus.current = false;
     setIsPanning(true);
     dragRef.current = {
       x: event.clientX,
@@ -269,12 +321,16 @@ export const useAtlasCamera = ({
     const pointerY = event.clientY - bounds.top;
     setCamera((current) => {
       cameraAdjusted.current = true;
-      const nextZoom = Math.max(MINIMUM_ZOOM, Math.min(MAXIMUM_ZOOM, current.zoom * factor));
+      autoFocus.current = false;
+      const nextZoom = Math.max(
+        Math.min(MINIMUM_ZOOM, layout.fitCamera.zoom, current.zoom),
+        Math.min(MAXIMUM_ZOOM, current.zoom * factor),
+      );
       const ratio = nextZoom / current.zoom;
       return {
         zoom: nextZoom,
-        panX: pointerX - layout.centreX - (pointerX - layout.centreX - current.panX) * ratio,
-        panY: pointerY - layout.centreY - (pointerY - layout.centreY - current.panY) * ratio,
+        panX: pointerX - (pointerX - current.panX) * ratio,
+        panY: pointerY - (pointerY - current.panY) * ratio,
       };
     });
   };
@@ -293,7 +349,7 @@ export const useAtlasCamera = ({
     resetCamera,
     screenPoint,
     size,
-    worldTransform: `translate(${camera.panX} ${camera.panY}) translate(${layout.centreX} ${layout.centreY}) scale(${camera.zoom}) translate(${-layout.centreX} ${-layout.centreY})`,
+    worldTransform: `translate(${camera.panX} ${camera.panY}) scale(${camera.zoom})`,
     zoom,
     zoomIn,
     zoomOut,

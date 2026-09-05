@@ -122,6 +122,34 @@ metadata while preserving positions. Selected and attention-bearing work retain
 identity at low density. Focus mode shows one complete Goal orbit when the full
 portfolio is too dense.
 
+Goal focus fits its body, caption, orbit ellipses and Agent cards within the
+viewport left after reserving the Inspector or another side panel. This is a
+geometric fit, not a guarantee that every label is readable: use individual
+Agent focus or Ledger for detailed reading. Individual Agent focus retains the
+1.45 zoom cap. The camera uses an absolute world origin; projection refreshes do
+not refit the overview. Active focus adapts to viewport and panel changes until
+the operator manually pans or zooms. Terminal entry, switching and return retain
+background panel context rather than reframing the map; explicit System changes
+start a new fitted view.
+
+The full spatial-memory hypothesis is not yet met. Renderer peer redistribution
+and portfolio-dependent spacing still permit reflow, and sorted-ID collision
+probing in projected satellite slots can change ownership after membership edits.
+A fixed-scale canonical-band alternative was not integrated because it materially
+reduced overview and focused-Goal readability. A compact, legible placement policy
+needs separate design work; no browser slot cache or schema change substitutes for
+that decision.
+
+Pending approval: strict membership- and reload-stable satellites would require
+Universe-owned `{goalId, agentId, slot}` reservations, unique per identity and per
+Goal slot, persisted atomically with assignment. Reservations would survive
+archive, unassignment and reassignment, restoring the previous slot on return,
+without automatic reuse or compaction. Initial allocation would be deterministic;
+footprints would use the highest active reserved slot band, including expansion
+beyond the current slot table. This needs an explicit migration decision and
+restart, rollback, assignment and arbitrary-membership regression coverage. It is
+not implemented.
+
 ### Ledger
 
 Ledger provides a compact, grouped textual view over the same projection. It is
@@ -141,6 +169,13 @@ Catch up summarises semantic change since the operator's last explicit
 acknowledgement. It groups outcomes by System, Goal or Inbox rather than showing
 an undifferentiated event stream. Polling and merely opening the panel do not
 advance the checkpoint.
+
+Metadata changes do not establish resolution: Agent summaries and counts retain
+blocked/waiting or uncertain state until typed host evidence establishes recovery.
+Historical transitions remain available even when a current summary is resolved.
+Marking caught up acknowledges only the semantic and provider-evidence sequence
+boundaries in the displayed projection, never changes that arrived afterward.
+Older or repeated acknowledgements cannot regress either durable checkpoint.
 
 ### Inbox and Conversation history
 
@@ -203,6 +238,18 @@ Agents.
 2. Inspect provider claims, repository state, diff and checks.
 3. Decide whether to continue, accept, close or archive.
 4. Revalidate and close the exact host execution before archiving a live Agent.
+
+Goal archive does not stop execution. Archived Goals remain visible as context
+containers while they have unresolved executions: live, conflicting, or unknown
+with a retained execution reference. Only those exceptional Agents are shown;
+confirmed-ended and never-observed work stays archived. The same exception
+applies to archived Agents. Visible Goal/Agent counts include these exceptions.
+Blocked and waiting work still leads to Respond; other live archived work has
+an explicit lifecycle decision in Needs you. Unknown or conflicting evidence is
+a Monitor item, never a claim of liveness. These records retain their names,
+assignments and System scope through Atlas, Ledger, Inspector and freshly
+validated SessionHost terminal access. No process is automatically stopped,
+Goal unarchived, or Agent reassigned.
 
 ## Visual principles
 
