@@ -731,6 +731,36 @@ describe("projections", () => {
     },
   );
 
+  test("metadata does not revive attention for a closed archived Agent", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Reviewed work" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane", "worker", "working")]),
+    );
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    clock.value += 1_000;
+    universe.reconcile(hostSnapshot([], clock.now()));
+    universe.execute({ type: "ArchiveAgent", agentId: "agent-1" });
+    const displayed = universe.project({ kind: "catch-up", now: clock.now() });
+    if (displayed.kind !== "catch-up") throw new Error("Wrong projection");
+    universe.execute({ type: "AcknowledgeCatchUp", throughSequence: displayed.throughSequence });
+
+    for (const command of [
+      { type: "RenameAgent", agentId: "agent-1", displayName: "Reviewed worker" },
+      { type: "SetAgentDescription", agentId: "agent-1", description: "Review complete" },
+    ] as const) {
+      expect(universe.execute(command).ok).toBe(true);
+      expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+        counts: { agents: 0, attention: 0 },
+      });
+      expect(universe.project({ kind: "catch-up", now: clock.now() })).toMatchObject({
+        counts: { attention: 0, finished: 1, stale: 0 },
+        subjects: [{ summaries: [{ kind: "finished" }] }],
+      });
+    }
+  });
+
   test("metadata preserves uncertainty until fresh host recovery", () => {
     const { universe, clock } = makeUniverse();
     admitObservedConversationsAndReconcile(

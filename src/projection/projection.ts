@@ -741,7 +741,10 @@ const projectCatchUp = (
   const lastSequence = state.operatorCheckpoint?.lastSequence ?? 0;
   const unread = state.changes.filter((item) => item.sequence > lastSequence);
   const agents = new Map(state.agents.map((agent) => [agent.id, agent]));
-  const attentionByAgent = byAttention(evaluateAttention(now, state.goals, state.agents).items);
+  const attentionAgents = state.agents.filter(
+    (agent) => agent.archivedAt === undefined || hasUnresolvedExecution(agent),
+  );
+  const attentionByAgent = byAttention(evaluateAttention(now, state.goals, attentionAgents).items);
   const agentFor = (item: UniverseChange) =>
     item.targetType === "agent" ? agents.get(item.targetId) : undefined;
   const latestByTarget = new Map<string, UniverseChange>();
