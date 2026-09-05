@@ -358,7 +358,14 @@ describe("agent observation coordination", () => {
     expect(enriched.goals[0]).toMatchObject({ attentionCount: 1 });
     expect(enriched.systems[0]).toMatchObject({ attentionCount: 1 });
     expect(enriched.counts.attention).toBe(1);
-    expect(enrichMap(map, evidence).goals[0]).toMatchObject({ attentionCount: 1 });
+    const enrichedMap = enrichMap(map, enriched);
+    expect(enrichedMap.goals[0]).toMatchObject({ attentionCount: 1 });
+    expect(enrichedMap.attention).toBe(enriched.attention);
+    expect(enrichedMap.counts).toBe(enriched.counts);
+    expect(enrichedMap.goals.map((goal) => goal.id)).toEqual(map.goals.map((goal) => goal.id));
+    expect(
+      enrichedMap.goals.flatMap((goal) => goal.agents.map((agent) => agent.mapPosition)),
+    ).toEqual(map.goals.flatMap((goal) => goal.agents.map((agent) => agent.mapPosition)));
     expect(
       enrichCatchUp(catchUp, evidence, enriched)
         .subjects.flatMap((subject) => subject.evidenceGroups ?? [])

@@ -520,7 +520,12 @@ const projectUniverseMap = (
   now: number,
   includeArchived = false,
 ): UniverseMapProjection => {
-  const commandCentre = projectCommandCentre(state, now, includeArchived);
+  return mapFromCommandCentre(projectCommandCentre(state, now, includeArchived));
+};
+
+export const mapFromCommandCentre = (
+  commandCentre: CommandCentreProjection,
+): UniverseMapProjection => {
   const mapGoals = commandCentre.goals.map((goal) => {
     const mapPosition = goal.mapPosition ?? defaultGoalMapPosition(goal.id);
     const satellitePositions = agentSatellitePositions(
@@ -556,7 +561,7 @@ const projectUniverseMap = (
   }));
   return {
     kind: "universe-map",
-    generatedAt: now,
+    generatedAt: commandCentre.generatedAt,
     host: commandCentre.host,
     attention: commandCentre.attention,
     goals: mapGoals,

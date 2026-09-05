@@ -250,6 +250,12 @@ observations.
 
 Renderers consume projections; they do not reproduce domain rules.
 
+Portfolio assembly builds Command Centre once and derives the base Map from
+that view. Provider evidence is fused once into Command Centre; Map reuses its
+enriched Agent views, attention and counts while retaining base spatial order
+and positions. Catch-up retains its own historical selection and base attention
+evaluation, then consumes the enriched Command Centre for provider evidence.
+
 The command-centre projection retains archived Goals as context containers only
 for unresolved execution exceptions (live, conflict, or unknown with a retained
 execution reference), including archived Agents. Atlas, code-context lenses,
@@ -286,6 +292,16 @@ concurrent changes, derives each affected portfolio once, and fans cached
 complete replacements to bounded SSE subscribers. Initial and reconnect
 snapshots repair missed process-local events. Projection schemas remain
 transport-neutral and renderers do not replay domain events.
+
+The browser uses the SSE snapshot as its primary bootstrap rather than issuing
+parallel REST bootstrap requests. A five-second bootstrap deadline, stream
+errors and malformed events trigger REST recovery, limited to once per thirty
+seconds. Disconnected streams and incomplete baselines also receive periodic
+recovery attempts. Partial events do not cancel baseline recovery; REST fills
+missing state without replacing newer pending-launch events or portfolio data.
+Command responses and recovery requests retain ordering guards. A new stream
+epoch invalidates old recovery requests and resets portfolio timestamp ordering
+only when portfolio data arrives, not when a pending-only event arrives first.
 
 `web/src/` owns presentation-only state: selection, viewport, zoom, active lens,
 theme, dialogs and terminal tabs. It renders native SVG/CSS and xterm.js. It

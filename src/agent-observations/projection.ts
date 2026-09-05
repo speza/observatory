@@ -355,18 +355,16 @@ export const enrichCommandCentre = (
 
 export const enrichMap = (
   projection: UniverseMapProjection,
-  snapshot: AgentEvidenceSnapshot,
+  commandCentre: CommandCentreProjection,
 ): UniverseMapProjection => {
-  const fusion = fuseAgents(
-    projection.goals,
-    projection.unassigned,
-    projection.attention.items,
-    snapshot,
+  const agentsById = new Map(
+    [...commandCentre.goals.flatMap((goal) => goal.agents), ...commandCentre.unassigned].map(
+      (agent) => [agent.id, agent],
+    ),
   );
-  const items = fusion.items;
   const enrich = <T extends AgentView>(agent: T): T => ({
     ...agent,
-    ...fusion.enrich(agent),
+    ...agentsById.get(agent.id),
   });
   return {
     ...projection,
@@ -380,16 +378,8 @@ export const enrichMap = (
       };
     }),
     unassigned: projection.unassigned.map(enrich),
-    attention: {
-      items,
-      currentCount: items.filter((item) => item.requiresHumanInput).length,
-      uncertaintyCount: items.filter((item) => !item.requiresHumanInput).length,
-    },
-    counts: {
-      ...projection.counts,
-      attention: items.filter((item) => item.requiresHumanInput).length,
-      uncertainty: items.filter((item) => !item.requiresHumanInput).length,
-    },
+    attention: commandCentre.attention,
+    counts: commandCentre.counts,
   };
 };
 

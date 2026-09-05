@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { projectPortfolio } from "../web/portfolio.ts";
 import {
   admitObservedConversationsAndReconcile,
   makeUniverse,
@@ -27,6 +28,28 @@ const observation = (
 });
 
 describe("projections", () => {
+  test("portfolio Map matches the standalone projection without rebuilding Command Centre", () => {
+    const { universe, clock } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("working", "Working", "working"),
+        observation("blocked", "Blocked", "blocked"),
+      ]),
+    );
+    const now = clock.now();
+    const expected = universe.project({ kind: "universe-map", now });
+    if (expected.kind !== "universe-map") throw new Error("Expected Map projection.");
+    const queries: string[] = [];
+    const original = universe.project.bind(universe);
+    universe.project = (query) => {
+      queries.push(query.kind);
+      return original(query);
+    };
+    expect(projectPortfolio(universe, now)?.map).toEqual(expected);
+    expect(queries).toEqual(["command-centre", "catch-up"]);
+  });
+
   test("exposes an ID-backed provider session only in its explicit inspector projection", () => {
     const { universe, clock } = makeUniverse();
     admitObservedConversationsAndReconcile(

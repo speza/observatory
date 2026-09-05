@@ -19,6 +19,61 @@ export interface PortfolioState {
 
 type InternalPortfolioState = Omit<PortfolioState, "accept">;
 
+const STREAM_BOOTSTRAP_TIMEOUT_MS = 5_000;
+const REST_FALLBACK_COOLDOWN_MS = 30_000;
+
+type StreamCursor = { readonly epoch: string; readonly revision: number };
+interface StreamCursorDecision {
+  readonly accept: boolean;
+  readonly epochChanged: boolean;
+}
+interface StreamRecovery {
+  readonly start: () => void;
+  readonly received: () => void;
+  readonly unavailable: () => void;
+  readonly dispose: () => void;
+}
+
+export const advanceStreamCursor = (
+  previous: StreamCursor | undefined,
+  candidate: StreamCursor,
+): StreamCursorDecision => ({
+  accept: previous?.epoch !== candidate.epoch || candidate.revision > previous.revision,
+  epochChanged: previous !== undefined && previous.epoch !== candidate.epoch,
+});
+
+export const createStreamRecovery = (options: {
+  readonly recover: () => void;
+  readonly now?: () => number;
+  readonly setTimer?: (callback: () => void, delay: number) => number;
+  readonly clearTimer?: (timer: number) => void;
+}): StreamRecovery => {
+  const now = options.now ?? Date.now;
+  const setTimer = options.setTimer ?? window.setTimeout.bind(window);
+  const clearTimer = options.clearTimer ?? window.clearTimeout.bind(window);
+  let bootstrapTimer: number | undefined;
+  let lastRecoveryAt = Number.NEGATIVE_INFINITY;
+  const recover = (): void => {
+    const current = now();
+    if (current - lastRecoveryAt < REST_FALLBACK_COOLDOWN_MS) return;
+    lastRecoveryAt = current;
+    options.recover();
+  };
+  const received = (): void => {
+    if (bootstrapTimer === undefined) return;
+    clearTimer(bootstrapTimer);
+    bootstrapTimer = undefined;
+  };
+  return {
+    start: () => {
+      bootstrapTimer = setTimer(recover, STREAM_BOOTSTRAP_TIMEOUT_MS);
+    },
+    received,
+    unavailable: recover,
+    dispose: received,
+  };
+};
+
 export const latestPortfolio = (
   current: PortfolioResponse | undefined,
   candidate: PortfolioResponse,
@@ -29,24 +84,27 @@ export const usePortfolio = (): PortfolioState => {
   const [state, setState] = useState<InternalPortfolioState>({});
   const request = useRef<AbortController | undefined>(undefined);
   const refreshEpoch = useRef(0);
-  const streamCursor = useRef<{ readonly epoch: string; readonly revision: number } | undefined>(
-    undefined,
-  );
+  const streamCursor = useRef<StreamCursor | undefined>(undefined);
+  const needsFullRecovery = useRef(true);
+  const pendingGeneration = useRef(0);
+  const replacePriorEpochPortfolio = useRef(false);
   const accept = useCallback((data: PortfolioResponse): void => {
     refreshEpoch.current += 1;
     request.current?.abort();
+    const replacePortfolio = replacePriorEpochPortfolio.current;
+    replacePriorEpochPortfolio.current = false;
     setState((current) => ({
       ...current,
-      data: latestPortfolio(current.data, data),
+      data: replacePortfolio ? data : latestPortfolio(current.data, data),
       error: undefined,
     }));
   }, []);
 
   useEffect(() => {
     let disposed = false;
-    let lastStreamRecoveryAt = Date.now();
     const refresh = async (): Promise<void> => {
       const epoch = refreshEpoch.current;
+      const pendingAtStart = pendingGeneration.current;
       const controller = new AbortController();
       request.current?.abort();
       request.current = controller;
@@ -56,10 +114,15 @@ export const usePortfolio = (): PortfolioState => {
           fetchPendingLaunches({ signal: controller.signal }),
         ]);
         if (disposed || controller.signal.aborted || epoch !== refreshEpoch.current) return;
+        const acceptPending = pendingAtStart === pendingGeneration.current;
+        const replacePortfolio = replacePriorEpochPortfolio.current;
+        replacePriorEpochPortfolio.current = false;
+        needsFullRecovery.current = false;
+        recovery.received();
         setState((current) => ({
           ...current,
-          data: latestPortfolio(current.data, data),
-          pendingLaunches: pending.launches,
+          data: replacePortfolio ? data : latestPortfolio(current.data, data),
+          pendingLaunches: acceptPending ? pending.launches : current.pendingLaunches,
           error: undefined,
         }));
       } catch (error) {
@@ -73,20 +136,35 @@ export const usePortfolio = (): PortfolioState => {
       }
     };
 
+    const recovery = createStreamRecovery({ recover: () => void refresh() });
+
     const events = new EventSource(projectionEventsUrl());
     const apply = (message: Event): void => {
       if (!(message instanceof MessageEvent)) return;
       try {
         const event = decodeBrowserProjectionEvent(message.data);
         const previous = streamCursor.current;
-        if (previous?.epoch === event.epoch && event.revision <= previous.revision) return;
-        const epochChanged = previous !== undefined && previous.epoch !== event.epoch;
+        const cursor = advanceStreamCursor(previous, event);
+        if (!cursor.accept) return;
         streamCursor.current = { epoch: event.epoch, revision: event.revision };
-        refreshEpoch.current += 1;
-        request.current?.abort();
+        if (cursor.epochChanged) {
+          needsFullRecovery.current = true;
+          replacePriorEpochPortfolio.current = true;
+          refreshEpoch.current += 1;
+          request.current?.abort();
+        }
+        const replacePortfolio = replacePriorEpochPortfolio.current;
+        if (event.kind !== "pending-launches-replaced") replacePriorEpochPortfolio.current = false;
+        if (event.kind !== "portfolio-replaced") pendingGeneration.current += 1;
         if (event.kind === "snapshot") {
+          needsFullRecovery.current = false;
+          recovery.received();
+          refreshEpoch.current += 1;
+          request.current?.abort();
           setState((current) => ({
-            data: epochChanged ? event.portfolio : latestPortfolio(current.data, event.portfolio),
+            data: replacePortfolio
+              ? event.portfolio
+              : latestPortfolio(current.data, event.portfolio),
             pendingLaunches: event.pendingLaunches,
             affected: event.affected,
             affectedAll: event.affectedAll,
@@ -94,7 +172,9 @@ export const usePortfolio = (): PortfolioState => {
         } else if (event.kind === "portfolio-replaced") {
           setState((current) => ({
             ...current,
-            data: latestPortfolio(current.data, event.portfolio),
+            data: replacePortfolio
+              ? event.portfolio
+              : latestPortfolio(current.data, event.portfolio),
             affected: event.affected,
             affectedAll: event.affectedAll,
             error: undefined,
@@ -110,6 +190,8 @@ export const usePortfolio = (): PortfolioState => {
         }
       } catch {
         // A malformed notification cannot replace the last valid projection.
+        needsFullRecovery.current = true;
+        recovery.unavailable();
       }
     };
     events.addEventListener("snapshot", apply);
@@ -121,23 +203,22 @@ export const usePortfolio = (): PortfolioState => {
     events.addEventListener("error", () => {
       if (disposed) return;
       setState((current) => ({ ...current, error: "Live updates disconnected; retrying." }));
-      if (Date.now() - lastStreamRecoveryAt >= 30_000) {
-        lastStreamRecoveryAt = Date.now();
-        void refresh();
-      }
+      recovery.unavailable();
     });
 
-    void refresh();
+    recovery.start();
     const safetyTimer = window.setInterval(() => {
-      if (events.readyState !== EventSource.OPEN) {
-        lastStreamRecoveryAt = Date.now();
-        void refresh();
-      }
+      if (needsFullRecovery.current || events.readyState !== EventSource.OPEN)
+        recovery.unavailable();
     }, 30_000);
     const refreshWhenVisible = (): void => {
-      if (document.visibilityState === "visible") void refresh();
+      if (
+        document.visibilityState === "visible" &&
+        (needsFullRecovery.current || events.readyState !== EventSource.OPEN)
+      )
+        recovery.unavailable();
     };
-    const refreshWhenOnline = (): void => void refresh();
+    const refreshWhenOnline = (): void => recovery.unavailable();
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("online", refreshWhenOnline);
     return () => {
@@ -145,6 +226,7 @@ export const usePortfolio = (): PortfolioState => {
       refreshEpoch.current += 1;
       request.current?.abort();
       events.close();
+      recovery.dispose();
       window.clearInterval(safetyTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("online", refreshWhenOnline);

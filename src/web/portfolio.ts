@@ -1,5 +1,6 @@
 import type { AgentObservationModule } from "../agent-observations/types.ts";
 import { enrichCatchUp, enrichCommandCentre, enrichMap } from "../agent-observations/projection.ts";
+import { mapFromCommandCentre } from "../projection/projection.ts";
 import type {
   CatchUpProjection,
   CommandCentreProjection,
@@ -18,20 +19,15 @@ export const projectPortfolio = (
   now: number,
   agentObservations?: AgentObservationModule,
 ): PortfolioResponse | undefined => {
-  const map = universe.project({ kind: "universe-map", now });
   const commandCentre = universe.project({ kind: "command-centre", now });
   const catchUp = universe.project({ kind: "catch-up", now });
-  if (
-    map.kind !== "universe-map" ||
-    commandCentre.kind !== "command-centre" ||
-    catchUp.kind !== "catch-up"
-  )
-    return undefined;
+  if (commandCentre.kind !== "command-centre" || catchUp.kind !== "catch-up") return undefined;
+  const map = mapFromCommandCentre(commandCentre);
   if (!agentObservations) return { map, commandCentre, catchUp };
   const evidence = agentObservations.snapshot();
   const enrichedCommandCentre = enrichCommandCentre(commandCentre, evidence);
   return {
-    map: enrichMap(map, evidence),
+    map: enrichMap(map, enrichedCommandCentre),
     commandCentre: enrichedCommandCentre,
     catchUp: enrichCatchUp(catchUp, evidence, enrichedCommandCentre),
   };
