@@ -283,8 +283,10 @@ data channel. Browser mutation additionally requires JSON, an explicit command
 header and an allow-list of commands. The provider-observation ingress is a
 separate POST-only, size-bounded interface authenticated by a user-owned bearer
 token; it accepts no browser credentials or CORS. Host-backed launch,
-closeout and terminal actions use separate typed gateways rather than pretending
-they are synchronous Universe commands.
+closeout and terminal actions use separate typed endpoints rather than pretending
+they are synchronous Universe commands. The closeout endpoint decodes its bounded
+request and runs the closeout coordinator's Effect directly at the HTTP edge;
+launch and terminal gateways own their additional transport behavior.
 
 The `ProjectionPublisher` subscribes to typed post-persistence events from
 Universe and the provider-observation and launch coordinators. It batches
@@ -299,13 +301,47 @@ errors and malformed events trigger REST recovery, limited to once per thirty
 seconds. Disconnected streams and incomplete baselines also receive periodic
 recovery attempts. Partial events do not cancel baseline recovery; REST fills
 missing state without replacing newer pending-launch events or portfolio data.
-Command responses and recovery requests retain ordering guards. A new stream
-epoch invalidates old recovery requests and resets portfolio timestamp ordering
-only when portfolio data arrives, not when a pending-only event arrives first.
+HTTP portfolio reads and all mutation replies containing portfolios use the same
+publisher epoch/revision as SSE. A synchronous capture refreshes both portfolio
+and pending launches, publishes the complete baseline and returns its cursor;
+failed capture returns an error, never stale state stamped with a new revision.
+Generation timestamps are display facts, not ordering keys. The browser tracks
+revision independently for each replacement slice, so an older complete baseline
+can fill a missing slice without overwriting a newer partial replacement.
+
+SSE and guarded REST recovery can establish a new process epoch. This clears both
+slices, invalidates in-flight recovery and retires the previous epoch; late
+responses cannot return to it. Every accepted epoch adoption, including the first
+baseline, synchronously advances a shared transport generation, aborts old REST
+requests and closes/replaces EventSource. Superseded SSE callbacks are inert before
+decoding or recovery bookkeeping, including snapshots from epochs never previously
+observed. Same-epoch updates neither rotate streams nor abort baseline recovery.
+This fencing assumes the single-authority loopback restart topology: newly opened
+transports reach the current process. Overlapping live replicas would require
+authoritative incarnation fencing instead of opaque process UUIDs.
+
+Mutation replies cannot switch an established epoch (opaque UUIDs have no
+chronological ordering); reconnect/recovery supplies
+the new baseline instead. Request abort and generation checks protect recovery
+across epoch changes and unmount, while same-epoch partial updates do not cancel
+baseline recovery. Equal revisions are duplicates, regardless of timestamps.
+
+`usePortfolio` is the sole browser owner of pending launches. Launch replies
+reconcile their complete, revisioned pending list through the same path rather
+than inserting the individual operation result. Late replies therefore cannot
+resurrect a resolved launch. App owns only dismissed IDs and terminal/dialog
+presentation. The standalone pending-launch endpoint remains an operation query,
+not a source for browser portfolio reconciliation.
 
 `web/src/` owns presentation-only state: selection, viewport, zoom, active lens,
 theme, dialogs and terminal tabs. It renders native SVG/CSS and xterm.js. It
 never reads SQLite or concrete host/provider protocols.
+
+`App` retains navigation, selection and layout orchestration. Search query,
+results and request cancellation belong to `search/useSearch`; inspector
+projection loading, selection resets and affected-subject invalidation belong
+to `inspector/useInspector`. Commands and retry actions explicitly refresh the
+inspector through the hook, retaining its last projection during refresh.
 
 ## Identity and reconciliation
 

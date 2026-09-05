@@ -228,6 +228,7 @@ const program = Effect.scoped(
       onError: (message) => console.error(message),
     });
     const api = new ObservatoryWebApi({
+      projectionPublisher,
       universe: runtime.universe,
       clock: runtime.clock,
       allowedOrigin,

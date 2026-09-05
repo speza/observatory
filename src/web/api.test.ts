@@ -1009,6 +1009,40 @@ describe("ObservatoryWebApi", () => {
       conversations,
     });
 
+    await Promise.all(
+      ["{", JSON.stringify({ agentIds: [] })].map(async (encoded) => {
+        const invalid = await api.fetch(
+          new Request("http://localhost/api/closeout/close", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+              "x-ao-command": "1",
+            },
+            body: encoded,
+          }),
+        );
+        expect(invalid.status).toBe(400);
+        expect(await invalid.json()).toEqual({
+          error: "Closeout request does not match the command contract.",
+        });
+      }),
+    );
+    const oversized = await api.fetch(
+      new Request("http://localhost/api/closeout/close", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: " ".repeat(16_385),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "Closeout request is too large." });
+    expect(canonicalHostObservations).toBe(0);
+
     const response = await api.fetch(
       new Request("http://localhost/api/closeout/close", {
         method: "POST",

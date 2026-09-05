@@ -13,7 +13,9 @@ import type { AgentRepositoryStatusReader } from "../repositories/types.ts";
 import type { PluginRegistry } from "../plugins/registry.ts";
 import type { ConversationTrackerModule } from "../conversations/types.ts";
 import { WebCommandError, decodeWebCommand } from "./commands.ts";
-import { WebLaunchError, WebLaunchGateway } from "./launch.ts";
+import { WebLaunchError, WebLaunchGateway, pendingLaunchView } from "./launch.ts";
+import { ProjectionPublisher } from "./projection-publisher.ts";
+import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import type {
   WebCommandResponse,
   WebCloseoutResponse,
@@ -31,6 +33,7 @@ import type {
   WebPluginStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
+  WebPortfolioResponse,
 } from "./protocol.ts";
 import {
   WebTerminalError,
@@ -38,7 +41,8 @@ import {
   type WebTerminalSocketConnection,
 } from "./terminal.ts";
 import { createAgentCloseoutCoordinator } from "../agent-closeout/coordinator.ts";
-import { WebCloseoutError, WebCloseoutGateway } from "./closeout.ts";
+import type { AgentCloseoutCoordinator } from "../agent-closeout/types.ts";
+import { WebCloseoutError, decodeWebCloseoutRequest } from "./closeout.ts";
 import type { AgentObservationModule } from "../agent-observations/types.ts";
 import { enrichInspector } from "../agent-observations/projection.ts";
 import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
@@ -92,6 +96,7 @@ const targetType = (value: string | null): "goal" | "agent" | undefined => {
 };
 
 export interface ObservatoryWebApiOptions {
+  readonly projectionPublisher?: ProjectionPublisher;
   readonly universe: Universe;
   readonly clock: Clock;
   readonly allowedOrigin?: string;
@@ -108,6 +113,7 @@ export interface ObservatoryWebApiOptions {
 }
 
 export class ObservatoryWebApi {
+  private readonly projectionPublisher: ProjectionPublisher;
   private readonly universe: Universe;
   private readonly clock: Clock;
   private readonly allowedOrigin: string;
@@ -118,9 +124,10 @@ export class ObservatoryWebApi {
   private readonly workspaceReview: WorkspaceReviewReader | undefined;
   private readonly terminals: WebTerminalGateway | undefined;
   private readonly launch: WebLaunchGateway | undefined;
-  private readonly closeout: WebCloseoutGateway | undefined;
+  private readonly closeout: AgentCloseoutCoordinator | undefined;
 
   constructor({
+    projectionPublisher,
     universe,
     clock,
     allowedOrigin = "http://127.0.0.1:4310",
@@ -143,18 +150,29 @@ export class ObservatoryWebApi {
     this.terminals = host ? new WebTerminalGateway(universe, host, launch?.coordinator) : undefined;
     this.closeout =
       host && conversations
-        ? new WebCloseoutGateway(
-            createAgentCloseoutCoordinator({
-              universe,
-              host,
-              observeHost: conversations.observeHost.bind(conversations),
-            }),
-          )
+        ? createAgentCloseoutCoordinator({
+            universe,
+            host,
+            observeHost: conversations.observeHost.bind(conversations),
+          })
         : undefined;
     this.launch =
       host && launch && plugins
         ? new WebLaunchGateway(universe, plugins, launch.workspace, launch.coordinator)
         : undefined;
+    this.projectionPublisher =
+      projectionPublisher ??
+      new ProjectionPublisher({
+        events: new ControlPlaneEventHub(),
+        projectPortfolio: () => {
+          const portfolio = projectPortfolio(universe, clock.now(), agentObservations);
+          if (!portfolio) throw new Error("Projection contract mismatch.");
+          return portfolio;
+        },
+        pendingLaunches: () => launch?.coordinator.pendingLaunches().map(pendingLaunchView) ?? [],
+        now: () => clock.now(),
+        allowedOrigin,
+      });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -176,8 +194,10 @@ export class ObservatoryWebApi {
       const rejected = this.rejectMutation(request);
       if (rejected) return rejected;
       try {
-        const result = await this.closeout.closeAndArchive(await request.text());
-        const portfolio = this.portfolio(this.clock.now());
+        const result = await Effect.runPromise(
+          this.closeout.closeAndArchiveMany(decodeWebCloseoutRequest(await request.text())),
+        );
+        const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebCloseoutResponse);
       } catch (error) {
@@ -218,7 +238,7 @@ export class ObservatoryWebApi {
               500,
             );
           }
-        const portfolio = this.portfolio(this.clock.now());
+        const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebCommandResponse);
       } catch (error) {
@@ -230,7 +250,7 @@ export class ObservatoryWebApi {
     if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
 
     if (url.pathname === "/api/portfolio") {
-      const portfolio = this.portfolio(now);
+      const portfolio = this.portfolio();
       return portfolio instanceof Response ? portfolio : json(portfolio);
     }
 
@@ -356,15 +376,17 @@ export class ObservatoryWebApi {
   }
 
   async close(): Promise<void> {
+    this.projectionPublisher.close();
     await this.terminals?.closeAll();
     if (this.plugins) await Effect.runPromise(this.plugins.close());
   }
 
-  private portfolio(now: number): PortfolioResponse | Response {
-    return (
-      projectPortfolio(this.universe, now, this.agentObservations) ??
-      json({ error: "Projection contract mismatch." }, 500)
-    );
+  private portfolio(): WebPortfolioResponse | Response {
+    try {
+      return this.projectionPublisher.capture();
+    } catch {
+      return json({ error: "Projection contract mismatch." }, 500);
+    }
   }
 
   private async terminal(request: Request, url: URL): Promise<Response> {
@@ -431,7 +453,7 @@ export class ObservatoryWebApi {
         const rejected = this.rejectMutation(request);
         if (rejected) return rejected;
         const result = await this.launch.start(await request.text());
-        const portfolio = this.portfolio(this.clock.now());
+        const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({
           result,
@@ -444,7 +466,7 @@ export class ObservatoryWebApi {
         const rejected = this.rejectMutation(request);
         if (rejected) return rejected;
         const result = await this.launch.resume(await request.text());
-        const portfolio = this.portfolio(this.clock.now());
+        const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({ result, portfolio } satisfies WebStartAgentResponse);
       }
@@ -490,7 +512,7 @@ export class ObservatoryWebApi {
           return json({ error: "A conversation handle is required." }, 400);
         const goalId = values.goalId?.trim() || undefined;
         const added = this.conversations.add(values.handle, goalId);
-        const portfolio = this.portfolio(this.clock.now());
+        const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({ ...added, portfolio } satisfies WebAddConversationResponse);
       } catch (error) {

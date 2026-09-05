@@ -1,11 +1,10 @@
 import type { InspectorProjection, SearchProjection } from "../../../src/projection/types.ts";
-import type { PortfolioResponse } from "../../../src/web/api.ts";
 import type {
+  WebPortfolioResponse,
   WebCommand,
   WebCommandResponse,
   WebCloseoutResponse,
   WebLaunchOptionsResponse,
-  WebPendingLaunchesResponse,
   WebStartAgentRequest,
   WebStartAgentResponse,
   WebResumeAgentRequest,
@@ -28,10 +27,9 @@ import { Schema } from "effect";
 import {
   CommandResponseSchema,
   InspectorProjectionSchema,
-  PortfolioResponseSchema,
+  WebPortfolioResponseSchema,
   SearchProjectionSchema,
   StartAgentResponseSchema,
-  PendingLaunchesResponseSchema,
   CloseoutResponseSchema,
   WorkspaceReviewFileResponseSchema,
   WorkspaceReviewResponseSchema,
@@ -125,7 +123,7 @@ const ConversationHistorySchema: Schema.Schema<WebConversationHistoryResponse> =
 const AddConversationSchema = Schema.Struct({
   agentId: Schema.String,
   goalId: Schema.optional(Schema.String),
-  portfolio: PortfolioResponseSchema,
+  portfolio: WebPortfolioResponseSchema,
 });
 
 const responseFor = async (path: string, signal?: AbortSignal): Promise<Response> => {
@@ -139,9 +137,9 @@ export const projectionEventsUrl = (): string => "/api/projections/events";
 export const decodeBrowserProjectionEvent = (value: string): BrowserProjectionEvent =>
   Schema.decodeUnknownSync(Schema.parseJson(BrowserProjectionEventSchema))(value);
 
-export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioResponse> => {
+export const fetchPortfolio = async (signal?: AbortSignal): Promise<WebPortfolioResponse> => {
   const response = await responseFor("/api/portfolio", signal);
-  return Schema.decodeUnknownSync(PortfolioResponseSchema)(await response.json());
+  return Schema.decodeUnknownSync(WebPortfolioResponseSchema)(await response.json());
 };
 
 export const fetchConversationHistory = async (options?: {
@@ -309,17 +307,6 @@ export const startWebAgent = async (
   if (!response.ok)
     throw new Error(await errorMessage(response, `Agent launch failed (${response.status}).`));
   return Schema.decodeUnknownSync(StartAgentResponseSchema)(await response.json());
-};
-
-export const fetchPendingLaunches = async (options?: {
-  readonly refresh?: boolean;
-  readonly signal?: AbortSignal;
-}): Promise<WebPendingLaunchesResponse> => {
-  const response = await responseFor(
-    `/api/launch/pending${options?.refresh ? "?refresh=1" : ""}`,
-    options?.signal,
-  );
-  return Schema.decodeUnknownSync(PendingLaunchesResponseSchema)(await response.json());
 };
 
 export const resumeWebAgent = async (

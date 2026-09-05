@@ -299,13 +299,19 @@ const PendingLaunch = Schema.Struct({
   goalId: Schema.optional(Schema.String),
   message: Schema.String,
 });
+export const WebPortfolioResponseSchema = Schema.Struct({
+  ...PortfolioResponseSchema.fields,
+  epoch: Schema.String,
+  revision: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
+  pendingLaunches: Schema.Array(PendingLaunch),
+});
 const RendererSubject = Schema.Struct({
   type: Schema.Literal("system", "goal", "agent"),
   id: Schema.String,
 });
 const ProjectionEventFields = {
   epoch: Schema.String,
-  revision: Schema.Number,
+  revision: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
   generatedAt: Schema.Number,
   affected: Schema.Array(RendererSubject),
   affectedAll: Schema.Boolean,
@@ -375,7 +381,7 @@ const CommandResult = Schema.Struct({
 });
 export const CommandResponseSchema = Schema.Struct({
   result: CommandResult,
-  portfolio: PortfolioResponseSchema,
+  portfolio: WebPortfolioResponseSchema,
 });
 
 const PreparedWorkspace = Schema.Struct({
@@ -397,12 +403,8 @@ const StartAgentResult = Schema.Struct({
 export const PendingLaunchSchema = PendingLaunch;
 export const StartAgentResponseSchema = Schema.Struct({
   result: StartAgentResult,
-  portfolio: PortfolioResponseSchema,
+  portfolio: WebPortfolioResponseSchema,
   pendingLaunch: Schema.optional(PendingLaunchSchema),
-});
-export const PendingLaunchesResponseSchema = Schema.Struct({
-  kind: Schema.Literal("pending-launches"),
-  launches: Schema.Array(PendingLaunchSchema),
 });
 
 const AgentCloseoutResult = Schema.Struct({
@@ -423,7 +425,7 @@ export const CloseoutResponseSchema = Schema.Struct({
     results: Schema.Array(AgentCloseoutResult),
     message: Schema.String,
   }),
-  portfolio: PortfolioResponseSchema,
+  portfolio: WebPortfolioResponseSchema,
 });
 
 const DiffFileContent = Schema.Struct({

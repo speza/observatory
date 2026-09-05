@@ -63,9 +63,15 @@ export type WebCommand =
       readonly evidenceThroughSequence: number;
     };
 
+export interface WebPortfolioResponse extends PortfolioResponse {
+  readonly epoch: string;
+  readonly revision: number;
+  readonly pendingLaunches: readonly WebPendingLaunch[];
+}
+
 export interface WebCommandResponse {
   readonly result: CommandResult;
-  readonly portfolio: PortfolioResponse;
+  readonly portfolio: WebPortfolioResponse;
 }
 
 export interface WebCloseoutRequest {
@@ -74,7 +80,7 @@ export interface WebCloseoutRequest {
 
 export interface WebCloseoutResponse {
   readonly result: AgentCloseoutBatchResult;
-  readonly portfolio: PortfolioResponse;
+  readonly portfolio: WebPortfolioResponse;
 }
 
 export interface WebLaunchGoal {
@@ -105,7 +111,7 @@ export interface WebStartAgentRequest {
 
 export interface WebStartAgentResponse {
   readonly result: StartAgentResult;
-  readonly portfolio: PortfolioResponse;
+  readonly portfolio: WebPortfolioResponse;
   readonly pendingLaunch?: WebPendingLaunch;
 }
 
@@ -191,7 +197,7 @@ export interface WebConversationHistoryResponse {
 export interface WebAddConversationResponse {
   readonly agentId: string;
   readonly goalId?: string;
-  readonly portfolio: PortfolioResponse;
+  readonly portfolio: WebPortfolioResponse;
 }
 
 export interface WebTerminalOpenResponse {

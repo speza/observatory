@@ -1,5 +1,4 @@
-import { Effect, Schema } from "effect";
-import type { AgentCloseoutCoordinator } from "../agent-closeout/types.ts";
+import { Schema } from "effect";
 
 const MAX_REQUEST_BYTES = 16_384;
 const Id = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160));
@@ -16,7 +15,7 @@ export class WebCloseoutError extends Error {
   }
 }
 
-const decodeRequest = (encoded: string): readonly string[] => {
+export const decodeWebCloseoutRequest = (encoded: string): readonly string[] => {
   if (encoded.length > MAX_REQUEST_BYTES)
     throw new WebCloseoutError("Closeout request is too large.", 413);
   try {
@@ -25,11 +24,3 @@ const decodeRequest = (encoded: string): readonly string[] => {
     throw new WebCloseoutError("Closeout request does not match the command contract.", 400);
   }
 };
-
-export class WebCloseoutGateway {
-  constructor(private readonly coordinator: AgentCloseoutCoordinator) {}
-
-  closeAndArchive(encoded: string) {
-    return Effect.runPromise(this.coordinator.closeAndArchiveMany(decodeRequest(encoded)));
-  }
-}

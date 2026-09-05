@@ -5,6 +5,7 @@ import type {
   BrowserProjectionSnapshot,
   RendererSubject,
   WebPendingLaunch,
+  WebPortfolioResponse,
 } from "./protocol.ts";
 import { isAllowedWebRequest } from "./security.ts";
 
@@ -114,6 +115,22 @@ export class ProjectionPublisher {
       pendingLaunches: this.launches,
       affected: [],
       affectedAll: false,
+    };
+  }
+
+  /** HTTP reads and mutation replies publish one atomic, fully refreshed baseline. */
+  capture(): WebPortfolioResponse {
+    if (this.closed) throw new Error("Projection delivery is closed.");
+    const previousRevision = this.revision;
+    this.pendingPortfolio = true;
+    this.pendingLaunches = true;
+    this.flush();
+    if (this.revision === previousRevision) throw new Error("Projection capture failed.");
+    return {
+      ...this.portfolio,
+      epoch: this.epoch,
+      revision: this.revision,
+      pendingLaunches: this.launches,
     };
   }
 

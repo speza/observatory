@@ -3,6 +3,8 @@ import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import { FixedClock, makeUniverse } from "../universe/test-support.ts";
 import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
+import { ObservatoryWebApi } from "./api.ts";
+import type { WebPortfolioResponse, WebCommandResponse } from "./protocol.ts";
 
 const portfolio = (generatedAt: number): PortfolioResponse => {
   const { universe } = makeUniverse({ clock: new FixedClock(generatedAt) });
@@ -29,6 +31,76 @@ const eventData = (
 };
 
 describe("projection publisher", () => {
+  test("HTTP reads and commands share the SSE cursor even when the clock does not advance", async () => {
+    const clock = new FixedClock(1_000);
+    const { universe } = makeUniverse({ clock });
+    const publisher = new ProjectionPublisher({
+      events: new ControlPlaneEventHub(),
+      projectPortfolio: () => projectPortfolio(universe, clock.now())!,
+      pendingLaunches: () => [],
+      now: () => clock.now(),
+      allowedOrigin: "http://127.0.0.1:4310",
+    });
+    const api = new ObservatoryWebApi({ universe, clock, projectionPublisher: publisher });
+    const first: WebPortfolioResponse = await (
+      await api.fetch(new Request("http://127.0.0.1:4310/api/portfolio"))
+    ).json();
+    const command: WebCommandResponse = await (
+      await api.fetch(
+        new Request("http://127.0.0.1:4310/api/commands", {
+          method: "POST",
+          headers: {
+            origin: "http://127.0.0.1:4310",
+            "content-type": "application/json",
+            "x-ao-command": "1",
+          },
+          body: JSON.stringify({ type: "CreateSystem", title: "Ordered" }),
+        }),
+      )
+    ).json();
+    expect(command.portfolio.epoch).toBe(first.epoch);
+    expect(command.portfolio.revision).toBeGreaterThan(first.revision);
+    expect(command.portfolio.map.generatedAt).toBe(first.map.generatedAt);
+    expect(command.portfolio.commandCentre.systems).toHaveLength(1);
+    const reader = publisher.stream(request()).body!.getReader();
+    expect(eventData((await reader.read()).value!).revision).toBe(command.portfolio.revision);
+    expect(publisher.current().portfolio).toEqual({
+      map: command.portfolio.map,
+      commandCentre: command.portfolio.commandCentre,
+      catchUp: command.portfolio.catchUp,
+    });
+    await reader.cancel();
+    await api.close();
+  });
+
+  test("capture replaces pending launches atomically and failed capture cannot stamp stale data", () => {
+    let pending = true;
+    let fail = false;
+    const publisher = new ProjectionPublisher({
+      events: new ControlPlaneEventHub(),
+      projectPortfolio: () => {
+        if (fail) throw new Error("unavailable");
+        return portfolio(1);
+      },
+      pendingLaunches: () =>
+        pending
+          ? [{ requestId: "launch", harnessId: "mock", displayName: "Pending", message: "Waiting" }]
+          : [],
+      now: () => 1,
+      allowedOrigin: "http://127.0.0.1:4310",
+    });
+    const first = publisher.capture();
+    pending = false;
+    const second = publisher.capture();
+    expect(first.pendingLaunches).toHaveLength(1);
+    expect(second.pendingLaunches).toEqual([]);
+    expect(second.revision).toBe(first.revision + 1);
+    fail = true;
+    expect(() => publisher.capture()).toThrow("Projection capture failed");
+    expect(publisher.current().revision).toBe(second.revision);
+    publisher.close();
+  });
+
   test("batches parallel control-plane changes into one shared projection replacement", async () => {
     const hub = new ControlPlaneEventHub();
     let calculations = 0;

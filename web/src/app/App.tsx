@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentView,
   CommandCentreProjection,
-  InspectorProjection,
-  SearchResult,
   SystemView,
 } from "../../../src/projection/types.ts";
 import type {
@@ -15,9 +13,7 @@ import type { ConversationHistoryView } from "../../../src/conversations/types.t
 import {
   closeAndArchiveAgents,
   executeCommand,
-  fetchInspector,
   fetchConversationHistory,
-  fetchSearch,
   resumeWebAgent,
   addConversation,
 } from "../api/client.ts";
@@ -47,6 +43,8 @@ import { scopePortfolio } from "../systems/scopedPortfolio.ts";
 import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "../systems/systemScope.ts";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "../workspace-review/WorkspaceReview.tsx";
+import { useSearch } from "../search/useSearch.ts";
+import { useInspector } from "../inspector/useInspector.ts";
 
 type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
 
@@ -75,10 +73,13 @@ export const App = (): React.JSX.Element => {
   const [selection, setSelection] = useState<Selection>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<readonly SearchResult[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string>();
+  const {
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    results: searchResults,
+    loading: searchLoading,
+    error: searchError,
+  } = useSearch(searchOpen);
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
@@ -89,9 +90,11 @@ export const App = (): React.JSX.Element => {
   const [pullRequestUrls, setPullRequestUrls] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
   );
-  const [inspector, setInspector] = useState<InspectorProjection>();
-  const [inspectorError, setInspectorError] = useState<string>();
-  const [inspectorRevision, setInspectorRevision] = useState(0);
+  const {
+    projection: inspector,
+    error: inspectorError,
+    refresh: refreshInspector,
+  } = useInspector(selection, portfolio.affected, portfolio.affectedAll);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
   const [systemDialogOpen, setSystemDialogOpen] = useState(false);
   const [editingSystem, setEditingSystem] = useState<SystemView>();
@@ -101,54 +104,13 @@ export const App = (): React.JSX.Element => {
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
-  const [pendingLaunches, setPendingLaunches] = useState<readonly WebPendingLaunch[]>([]);
+  const pendingLaunches = portfolio.pendingLaunches;
   const [dismissedPendingLaunches, setDismissedPendingLaunches] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [conversationHistory, setConversationHistory] = useState<
     readonly ConversationHistoryView[]
   >([]);
-
-  useEffect(() => {
-    if (portfolio.pendingLaunches) setPendingLaunches(portfolio.pendingLaunches);
-  }, [portfolio.pendingLaunches]);
-
-  useEffect(() => {
-    if (
-      selection &&
-      (portfolio.affectedAll ||
-        portfolio.affected?.some(
-          (subject) => subject.type === selection.type && subject.id === selection.id,
-        ))
-    )
-      setInspectorRevision((value) => value + 1);
-  }, [portfolio.affected, portfolio.affectedAll, selection]);
-
-  useEffect(() => {
-    const query = searchQuery.trim();
-    if (!searchOpen || !query) {
-      setSearchResults([]);
-      setSearchLoading(false);
-      setSearchError(undefined);
-      return;
-    }
-    const controller = new AbortController();
-    setSearchResults([]);
-    setSearchLoading(true);
-    setSearchError(undefined);
-    void fetchSearch(query, controller.signal)
-      .then((projection) => setSearchResults(projection.results))
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setSearchResults([]);
-          setSearchError(error instanceof Error ? error.message : "Search unavailable.");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSearchLoading(false);
-      });
-    return () => controller.abort();
-  }, [searchOpen, searchQuery]);
 
   useEffect(() => {
     if (!conversationHistoryOpen) return;
@@ -177,24 +139,6 @@ export const App = (): React.JSX.Element => {
     }
   };
 
-  useEffect(() => {
-    setInspector(undefined);
-    setInspectorError(undefined);
-  }, [selection]);
-
-  useEffect(() => {
-    if (!selection) return;
-    const controller = new AbortController();
-    setInspectorError(undefined);
-    void fetchInspector(selection.type, selection.id, controller.signal)
-      .then(setInspector)
-      .catch((error) => {
-        if (!controller.signal.aborted)
-          setInspectorError(error instanceof Error ? error.message : "Inspector unavailable.");
-      });
-    return () => controller.abort();
-  }, [selection, inspectorRevision]);
-
   const runCommand = async (command: WebCommand): Promise<WebCommandResponse | undefined> => {
     setCommandPending(true);
     setCommandError(undefined);
@@ -203,7 +147,7 @@ export const App = (): React.JSX.Element => {
       portfolio.accept(response.portfolio);
       if (command.type === "AssignGoalToSystem")
         setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
-      setInspectorRevision((value) => value + 1);
+      refreshInspector();
       return response;
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : "Command failed.");
@@ -215,7 +159,8 @@ export const App = (): React.JSX.Element => {
 
   const data = portfolio.data;
   const visiblePendingLaunches = useMemo(
-    () => pendingLaunches.filter((launch) => !dismissedPendingLaunches.has(launch.requestId)),
+    () =>
+      (pendingLaunches ?? []).filter((launch) => !dismissedPendingLaunches.has(launch.requestId)),
     [dismissedPendingLaunches, pendingLaunches],
   );
   const scopedPortfolio = useMemo(
@@ -297,7 +242,7 @@ export const App = (): React.JSX.Element => {
             : "Conversation added without a Goal. Find it in Inbox.",
         );
       }
-      setInspectorRevision((value) => value + 1);
+      refreshInspector();
       return { agentId: added.agentId };
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : "Add conversation failed.");
@@ -313,7 +258,7 @@ export const App = (): React.JSX.Element => {
     try {
       const response = await closeAndArchiveAgents(agentIds);
       portfolio.accept(response.portfolio);
-      setInspectorRevision((value) => value + 1);
+      refreshInspector();
       setLaunchNotice(response.result.message);
       const failures = response.result.results.filter((result) => !result.ok);
       if (failures.length > 0) {
@@ -399,7 +344,7 @@ export const App = (): React.JSX.Element => {
       });
       portfolio.accept(response.portfolio);
       setLaunchNotice(response.result.message);
-      setInspectorRevision((value) => value + 1);
+      refreshInspector();
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : "Agent resume failed.");
     } finally {
@@ -925,7 +870,7 @@ export const App = (): React.JSX.Element => {
             projection={inspector}
             onOpenTerminal={openAgentTerminal}
             onPullRequestChange={recordPullRequest}
-            onRetry={() => setInspectorRevision((value) => value + 1)}
+            onRetry={refreshInspector}
             onReviewChanges={openWorkspaceReview}
             onResume={resumeAgent}
           />
@@ -1048,16 +993,12 @@ export const App = (): React.JSX.Element => {
                 next.delete(pendingLaunch.requestId);
                 return next;
               });
-              setPendingLaunches((current) => [
-                pendingLaunch,
-                ...current.filter((launch) => launch.requestId !== pendingLaunch.requestId),
-              ]);
               setTerminalAgent(undefined);
               setTerminalLaunch(pendingLaunch);
             } else if (response.result.agentId) {
               setSelection({ type: "agent", id: response.result.agentId });
               setSidePanel("inspector");
-              setInspectorRevision((value) => value + 1);
+              refreshInspector();
             } else if (response.result.goalId) {
               setSelection({ type: "goal", id: response.result.goalId });
             }
@@ -1073,7 +1014,7 @@ export const App = (): React.JSX.Element => {
           onAdded={(agentId) => {
             setConversationHistoryOpen(false);
             selectAndFocus({ type: "agent", id: agentId });
-            setInspectorRevision((value) => value + 1);
+            refreshInspector();
           }}
           onClose={() => setConversationHistoryOpen(false)}
           onRefresh={refreshConversationHistory}

@@ -4,6 +4,7 @@ import { FixedClock, makeUniverse } from "../../../src/universe/test-support.ts"
 import {
   BrowserProjectionEventSchema,
   PortfolioResponseSchema,
+  WebPortfolioResponseSchema,
   SearchProjectionSchema,
 } from "./schemas.ts";
 
@@ -24,6 +25,16 @@ const portfolioAt = (generatedAt: number) => {
 const decodePortfolioJson = Schema.decodeUnknownSync(Schema.parseJson(PortfolioResponseSchema));
 
 describe("browser API response schemas", () => {
+  test("HTTP portfolios require and preserve ordering and complete pending state", () => {
+    const decodeJson = Schema.decodeUnknownSync(Schema.parseJson(WebPortfolioResponseSchema));
+    const portfolio = portfolioAt(1_000);
+    expect(() => decodeJson(JSON.stringify(portfolio))).toThrow();
+    const response = { ...portfolio, epoch: "server", revision: 2, pendingLaunches: [] };
+    expect(decodeJson(JSON.stringify(response))).toEqual(response);
+    expect(() => decodeJson(JSON.stringify({ ...response, revision: -1 }))).toThrow();
+    expect(() => decodeJson(JSON.stringify({ ...response, revision: 1.5 }))).toThrow();
+  });
+
   test("decodes a serialized production portfolio with no observed host", () => {
     const decoded = decodePortfolioJson(JSON.stringify(portfolioAt(1_000)));
 
