@@ -1319,6 +1319,18 @@
   text-transform: uppercase;
 }
 
+.review-workspace__review {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.review-workspace__review.has-tabs {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .review-workspace__main {
   min-width: 0;
   min-height: 0;
@@ -1329,6 +1341,129 @@
 
 .review-workspace__main.has-file {
   grid-template-rows: auto minmax(0, 1fr);
+}
+
+.review-file-tabs {
+  min-width: 0;
+  min-height: 37px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--review-line);
+  background: var(--review-bg-deep);
+}
+
+.review-file-tabs__list {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.review-file-tabs__item {
+  min-width: 112px;
+  max-width: 230px;
+  display: flex;
+  flex: 0 1 190px;
+  border-right: 1px solid var(--review-line);
+}
+
+.review-file-tabs__item.is-active {
+  background: var(--review-elevated);
+  box-shadow: inset 0 -2px 0 var(--review-accent);
+}
+
+.review-file-tabs__tab {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--review-muted);
+  cursor: pointer;
+}
+
+.review-file-tabs__tab:hover,
+.review-file-tabs__tab:focus-visible {
+  color: var(--review-text-strong);
+  background: var(--review-hover);
+}
+
+.review-file-tabs__tab[aria-selected="true"] {
+  color: var(--review-text-strong);
+}
+
+.review-file-tabs__identity {
+  min-width: 0;
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  text-align: left;
+}
+
+.review-file-tabs__identity strong,
+.review-file-tabs__identity small {
+  min-width: 0;
+  overflow: hidden;
+  font-family: "DM Mono", ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-file-tabs__identity strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.review-file-tabs__identity small {
+  color: var(--review-dim);
+  font-size: 8px;
+}
+
+.review-file-tabs__state {
+  color: var(--review-warning);
+  font:
+    8px "DM Mono",
+    ui-monospace,
+    monospace;
+  text-transform: uppercase;
+}
+
+.review-file-tabs__item.is-removed .review-file-tabs__state,
+.review-file-tabs__item.is-unavailable .review-file-tabs__state {
+  color: var(--review-accent);
+}
+
+.review-file-tabs__close {
+  width: 25px;
+  flex: 0 0 25px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--review-dim);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.review-file-tabs__close:hover,
+.review-file-tabs__close:focus-visible {
+  color: var(--review-accent-soft);
+  background: color-mix(in srgb, var(--review-accent) 14%, var(--review-panel));
+}
+
+.review-file-tabs__count {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0 8px;
+  color: var(--review-dim);
+  font:
+    8px "DM Mono",
+    ui-monospace,
+    monospace;
 }
 
 .review-files {
@@ -1385,6 +1520,23 @@
   white-space: nowrap;
 }
 
+.review-file-header__state {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--review-warning);
+  font:
+    9px "DM Mono",
+    ui-monospace,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-file-header__state.is-removed,
+.review-file-header__state.is-unavailable {
+  color: var(--review-accent);
+}
+
 .review-file-header .review-workspace__segmented button {
   min-height: 28px;
   padding-inline: 8px;
@@ -1410,6 +1562,13 @@
 .review-workspace__selected-diff .diff-style-root {
   border: 1px solid var(--review-line);
   border-radius: 0;
+}
+
+/* The active file owns both axes so its horizontal scrollbar stays in view. */
+.review-workspace__selected-diff
+  .diff-tailwindcss-wrapper
+  :is(.unified-diff-table-wrapper, .old-diff-table-wrapper, .new-diff-table-wrapper) {
+  overflow: visible !important;
 }
 
 .review-source pre {

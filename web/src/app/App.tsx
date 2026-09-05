@@ -965,6 +965,7 @@ export const App = (): React.JSX.Element => {
       {diffAgent ? (
         <WorkspaceReview
           agent={diffAgent}
+          key={diffAgent.id}
           onClose={() => setDiffAgent(undefined)}
           onTerminalAppearanceChange={(appearance) => setSetting("terminalAppearance", appearance)}
           terminalAppearance={terminalAppearance}

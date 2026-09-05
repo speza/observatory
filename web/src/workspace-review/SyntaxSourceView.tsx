@@ -1,4 +1,5 @@
 import { highlighter } from "@git-diff-view/react";
+import type { Ref, UIEventHandler } from "react";
 import type { WebWorkspaceReviewFileResponse } from "../../../src/web/protocol.ts";
 
 const MAX_HIGHLIGHT_CHARACTERS = 100_000;
@@ -8,9 +9,16 @@ const MAX_RENDERED_SOURCE_LINES = 5_000;
 interface SyntaxSourceViewProps {
   readonly snapshot: WebWorkspaceReviewFileResponse;
   readonly theme: "light" | "dark";
+  readonly scrollRef?: Ref<HTMLDivElement>;
+  readonly onScroll?: UIEventHandler<HTMLDivElement>;
 }
 
-export const SyntaxSourceView = ({ snapshot, theme }: SyntaxSourceViewProps): React.JSX.Element => {
+export const SyntaxSourceView = ({
+  snapshot,
+  theme,
+  scrollRef,
+  onScroll,
+}: SyntaxSourceViewProps): React.JSX.Element => {
   if (snapshot.status !== "available" || snapshot.content === undefined)
     return (
       <div className="review-workspace__empty">
@@ -30,7 +38,13 @@ export const SyntaxSourceView = ({ snapshot, theme }: SyntaxSourceViewProps): Re
       : undefined;
 
   return (
-    <div className="review-source" aria-label={`${snapshot.displayPath} source`} role="region">
+    <div
+      aria-label={`${snapshot.displayPath} ${snapshot.view}`}
+      className="review-source"
+      onScroll={onScroll}
+      ref={scrollRef}
+      role="region"
+    >
       <pre>
         {renderedLines.map((line, index) => (
           <span className="review-source__line" key={`${index}:${line}`}>

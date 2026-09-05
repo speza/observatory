@@ -1,8 +1,8 @@
 # Multi-pane Agent review workspace
 
-Status: initial multi-pane file, source, diff, evidence and terminal slice implemented; ergonomics under iteration
+Status: multi-pane file, source, diff, evidence, terminal and bounded open-file tabs implemented; ergonomics under iteration
 
-Updated: 2026-09-04
+Updated: 2026-09-05
 
 Depends on:
 
@@ -223,9 +223,10 @@ Content search is a separate future decision.
 
 ### Open-file tabs
 
-The pane supports a bounded number of renderer-local tabs. Tabs represent a
-file identity within the current review snapshot, not a durable Observatory
-record. Opening beyond the bound evicts the least-recent unpinned tab.
+The pane supports up to eight renderer-local tabs. Tabs represent a file
+identity within the current review snapshot, not a durable Observatory record.
+Opening a ninth file deterministically evicts the least-recent inactive tab;
+pinning is not part of this slice.
 
 Tabs show filename, change status and stale/unavailable state. Closing a tab does
 not change the repository. Refresh attempts to retain tabs whose file identities
@@ -751,8 +752,8 @@ read a path that the server did not issue, including symlink escapes.
 
 ### Slice 3: review ergonomics
 
-- Add bounded open-file tabs, per-file scroll restoration and previous/next
-  changed navigation.
+- Bounded open-file tabs and per-file mode/scroll restoration are implemented.
+- Add previous/next changed navigation.
 - Add collapsed unchanged context and bounded expansion.
 - Add keyboard tree navigation, pane resizing and responsive drawers.
 - Persist only versioned presentation preferences.

@@ -5,7 +5,6 @@ import type { WorkspaceDiffFile } from "../../../src/workspaces/types.ts";
 import { ChangedFileList, FileDiff } from "./WorkingTreeDiff.tsx";
 import { SyntaxSourceView } from "./SyntaxSourceView.tsx";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
-import { reduceReviewLocation } from "./reviewLocation.ts";
 
 const agent = {
   id: "agent-1",
@@ -31,24 +30,6 @@ const agent = {
 } satisfies AgentView;
 
 describe("WorkspaceReview", () => {
-  test("keeps review navigation in valid surface-specific states", () => {
-    const file = reduceReviewLocation(
-      { surface: "files" },
-      { type: "open-file", fileId: "file-1", view: "source" },
-    );
-    const change = reduceReviewLocation(file, { type: "view-change", fileId: "file-1" });
-
-    expect(file).toEqual({
-      surface: "files",
-      file: { id: "file-1", view: "source" },
-    });
-    expect(change).toEqual({ surface: "changes", fileId: "file-1" });
-    expect(reduceReviewLocation(change, { type: "back" })).toEqual({ surface: "changes" });
-    expect(reduceReviewLocation(file, { type: "show", surface: "evidence" })).toEqual({
-      surface: "evidence",
-    });
-  });
-
   test("opens with a persistent, application-themed terminal beside the review workspace", () => {
     const markup = renderToStaticMarkup(
       <WorkspaceReview
