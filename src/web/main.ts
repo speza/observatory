@@ -3,7 +3,7 @@
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect, Schema } from "effect";
 import { readFile, stat } from "node:fs/promises";
-import { delimiter, extname, join, normalize, resolve } from "node:path";
+import { delimiter, extname, isAbsolute, join, normalize, resolve } from "node:path";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runtime/runtime.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
@@ -26,6 +26,12 @@ import { pendingLaunchView } from "./launch.ts";
 import { projectPortfolio } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
+import {
+  isAuthorizedDesktopRequest,
+  readDesktopSession,
+  writeDesktopReadiness,
+  type DesktopSession,
+} from "./desktop-session.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -43,8 +49,18 @@ const contentTypeFor = (path: string): string => {
   return "application/octet-stream";
 };
 
-const staticRoot = normalize(join(import.meta.dir, "../../web/dist"));
+const sourceRoot = resolve(import.meta.dir, "../..");
+const resourceRoot = (() => {
+  const configured = process.env.AO_RESOURCE_ROOT;
+  if (!configured) return sourceRoot;
+  if (!isAbsolute(configured)) throw new Error("AO_RESOURCE_ROOT must be an absolute path.");
+  return resolve(configured);
+})();
+const staticRoot = normalize(join(resourceRoot, "web/dist"));
 const terminalSocketPath = /^\/api\/terminal\/([^/]+)\/socket$/u;
+const desktopMode = process.env.AO_DESKTOP === "1";
+const desktopContentSecurityPolicy =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 interface TerminalSocketData {
   sessionId: string;
@@ -111,18 +127,32 @@ const staticResponse = async (url: URL): Promise<Response> => {
   if (!(await file.exists())) file = Bun.file(join(staticRoot, "index.html"));
   if (!(await file.exists()))
     return new Response("Build the web client with `bun run build:web`.", { status: 503 });
+  const headers = new Headers({
+    "content-type": contentTypeFor(file.name ?? path),
+    "x-content-type-options": "nosniff",
+  });
+  if (desktopMode) headers.set("content-security-policy", desktopContentSecurityPolicy);
   return new Response(file, {
-    headers: {
-      "content-type": contentTypeFor(file.name ?? path),
-      "x-content-type-options": "nosniff",
-    },
+    headers,
   });
 };
 
 const program = Effect.scoped(
   Effect.gen(function* () {
+    const desktopSession: DesktopSession | undefined = desktopMode
+      ? yield* Effect.tryPromise(() => readDesktopSession())
+      : undefined;
+    if (desktopSession)
+      yield* Effect.forkScoped(
+        Effect.promise(() =>
+          desktopSession.parentClosed.then(() => process.kill(process.pid, "SIGTERM")),
+        ),
+      );
     const events = new ControlPlaneEventHub();
-    const runtime = createObservatoryRuntime(events);
+    const runtime = yield* Effect.acquireRelease(
+      Effect.sync(() => createObservatoryRuntime(events)),
+      (ownedRuntime) => Effect.sync(() => ownedRuntime.close()),
+    );
     const port = positiveIntegerSetting("AO_WEB_PORT", process.env.AO_WEB_PORT, 4310, {
       maximum: 65_535,
     });
@@ -142,10 +172,10 @@ const program = Effect.scoped(
       readPluginConfiguration(process.env.AO_PLUGIN_CONFIG),
     );
     const builtInPlugins = [
-      { path: resolve(import.meta.dir, "../../plugins/agent-harnesses") },
-      { path: resolve(import.meta.dir, "../../plugins/github") },
+      { path: resolve(resourceRoot, "plugins/agent-harnesses") },
+      { path: resolve(resourceRoot, "plugins/github") },
       ...(runtime.useMockHost
-        ? [{ path: resolve(import.meta.dir, "../../plugins/mock-agent-harnesses") }]
+        ? [{ path: resolve(resourceRoot, "plugins/mock-agent-harnesses") }]
         : []),
     ];
     const configuredPaths = new Set(configuredPlugins.map(({ path }) => resolve(path)));
@@ -227,6 +257,7 @@ const program = Effect.scoped(
       allowedOrigin,
       onError: (message) => console.error(message),
     });
+    yield* Effect.addFinalizer(() => Effect.sync(() => projectionPublisher.close()));
     const api = new ObservatoryWebApi({
       universe: runtime.universe,
       clock: runtime.clock,
@@ -239,6 +270,7 @@ const program = Effect.scoped(
       agentObservations,
       workspaceReview: workspace,
     });
+    yield* Effect.addFinalizer(() => Effect.promise(() => api.close()));
     const refreshMs = positiveIntegerSetting(
       "AO_WEB_REFRESH_MS",
       process.env.AO_WEB_REFRESH_MS,
@@ -274,6 +306,16 @@ const program = Effect.scoped(
     const observationIngress = observationToken
       ? new ProviderObservationIngress(observationToken, plugins, agentObservations)
       : undefined;
+    const hostLoop = startSerializedRefreshLoop({
+      intervalMs: refreshMs,
+      refresh: async () => {
+        const snapshot = await Effect.runPromise(runtime.host.snapshot());
+        conversations.observeHost(snapshot);
+        await Effect.runPromise(startAgent.refreshPending());
+      },
+      onError: (message) => console.error(`Observatory refresh failed: ${message}`),
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => hostLoop.stop()));
     const server = Bun.serve<TerminalSocketData>({
       hostname: "127.0.0.1",
       port,
@@ -282,6 +324,8 @@ const program = Effect.scoped(
         if (!isAllowedWebRequest(request, allowedOrigin))
           return new Response("Request origin rejected.", { status: 403 });
         const url = new URL(request.url);
+        if (desktopSession && !isAuthorizedDesktopRequest(request, desktopSession.token))
+          return new Response("Desktop session required.", { status: 401 });
         const terminalSocket = terminalSocketPath.exec(url.pathname);
         if (terminalSocket) {
           const sessionId = terminalSocket[1];
@@ -309,6 +353,27 @@ const program = Effect.scoped(
           return (
             observationIngress?.fetch(request) ?? new Response("Not configured.", { status: 503 })
           );
+        if (url.pathname === "/api/host/refresh") {
+          if (request.method !== "POST")
+            return Response.json({ error: "Method not allowed." }, { status: 405 });
+          if (
+            request.headers.get("origin") !== allowedOrigin ||
+            request.headers.get("x-ao-command") !== "1"
+          )
+            return Response.json({ error: "Command origin rejected." }, { status: 403 });
+          if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
+            return Response.json({ error: "Commands require application/json." }, { status: 415 });
+          return hostLoop.refreshNow().then(
+            () => Response.json({ ok: true }),
+            () =>
+              Response.json(
+                {
+                  error: "Host refresh failed. Check host availability and retry.",
+                },
+                { status: 503 },
+              ),
+          );
+        }
         if (url.pathname === "/api/projections/events") return projectionPublisher.stream(request);
         return url.pathname.startsWith("/api/") ? api.fetch(request) : staticResponse(url);
       },
@@ -351,15 +416,9 @@ const program = Effect.scoped(
         },
       },
     });
-    const hostLoop = startSerializedRefreshLoop({
-      intervalMs: refreshMs,
-      refresh: async () => {
-        const snapshot = await Effect.runPromise(runtime.host.snapshot());
-        conversations.observeHost(snapshot);
-        await Effect.runPromise(startAgent.refreshPending());
-      },
-      onError: (message) => console.error(`Observatory refresh failed: ${message}`),
-    });
+    yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
+      Effect.sync(() => void runningServer.stop(true)),
+    );
     const observationLoop =
       observationRefreshMs === undefined
         ? undefined
@@ -370,20 +429,13 @@ const program = Effect.scoped(
             },
             onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
           });
+    if (observationLoop)
+      yield* Effect.addFinalizer(() => Effect.promise(() => observationLoop.stop()));
     console.log(
       `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
+    if (desktopSession) writeDesktopReadiness(allowedOrigin);
 
-    yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
-      Effect.promise(async () => {
-        hostLoop.stop();
-        observationLoop?.stop();
-        projectionPublisher.close();
-        await api.close();
-        void runningServer.stop(true);
-        runtime.store.close?.();
-      }),
-    );
     yield* Effect.never;
   }),
 );

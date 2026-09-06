@@ -22,7 +22,7 @@ describe("serialized refresh loop", () => {
     });
 
     await wait(48);
-    loop.stop();
+    await loop.stop();
     const completedAtStop = completed;
     await wait(25);
 
@@ -44,9 +44,50 @@ describe("serialized refresh loop", () => {
     });
 
     await wait(22);
-    loop.stop();
+    await loop.stop();
 
     expect(attempts).toBeGreaterThanOrEqual(2);
     expect(errors).toHaveLength(1);
+  });
+
+  test("coalesces manual retries with in-flight automatic work", async () => {
+    let release: (() => void) | undefined;
+    let attempts = 0;
+    const loop = startSerializedRefreshLoop({
+      intervalMs: 5,
+      refresh: async () => {
+        attempts += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      onError: () => undefined,
+    });
+
+    await wait(8);
+    const first = loop.refreshNow();
+    const second = loop.refreshNow();
+    expect(first).toBe(second);
+    expect(attempts).toBe(1);
+    release?.();
+    await Promise.all([first, second]);
+    await loop.stop();
+  });
+
+  test("rejects retries after stopping and drains in-flight work", async () => {
+    let release: (() => void) | undefined;
+    const loop = startSerializedRefreshLoop({
+      intervalMs: 100,
+      refresh: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      onError: () => undefined,
+    });
+    const refresh = loop.refreshNow();
+    const stopped = loop.stop();
+    release?.();
+    await Promise.all([refresh, stopped]);
+    expect(loop.refreshNow()).rejects.toThrow("Refresh loop is stopped.");
   });
 });

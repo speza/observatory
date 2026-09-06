@@ -12,6 +12,7 @@ import { createProjectionModule } from "../projection/projection.ts";
 import { Universe, type ReconciliationResult } from "../universe/universe.ts";
 import type { Clock, IdGenerator } from "../universe/types.ts";
 import { positiveIntegerSetting } from "./config.ts";
+import { acquireDatabaseOwnership, type DatabaseOwnership } from "./database-ownership.ts";
 
 export class SystemClock implements Clock {
   now(): number {
@@ -35,6 +36,7 @@ export interface ObservatoryRuntime {
   readonly store: SqliteUniverseStore;
   readonly reconcile: ReturnType<typeof createReconcile>;
   readonly useMockHost: boolean;
+  close(): void;
 }
 
 const createReconcile = (
@@ -58,7 +60,14 @@ export const createObservatoryRuntime = (events?: ControlPlaneEventSink): Observ
   const clock = new SystemClock();
   const databasePath = process.env.AO_DB_PATH ?? `${process.cwd()}/data/ao.sqlite`;
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
-  const store = new SqliteUniverseStore(databasePath);
+  const ownership: DatabaseOwnership = acquireDatabaseOwnership(databasePath);
+  let store: SqliteUniverseStore;
+  try {
+    store = new SqliteUniverseStore(databasePath);
+  } catch (error) {
+    ownership.release();
+    throw error;
+  }
   const useMockHost = process.env.AO_HOST?.trim().toLowerCase() === "mock";
   const host: SessionHost = useMockHost
     ? (() => {
@@ -84,6 +93,10 @@ export const createObservatoryRuntime = (events?: ControlPlaneEventSink): Observ
     store,
     reconcile,
     useMockHost,
+    close: () => {
+      store.close?.();
+      ownership.release();
+    },
   };
 };
 

@@ -599,6 +599,46 @@ button {
   background: #b47b36;
 }
 
+.app:has(> .host-unavailable) {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.app:has(> .host-unavailable) > .masthead {
+  flex-shrink: 0;
+}
+.app:has(> .host-unavailable) > .work-surface {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.host-unavailable {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--uncertain) 55%, var(--hairline));
+  color: var(--muted);
+}
+.host-unavailable strong {
+  color: var(--ink);
+}
+.host-unavailable button {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+  background: var(--paper-panel);
+  cursor: pointer;
+}
+.host-unavailable p {
+  margin: 4px 0 0;
+}
+.host-unavailable__error {
+  color: var(--danger);
+}
+
 @media (max-width: 1600px) {
   .masthead {
     grid-template-columns: auto minmax(0, 1fr) auto auto;

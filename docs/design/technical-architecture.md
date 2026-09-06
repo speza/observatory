@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
 Status: implemented V1 architecture
-Updated: 2026-09-03
+Updated: 2026-09-05
 
 Related documents:
 
@@ -10,6 +10,7 @@ Related documents:
 - [Plugin architecture](plugin-architecture.md)
 - [Conversation-first Agent tracking](../specs/conversation-first-agent-tracking.md)
 - [Feature roadmap](../specs/observatory-feature-roadmap.md)
+- [Electron desktop delivery](../specs/electron-desktop.md) (initial implementation)
 
 ## Purpose
 
@@ -65,6 +66,22 @@ work. The closed process-local `ControlPlaneEventHub` carries committed change
 notifications to a batched `ProjectionPublisher`; the browser receives complete
 revisioned projections over SSE instead of polling. The browser never imports
 persistence, the mutable Universe or concrete host adapters.
+
+Electron's initial shell is implemented; live Mac validation remains pending. Its
+main process supervises one bundled Bun backend and hosts the same sandboxed
+React renderer. Desktop code owns application lifecycle and OS presentation only;
+the existing composition root remains the domain/host edge. The desktop spec
+defines session authentication, readiness, database ownership, parent-death
+cleanup and Mac validation gates. Browser development remains supported without
+creating a second maintained UI or an agent runtime.
+
+Both application entry points acquire a canonical database-path ownership lock
+before opening SQLite. A separate SQLite sidecar holds an exclusive transaction
+for the runtime lifetime; OS process exit releases it without stale PID deletion.
+Desktop startup uses a bounded stdin handshake and private fd-3 readiness record.
+Its HttpOnly session cookie protects assets, APIs, SSE and terminal upgrades;
+provider ingress retains its independent bearer token. Explicit host retry joins
+the same serialized refresh loop as polling, and shutdown drains active refreshes.
 
 ## Module ownership
 

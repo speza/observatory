@@ -1,7 +1,7 @@
 # Observatory feature roadmap
 
 Status: current product direction
-Updated: 2026-09-02
+Updated: 2026-09-06
 
 Depends on:
 
@@ -17,6 +17,10 @@ Depends on:
 Observatory has one maintained client: the local React GUI. The spatial Atlas is
 the primary product hypothesis. Ledger, Needs you, Catch up, Inbox, inspector,
 workspace review and terminals are supporting lenses over the same state.
+
+Electron is the accepted desktop delivery direction, macOS-first with Linux
+later; the initial shell is implemented, with live Mac validation pending. The browser remains the development/test
+workflow for that same UI. See [Electron desktop delivery](electron-desktop.md).
 
 The immediate goal is not broader infrastructure. It is to prove that the
 implemented local product improves human supervision of realistic concurrent
@@ -85,6 +89,11 @@ sustained use against disposable real Agents.
 5. Measure whether Needs you and Catch up replace manual reconstruction rather
    than adding another inbox.
 6. Keep screenshots, fixtures and public evidence synthetic or sanitised.
+7. Build the thin Electron slice alongside product work. Mock is an internal
+   checkpoint; the first handoff requires a Finder-launched Mac app working with
+   a live Agent on an independently installed/running Herdr server. Validate
+   unavailable-host recovery, lifecycle and resource use without managing Herdr's
+   server lifetime. Defer external distribution and updates until those gates pass.
 
 ## Next: deepen trust and spatial meaning
 

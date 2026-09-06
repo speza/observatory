@@ -61,6 +61,58 @@ remote session is not presented as locally portable without provider proof.
 
 ## Run
 
+### Initial desktop build
+
+The Electron shell runs this same UI and owns a bundled Bun backend, not the
+Herdr server. The initial implementation has Linux mock/degraded-host evidence;
+the live macOS acceptance gate is still pending. See the
+[desktop spec](docs/specs/electron-desktop.md).
+
+```sh
+bun install --frozen-lockfile
+bun run desktop:dev    # live host, Vite hot reload (UI 4330 / backend 4331)
+bun run desktop:mock   # synthetic portfolio, built UI (port 4320)
+bun run build:desktop  # unsigned app for the build machine's OS/architecture
+```
+
+Build on your Mac to produce `.desktop/release/Observatory-darwin-*/Observatory.app`.
+Open that app from Finder. Live packaged mode uses port 4310; stop a separately
+running Observatory web server first. Herdr must already be installed and running
+as described in its [setup documentation](https://herdr.dev/docs/). No server is
+started or stopped by Observatory. Missing Herdr shows retained state and Retry
+connection. Quit stops Observatory's backend, not Agent executions.
+
+Desktop data/configuration is in `~/Library/Application Support/Observatory` on
+macOS, or the platform application-data directory on Linux. Mock uses a separate
+`Observatory-mock` directory. Existing `data/ao.sqlite` is not imported or reset.
+An optional `desktop.json` in that directory configures GUI-launched tools:
+
+```json
+{
+  "toolPaths": ["/opt/homebrew/bin", "/absolute/path/to/your/tools"],
+  "port": 4310,
+  "workspaceLocations": ["/absolute/path/to/work"],
+  "pluginConfig": "/absolute/path/to/plugins.json"
+}
+```
+
+Omit fields you do not need. Tool paths are prepended to the GUI process PATH;
+shell startup files are not executed. Changing the packaged port requires
+explicitly repairing installed provider-hook endpoints. Vite development uses
+4330/4331 regardless of the configured packaged port; live hook smoke should use
+the packaged app's stable endpoint. Never point mock hooks at live configuration.
+
+`desktop:dev` owns Vite and Electron; Electron owns Bun. Renderer edits hot-reload;
+restart the command for main/backend/configuration edits. Core tests still run
+without Electron/Herdr; `bun test desktop/backend.test.ts` exercises the real Bun
+child transport/lifecycle using mock data. Backend raw logs are drained rather
+than persisted because they may include private host diagnostics; startup errors
+give bounded guidance. Use the standalone web workflow for detailed local backend
+debugging. No signing, automatic updates or background daemon is included.
+The bundle embeds the build machine's Bun executable and records its version with
+Electron/platform/architecture in `resources/app/runtime/build.json` (inside the
+Mac app's `Contents` directory). It is not a cross-platform build.
+
 ### Prerequisites
 
 - [Bun](https://bun.sh/) 1.3.14 or newer.

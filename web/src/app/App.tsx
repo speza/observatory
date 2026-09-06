@@ -20,6 +20,7 @@ import {
   fetchSearch,
   resumeWebAgent,
   addConversation,
+  refreshHostConnection,
 } from "../api/client.ts";
 import { CloseAgentDialog } from "../agents/CloseAgentDialog.tsx";
 import { AttentionQueue } from "../attention/AttentionQueue.tsx";
@@ -100,6 +101,8 @@ export const App = (): React.JSX.Element => {
   const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<string>();
+  const [hostRetryPending, setHostRetryPending] = useState(false);
+  const [hostRetryError, setHostRetryError] = useState<string>();
   const [launchNotice, setLaunchNotice] = useState<string>();
   const [pendingLaunches, setPendingLaunches] = useState<readonly WebPendingLaunch[]>([]);
   const [dismissedPendingLaunches, setDismissedPendingLaunches] = useState<ReadonlySet<string>>(
@@ -214,6 +217,17 @@ export const App = (): React.JSX.Element => {
   };
 
   const data = portfolio.data;
+  const retryHost = async (): Promise<void> => {
+    setHostRetryPending(true);
+    setHostRetryError(undefined);
+    try {
+      await refreshHostConnection();
+    } catch (error) {
+      setHostRetryError(error instanceof Error ? error.message : "Host connection retry failed.");
+    } finally {
+      setHostRetryPending(false);
+    }
+  };
   const visiblePendingLaunches = useMemo(
     () => pendingLaunches.filter((launch) => !dismissedPendingLaunches.has(launch.requestId)),
     [dismissedPendingLaunches, pendingLaunches],
@@ -747,6 +761,21 @@ export const App = (): React.JSX.Element => {
           <b>{data.commandCentre.counts.agents} OBSERVED</b>
         </div>
       </header>
+      {data.commandCentre.host?.status === "unavailable" ? (
+        <aside className="host-unavailable" aria-live="polite">
+          <div>
+            <strong>{data.commandCentre.host.hostKind} isn't available</strong>
+            <p>
+              The configured session host must be installed and running independently. Retained
+              state remains accessible, but current host state is uncertain.
+            </p>
+            {hostRetryError ? <p className="host-unavailable__error">{hostRetryError}</p> : null}
+          </div>
+          <button disabled={hostRetryPending} onClick={() => void retryHost()} type="button">
+            {hostRetryPending ? "Retrying…" : "Retry connection"}
+          </button>
+        </aside>
+      ) : null}
       <section className="work-surface">
         <div className="metrics" aria-label="Portfolio metrics">
           <div>

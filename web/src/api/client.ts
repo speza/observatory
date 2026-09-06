@@ -144,6 +144,18 @@ export const fetchPortfolio = async (signal?: AbortSignal): Promise<PortfolioRes
   return Schema.decodeUnknownSync(PortfolioResponseSchema)(await response.json());
 };
 
+export const refreshHostConnection = async (): Promise<void> => {
+  const response = await fetch("/api/host/refresh", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ao-command": "1" },
+    body: "{}",
+  });
+  if (!response.ok)
+    throw new Error(
+      await errorMessage(response, `Host connection retry failed (${response.status}).`),
+    );
+};
+
 export const fetchConversationHistory = async (options?: {
   readonly refresh?: boolean;
   readonly signal?: AbortSignal;

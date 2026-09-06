@@ -1,15 +1,18 @@
 # Observatory technology decisions
 
-Status: accepted for the web-only V1 product
+Status: accepted stack; initial Electron shell implemented, live Mac validation pending
 
-Updated: 2026-09-03
+Updated: 2026-09-05
 
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision
 
 Observatory uses one maintained application client: a local React GUI served by
-the Bun control-plane process.
+the Bun control-plane process. Electron is the accepted primary desktop delivery
+direction, macOS-first with Linux later. The browser remains the development and
+test workflow for the same UI. The initial desktop implementation is in `desktop/`; see
+[Electron desktop delivery](../specs/electron-desktop.md) for stages and gates.
 
 ```text
 Language                  TypeScript
@@ -33,8 +36,8 @@ have been removed. OpenTUI is no longer an application dependency or technology
 direction. A future CLI may launch the server, report status or
 submit structured commands; it must not become a second interactive client.
 
-This is a product-development decision, not a commitment to implement a native
-multiplexer, daemon or desktop shell in TypeScript.
+This does not commit Observatory to a native multiplexer or daemon. The planned
+Electron shell owns desktop lifecycle, not agent execution or semantic state.
 
 ## Why this stack fits Observatory
 
@@ -51,7 +54,8 @@ TypeScript keeps the semantic contracts, HTTP protocol and React client close
 while those product questions remain uncertain. Bun supplies TypeScript
 execution, SQLite, tests and a compact server runtime. React, SVG and CSS offer
 crisp text, accessible controls, pointer interaction, responsive composition
-and browser-native iteration without a canvas scene graph or desktop wrapper.
+and browser-native iteration without a canvas scene graph. Desktop delivery
+reuses these surfaces rather than replacing them with platform-specific clients.
 
 Observatory does not own pseudo-terminal process lifetime, pane scrollback or
 agent execution. Those responsibilities remain behind `SessionHost`; xterm.js
@@ -87,8 +91,9 @@ React with native SVG and CSS is the accepted renderer.
 
 PixiJS was rejected after direct pan/zoom comparison because rasterised text and
 scene scaling reduced clarity without solving a product requirement. Electron
-is deferred because the current local browser process already provides the GUI;
-add a desktop shell only for a measured packaging or OS-integration need.
+is now selected for dedicated application delivery and lifecycle while preserving
+one UI and a Linux path. Implement the thin shell first; signing, updates and
+broader distribution follow measured Mac dogfood evidence, not a UI rewrite.
 
 The Carbon Survey visual language is an art direction over production
 projections, not a fixture tree or a second semantic model. Neutral carbon and
@@ -143,7 +148,7 @@ federating their semantic Universes is not the default remote-host design.
 
 ## Local transport
 
-The current product is one in-process, single-user application:
+The implemented control plane is one process in a local, single-user application:
 
 ```text
 Browser -------> 127.0.0.1 HTTP mutations + SSE projections + terminal WebSockets
@@ -163,6 +168,12 @@ Host snapshots are polled. Browser projections use revisioned SSE replacements,
 with HTTP refresh for startup and recovery; provider hooks trigger immediate
 reconciliation and are not polled. This transport remains in the existing Bun
 process; it does not require a daemon.
+
+The initial desktop shell supervises that Bun process and authenticates its
+renderer session without replacing the transport. Provider ingress retains its
+separate token and stable configured endpoint. Desktop shutdown detaches terminals
+but does not stop host-owned executions; see the desktop spec for lifecycle,
+database ownership and startup security requirements.
 
 ## Toolchain and quality
 

@@ -22,7 +22,8 @@
     "tools/oxlint/anti-slop/**",
     "prototypes/**",
     "src/prototypes/**",
-    "web/dist/**"
+    "web/dist/**",
+    ".desktop/**"
   ],
   "jsPlugins": [
     {

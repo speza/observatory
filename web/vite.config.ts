@@ -10,10 +10,12 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 4310,
+    port: process.env.AO_DESKTOP_DEV === "1" ? 4330 : 4310,
+    strictPort: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:4311",
+        target:
+          process.env.AO_DESKTOP_DEV === "1" ? "http://127.0.0.1:4331" : "http://127.0.0.1:4311",
         ws: true,
       },
     },
