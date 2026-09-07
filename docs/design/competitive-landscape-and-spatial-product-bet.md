@@ -2,7 +2,7 @@
 
 Status: product research snapshot
 
-Date: 2026-08-30
+Last verified: 2026-09-07
 
 Related design:
 
@@ -20,9 +20,13 @@ product hypothesis:
 > kanban and flat session lists for supervising a large body of concurrent and
 > long-lived agent work?
 
-The market is moving quickly. Product and installation details below are a
-dated snapshot and should be reverified before making packaging or partnership
-decisions.
+The market is moving quickly. Product and installation details below were
+checked against linked first-party sources on the verification date and should
+be reverified before making packaging, licensing or partnership decisions.
+Descriptions of product capabilities are observations; sections explicitly
+labelled **Observatory assessment** contain our interpretation and strategy.
+Product names identify their respective projects and do not imply affiliation
+or endorsement.
 
 ## Conclusion
 
@@ -31,9 +35,10 @@ The category is already crowded at the execution layer. Most products either:
 1. own agent launch, PTYs, session persistence and worktrees themselves; or
 2. package a management interface over tmux.
 
-Conductor OSS and Superset therefore contain their own equivalent of the
-capability Observatory currently obtains from Herdr. They do not depend on an
-external general-purpose agent session host.
+Conductor OSS, Superset, Orca and bb own PTY, session or provider-process and
+worktree capabilities that overlap materially with capabilities Observatory
+currently obtains through Herdr. They do not depend on an external
+general-purpose agent session host for their primary product path.
 
 Observatory should not respond by absorbing multiplexer scope. Its strongest
 case remains a host-neutral semantic control plane above execution:
@@ -64,69 +69,75 @@ not a map-only interface.
 
 ### Full execution environments
 
-These products own most or all of the Herdr-equivalent layer as part of their
-application.
+These products own substantial execution and workspace lifecycle capability as
+part of their application. Descriptions of each organising model are based on
+first-party documentation, not necessarily an explicit vendor term.
 
-| Product                                                       | Primary object                            | Runtime/session approach                                                                           | Product significance                                                                                                                             |
-| ------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Conductor OSS](https://github.com/charannyk06/conductor-oss) | Workspace and project session             | Rust backend, provider executors, interactive terminal runtime, persistence and worktree lifecycle | Demonstrates that a browser-based local control surface can package its own complete runtime. Its overview remains session/workspace-centred.    |
-| [Superset](https://github.com/superset-sh/superset)           | Repository workspace and branch/worktree  | Standalone PTY daemon, persistent terminal panes and provider hooks/wrappers                       | One of the closest execution-product competitors. It combines worktree management, terminals, diffs and attention-oriented boards.               |
-| [Orca](https://github.com/stablyai/orca)                      | Repository worktree and agent terminal    | Own desktop runtime, persistent terminals, worktrees, remote execution and agent launch            | The strongest full-stack competitor. Its experimental orchestration layer adds task DAGs, dispatches, persistent messages and coordinator loops. |
-| [Nimbalyst](https://github.com/Nimbalyst/nimbalyst)           | Session, task and workstream              | Electron runtime, terminals, worktrees and persistent session metadata                             | The closest semantic competitor. It has kanban phases, related-session workstreams, agent supervision and human-confirmed completion.            |
-| [Xum, formerly Coder Mux](https://github.com/coder/xum)       | Isolated workspace and agent conversation | Custom agent loop with local worktree and SSH environments                                         | A parallel-agent desktop IDE with integrated review, Git divergence, costs and context management.                                               |
-| [Vibe Kanban](https://github.com/BloopAI/vibe-kanban)         | Kanban issue and execution workspace      | Local Rust/React service, per-task branches, terminals and dev servers                             | A direct task-to-agent product with strong planning and review. The project currently says it is sunsetting.                                     |
-| [Luvus](https://luvus.dev/)                                   | Project workspace, tab and terminal pane  | Own persistent server, PTYs and TUI, with agent detection, worktrees and remote attachment         | A terminal-native full-stack competitor with mission control, session resume, agent messaging and dependency-aware task orchestration.           |
-| [Warp and Oz](https://github.com/warpdotdev/warp)             | Cloud or local agent run                  | Warp-owned terminal and cloud execution environment                                                | The enterprise and cloud end of the category. The Warp terminal is available as an application; Oz orchestration remains proprietary.            |
+| Product                                                                           | Verified product shape                                                                                                                                                                                                                                                                                                                                                   | Distribution and licence                                                                                                                                                                                | Observatory assessment                                                                                                                                    |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Conductor OSS](https://github.com/charannyk06/conductor-oss/blob/main/README.md) | Local-first browser dashboard organised around workspaces and sessions. Its backend owns PTYs, coding-agent launch, Git worktrees and SQLite state; the UI adds terminal, diff, preview, feedback and task-board surfaces.                                                                                                                                               | `npx`/npm launcher with native backends for macOS, Linux x64 and Windows x64; paired-device browser access; Apache-2.0.                                                                                 | Demonstrates that a local browser control surface can package execution and review while remaining session/workspace-centred.                             |
+| [Superset](https://github.com/superset-sh/superset/blob/main/README.md)           | Agentic IDE organised around isolated repository workspaces, with persistent terminals, worktrees, agent status, diffs, previews, automations, CLI/SDK/MCP control and remote hosts.                                                                                                                                                                                     | Current README promotes a macOS desktop download and phone access through its remote surface; [Elastic License 2.0](https://github.com/superset-sh/superset/blob/main/LICENSE.md).                      | A vertically integrated execution product whose convenience may reduce demand for a separate supervisory layer.                                           |
+| [Orca](https://github.com/stablyai/orca/blob/main/README.md)                      | AI orchestrator/ADE organised around repository worktrees, terminal agents and orchestration runs. It owns persistent terminals, worktrees, agent launch, review and SSH execution; its [orchestration model](https://github.com/stablyai/orca/blob/main/docs/site/content/docs/cli/orchestration.mdx) adds task DAGs, dispatches, workers, messages and decision gates. | Desktop builds for macOS, Windows and Linux plus documented iOS and Android companions; MIT.                                                                                                            | A close full-stack comparator because it combines execution ownership with structured task orchestration.                                                 |
+| [Nimbalyst](https://github.com/Nimbalyst/nimbalyst/blob/main/README.md)           | Visual workspace spanning files/documents, agent sessions, worktrees and tasks. It provides session Kanban, search/resume, task tracking, visual diff approval and [related-session workstreams](https://github.com/Nimbalyst/nimbalyst/blob/main/docs/SESSION_HIERARCHY.md).                                                                                            | Desktop downloads for macOS, Windows and Linux plus a documented iOS companion; desktop/iOS repository is MIT, with sync hosted separately.                                                             | A close semantic comparator through tasks, workstreams and human review, although no distinct human-confirmed completion state was verified.              |
+| [Xum, formerly Mux](https://github.com/coder/xum/blob/main/README.md)             | Coding-agent multiplexer organised around isolated workspaces and conversations. It uses a custom agent loop with local-directory, Git-worktree and SSH runtimes, plus review, Git divergence, cost and context-management surfaces.                                                                                                                                     | Prebuilt macOS and Linux desktop binaries; responsive server-mode web UI for mobile; AGPL-3.0-only.                                                                                                     | Strong execution-product comparator, but its organising model remains workspace/conversation-centred.                                                     |
+| [Vibe Kanban](https://github.com/BloopAI/vibe-kanban/blob/main/README.md)         | Local application organised around Kanban issues and execution workspaces, with per-workspace branches, terminals, dev servers, diff comments, previews and PR/merge flows.                                                                                                                                                                                              | `npx vibe-kanban`; Apache-2.0. Bloop [shut down on 2026-04-10](https://www.vibekanban.com/blog/shutdown), and hosted services were withdrawn; the local OSS project was left for community maintenance. | A clear task-to-agent planning and review baseline, but no longer a commercially supported hosted product.                                                |
+| [Luvus](https://github.com/RizRiyz/luvus/blob/main/README.md)                     | Terminal-native mission control organised around persistent project workspaces, tabs, panes and agent sessions. Its own server owns PTYs and supports agent detection, resume/fork/message/wait, worktrees and dependency-aware task coordination.                                                                                                                       | Terminal application distributed for macOS, Linux and Windows through installers, packages and Cargo; Apache-2.0.                                                                                       | Shows how much of the multi-agent workflow can be packaged in a terminal-native execution product.                                                        |
+| [Warp and Oz](https://github.com/warpdotdev/warp/blob/main/README.md)             | Warp is an agentic development environment with a locally installed terminal client and local or hosted agents. Drive sync, hosted-model agents, team services and Oz cloud orchestration retain proprietary backend dependencies.                                                                                                                                       | Desktop application for macOS, Linux and Windows; most client code AGPLv3, `warpui` crates MIT, server/Drive/Oz proprietary.                                                                            | Represents the enterprise and cloud end of the category rather than Observatory’s local control-plane boundary.                                           |
+| [bb](https://github.com/get-bb/bb/blob/main/README.md)                            | Local-first agentic IDE organised around projects and threads. A SQLite server coordinates host daemons that provision environments and run provider processes. Desktop, web, CLI and API surfaces support steering, delegation and automation; Tasks and Workflows add optional higher-level organisation.                                                              | `npx bb-app`, macOS arm64 desktop, alpha Linux x64 AppImage, Windows through WSL2 and early-access iOS; MIT.                                                                                            | Strong execution-layer competitor. Its core remains project/thread-centred, and its 2D interaction is pane tiling rather than durable semantic geography. |
 
 ### Tmux-based session managers
 
 These products are closer to Herdr itself. They package installation and UX
 around tmux rather than owning a native PTY/session runtime end to end.
 
-| Product                                                   | Main capabilities                                                                                                        | Product significance                                                                                                                           |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Agent Deck](https://github.com/asheshgoplani/agent-deck) | Groups, search, running/waiting/done state, forking, worktrees, costs and optional web control                           | A broad mission-control layer over terminal sessions.                                                                                          |
-| [Claude Squad](https://github.com/smtg-ai/claude-squad)   | Parallel agents in isolated workspaces, attach and review                                                                | A deliberately simple terminal application over tmux and Git worktrees.                                                                        |
-| [dmux](https://github.com/standardagents/dmux)            | Multi-agent launch, worktrees, durable terminals, conversation resumption, merge/PR workflow and attention notifications | A polished example of packaging the whole parallel-agent workflow around tmux.                                                                 |
-| [fleet](https://github.com/brizzai/fleet)                 | Hook-derived agent state, attention jumping, PR state, worktrees, session resume and forking                             | Particularly relevant to Observatory's host boundary because it derives richer status from provider hooks while retaining tmux as the runtime. |
+| Product                                                                       | Verified capabilities                                                                                                                                                                  | Observatory assessment                                                                                  |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [Agent Deck](https://github.com/asheshgoplani/agent-deck/blob/main/README.md) | Grouped tmux sessions, running/waiting/done state, search, attach, worktrees, conversation forks, cost tracking, Git features, web control and optional messaging-channel supervision. | A broad mission-control layer over terminal sessions.                                                   |
+| [Claude Squad](https://github.com/smtg-ai/claude-squad/blob/main/README.md)   | Tmux sessions and Git worktrees with create, attach, pause/resume, delete, diff preview and review before checkout or push.                                                            | A deliberately small terminal application over tmux and Git worktrees.                                  |
+| [dmux](https://github.com/standardagents/dmux/blob/main/README.md)            | Agent launch, per-pane Git worktrees, durable terminals, conversation resume, file/diff browsing, merge/PR workflow, lifecycle hooks and macOS attention notifications.                | Packages most of the parallel-agent terminal workflow around tmux.                                      |
+| [fleet](https://github.com/brizzai/fleet/blob/master/README.md)               | Tmux sessions with Claude Code, Codex and OpenCode hook-derived state, pane fallback heuristics, attention jumping, PR state, worktrees, resume and forking.                           | Relevant to `SessionHost` because it derives richer provider state while retaining tmux as the runtime. |
 
 ### Substrates rather than supervisory products
 
-[AgentAPI](https://github.com/coder/agentapi) wraps supported coding agents in a
-common HTTP API. It is an installable server binary with a basic chat page, not
-an agent observatory. A tool like this is more likely to inform a future
-`SessionHost` adapter than to compete with Observatory's product surface.
+[AgentAPI](https://github.com/coder/agentapi/blob/main/README.md) wraps one
+coding-agent conversation in a common HTTP API by driving its terminal and
+parsing output. It exposes messages, coarse running/stable status, events,
+terminal attachment and a basic chat page. Observatory classifies it as
+infrastructure: it is more likely to inform a future `SessionHost` adapter than
+to compete with Observatory's product surface.
 
 ### Adjacent observability products
 
-[Agenttrail](https://github.com/sodiumsun/agenttrail) is a local, read-only
-spatial dashboard organised around repository components and files. It combines
-a durable `PLAN.md`, filesystem activity and optional Claude Code hooks to show
-runs, tools, todos, trails and handoffs across repositories. It does not own or
-attach to agent execution. Its codebase-centred map is therefore a strong UX
-comparator for Observatory's spatial hypothesis, but not a substitute for a
-System -> Goal -> Agent supervisory control plane.
+[agenttrail](https://github.com/sodiumsun/agenttrail/blob/main/README.md) is a
+local, read-only spatial dashboard organised around repository components and
+files. It combines a durable `PLAN.md`, filesystem activity and optional
+repository-local Claude Code hooks to show runs, tools, todos and provenance.
+It switches between per-repository daemons but does not own or attach to agent
+execution. Observatory considers its codebase-centred map a useful UX
+comparator for the spatial hypothesis, but not a substitute for a cross-repository
+System -> Goal -> Agent control plane.
 
 ## Installation and packaging
 
 Not all of these tools are packaged as conventional desktop applications.
 
-| Product       | Installation shape                                                                          | Conventional desktop app?                                                   |
-| ------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Superset      | Signed macOS DMG; experimental Linux AppImage; automatic updates                            | Yes                                                                         |
-| Orca          | macOS DMG, Windows installer, Linux AppImage, package-manager options and mobile companion  | Yes                                                                         |
-| Nimbalyst     | macOS DMG, Windows installer, Linux AppImage and mobile companion                           | Yes                                                                         |
-| Xum           | Prebuilt macOS and Linux desktop binaries                                                   | Yes, on currently documented platforms                                      |
-| Warp          | Downloadable desktop application                                                            | Yes                                                                         |
-| Conductor OSS | npm/npx launcher starts its local dashboard and bundled Rust backend                        | Installable product, but browser-hosted rather than a normal desktop bundle |
-| Vibe Kanban   | `npx vibe-kanban` starts a local service and opens the browser                              | Local web application, not a conventional desktop package                   |
-| Luvus         | Install script, Homebrew, Linux packages, Nix, Windows archive or Cargo; single Rust binary | No; packaged terminal application                                           |
-| Agent Deck    | Install script, Homebrew or Go binary; TUI plus optional local web UI                       | No; packaged terminal application                                           |
-| Claude Squad  | Homebrew or installed Go binary; requires tmux                                              | No; packaged terminal application                                           |
-| dmux          | Global npm package; requires tmux                                                           | No; packaged terminal application                                           |
-| fleet         | Homebrew, install script, Go binary, Linux packages or Docker; requires tmux                | No; packaged terminal application                                           |
-| AgentAPI      | Downloadable CLI/server binary                                                              | No; infrastructure component                                                |
-| Agenttrail    | `npx` starts a zero-dependency Node CLI and local browser dashboard                         | No; local web application                                                   |
+| Product       | Installation shape                                                                                       | Conventional desktop app?                                                   |
+| ------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Superset      | Current first-party README promotes a macOS desktop download                                             | Yes, on the currently documented platform                                   |
+| Orca          | macOS, Windows and Linux desktop builds; native iOS and Android companions                               | Yes                                                                         |
+| Nimbalyst     | macOS, Windows and Linux desktop builds; documented iOS companion                                        | Yes                                                                         |
+| Xum           | Prebuilt macOS and Linux desktop binaries; responsive server-mode web UI                                 | Yes, on the currently documented platforms                                  |
+| Warp          | macOS, Linux and Windows desktop application                                                             | Yes                                                                         |
+| bb            | macOS arm64 desktop; alpha Linux x64 AppImage; npm/browser path; Windows through WSL2; early-access iOS  | Yes, with platform-specific maturity                                        |
+| Conductor OSS | npm/npx launcher starts its local dashboard and native backend                                           | Installable product, but browser-hosted rather than a normal desktop bundle |
+| Vibe Kanban   | `npx vibe-kanban` starts the community-maintained local web application                                  | Local web application, not a conventional desktop package                   |
+| Luvus         | Install scripts, Homebrew, packages, release binaries or Cargo; terminal application for major platforms | No; packaged terminal application                                           |
+| Agent Deck    | Install script, Homebrew or Go binary; TUI plus optional local web UI                                    | No; packaged terminal application                                           |
+| Claude Squad  | Homebrew or installed Go binary; requires tmux                                                           | No; packaged terminal application                                           |
+| dmux          | Global npm package; requires tmux                                                                        | No; packaged terminal application                                           |
+| fleet         | Homebrew, install script, Go binary, Linux packages or Docker; requires tmux                             | No; packaged terminal application                                           |
+| AgentAPI      | Downloadable macOS/Linux CLI/server binary                                                               | No; infrastructure component                                                |
+| agenttrail    | `npx` starts a dependency-free Node CLI and local browser dashboard                                      | No; local web application                                                   |
 
 This distinction matters commercially even though it does not change the core
 architecture. Depending on Herdr is reasonable for proving the product, but a
@@ -136,7 +147,7 @@ That could package Observatory and a compatible Herdr version together while
 preserving `SessionHost` as the architectural seam; it does not require
 Observatory to own the multiplexer.
 
-## Competitive interpretation
+## Observatory assessment
 
 ### What is already commodity
 
@@ -148,24 +159,35 @@ The landscape increasingly treats the following as baseline capabilities:
 - running, waiting, completed and needs-attention indicators;
 - diffs, branches, pull requests and merge workflows;
 - kanban or grouped-list overviews; and
-- remote or mobile monitoring in the more mature products.
+- some form of remote or mobile monitoring in products such as Orca, Nimbalyst,
+  Superset, Conductor OSS, Xum, bb and Agent Deck, although their native-app,
+  responsive-web, paired-browser and messaging-channel approaches differ.
 
 Observatory should not position terminal persistence or a needs-attention list
 as its central differentiation.
 
-### Closest threats
+### Closest comparators
 
-**Orca is the closest full-stack threat.** It owns the execution environment
-and is moving upward into structured task orchestration, agent-to-agent
-messages and coordinator workflows.
+**Orca is a close full-stack comparator.** It owns the execution environment
+and includes structured task orchestration, agent-to-agent messages and
+coordinator workflows.
 
-**Nimbalyst is the closest product-model threat.** Workstreams, session phases,
-human-confirmed completion and mobile supervision overlap with parts of
-Observatory's semantic and human-in-the-loop case.
+**Nimbalyst is a close product-model comparator.** Workstreams, session phases,
+human review and mobile supervision overlap with parts of Observatory's
+semantic and human-in-the-loop case. No distinct human-confirmed completion
+state was verified in its first-party documentation.
 
-**Superset and Xum are strong execution-product threats.** They can make the
+**Superset and Xum are strong execution-product comparators.** They can make the
 integrated worktree IDE sufficiently convenient that some users never seek a
 separate supervisory layer.
+
+**bb is a strong execution-layer comparator.** It combines broad provider
+support, worktrees, timelines, terminals, remote hosts and first-class desktop,
+web, CLI and API control. Optional Tasks and Workflows plugins move upward into
+task semantics and multi-agent orchestration. Its core model remains
+project/thread-centred, and its 2D split-pane workspace is not a persistent
+semantic geography. Its extensibility nevertheless means users could add a map
+surface faster than competitors with closed interfaces.
 
 **Agenttrail is the closest spatial observability comparator.** It demonstrates
 an alternative durable geography based on repository components and overlays
@@ -180,10 +202,10 @@ Observatory should reproduce it.
 
 ### Remaining opening
 
-None of the reviewed products is primarily organised around a durable,
-cross-repository System -> Goal -> Agent universe that remains independent of
-the session host. Most make a repository, worktree, task card, terminal or
-runtime task graph the primary organising object.
+No reviewed product's first-party documentation was found to make a durable,
+host-independent, cross-repository System -> Goal -> Agent universe its primary
+model. Most make a repository, worktree, task card, terminal or runtime task
+graph the primary organising object.
 
 The strongest Observatory position is:
 
@@ -397,8 +419,9 @@ world that users learn and trust requires the semantic model beneath it.
 
 1. Keep Herdr as the required V1 host behind `SessionHost`; do not rebuild its
    runtime in response to competitors that chose vertical integration.
-2. Treat Orca and Nimbalyst as the primary products to watch, especially their
-   movement into task semantics, human verification and cross-session context.
+2. Watch Orca and Nimbalyst for movement into task semantics, human review and
+   cross-session context. Watch bb's Tasks and Workflows plugins for movement
+   from optional project/thread organisation into durable outcome semantics.
 3. Treat the Ledger as the experimental control and permanent precision lens,
    not as the primary Observatory hypothesis.
 4. Prioritise catch-up, rich attention and verification because the spatial
@@ -414,19 +437,24 @@ world that users learn and trust requires the semantic model beneath it.
 Competitive product sources:
 
 - [Conductor OSS](https://github.com/charannyk06/conductor-oss)
-- [Superset installation](https://github.com/superset-sh/superset/blob/main/apps/docs/content/docs/install.mdx)
+- [Superset](https://github.com/superset-sh/superset)
 - [Orca](https://github.com/stablyai/orca)
 - [Nimbalyst](https://github.com/Nimbalyst/nimbalyst)
 - [Xum](https://github.com/coder/xum)
 - [Vibe Kanban](https://github.com/BloopAI/vibe-kanban)
+- [Vibe Kanban shutdown announcement](https://www.vibekanban.com/blog/shutdown)
 - [Luvus](https://github.com/RizRiyz/luvus)
 - [Agent Deck](https://github.com/asheshgoplani/agent-deck)
 - [Claude Squad](https://github.com/smtg-ai/claude-squad)
 - [dmux](https://github.com/standardagents/dmux)
 - [fleet](https://github.com/brizzai/fleet)
 - [Warp](https://github.com/warpdotdev/warp)
+- [bb](https://github.com/get-bb/bb)
+- [bb site](https://getbb.app/)
+- [bb changelog](https://getbb.app/changelog)
+- [bb privacy policy](https://getbb.app/privacy)
 - [AgentAPI](https://github.com/coder/agentapi)
-- [Agenttrail](https://github.com/sodiumsun/agenttrail)
+- [agenttrail](https://github.com/sodiumsun/agenttrail)
 
 Human-computer interaction sources:
 
