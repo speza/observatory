@@ -374,7 +374,9 @@ overwrite an Agent's human or provider-derived name.
 
 An unnamed Observatory launch initially shows its launch/workspace fallback.
 When the provider supplies a meaningful conversation title, the title may
-replace only a fallback name. It may not replace a human name.
+replace a fallback or earlier provider name. Subsequent provider title changes
+continue to update the same Agent. Empty titles retain the existing name, and
+provider titles may not replace a human name.
 
 ## Primary flows
 
@@ -602,7 +604,8 @@ Conversation history remain implemented. The explicit-admission revision:
 1. Start a named new conversation through Observatory. Exactly one assigned
    Agent appears after exact launch identity is proven.
 2. Start an unnamed new conversation through Observatory. Exactly one Agent
-   appears; provider title may replace only its fallback name.
+   appears; provider titles replace its fallback and follow later provider renames,
+   while an explicit human name remains protected.
 3. Start Claude Code directly in Herdr. No Agent appears automatically; its
    exact execution remains diagnostic until the conversation is explicitly
    added.

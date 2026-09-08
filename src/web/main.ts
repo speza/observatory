@@ -361,6 +361,15 @@ const program = Effect.scoped(
       },
       onError: (message) => console.error(`Observatory refresh failed: ${message}`),
     });
+    const catalogueLoop = runtime.useMockHost
+      ? undefined
+      : startSerializedRefreshLoop({
+          intervalMs: 30_000,
+          refresh: async () => {
+            await Effect.runPromise(conversations.refresh());
+          },
+          onError: (message) => console.error(`Conversation catalogue refresh failed: ${message}`),
+        });
     const observationLoop =
       observationRefreshMs === undefined
         ? undefined
@@ -378,6 +387,7 @@ const program = Effect.scoped(
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
         hostLoop.stop();
+        catalogueLoop?.stop();
         observationLoop?.stop();
         projectionPublisher.close();
         await api.close();

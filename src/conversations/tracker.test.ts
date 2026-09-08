@@ -104,6 +104,63 @@ const trackerFixture = (snapshot: () => ProviderSessionSnapshot = () => provider
 };
 
 describe("conversation tracker", () => {
+  test("updates managed launch titles across refreshes while preserving human names", async () => {
+    let snapshot = providerSnapshot([conversation("native-secret-id", "project")]);
+    const fixture = trackerFixture(() => snapshot);
+    fixture.universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: "codex",
+      nativeConversationRef: { harnessId: "codex", kind: "id", value: "native-secret-id" },
+      displayName: "project",
+      observedAt: 1_000_000,
+    });
+    await Effect.runPromise(fixture.tracker.refresh());
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      displayName: "project",
+      displayNameSource: "provider",
+    });
+    const original = semanticAgentFacts(fixture.universe.snapshot().agents[0]!);
+    const refreshTitle = async (title: string) => {
+      snapshot = providerSnapshot(
+        [conversation("native-secret-id", title)],
+        snapshot.observedAt + 1000,
+      );
+      await Effect.runPromise(fixture.tracker.refresh());
+      expect(fixture.universe.snapshot().agents).toHaveLength(1);
+      expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+        id: "agent-1",
+        displayName: title,
+        displayNameSource: "provider",
+      });
+      expect(semanticAgentFacts(fixture.universe.snapshot().agents[0]!)).toEqual(original);
+    };
+    await refreshTitle("Fix session naming");
+    await refreshTitle("Verify generated titles");
+    snapshot = providerSnapshot(
+      [conversation("native-secret-id", "   ")],
+      snapshot.observedAt + 1000,
+    );
+    await Effect.runPromise(fixture.tracker.refresh());
+    expect(fixture.universe.snapshot().agents[0]?.displayName).toBe("Verify generated titles");
+
+    fixture.universe.execute({
+      type: "RenameAgent",
+      agentId: "agent-1",
+      displayName: "My chosen name",
+    });
+    snapshot = providerSnapshot(
+      [conversation("native-secret-id", "Another provider title")],
+      snapshot.observedAt + 1000,
+    );
+    await Effect.runPromise(fixture.tracker.refresh());
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      displayName: "My chosen name",
+      displayNameSource: "human",
+    });
+    fixture.store.close();
+  });
+
   test("serializes concurrent provider refreshes", async () => {
     let active = 0;
     let maximumActive = 0;

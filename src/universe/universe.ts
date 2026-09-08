@@ -1097,11 +1097,11 @@ export class Universe {
         providerObservedAt: session.observedAt,
         continuity: "proved" as const,
         displayName:
-          agent.displayNameSource === "fallback" && normalizeText(session.title)
+          agent.displayNameSource !== "human" && normalizeText(session.title)
             ? normalizeText(session.title)!
             : agent.displayName,
         displayNameSource:
-          agent.displayNameSource === "fallback" && normalizeText(session.title)
+          agent.displayNameSource !== "human" && normalizeText(session.title)
             ? ("provider" as const)
             : agent.displayNameSource,
         worktree: normalizeText(session.workspaceRef) ?? agent.worktree,
