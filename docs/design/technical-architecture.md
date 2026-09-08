@@ -180,9 +180,8 @@ scoped provider evidence, while managed-launch admission may begin with an
 unscoped host reference and must not fabricate provider freshness or naming.
 Accepted catalogue refreshes update fallback and provider-owned Agent names
 from non-empty titles for the exact conversation. Explicit human names remain
-protected from provider and host updates. The web composition root refreshes
-provider catalogues every 30 seconds after the preceding refresh settles,
-independently of host snapshots and metadata observation hooks.
+protected from provider and host updates. Catalogue refresh remains bounded to
+startup and explicit Conversation history requests.
 Exact resume requires an Agent that already exists.
 
 Universe owns admitted-reference resolution. Conversation history, provider

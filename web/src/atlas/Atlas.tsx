@@ -47,6 +47,7 @@ interface GoalStyle extends CSSProperties {
 }
 
 interface AtlasProps {
+  readonly additionalControls?: React.ReactNode;
   readonly projection: UniverseMapProjection;
   readonly selection?: Selection;
   readonly reservedLeft: number;
@@ -94,6 +95,7 @@ const palettes = {
 } as const;
 
 export const Atlas = ({
+  additionalControls,
   projection,
   selection,
   reservedLeft,
@@ -740,6 +742,7 @@ export const Atlas = ({
         <button aria-label="Fit map to screen" onClick={reset} type="button">
           Fit
         </button>
+        {additionalControls}
       </div>
     </div>
   );

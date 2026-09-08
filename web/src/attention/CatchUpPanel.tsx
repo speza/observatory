@@ -196,8 +196,7 @@ export const CatchUpPanel = ({
 
       <footer>
         <span>
-          {projection.subjects.length} affected areas · {projection.transitionCount} accepted
-          transitions · {projection.evidenceTransitionCount ?? 0} provider transitions
+          {projection.subjects.length} {projection.subjects.length === 1 ? "area" : "areas"} changed
         </span>
         {projection.pending ? (
           <button disabled={pending} onClick={() => void onAcknowledge()} type="button">

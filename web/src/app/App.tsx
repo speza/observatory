@@ -1,3 +1,5 @@
+import { ModalDialog } from "../shared/ModalDialog.tsx";
+import { CircleAlert, Inbox, History, ListTree } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentView,
@@ -18,11 +20,9 @@ import {
   addConversation,
 } from "../api/client.ts";
 import { CloseAgentDialog } from "../agents/CloseAgentDialog.tsx";
-import { AttentionQueue } from "../attention/AttentionQueue.tsx";
 import { Atlas, type AtlasCameraCommand } from "../atlas/Atlas.tsx";
 import type { Selection } from "./selection.ts";
 import { CatchUpPanel } from "../attention/CatchUpPanel.tsx";
-import { InboxPanel } from "../inbox/InboxPanel.tsx";
 import { Inspector } from "../inspector/Inspector.tsx";
 import { KeyboardGuide } from "../shared/KeyboardGuide.tsx";
 import { Ledger } from "../ledger/Ledger.tsx";
@@ -46,7 +46,8 @@ import { WorkspaceReview } from "../workspace-review/WorkspaceReview.tsx";
 import { useSearch } from "../search/useSearch.ts";
 import { useInspector } from "../inspector/useInspector.ts";
 
-type SidePanel = "attention" | "inbox" | "catch-up" | "inspector";
+import { Workspace } from "./Workspace.tsx";
+import { WorkspaceNavigation, type NavigationView } from "./WorkspaceNavigation.tsx";
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
   ...projection.goals.flatMap((goal) => goal.agents),
@@ -69,7 +70,9 @@ export const App = (): React.JSX.Element => {
   const { settings, setSetting, updateSetting } = useBrowserSettings();
   const { motion, terminalAppearance, theme, view } = settings;
   const terminalTheme = terminalAppearance === "application" ? theme : terminalAppearance;
-  const [sidePanel, setSidePanel] = useState<SidePanel>();
+  const [navigationView, setNavigationView] = useState<NavigationView>("all");
+  const [catchUpOpen, setCatchUpOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [selection, setSelection] = useState<Selection>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -145,8 +148,20 @@ export const App = (): React.JSX.Element => {
     try {
       const response = await executeCommand(command);
       portfolio.accept(response.portfolio);
-      if (command.type === "AssignGoalToSystem")
+      if (command.type === "AssignGoalToSystem") {
         setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
+      } else if (command.type === "AssignAgent") {
+        setSelectedSystemId(
+          systemScopeForSelection(
+            { type: "agent", id: command.agentId },
+            response.portfolio.commandCentre,
+          ),
+        );
+        setNavigationView("all");
+      } else if (command.type === "UnassignAgent") {
+        setSelectedSystemId(undefined);
+        setNavigationView("unassigned");
+      }
       refreshInspector();
       return response;
     } catch (error) {
@@ -169,7 +184,6 @@ export const App = (): React.JSX.Element => {
   );
   const scopedCommandCentre = scopedPortfolio?.commandCentre;
   const scopedMap = scopedPortfolio?.map;
-  const working = scopedPortfolio?.workingAgentCount ?? 0;
   const terminalAgents = useMemo(
     () =>
       orderTerminalAgents(
@@ -198,21 +212,18 @@ export const App = (): React.JSX.Element => {
 
   const select = (next: Selection): void => {
     setSelection(next);
-    setSidePanel("inspector");
+    setInspectorOpen(true);
   };
 
   const selectAndFocus = (next: Selection): void => {
     if (data) {
       const systemScope = systemScopeForSelection(next, data.commandCentre);
-      if (systemScope) setSelectedSystemId(systemScope);
+      setSelectedSystemId(systemScope);
     }
     setSetting("view", "atlas");
     select(next);
     issueCamera("focus", next);
   };
-
-  const assignInboxAgents = async (agentIds: readonly string[], goalId: string): Promise<boolean> =>
-    (await runCommand({ type: "AssignAgents", agentIds, goalId })) !== undefined;
 
   const addHistoricalConversation = async (
     handle: string,
@@ -436,8 +447,13 @@ export const App = (): React.JSX.Element => {
           setDiffAgent(undefined);
           return;
         }
-        if (sidePanel) {
-          setSidePanel(undefined);
+        if (catchUpOpen) {
+          setCatchUpOpen(false);
+          return;
+        }
+        if (inspectorOpen) {
+          setInspectorOpen(false);
+          setSelection(undefined);
           return;
         }
         setSelection(undefined);
@@ -456,10 +472,21 @@ export const App = (): React.JSX.Element => {
         terminalAgent ||
         terminalLaunch ||
         shortcutsOpen ||
-        (sidePanel && sidePanel !== "inspector")
+        catchUpOpen
       )
         return;
-      if (event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        isEditableTarget(event.target) ||
+        (event.target instanceof Element &&
+          event.target.closest(
+            ".workspace-tree, .navigation-attention, .workspace__toolbar, .workspace__resize, .zoom-control",
+          ))
+      )
+        return;
 
       const key = event.key;
       if (key === "ArrowDown" || key === "j") {
@@ -502,10 +529,10 @@ export const App = (): React.JSX.Element => {
         focusSelection();
       } else if (key === "a") {
         event.preventDefault();
-        setSidePanel((value) => (value === "attention" ? undefined : "attention"));
+        setNavigationView((value) => (value === "attention" ? "all" : "attention"));
       } else if (key === "b") {
         event.preventDefault();
-        setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
+        setNavigationView((value) => (value === "unassigned" ? "all" : "unassigned"));
       } else if (key === "v") {
         event.preventDefault();
         updateSetting("view", (current) => (current === "atlas" ? "ledger" : "atlas"));
@@ -519,7 +546,7 @@ export const App = (): React.JSX.Element => {
         setNewAgentOpen(true);
       } else if (key === "i") {
         event.preventDefault();
-        if (selection) setSidePanel((value) => (value === "inspector" ? undefined : "inspector"));
+        setInspectorOpen((open) => !open);
       } else if (key === "g") {
         event.preventDefault();
         jumpToAttention();
@@ -550,7 +577,8 @@ export const App = (): React.JSX.Element => {
     selection,
     selectedAgent,
     setSetting,
-    sidePanel,
+    catchUpOpen,
+    inspectorOpen,
     shortcutsOpen,
     terminalAgent,
     terminalLaunch,
@@ -580,29 +608,6 @@ export const App = (): React.JSX.Element => {
           </div>
         </div>
         <nav aria-label="Portfolio controls">
-          <label className="system-scope">
-            <span className="visually-hidden">Current system</span>
-            <select
-              aria-label="Current system"
-              onChange={(event) => {
-                setSelectedSystemId(event.target.value || undefined);
-                setSelection(undefined);
-                setSidePanel(undefined);
-                setCameraCommand(undefined);
-              }}
-              value={selectedSystemId ?? ""}
-            >
-              <option value="">All systems</option>
-              {data.commandCentre.systems.map((system) => (
-                <option key={system.id} value={system.id}>
-                  {system.title}
-                </option>
-              ))}
-              {data.commandCentre.goals.some((goal) => !goal.systemId) ? (
-                <option value={NO_SYSTEM_SCOPE}>No system</option>
-              ) : null}
-            </select>
-          </label>
           <div className="masthead__view" role="group" aria-label="View">
             <button
               aria-pressed={view === "atlas"}
@@ -692,146 +697,228 @@ export const App = (): React.JSX.Element => {
           <b>{data.commandCentre.counts.agents} OBSERVED</b>
         </div>
       </header>
-      <section className="work-surface">
-        <div className="metrics" aria-label="Portfolio metrics">
-          <div>
-            <strong>{String(scopedCommandCentre?.counts.goals ?? 0).padStart(2, "0")}</strong>
-            <span>Goals</span>
-          </div>
-          <div>
-            <strong>{String(scopedCommandCentre?.counts.agents ?? 0).padStart(2, "0")}</strong>
-            <span>Agents</span>
-          </div>
-          <div>
-            <strong>{String(working).padStart(2, "0")}</strong>
-            <span>Working</span>
-          </div>
-          <button
-            aria-expanded={sidePanel === "attention"}
-            onClick={() => {
-              setSidePanel((value) => (value === "attention" ? undefined : "attention"));
-            }}
-            type="button"
-          >
-            <strong>{String(scopedCommandCentre?.counts.attention ?? 0).padStart(2, "0")}</strong>
-            <span>Needs you</span>
-          </button>
-          <button
-            aria-expanded={sidePanel === "inbox"}
-            onClick={() => {
-              setSidePanel((value) => (value === "inbox" ? undefined : "inbox"));
-              setSetting("view", "atlas");
-            }}
-            type="button"
-          >
-            <strong>{String(data.commandCentre.counts.unassigned).padStart(2, "0")}</strong>
-            <span>Inbox</span>
-          </button>
-        </div>
-        {portfolio.error ? (
-          <div className="refresh-error">{portfolio.error} · showing last trusted projection</div>
-        ) : null}
-        {launchNotice ? (
-          <button
-            className="launch-notice"
-            onClick={() => setLaunchNotice(undefined)}
-            type="button"
-          >
-            {launchNotice} <span aria-hidden="true">×</span>
-          </button>
-        ) : null}
-        <PendingLaunches
-          launches={visiblePendingLaunches}
-          onDismiss={(requestId) => {
-            setDismissedPendingLaunches((current) => new Set(current).add(requestId));
-            if (terminalLaunch?.requestId === requestId) setTerminalLaunch(undefined);
-          }}
-          onOpen={(launch) => {
-            setTerminalAgent(undefined);
-            setTerminalLaunch(launch);
-          }}
-        />
-        <button
-          aria-expanded={sidePanel === "catch-up"}
-          className={`catch-up-trigger ${data.catchUp.pending ? "is-pending" : ""}`}
-          onClick={() => {
-            setSidePanel((value) => (value === "catch-up" ? undefined : "catch-up"));
-          }}
-          type="button"
-        >
-          <span>{data.catchUp.pending ? "Catch up" : "Caught up"}</span>
-          <b>
-            {data.catchUp.subjects.length} {data.catchUp.subjects.length === 1 ? "area" : "areas"}
-          </b>
-        </button>
-        {view === "atlas" && !selectedSystemId ? (
-          <SystemsOverview
-            onCreate={() => {
-              setEditingSystem(undefined);
-              setSystemDialogOpen(true);
-            }}
-            onEdit={(system) => {
-              setEditingSystem(system);
-              setSystemDialogOpen(true);
-            }}
-            onOpen={(systemId) => {
-              setSelectedSystemId(systemId);
-              setCameraCommand(undefined);
-            }}
-            projection={data.commandCentre}
-          />
-        ) : view === "atlas" && scopedMap ? (
-          <Atlas
-            key={selectedSystemId}
-            cameraCommand={cameraCommand}
-            onCloseAndArchive={(agent) => {
-              setCommandError(undefined);
-              setCloseoutAgent(agent);
-            }}
-            onFocusSelection={setSelection}
-            onMoveGoal={async (goalId, position) => {
-              await runCommand({ type: "SetGoalMapPosition", goalId, position });
-            }}
-            onSelect={select}
-            onOpenTerminal={openAgentTerminal}
-            onReviewChanges={openWorkspaceReview}
-            onClearSelection={() => {
-              setSelection(undefined);
-              setSidePanel(undefined);
-            }}
-            projection={scopedMap}
-            pullRequestUrls={pullRequestUrls}
-            reservedLeft={sidePanel === "attention" || sidePanel === "inbox" ? 430 : 0}
-            reservedRight={selection && sidePanel === "inspector" ? 428 : 0}
-            selection={selection}
-            theme={theme}
-            motion={motion}
-          />
-        ) : (
-          <Ledger onSelect={select} projection={scopedCommandCentre ?? data.commandCentre} />
+      <Workspace
+        revealNavigation={navigationView}
+        revealInspector={selection ? `${selection.type}:${selection.id}` : undefined}
+        inspectorOpen={inspectorOpen}
+        onInspectorOpenChange={setInspectorOpen}
+        navigation={
+          <>
+            <nav className="navigation-attention" aria-label="Work views">
+              <button
+                type="button"
+                aria-pressed={navigationView === "all"}
+                onClick={() => setNavigationView("all")}
+              >
+                <ListTree size={16} />
+                <span>All work</span>
+                <b>{data.commandCentre.counts.agents}</b>
+              </button>
+              <button
+                type="button"
+                aria-pressed={navigationView === "attention"}
+                onClick={() =>
+                  setNavigationView((value) => (value === "attention" ? "all" : "attention"))
+                }
+              >
+                <CircleAlert size={16} />
+                <span>Needs you</span>
+                <b className={data.commandCentre.counts.attention > 0 ? "is-attention" : undefined}>
+                  {data.commandCentre.counts.attention}
+                </b>
+              </button>
+              <button
+                type="button"
+                aria-pressed={navigationView === "unassigned"}
+                onClick={() => {
+                  setNavigationView((value) => (value === "unassigned" ? "all" : "unassigned"));
+                  setSetting("view", "atlas");
+                }}
+              >
+                <Inbox size={16} />
+                <span>Unassigned</span>
+                <b>{data.commandCentre.counts.unassigned}</b>
+              </button>
+              <button
+                type="button"
+                className="navigation-attention__catchup"
+                aria-haspopup="dialog"
+                aria-expanded={catchUpOpen}
+                onClick={() => setCatchUpOpen((open) => !open)}
+              >
+                <History size={16} />
+                <span>{data.catchUp.pending ? "Catch up" : "Caught up"}</span>
+                <b className={data.catchUp.pending ? "is-attention" : undefined}>
+                  {data.catchUp.subjects.length}
+                </b>
+              </button>
+            </nav>
+            <WorkspaceNavigation
+              view={navigationView}
+              projection={data.commandCentre}
+              systemId={selectedSystemId}
+              selection={selection}
+              onSelect={selectAndFocus}
+              onSystem={(id) => {
+                setSelectedSystemId(id);
+                setSelection(undefined);
+                setCameraCommand(undefined);
+                setSetting("view", "atlas");
+              }}
+            />
+          </>
+        }
+        inspector={
+          <>
+            {selection ? (
+              <Inspector
+                commandCentre={data.commandCentre}
+                commandError={commandError}
+                commandPending={commandPending}
+                error={inspectorError}
+                onClose={() => {
+                  setSelection(undefined);
+                  setInspectorOpen(false);
+                }}
+                onCommand={runCommand}
+                onCloseAndArchive={runCloseout}
+                projection={inspector}
+                onOpenTerminal={openAgentTerminal}
+                onPullRequestChange={recordPullRequest}
+                onRetry={refreshInspector}
+                onReviewChanges={openWorkspaceReview}
+                onResume={resumeAgent}
+              />
+            ) : null}
+
+            {!selection ? (
+              <aside className="inspector workspace-summary" aria-label="System overview">
+                <header>
+                  <div>
+                    <p className="overline">Overview</p>
+                    <h2>
+                      {data.commandCentre.systems.find((system) => system.id === selectedSystemId)
+                        ?.title ?? (selectedSystemId ? "No system" : "All systems")}
+                    </h2>
+                  </div>
+                </header>
+                <div className="workspace-summary__body">
+                  <p>
+                    {data.commandCentre.systems.find((system) => system.id === selectedSystemId)
+                      ?.description ?? "Select a goal or agent to see its details and actions."}
+                  </p>
+
+                  {selectedSystemId && selectedSystemId !== NO_SYSTEM_SCOPE ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingSystem(
+                          data.commandCentre.systems.find(
+                            (system) => system.id === selectedSystemId,
+                          ),
+                        );
+                        setSystemDialogOpen(true);
+                      }}
+                    >
+                      Edit system
+                    </button>
+                  ) : null}
+                </div>
+              </aside>
+            ) : null}
+          </>
+        }
+      >
+        {(focusControl) => (
+          <section className="work-surface">
+            {portfolio.error ? (
+              <div className="refresh-error">
+                {portfolio.error} · showing last trusted projection
+              </div>
+            ) : null}
+            {launchNotice ? (
+              <button
+                className="launch-notice"
+                onClick={() => setLaunchNotice(undefined)}
+                type="button"
+              >
+                {launchNotice} <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            <PendingLaunches
+              launches={visiblePendingLaunches}
+              onDismiss={(requestId) => {
+                setDismissedPendingLaunches((current) => new Set(current).add(requestId));
+                if (terminalLaunch?.requestId === requestId) setTerminalLaunch(undefined);
+              }}
+              onOpen={(launch) => {
+                setTerminalAgent(undefined);
+                setTerminalLaunch(launch);
+              }}
+            />
+            {view === "atlas" && !selectedSystemId ? (
+              <SystemsOverview
+                onCreate={() => {
+                  setEditingSystem(undefined);
+                  setSystemDialogOpen(true);
+                }}
+                onEdit={(system) => {
+                  setEditingSystem(system);
+                  setSystemDialogOpen(true);
+                }}
+                onOpen={(systemId) => {
+                  setSelectedSystemId(systemId);
+                  setCameraCommand(undefined);
+                }}
+                projection={data.commandCentre}
+              />
+            ) : view === "atlas" && scopedMap ? (
+              <Atlas
+                key={selectedSystemId}
+                cameraCommand={cameraCommand}
+                additionalControls={focusControl}
+                onCloseAndArchive={(agent) => {
+                  setCommandError(undefined);
+                  setCloseoutAgent(agent);
+                }}
+                onFocusSelection={setSelection}
+                onMoveGoal={async (goalId, position) => {
+                  await runCommand({ type: "SetGoalMapPosition", goalId, position });
+                }}
+                onSelect={select}
+                onOpenTerminal={openAgentTerminal}
+                onReviewChanges={openWorkspaceReview}
+                onClearSelection={() => {
+                  setSelection(undefined);
+                }}
+                projection={scopedMap}
+                pullRequestUrls={pullRequestUrls}
+                reservedLeft={0}
+                reservedRight={0}
+                selection={selection}
+                theme={theme}
+                motion={motion}
+              />
+            ) : (
+              <Ledger onSelect={select} projection={scopedCommandCentre ?? data.commandCentre} />
+            )}
+            <button
+              aria-pressed={motion}
+              className="motion-control"
+              onClick={() => updateSetting("motion", (current) => !current)}
+              type="button"
+            >
+              Motion {motion ? "on" : "off"}
+            </button>
+          </section>
         )}
-        {sidePanel === "attention" ? (
-          <AttentionQueue
-            onClose={() => setSidePanel(undefined)}
-            onSelect={selectAndFocus}
-            projection={scopedCommandCentre ?? data.commandCentre}
-          />
-        ) : null}
-        {sidePanel === "inbox" ? (
-          <InboxPanel
-            error={commandError}
-            focusedAgentId={selection?.type === "agent" ? selection.id : undefined}
-            onAssign={assignInboxAgents}
-            onClose={() => setSidePanel(undefined)}
-            onSelect={(next) => {
-              setSelection(next);
-              setSidePanel("inspector");
-            }}
-            pending={commandPending}
-            projection={data.commandCentre}
-          />
-        ) : null}
-        {sidePanel === "catch-up" ? (
+      </Workspace>
+      {catchUpOpen ? (
+        <ModalDialog
+          className="modal-backdrop workspace-task-modal"
+          ariaLabel="Catch up"
+          onClose={() => setCatchUpOpen(false)}
+        >
           <CatchUpPanel
             onAcknowledge={async () => {
               const response = await runCommand({
@@ -839,51 +926,30 @@ export const App = (): React.JSX.Element => {
                 throughSequence: data.catchUp.throughSequence,
                 evidenceThroughSequence: data.catchUp.evidenceThroughSequence,
               });
-              if (response) setSidePanel(undefined);
+              if (response) setCatchUpOpen(false);
             }}
-            onClose={() => setSidePanel(undefined)}
+            onClose={() => setCatchUpOpen(false)}
             onOpenInbox={() => {
               setSelection(undefined);
-              setSidePanel("inbox");
+              setCatchUpOpen(false);
+              setNavigationView("unassigned");
             }}
             onSelectSystem={(systemId) => {
               setSelectedSystemId(systemId);
               setSetting("view", "atlas");
               setSelection(undefined);
-              setSidePanel(undefined);
+              setCatchUpOpen(false);
             }}
-            onSelect={selectAndFocus}
+            onSelect={(next) => {
+              setCatchUpOpen(false);
+              selectAndFocus(next);
+            }}
             pending={commandPending}
             projection={data.catchUp}
           />
-        ) : null}
-        {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
-        {selection && sidePanel === "inspector" && !terminalAgent ? (
-          <Inspector
-            commandCentre={data.commandCentre}
-            commandError={commandError}
-            commandPending={commandPending}
-            error={inspectorError}
-            onClose={() => setSidePanel(undefined)}
-            onCommand={runCommand}
-            onCloseAndArchive={runCloseout}
-            projection={inspector}
-            onOpenTerminal={openAgentTerminal}
-            onPullRequestChange={recordPullRequest}
-            onRetry={refreshInspector}
-            onReviewChanges={openWorkspaceReview}
-            onResume={resumeAgent}
-          />
-        ) : null}
-        <button
-          aria-pressed={motion}
-          className="motion-control"
-          onClick={() => updateSetting("motion", (current) => !current)}
-          type="button"
-        >
-          Motion {motion ? "on" : "off"}
-        </button>
-      </section>
+        </ModalDialog>
+      ) : null}
+      {shortcutsOpen ? <KeyboardGuide onClose={() => setShortcutsOpen(false)} /> : null}
       {closeoutAgent ? (
         <CloseAgentDialog
           agent={closeoutAgent}
@@ -900,7 +966,7 @@ export const App = (): React.JSX.Element => {
             setCloseoutAgent(undefined);
             if (selection?.type === "agent" && selection.id === closedAgentId) {
               setSelection(undefined);
-              setSidePanel(undefined);
+              setInspectorOpen(false);
             }
             if (terminalAgent?.id === closedAgentId) setTerminalAgent(undefined);
           }}
@@ -997,7 +1063,7 @@ export const App = (): React.JSX.Element => {
               setTerminalLaunch(pendingLaunch);
             } else if (response.result.agentId) {
               setSelection({ type: "agent", id: response.result.agentId });
-              setSidePanel("inspector");
+              setInspectorOpen(true);
               refreshInspector();
             } else if (response.result.goalId) {
               setSelection({ type: "goal", id: response.result.goalId });
@@ -1030,13 +1096,14 @@ export const App = (): React.JSX.Element => {
             setSearchQuery("");
             const next = { type: result.type, id: result.id };
             const systemScope = systemScopeForSelection(next, data.commandCentre);
-            if (systemScope) setSelectedSystemId(systemScope);
+            setSelectedSystemId(systemScope);
             const action = searchResultAction(result, data.map);
             if (action === "focus") selectAndFocus(next);
             else {
               setSetting("view", "atlas");
               setSelection(next);
-              setSidePanel(action === "inbox" ? "inbox" : "inspector");
+              if (action === "inbox") setNavigationView("unassigned");
+              setInspectorOpen(true);
             }
           }}
           onClose={() => {

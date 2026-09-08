@@ -77,7 +77,7 @@ export const Inspector = ({
     <aside className="inspector" aria-label="Selection inspector">
       <header>
         <div>
-          <p className="overline">INSPECTOR / OBSERVED STATE</p>
+          <p className="overline">INSPECTOR</p>
           <h2>{heading}</h2>
         </div>
         <button aria-label="Close inspector" onClick={onClose} type="button">
@@ -522,7 +522,6 @@ export const Inspector = ({
         </>
       ) : null}
       {commandError ? <p className="command-error">{commandError}</p> : null}
-      <footer>Commands are validated and persisted by the Universe.</footer>
     </aside>
   );
 };

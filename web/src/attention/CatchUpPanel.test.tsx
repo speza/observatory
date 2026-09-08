@@ -100,7 +100,7 @@ describe("CatchUpPanel", () => {
     expect(markup).toContain("1 Agent finished");
     expect(markup).toContain("Provider requests");
     expect(markup).toContain("7 accepted transitions · 1 routine provider transition");
-    expect(markup).toContain("1 affected areas · 7 accepted transitions");
+    expect(markup).toContain("1 area changed");
     expect(markup).toContain("<details");
     expect(markup).not.toContain("<details open");
     expect(markup.indexOf("1 Agent needs judgment")).toBeLessThan(

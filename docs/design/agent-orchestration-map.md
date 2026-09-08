@@ -312,3 +312,31 @@ Observatory is not:
 - How much semantic-density control is needed before focus and Ledger are
   sufficient?
 - What narrowly defined automation, if any, can preserve human trust?
+
+## Docked workspace trial (2026-09-07)
+
+The desktop workspace has a resizable navigation column (240px initially),
+the Atlas or Ledger, and a resizable inspector column (360px initially).
+Navigation holds system/goal/agent discovery, counts, Inbox, Needs you and
+Catch up. Selecting a goal or agent locates it on Atlas and opens its inspector;
+All work, Needs you and Unassigned are views of the same sidebar list. Needs
+you retains system/goal context and includes unassigned agents requiring
+attention. Unassigned agents are assigned through the existing inspector.
+Catch up is a separate centred modal action. With no selection,
+the right column shows the current system overview.
+
+The canvas owns only the remaining column width; panels do not require guessed
+camera reservations. Panel widths and the navigation preference live in browser
+storage, never Universe state. Focus map sits beside the Atlas zoom/Fit controls and
+temporarily hides both panels. Below 1200px the
+navigation defaults to collapsed; below 700px the inspector also defaults to
+collapsed. Explicitly opened narrow-screen panels overlay the canvas one at a
+time. Resize separators support pointer dragging and keyboard arrows/Home/End.
+
+The left navigator uses aligned attention action badges,
+indented System/Goal/Agent rows, provider marks and accessible agent status
+indicators. Only the selected item receives the full selection highlight.
+
+The navigator and system inspector avoid repeating portfolio metrics. Empty
+list views show a short message. Catch up uses native modal
+focus containment, Escape/backdrop dismissal and focus return to the trigger.

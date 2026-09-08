@@ -14,10 +14,5 @@ export const systemScopeForSelection = (
           candidate.agents.some((agent) => agent.id === selection.id),
         );
   if (goal) return goal.systemId ?? NO_SYSTEM_SCOPE;
-  if (
-    selection.type === "agent" &&
-    projection.unassigned.some((agent) => agent.id === selection.id)
-  )
-    return NO_SYSTEM_SCOPE;
   return undefined;
 };

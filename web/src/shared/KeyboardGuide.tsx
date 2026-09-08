@@ -40,11 +40,11 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
       </div>
       <div>
         <dt>/ or ⌘/Ctrl+k</dt>
-        <dd>Find a Goal or Agent in the Atlas, Inspector, or Inbox</dd>
+        <dd>Find a Goal or Agent in the Atlas, Inspector, or Unassigned list</dd>
       </div>
       <div>
         <dt>a / b / v / n / N</dt>
-        <dd>Needs you, inbox, view, new goal, new agent</dd>
+        <dd>Needs you, unassigned, view, new goal, new agent</dd>
       </div>
       <div>
         <dt>i / ? / Esc</dt>

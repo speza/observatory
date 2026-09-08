@@ -49,9 +49,7 @@ describe("systemScopeForSelection", () => {
     expect(systemScopeForSelection({ type: "goal", id: "goal-2" }, projection)).toBe(
       NO_SYSTEM_SCOPE,
     );
-    expect(systemScopeForSelection({ type: "agent", id: "agent-2" }, projection)).toBe(
-      NO_SYSTEM_SCOPE,
-    );
+    expect(systemScopeForSelection({ type: "agent", id: "agent-2" }, projection)).toBeUndefined();
     expect(systemScopeForSelection({ type: "agent", id: "missing" }, projection)).toBeUndefined();
   });
 });
