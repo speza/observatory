@@ -26,6 +26,7 @@ import { pendingLaunchView } from "./launch.ts";
 import { projectPortfolio, type PortfolioLimits } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
+import type { HostExecutionKey } from "../universe/universe.ts";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -57,6 +58,8 @@ interface TerminalSocketData {
 }
 
 const MAX_TERMINAL_SOCKET_QUEUE_BYTES = 1_048_576;
+
+const noPendingExecutionKeys = (): readonly HostExecutionKey[] => [];
 
 const closeTerminalSocketAfterFlush = (
   socket: Bun.ServerWebSocket<TerminalSocketData>,
@@ -162,11 +165,13 @@ const program = Effect.scoped(
       workspace,
       plugins,
     );
+    let pendingExecutionKeys: () => readonly HostExecutionKey[] = noPendingExecutionKeys;
     const conversations = new ConversationTracker(
       plugins,
       runtime.store,
       runtime.universe,
       configuredWorkspaceLocations,
+      () => pendingExecutionKeys(),
     );
     const agentObservations = new AgentObservationCoordinator(
       plugins,
@@ -185,6 +190,18 @@ const program = Effect.scoped(
       events,
       now: () => runtime.clock.now(),
     });
+    pendingExecutionKeys = () =>
+      startAgent.pendingLaunches().flatMap((launch) =>
+        launch.hostKind && launch.hostInstanceId
+          ? [
+              {
+                hostKind: launch.hostKind,
+                hostInstanceId: launch.hostInstanceId,
+                nativeId: launch.executionRef,
+              },
+            ]
+          : [],
+      );
     const initialMessage = yield* initializeObservatoryRuntime(
       runtime,
       conversations.observeHost.bind(conversations),

@@ -184,10 +184,32 @@ export interface RuntimeInvalidationResult {
 }
 
 export interface IdGenerator {
-  next(kind: "system" | "goal" | "agent"): string;
+  next(kind: "system" | "goal" | "agent" | "discovery"): string;
 }
 
 export const priorityRank = (priority: Priority): number => PRIORITIES.indexOf(priority);
+
+/**
+ * Reduce an opaque conversation reference to display-safe identity for browser
+ * projections. Path-like values never leave the server.
+ */
+export const safeConversationReference = (
+  reference: NativeConversationRef | undefined,
+): { readonly kind: string; readonly id: string } | undefined => {
+  if (!reference) return undefined;
+  const kind = reference.kind.trim();
+  const value = reference.value.trim();
+  if (
+    !kind ||
+    !value ||
+    kind.toLocaleLowerCase().includes("path") ||
+    value.startsWith("/") ||
+    value.startsWith("\\") ||
+    /^[A-Za-z]:[\\/]/u.test(value)
+  )
+    return undefined;
+  return { kind, id: value };
+};
 
 export const isCurrentAttentionState = (state: RuntimeState): boolean =>
   state === "blocked" || state === "waiting";

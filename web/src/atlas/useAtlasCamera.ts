@@ -12,6 +12,8 @@ import type { Selection } from "../app/selection.ts";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
+  DISCOVERED_CARD_HEIGHT,
+  DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
   goalAgentPoints,
@@ -171,6 +173,12 @@ export const useAtlasCamera = ({
       const goal = projection.goals.find((candidate) => candidate.id === target.id);
       return goal ? screenPoint(goal.mapPosition) : undefined;
     }
+    if (target.type === "discovered-execution") {
+      const execution = projection.discoveredExecutions?.find(
+        (candidate) => candidate.handle === target.id,
+      );
+      return execution ? screenPoint(execution.mapPosition) : undefined;
+    }
     for (const goal of projection.goals) {
       const agentIndex = goal.agents.findIndex((candidate) => candidate.id === target.id);
       if (agentIndex >= 0) {
@@ -193,14 +201,25 @@ export const useAtlasCamera = ({
       next?.type === "goal"
         ? projection.goals.find((candidate) => candidate.id === next.id)
         : undefined;
+    const discovered =
+      next?.type === "discovered-execution"
+        ? projection.discoveredExecutions?.find((candidate) => candidate.handle === next.id)
+        : undefined;
     const bounds = goal
       ? goalLocalBounds(goal)
-      : {
-          left: AGENT_CARD_WIDTH / 2 + 4,
-          right: AGENT_CARD_WIDTH / 2 + 4,
-          top: AGENT_CARD_HEIGHT / 2 + 4,
-          bottom: AGENT_CARD_HEIGHT / 2 + 4,
-        };
+      : discovered
+        ? {
+            left: DISCOVERED_CARD_WIDTH / 2 + 8,
+            right: DISCOVERED_CARD_WIDTH / 2 + 8,
+            top: DISCOVERED_CARD_HEIGHT / 2 + 28,
+            bottom: DISCOVERED_CARD_HEIGHT / 2 + 28,
+          }
+        : {
+            left: AGENT_CARD_WIDTH / 2 + 4,
+            right: AGENT_CARD_WIDTH / 2 + 4,
+            top: AGENT_CARD_HEIGHT / 2 + 4,
+            bottom: AGENT_CARD_HEIGHT / 2 + 4,
+          };
     setCamera(
       fitAtlasBounds(
         {

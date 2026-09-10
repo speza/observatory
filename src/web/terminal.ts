@@ -46,6 +46,7 @@ const Dimensions = Schema.Struct({
 const OpenRequest = Schema.Struct({
   agentId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160))),
   requestId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))),
+  discoveryHandle: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))),
   dimensions: Dimensions,
   resizeMode: Schema.optional(Schema.Literal("fit", "preserve")),
   linkId: Schema.optional(LinkId),
@@ -193,20 +194,33 @@ export class WebTerminalGateway {
 
   async open(body: string): Promise<WebTerminalOpenResponse> {
     const request = decode(OpenRequest, body);
-    if (Boolean(request.agentId) === Boolean(request.requestId))
-      throw new WebTerminalError("Choose exactly one Agent or pending launch terminal.", 400);
+    const targetCount = [request.agentId, request.requestId, request.discoveryHandle].filter(
+      Boolean,
+    ).length;
+    if (targetCount !== 1)
+      throw new WebTerminalError(
+        "Choose exactly one Agent, discovered execution, or pending launch terminal.",
+        400,
+      );
     try {
       const agent = request.agentId ? this.activeAgent(request.agentId) : undefined;
       if (agent && !agent.execution)
         throw new WebTerminalError("Agent has no current host execution.", 409);
       const access = agent
         ? await Effect.runPromise(this.host.access(agent.execution!))
-        : await this.pendingLaunchAccess(request.requestId!);
+        : request.discoveryHandle
+          ? await this.discoveredExecutionAccess(request.discoveryHandle)
+          : await this.pendingLaunchAccess(request.requestId!);
       const options: TerminalOpenOptions | undefined = request.resizeMode
         ? { resizeMode: request.resizeMode }
         : undefined;
       if (request.linkId && !agent)
-        throw new WebTerminalError("Pending launches do not have companion terminals.", 409);
+        throw new WebTerminalError(
+          request.discoveryHandle
+            ? "Discovered executions do not have companion terminals."
+            : "Pending launches do not have companion terminals.",
+          409,
+        );
       const opened = request.linkId
         ? await this.openLinkedTerminal(request.linkId, agent!, access, request.dimensions, options)
         : await this.openPrimaryTerminal(access, request.dimensions, options);
@@ -236,10 +250,81 @@ export class WebTerminalGateway {
     const snapshot = await Effect.runPromise(this.host.snapshot());
     if (!snapshot.available)
       throw new WebTerminalError(snapshot.error ?? "The session host is unavailable.", 409);
+    if (
+      !launch.hostKind ||
+      !launch.hostInstanceId ||
+      snapshot.hostKind !== launch.hostKind ||
+      snapshot.hostInstanceId !== launch.hostInstanceId
+    )
+      throw new WebTerminalError("The pending launch host changed; refresh and retry.", 409);
     if (!snapshot.agents.some((observation) => observation.nativeId === launch.executionRef))
       throw new WebTerminalError("The pending launch execution is no longer visible.", 409);
     return Effect.runPromise(
       this.host.access({ hostKind: snapshot.hostKind, nativeId: launch.executionRef }),
+    );
+  }
+
+  private async discoveredExecutionAccess(handle: string): Promise<AgentAccess> {
+    const discovery = this.universe.resolveDiscoveredExecution(handle);
+    if (!discovery)
+      throw new WebTerminalError(
+        "Discovered execution is no longer visible; refresh and retry.",
+        404,
+      );
+    const snapshot = await Effect.runPromise(this.host.snapshot());
+    if (!snapshot.available)
+      throw new WebTerminalError(
+        snapshot.error ?? "The session host is unavailable; live terminal access is disabled.",
+        409,
+      );
+    if (snapshot.observedAt < discovery.binding.observedAt)
+      throw new WebTerminalError(
+        "The discovered execution inventory is older than the selected observation; refresh and retry.",
+        409,
+      );
+    if (
+      snapshot.hostKind !== discovery.binding.hostKind ||
+      snapshot.hostInstanceId !== discovery.binding.hostInstanceId
+    )
+      throw new WebTerminalError("The discovered execution host changed; refresh and retry.", 409);
+    const observation = snapshot.agents.find(
+      (candidate) => candidate.nativeId.trim() === discovery.binding.nativeId,
+    );
+    if (!observation)
+      throw new WebTerminalError(
+        snapshot.complete
+          ? "The discovered execution is no longer visible; refresh and retry."
+          : "The discovered execution target could not be validated while the host inventory is incomplete.",
+        409,
+      );
+    if (observation.hostLocator !== discovery.binding.hostLocator)
+      throw new WebTerminalError(
+        "The discovered execution target was reused; select it again before opening a terminal.",
+        409,
+      );
+    const expectedConversation = discovery.nativeConversationRef;
+    const observedConversation = observation.harnessEvidence?.nativeConversationRef;
+    const sameConversation =
+      expectedConversation === undefined && observedConversation === undefined
+        ? true
+        : expectedConversation !== undefined &&
+          observedConversation !== undefined &&
+          expectedConversation.harnessId === observedConversation.harnessId &&
+          expectedConversation.kind === observedConversation.kind &&
+          expectedConversation.value === observedConversation.value &&
+          (expectedConversation.continuityScopeId === undefined ||
+            observedConversation.continuityScopeId === undefined ||
+            expectedConversation.continuityScopeId === observedConversation.continuityScopeId);
+    if (!sameConversation)
+      throw new WebTerminalError(
+        "The discovered execution conversation changed; select it again before opening a terminal.",
+        409,
+      );
+    return Effect.runPromise(
+      this.host.access({
+        hostKind: discovery.binding.hostKind,
+        nativeId: discovery.binding.nativeId,
+      }),
     );
   }
 

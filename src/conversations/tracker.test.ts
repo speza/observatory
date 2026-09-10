@@ -263,7 +263,86 @@ describe("conversation tracker", () => {
     expect(reconciled.accepted).toBe(true);
     expect(reconciled.diagnostics.join(" ")).toContain("untracked");
     expect(fixture.universe.snapshot().agents).toEqual([]);
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toHaveLength(1);
     expect(fixture.tracker.history()).toHaveLength(1);
+    fixture.store.close();
+  });
+
+  test("admits a discovered execution only after exact catalogue evidence", async () => {
+    const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(
+      hostSnapshot([
+        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+      ]),
+    );
+    const before = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (before.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = before.discoveredExecutions?.[0];
+    expect(discovery?.admission.status).toBe("available");
+    expect(discovery?.conversationIdentified).toBe(true);
+    expect(discovery?.conversation).toEqual({ kind: "id", id: "native-secret-id" });
+    const admitted = fixture.tracker.admitDiscovered(discovery!.handle);
+    expect(admitted).toMatchObject({ message: "Execution added to Observatory." });
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      id: admitted.agentId,
+      execution: { nativeId: "pane-live" },
+    });
+    expect(fixture.universe.project({ kind: "command-centre", now: 1_000_000 })).toMatchObject({
+      discoveredExecutions: [],
+      counts: { agents: 1, discovered: 0 },
+    });
+    fixture.store.close();
+  });
+
+  test("converges a queued discovery admission with earlier History admission", async () => {
+    const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(
+      hostSnapshot([
+        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+      ]),
+    );
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const handle = projection.discoveredExecutions?.[0]?.handle;
+    if (!handle) throw new Error("Expected a discovery handle.");
+
+    const historyAdded = fixture.tracker.add(fixture.tracker.history()[0]!.handle);
+    const retried = fixture.tracker.admitDiscovered(handle);
+
+    expect(retried).toMatchObject({
+      agentId: historyAdded.agentId,
+      message: "Execution was already added to Observatory.",
+    });
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    fixture.store.close();
+  });
+
+  test("reports partial success when discovered admission cannot assign its Goal", async () => {
+    const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    const goal = fixture.universe.execute({ type: "CreateGoal", title: "Finished goal" });
+    fixture.universe.execute({ type: "CompleteGoal", goalId: goal.goalId! });
+    fixture.universe.execute({ type: "ArchiveGoal", goalId: goal.goalId! });
+    fixture.tracker.observeHost(
+      hostSnapshot([
+        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+      ]),
+    );
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const result = fixture.tracker.admitDiscovered(
+      projection.discoveredExecutions![0]!.handle,
+      goal.goalId,
+    );
+    expect(result.partial).toBe(true);
+    expect(result.goalId).toBeUndefined();
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]?.primaryGoalId).toBeUndefined();
     fixture.store.close();
   });
 
@@ -360,6 +439,25 @@ describe("conversation tracker", () => {
     expect(result.accepted).toBe(true);
     expect(result.diagnostics.join(" ")).toContain("untracked");
     expect(fixture.universe.snapshot().agents).toEqual([]);
+    fixture.store.close();
+  });
+
+  test("does not promote an unscoped host identity into a lone scoped catalogue entry", () => {
+    const fixture = trackerFixture();
+    fixture.store.reconcileProviderCatalogue(providerSnapshot());
+
+    const result = fixture.tracker.observeHost(
+      hostSnapshot([liveProviderExecution("unscoped-host", "id", "native-secret-id")]),
+    );
+
+    expect(result.accepted).toBe(true);
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toHaveLength(1);
+    expect(projection.discoveredExecutions?.[0]).toMatchObject({
+      conversationTitle: undefined,
+      admission: { status: "unavailable" },
+    });
     fixture.store.close();
   });
 

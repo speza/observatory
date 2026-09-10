@@ -33,6 +33,7 @@ import type {
   WebPluginStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
+  WebAdmitDiscoveredExecutionResponse,
   WebPortfolioResponse,
 } from "./protocol.ts";
 import {
@@ -60,6 +61,10 @@ const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
 });
+const AdmitDiscoveredExecutionRequestSchema = Schema.Struct({
+  handle: Schema.String,
+  goalId: Schema.optional(Schema.String),
+});
 
 type WebResponse =
   | PortfolioResponse
@@ -79,6 +84,7 @@ type WebResponse =
   | WebPluginStatusResponse
   | WebConversationHistoryResponse
   | WebAddConversationResponse
+  | WebAdmitDiscoveredExecutionResponse
   | ErrorResponse;
 
 const json = (body: WebResponse, status = 200): Response =>
@@ -90,8 +96,10 @@ const json = (body: WebResponse, status = 200): Response =>
     },
   });
 
-const targetType = (value: string | null): "goal" | "agent" | undefined => {
-  if (value === "goal" || value === "agent") return value;
+const targetType = (
+  value: string | null,
+): "goal" | "agent" | "discovered-execution" | undefined => {
+  if (value === "goal" || value === "agent" || value === "discovered-execution") return value;
   return undefined;
 };
 
@@ -189,6 +197,41 @@ export class ObservatoryWebApi {
 
     if (url.pathname.startsWith("/api/conversations/"))
       return this.conversationHistory(request, url);
+
+    if (url.pathname === "/api/discoveries/admit") {
+      if (!this.conversations?.admitDiscovered)
+        return json({ error: "Discovered execution admission is unavailable." }, 501);
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const rejected = this.rejectMutation(request);
+      if (rejected) return rejected;
+      try {
+        const values = Schema.decodeUnknownSync(
+          Schema.parseJson(AdmitDiscoveredExecutionRequestSchema),
+        )(await request.text());
+        const handle = values.handle.trim();
+        if (!handle) return json({ error: "A discovered execution handle is required." }, 400);
+        if (
+          this.universe.resolveDiscoveredExecution(handle) === undefined &&
+          this.universe.resolveAdmittedDiscoveredExecution(handle) === undefined
+        )
+          return json({ error: "Discovered execution is no longer visible." }, 404);
+        const result = this.conversations.admitDiscovered(
+          handle,
+          values.goalId?.trim() || undefined,
+        );
+        const portfolio = this.portfolio();
+        if (portfolio instanceof Response) return portfolio;
+        return json({ ...result, portfolio } satisfies WebAdmitDiscoveredExecutionResponse);
+      } catch (error) {
+        return json(
+          {
+            error:
+              error instanceof Error ? error.message : "Discovered execution admission failed.",
+          },
+          409,
+        );
+      }
+    }
 
     if (url.pathname === "/api/closeout/close") {
       if (!this.closeout) return json({ error: "Agent closeout is unavailable." }, 501);

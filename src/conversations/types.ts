@@ -57,6 +57,11 @@ export interface AddedConversation {
   readonly goalId?: string;
 }
 
+export interface AdmittedDiscoveredExecution extends AddedConversation {
+  readonly message: string;
+  readonly partial?: boolean;
+}
+
 /**
  * The single composition-level interface for conversation admission and
  * execution correlation. Provider and host observations do not independently
@@ -66,5 +71,6 @@ export interface ConversationTrackerModule {
   refresh(): Effect.Effect<ConversationRefreshResult>;
   history(): readonly ConversationHistoryView[];
   add(handle: string, goalId?: string): AddedConversation;
+  readonly admitDiscovered?: (handle: string, goalId?: string) => AdmittedDiscoveredExecution;
   observeHost(snapshot: HostSnapshot): ReconciliationResult;
 }

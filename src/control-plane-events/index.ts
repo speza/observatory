@@ -39,8 +39,12 @@ export type UnsequencedControlPlaneEvent =
   | (ControlPlaneEventBase & {
       readonly type: "execution-evidence-changed";
       readonly agentIds: readonly AgentId[];
-      readonly hostInstanceIds: readonly string[];
+      readonly hostKeys: readonly string[];
       readonly availabilityChanged: boolean;
+    })
+  | (ControlPlaneEventBase & {
+      readonly type: "discovered-execution-changed";
+      readonly handles: readonly string[];
     })
   | (ControlPlaneEventBase & {
       readonly type: "provider-evidence-changed";
@@ -97,14 +101,16 @@ const normalizeEvent = (
         ...normalizedIdChunks(event.agentIds).map((agentIds) => ({
           ...event,
           agentIds,
-          hostInstanceIds: [],
+          hostKeys: [],
         })),
-        ...normalizedIdChunks(event.hostInstanceIds).map((hostInstanceIds) => ({
+        ...normalizedIdChunks(event.hostKeys).map((hostKeys) => ({
           ...event,
           agentIds: [],
-          hostInstanceIds,
+          hostKeys,
         })),
       ];
+    case "discovered-execution-changed":
+      return normalizedIdChunks(event.handles).map((handles) => ({ ...event, handles }));
     case "provider-evidence-changed": {
       const kinds = [...new Set(event.kinds)].sort();
       return kinds.length > 0

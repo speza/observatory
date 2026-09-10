@@ -27,6 +27,7 @@ export const searchResultAction = (
 ): SearchResultAction => {
   if (result.type === "goal")
     return projection.goals.some((goal) => goal.id === result.id) ? "focus" : "inspect";
+  if (result.type === "discovered-execution") return "inspect";
   if (projection.goals.some((goal) => goal.agents.some((agent) => agent.id === result.id)))
     return "focus";
   return projection.unassigned.some((agent) => agent.id === result.id) ? "inbox" : "inspect";
@@ -99,7 +100,7 @@ export const SearchPalette = ({
       >
         <header>
           <label htmlFor="search-palette-query" id="search-palette-title">
-            Find a Goal or Agent
+            Find a Goal, Agent, or discovered execution
           </label>
           <kbd>Esc</kbd>
         </header>
@@ -127,7 +128,7 @@ export const SearchPalette = ({
               ? "Searching…"
               : query.trim()
                 ? `${results.length} result${results.length === 1 ? "" : "s"}`
-                : "Search names, descriptions, repositories and status"}
+                : "Search names, descriptions, repositories, hosts and status"}
         </div>
         <div className="search-palette__results" id="search-palette-results" role="listbox">
           {results.map((result, index) => (
@@ -152,7 +153,7 @@ export const SearchPalette = ({
             </button>
           ))}
           {!loading && query.trim() && results.length === 0 && !error ? (
-            <p>No matching Goals or Agents.</p>
+            <p>No matching Goals, Agents, or discovered executions.</p>
           ) : null}
         </div>
         <footer>

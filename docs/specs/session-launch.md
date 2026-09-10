@@ -67,6 +67,8 @@ recover an accepted host launch without launching it again.
 10. No launch step writes Universe state around its commands.
 11. Weak cwd, title, repository or recency matches never complete launch
     identity.
+12. A live execution correlated to a pending launch remains in `Starting` and
+    is not duplicated in `Discovered in Herdr`.
 
 ## Start flow
 
@@ -138,8 +140,9 @@ not become Systems or Goals.
   claim process creation.
 - Host accepts launch but identity is delayed: return pending and continue
   reconciliation without relaunching.
-- Host execution appears without exact provider identity: retain diagnostic
-  evidence only.
+- Host execution appears without exact provider identity: retain the existing
+  pending-launch surface when correlated, otherwise show transient `Discovered
+in Herdr` evidence without creating an Agent.
 - Exact Agent appears but assignment fails: keep it in Inbox and report the
   partial result.
 - Observatory restarts after host acceptance: recover from the receipt and
@@ -165,6 +168,8 @@ Universe and generic terminal interface must not speculate one into existence.
 
 - Launch plans are structured argument vectors, not shell strings.
 - Browser requests do not contain host-native pane, tab or workspace IDs.
+- Discovery terminal requests contain only an opaque server-issued handle;
+  target identity is freshly validated at the SessionHost seam.
 - Provider conversation references remain opaque and server-side.
 - Diagnostics are bounded and exclude prompts, terminal output and transcript
   paths.

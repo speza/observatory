@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import { createProjectionModule } from "../projection/projection.ts";
-import { createEmptyUniverse } from "./universe.ts";
+import { createEmptyUniverse, Universe } from "./universe.ts";
 import { DEFAULT_SYSTEM_ID, emptyUniverseState, type Agent } from "./types.ts";
 import {
   makeUniverse,
@@ -60,6 +60,21 @@ const conversationAlias = (value: string, scope: string) => ({
   continuityScopeId: scope,
   kind: "id",
   value,
+});
+
+const hostOnlyObservation = (
+  nativeId: string,
+  displayName = nativeId,
+  runtimeState: "idle" | "working" | "waiting" | "blocked" | "done" | "unknown" = "working",
+  observedAt = 1_000_000,
+) => ({
+  ...observation(nativeId, displayName, runtimeState, observedAt),
+  harnessEvidence: {
+    detectedHarnessId: "codex",
+    restoreState: "unknown" as const,
+    source: "process" as const,
+    observedAt,
+  },
 });
 
 describe("Universe", () => {
@@ -514,12 +529,19 @@ describe("Universe", () => {
     const untracked = universe.reconcile(hostSnapshot([promoted]));
     expect(untracked.diagnostics.join(" ")).toContain("untracked");
     expect(universe.snapshot().agents).toEqual([]);
+    const discovered = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (discovered.kind !== "command-centre") throw new Error("wrong projection");
+    expect(discovered.discoveredExecutions).toHaveLength(1);
 
     admitObservedConversationsAndReconcile(universe, hostSnapshot([promoted], 1_001_000));
     expect(universe.snapshot().agents[0]).toMatchObject({
       id: "agent-1",
       execution: { nativeId: "shell-pane" },
       displayName: "promoted agent",
+    });
+    expect(universe.project({ kind: "command-centre", now: 1_001_000 })).toMatchObject({
+      counts: { agents: 1, discovered: 0 },
+      discoveredExecutions: [],
     });
   });
 
@@ -672,10 +694,19 @@ describe("Universe", () => {
 
   test("rejects duplicate native identities without guessing", () => {
     const { universe } = makeUniverse();
-    const result = universe.reconcile(hostSnapshot([observation("same"), observation("same")]));
+    universe.reconcile(hostSnapshot([hostOnlyObservation("same")], 1_000_000));
+    const result = universe.reconcile(
+      hostSnapshot([hostOnlyObservation("same"), hostOnlyObservation("same")], 1_001_000),
+    );
     expect(result.accepted).toBe(false);
     expect(result.error).toContain("Duplicate native identity");
     expect(universe.snapshot().agents).toHaveLength(0);
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions?.[0]).toMatchObject({
+      presence: "unknown",
+      observationHealth: "unknown",
+    });
   });
 
   test("rebinds the same proven conversation to a new execution and retains its goal", () => {
@@ -844,6 +875,35 @@ describe("Universe", () => {
     expect(original).toMatchObject({ primaryGoalId: "goal-1", continuity: "replaced" });
     expect(original?.execution).toBeUndefined();
     expect(universe.snapshot().agents).toHaveLength(1);
+  });
+
+  test("does not rebind an admitted Agent when an unidentified target is reused", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Original work" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observedConversation("pane-1", "conversation-a")]),
+    );
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+
+    clock.value += 1_000;
+    const replacement = {
+      ...hostOnlyObservation("pane-1", "Unidentified replacement", "working", clock.now()),
+      hostLocator: "opaque:replacement-pane",
+    };
+    const result = universe.reconcile(hostSnapshot([replacement], clock.now()));
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("untracked");
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      id: "agent-1",
+      primaryGoalId: "goal-1",
+      execution: undefined,
+      continuity: "unknown",
+    });
+    expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+      counts: { discovered: 1, agents: 1 },
+    });
   });
 
   test("does not transfer metadata when a reused execution changes from unscoped A to scoped B", () => {
@@ -1224,25 +1284,365 @@ describe("Universe", () => {
     ).toBeUndefined();
   });
 
-  test("does not admit a host-only execution as a durable Agent", () => {
+  test("shows a host-only execution without admitting it as a durable Agent", () => {
     const { universe, clock } = makeUniverse();
-    const hostOnly = {
-      ...observation("pane-host-only", "Host-only work"),
-      harnessEvidence: {
-        detectedHarnessId: "codex",
-        restoreState: "unknown" as const,
-        source: "process" as const,
-        observedAt: clock.now(),
-      },
-    };
-    admitObservedConversationsAndReconcile(universe, hostSnapshot([hostOnly]));
+    const hostOnly = hostOnlyObservation(
+      "pane-host-only",
+      "Host-only work",
+      "working",
+      clock.now(),
+    );
+    universe.reconcile(hostSnapshot([hostOnly]));
+    const commandCentre = universe.project({ kind: "command-centre", now: clock.now() });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = commandCentre.discoveredExecutions?.[0];
+    expect(universe.snapshot().agents).toEqual([]);
+    expect(commandCentre.counts).toMatchObject({ agents: 0, unassigned: 0, discovered: 1 });
+    expect(discovery).toMatchObject({
+      displayName: "Host-only work",
+      runtimeState: "working",
+      conversationIdentified: false,
+      admission: { status: "unavailable" },
+    });
+    expect(commandCentre.unassigned).toEqual([]);
+    const map = universe.project({ kind: "universe-map", now: clock.now() });
+    if (map.kind !== "universe-map") throw new Error("wrong projection");
+    expect(map.discoveredExecutions).toHaveLength(1);
+    const search = universe.project({ kind: "search", now: clock.now(), query: "Host-only" });
+    if (search.kind !== "search") throw new Error("wrong projection");
+    expect(search.results).toMatchObject([
+      { type: "discovered-execution", label: "Host-only work" },
+    ]);
+    const inspector = universe.project({
+      kind: "inspector",
+      now: clock.now(),
+      target: { type: "discovered-execution", id: discovery!.handle },
+    });
+    expect(inspector).toMatchObject({
+      kind: "discovered-execution-inspector",
+      lines: expect.arrayContaining(["conversation not identified"]),
+    });
+
     universe.invalidateRuntimeFacts();
     clock.value += 1_000;
-    admitObservedConversationsAndReconcile(
-      universe,
-      hostSnapshot([{ ...hostOnly, observedAt: clock.now() }], clock.now()),
-    );
+    universe.reconcile(hostSnapshot([{ ...hostOnly, observedAt: clock.now() }], clock.now()));
     expect(universe.snapshot().agents).toEqual([]);
+    expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+      counts: { agents: 0, discovered: 1 },
+    });
+  });
+
+  test("does not publish discovery changes for timestamp-only host refreshes", () => {
+    const events = new ControlPlaneEventHub();
+    const received: ControlPlaneEvent[] = [];
+    events.subscribe((batch) => received.push(...batch));
+    const { universe, clock } = makeUniverse({ events });
+    const observationAt = clock.now();
+    universe.reconcile(
+      hostSnapshot([hostOnlyObservation("pane-quiet", "Quiet", "working", observationAt)]),
+    );
+    expect(received.map((event) => event.type)).toContain("discovered-execution-changed");
+
+    received.length = 0;
+    clock.value += 1_000;
+    universe.reconcile(
+      hostSnapshot(
+        [hostOnlyObservation("pane-quiet", "Quiet", "working", clock.now())],
+        clock.now(),
+      ),
+    );
+    expect(received).toEqual([]);
+  });
+
+  test("keeps a non-displayable conversation identified without exposing its value", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("pane-hidden", "Hidden conversation", "working", clock.now()),
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            nativeConversationRef: {
+              harnessId: "codex",
+              continuityScopeId: "scope-hidden",
+              kind: "path",
+              value: "/synthetic/private-transcript.jsonl",
+            },
+            restoreState: "unknown" as const,
+            source: "native-integration" as const,
+            observedAt: clock.now(),
+          },
+        },
+      ]),
+    );
+
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = projection.discoveredExecutions?.[0];
+    expect(discovery?.conversationIdentified).toBe(true);
+    expect(discovery?.conversation).toBeUndefined();
+    expect(JSON.stringify(projection)).not.toContain("/synthetic/private-transcript.jsonl");
+  });
+
+  test("retains discovery through uncertain host refreshes but removes it on complete absence", () => {
+    const { universe } = makeUniverse();
+    const first = hostSnapshot([hostOnlyObservation("pane-uncertain")], 1_000_000);
+    universe.reconcile(first);
+    universe.reconcile({
+      ...hostSnapshot([], 1_001_000),
+      complete: false,
+      diagnostics: ["Synthetic inventory record was skipped."],
+    });
+    let projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions?.[0]).toMatchObject({
+      presence: "unknown",
+      observationHealth: "unknown",
+    });
+    universe.reconcile({
+      ...hostSnapshot([], 1_002_000),
+      available: false,
+      complete: false,
+      error: "host unavailable",
+    });
+    projection = universe.project({ kind: "command-centre", now: 1_002_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions?.[0]).toMatchObject({
+      presence: "unknown",
+      observationHealth: "unavailable",
+    });
+    universe.reconcile(hostSnapshot([], 1_003_000));
+    projection = universe.project({ kind: "command-centre", now: 1_003_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toEqual([]);
+    universe.reconcile(first);
+    projection = universe.project({ kind: "command-centre", now: 1_003_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toEqual([]);
+  });
+
+  test("keeps discovery identities separate by execution and host instance", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([
+        hostOnlyObservation("pane-a", "same title"),
+        hostOnlyObservation("pane-b", "same title"),
+      ]),
+    );
+    universe.reconcile({
+      ...hostSnapshot([hostOnlyObservation("pane-a", "same title")], 1_001_000),
+      hostInstanceId: "test-host:other",
+    });
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toHaveLength(3);
+    expect(projection.discoveredExecutions?.map((item) => item.displayName)).toEqual([
+      "same title",
+      "same title",
+      "same title",
+    ]);
+  });
+
+  test("does not rediscover an execution covered by a pending launch", () => {
+    const { universe } = makeUniverse();
+    const pending = hostOnlyObservation("pending-pane");
+    universe.reconcile(hostSnapshot([pending]), [
+      { hostKind: "test-host", hostInstanceId: "test-host:default", nativeId: "pending-pane" },
+    ]);
+    let projection = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toEqual([]);
+    universe.reconcile(hostSnapshot([{ ...pending, observedAt: 1_001_000 }], 1_001_000));
+    projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toHaveLength(1);
+  });
+
+  test("does not let a pending launch on another host suppress discovery", () => {
+    const { universe } = makeUniverse();
+    const pending = hostOnlyObservation("shared-native-id");
+    universe.reconcile(hostSnapshot([pending]), [
+      { hostKind: "other-host", hostInstanceId: "test-host:default", nativeId: "shared-native-id" },
+    ]);
+
+    const projection = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions).toHaveLength(1);
+  });
+
+  test("invalidates a discovery handle when its host target is reused", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(hostSnapshot([hostOnlyObservation("reused-pane")], 1_000_000));
+    const first = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (first.kind !== "command-centre") throw new Error("wrong projection");
+    const oldHandle = first.discoveredExecutions?.[0]?.handle;
+    expect(oldHandle).toBeDefined();
+    universe.reconcile(
+      hostSnapshot(
+        [
+          {
+            ...hostOnlyObservation("reused-pane", "replacement", "working", 1_001_000),
+            hostLocator: "opaque:replacement-pane",
+          },
+        ],
+        1_001_000,
+      ),
+    );
+    const second = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (second.kind !== "command-centre") throw new Error("wrong projection");
+    const newHandle = second.discoveredExecutions?.[0]?.handle;
+    expect(newHandle).toBeDefined();
+    expect(newHandle).not.toBe(oldHandle);
+    expect(universe.resolveDiscoveredExecution(oldHandle!)).toBeUndefined();
+  });
+
+  test("rebuilds unadmitted discovery after a process restart without durable history", () => {
+    const { universe, store, clock } = makeUniverse();
+    const snapshot = hostSnapshot([hostOnlyObservation("restart-pane")]);
+    universe.reconcile(snapshot);
+    const semanticChanges = store.state.changes;
+    universe.invalidateRuntimeFacts();
+    const restarted = new Universe(store, clock, new SequenceIds(), createProjectionModule());
+    expect(restarted.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
+      discoveredExecutions: [],
+      counts: { discovered: 0 },
+    });
+    expect(store.state.changes).toEqual(semanticChanges);
+    restarted.reconcile(
+      hostSnapshot(
+        [hostOnlyObservation("restart-pane", "restart", "working", 1_001_000)],
+        1_001_000,
+      ),
+    );
+    expect(restarted.snapshot().agents).toEqual([]);
+    expect(restarted.project({ kind: "command-centre", now: 1_001_000 })).toMatchObject({
+      counts: { discovered: 1, agents: 0 },
+    });
+  });
+
+  test("enriches a host-only discovery in place when scoped catalogue identity arrives later", () => {
+    const { universe } = makeUniverse();
+    const hostOnly = {
+      ...observation("pane-late-identity", "Late identity", "working"),
+      harnessEvidence: {
+        detectedHarnessId: "codex",
+        nativeConversationRef: {
+          harnessId: "codex",
+          kind: "session-id",
+          value: "late-conversation",
+        },
+        restoreState: "unknown" as const,
+        source: "process" as const,
+        observedAt: 1_000_000,
+      },
+    };
+    universe.reconcile(hostSnapshot([hostOnly]));
+    const before = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (before.kind !== "command-centre") throw new Error("wrong projection");
+    const handle = before.discoveredExecutions?.[0]?.handle;
+    expect(handle).toBeDefined();
+    expect(before.discoveredExecutions?.[0]?.admission.status).toBe("unavailable");
+
+    universe.reconcile(
+      hostSnapshot(
+        [
+          {
+            ...hostOnly,
+            observedAt: 1_001_000,
+            harnessEvidence: {
+              detectedHarnessId: "codex",
+              nativeConversationRef: {
+                harnessId: "codex",
+                continuityScopeId: "scope-late",
+                kind: "session-id",
+                value: "late-conversation",
+              },
+              restoreState: "host-restored",
+              source: "native-integration",
+              observedAt: 1_001_000,
+            },
+          },
+        ],
+        1_001_000,
+      ),
+    );
+    universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-late",
+      observedAt: 1_002_000,
+      complete: true,
+      sessions: [
+        {
+          nativeConversationRef: {
+            harnessId: "codex",
+            continuityScopeId: "scope-late",
+            kind: "session-id",
+            value: "late-conversation",
+          },
+          observedAt: 1_002_000,
+          resumeEligibility: "same-site",
+          title: "Late catalogue work",
+        },
+      ],
+    });
+    const after = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (after.kind !== "command-centre") throw new Error("wrong projection");
+    expect(after.discoveredExecutions).toHaveLength(1);
+    expect(after.discoveredExecutions?.[0]).toMatchObject({
+      handle,
+      conversationIdentified: true,
+      conversationTitle: "Late catalogue work",
+      admission: { status: "available" },
+    });
+  });
+
+  test("preserves execution conflicts while admitting one durable Agent", () => {
+    const { universe } = makeUniverse();
+    const makeClaim = (nativeId: string) => {
+      const claimed = observedConversation(nativeId, "same conversation", 1_000_000);
+      return {
+        ...claimed,
+        harnessEvidence: {
+          ...claimed.harnessEvidence,
+          nativeConversationRef: {
+            ...claimed.harnessEvidence.nativeConversationRef,
+            continuityScopeId: "scope-conflict",
+          },
+        },
+      };
+    };
+    const claims = [makeClaim("pane-conflict-a"), makeClaim("pane-conflict-b")];
+    universe.reconcile(hostSnapshot(claims));
+    const before = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (before.kind !== "command-centre") throw new Error("wrong projection");
+    expect(before.discoveredExecutions).toHaveLength(2);
+    expect(before.discoveredExecutions?.every((item) => item.conversationConflictCount === 2)).toBe(
+      true,
+    );
+    const firstClaim = claims[0];
+    if (!firstClaim) throw new Error("Expected the first conflict claim.");
+    const reference = firstClaim.harnessEvidence.nativeConversationRef;
+    expect(
+      universe.execute({
+        type: "AddConversation",
+        admissionSource: "provider-catalogue",
+        resumeEligibility: "same-site",
+        harnessId: reference.harnessId,
+        nativeConversationRef: reference,
+        displayName: "Admitted conflict",
+        observedAt: 1_000_000,
+      }).ok,
+    ).toBe(true);
+    universe.reconcile(hostSnapshot(claims, 1_001_000));
+    const after = universe.snapshot();
+    expect(after.agents).toHaveLength(1);
+    expect(after.agents[0]).toMatchObject({ executionPresence: "conflict" });
+    expect(after.agents[0]?.conflictingExecutions).toHaveLength(2);
+    expect(universe.project({ kind: "command-centre", now: 1_001_000 })).toMatchObject({
+      discoveredExecutions: [],
+      counts: { agents: 1, discovered: 0 },
+    });
   });
 
   test("restores the same Agent after restart when the conversation is proven", () => {

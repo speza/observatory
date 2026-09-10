@@ -21,9 +21,11 @@ export class SequenceIds implements IdGenerator {
   private system = 0;
   private goal = 0;
   private agent = 0;
-  next(kind: "system" | "goal" | "agent"): string {
+  private discovery = 0;
+  next(kind: "system" | "goal" | "agent" | "discovery"): string {
     if (kind === "system") return `system-${++this.system}`;
     if (kind === "goal") return `goal-${++this.goal}`;
+    if (kind === "discovery") return `discovery-${++this.discovery}`;
     return `agent-${++this.agent}`;
   }
 }

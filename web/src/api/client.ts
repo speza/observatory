@@ -20,6 +20,7 @@ import type {
   WebAgentRepositoryStatusResponse,
   WebConversationHistoryResponse,
   WebAddConversationResponse,
+  WebAdmitDiscoveredExecutionResponse,
   BrowserProjectionEvent,
   WebTerminalServerMessage,
 } from "../../../src/web/protocol.ts";
@@ -125,6 +126,13 @@ const AddConversationSchema = Schema.Struct({
   goalId: Schema.optional(Schema.String),
   portfolio: WebPortfolioResponseSchema,
 });
+const AdmitDiscoveredExecutionSchema = Schema.Struct({
+  agentId: Schema.String,
+  goalId: Schema.optional(Schema.String),
+  message: Schema.String,
+  partial: Schema.optional(Schema.Boolean),
+  portfolio: WebPortfolioResponseSchema,
+});
 
 const responseFor = async (path: string, signal?: AbortSignal): Promise<Response> => {
   const response = await fetch(path, { signal });
@@ -167,8 +175,24 @@ export const addConversation = async (
   return Schema.decodeUnknownSync(AddConversationSchema)(await response.json());
 };
 
+export const admitDiscoveredExecution = async (
+  handle: string,
+  goalId?: string,
+): Promise<WebAdmitDiscoveredExecutionResponse> => {
+  const response = await fetch("/api/discoveries/admit", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-ao-command": "1" },
+    body: JSON.stringify({ handle, goalId }),
+  });
+  if (!response.ok)
+    throw new Error(
+      await errorMessage(response, `Discovered execution admission failed (${response.status}).`),
+    );
+  return Schema.decodeUnknownSync(AdmitDiscoveredExecutionSchema)(await response.json());
+};
+
 export const fetchInspector = async (
-  type: "goal" | "agent",
+  type: "goal" | "agent" | "discovered-execution",
   id: string,
   signal?: AbortSignal,
 ): Promise<InspectorProjection> => {
@@ -351,7 +375,10 @@ const terminalMutation = async (path: string, body: string): Promise<Response> =
 };
 
 export const openWebTerminal = async (
-  target: { readonly agentId: string } | { readonly requestId: string },
+  target:
+    | { readonly agentId: string }
+    | { readonly requestId: string }
+    | { readonly discoveryHandle: string },
   dimensions: { readonly columns: number; readonly rows: number },
   options?: {
     readonly linkId?: string;

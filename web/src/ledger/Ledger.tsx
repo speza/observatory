@@ -1,6 +1,7 @@
 import type {
   AgentView,
   CommandCentreProjection,
+  DiscoveredExecutionView,
   GoalView,
 } from "../../../src/projection/types.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
@@ -59,6 +60,36 @@ const GoalCard = ({
   </article>
 );
 
+const DiscoveredRow = ({
+  execution,
+  onSelect,
+}: {
+  readonly execution: DiscoveredExecutionView;
+  readonly onSelect: (selection: Selection) => void;
+}): React.JSX.Element => {
+  const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+  return (
+    <li>
+      <button
+        aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+        onClick={() => onSelect({ type: "discovered-execution", id: execution.handle })}
+        type="button"
+      >
+        <span className={`state state--${state}`} />
+        <AgentLogo provider={execution.provider} />
+        <span className="ledger__agent-copy">
+          <b>{execution.displayName}</b>
+          <small>
+            {execution.worktree ?? execution.repository ?? "Workspace unknown"} ·{" "}
+            {execution.hostKind}
+          </small>
+        </span>
+        <em>{execution.presence === "live" ? state : "runtime unknown"}</em>
+      </button>
+    </li>
+  );
+};
+
 export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element => {
   const groups = projection.systems.map((system) => ({
     id: system.id,
@@ -104,6 +135,31 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
               <ul>
                 {projection.unassigned.map((agent) => (
                   <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
+                ))}
+              </ul>
+            </article>
+          </div>
+        </section>
+      ) : null}
+      {(projection.discoveredExecutions?.length ?? 0) > 0 ? (
+        <section className="ledger__system">
+          <header>
+            <p className="overline">DISCOVERED IN HERDR</p>
+            <h3>Unassigned host executions</h3>
+            <p>
+              {projection.discoveredExecutions?.length} discovered executions · not durable Agents
+            </p>
+          </header>
+          <div className="ledger__grid">
+            <article className="ledger__unassigned">
+              <div className="ledger__unassigned-heading">
+                <span className="ledger__priority">HOST</span>
+                <strong>Discovered in Herdr</strong>
+                <small>Admission stays explicit; terminal access remains independent.</small>
+              </div>
+              <ul>
+                {projection.discoveredExecutions?.map((execution) => (
+                  <DiscoveredRow execution={execution} key={execution.handle} onSelect={onSelect} />
                 ))}
               </ul>
             </article>

@@ -3,12 +3,18 @@ import type {
   UnsequencedControlPlaneEvent,
 } from "../control-plane-events/index.ts";
 import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
-import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
+import type {
+  DiscoveredExecutionView,
+  Projection,
+  ProjectionModule,
+  ProjectionQuery,
+} from "../projection/types.ts";
 import {
   DEFAULT_SYSTEM_ID,
   PRIORITIES,
   cloneUniverseState,
   isCurrentAttentionState,
+  safeConversationReference,
   type Clock,
   type ExecutionContainerRef,
   type Goal,
@@ -21,8 +27,10 @@ import {
   type ProviderSessionFact,
   type AgentId,
   type Agent,
+  type AgentExecutionBinding,
   type NativeConversationRef,
   type RuntimeInvalidationResult,
+  type MapPosition,
   type UniverseChange,
   type UniverseChangeOutcome,
   type UniverseState,
@@ -33,6 +41,7 @@ import {
   initialGoalMapPosition,
   isMapPosition,
   repairGoalMapPosition,
+  initialDiscoveredExecutionMapPosition,
   type GoalLayoutOccupancy,
 } from "../spatial/positions.ts";
 
@@ -151,7 +160,12 @@ export interface ReconciliationResult {
 }
 
 export type UniverseObservation =
-  | { readonly kind: "host-executions"; readonly snapshot: HostSnapshot }
+  | {
+      readonly kind: "host-executions";
+      readonly snapshot: HostSnapshot;
+      /** Launch identity is scoped to the exact host target for this snapshot. */
+      readonly pendingExecutionKeys?: readonly HostExecutionKey[];
+    }
   | {
       readonly kind: "provider-catalogue";
       readonly harnessId: string;
@@ -182,6 +196,38 @@ const copyExecutionContainer = (
 const uniqueAgentIds = (agentIds: readonly AgentId[]): AgentId[] => [
   ...new Set(agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
 ];
+
+export interface HostExecutionKey {
+  readonly hostKind: string;
+  readonly hostInstanceId: string;
+  readonly nativeId: string;
+}
+
+/** Server-side only: the browser receives the opaque handle, never this binding. */
+export interface DiscoveredExecutionAccess {
+  readonly handle: string;
+  readonly binding: AgentExecutionBinding;
+  readonly nativeConversationRef?: NativeConversationRef;
+}
+
+interface DiscoveredExecutionRecord {
+  readonly handle: string;
+  readonly binding: AgentExecutionBinding;
+  readonly displayName: string;
+  readonly runtimeState: Agent["runtimeState"];
+  readonly runtimeStateSource: string;
+  readonly repository?: string;
+  readonly branch?: string;
+  readonly worktree?: string;
+  readonly provider?: string;
+  readonly executionContainer?: ExecutionContainerRef;
+  readonly nativeConversationRef?: NativeConversationRef;
+  readonly presence: "live" | "unknown";
+  readonly observationHealth: "fresh" | "unknown" | "unavailable";
+  readonly lastObservedAt: number;
+  readonly catalogue?: ProviderSessionFact;
+  readonly mapPosition: MapPosition;
+}
 
 const dismissalKey = (goalId: GoalId, agentId: AgentId): string => `${goalId}\u0000${agentId}`;
 
@@ -265,7 +311,10 @@ const repairUnpinnedGoalPosition = (state: UniverseState, goalId: GoalId): void 
 
 const replaceHost = (state: UniverseState, host: HostHealth): void => {
   state.hosts = [
-    ...state.hosts.filter((candidate) => candidate.hostInstanceId !== host.hostInstanceId),
+    ...state.hosts.filter(
+      (candidate) =>
+        candidate.hostKind !== host.hostKind || candidate.hostInstanceId !== host.hostInstanceId,
+    ),
     host,
   ];
 };
@@ -479,14 +528,17 @@ const changedExecutionAgentIds = (
 const stableHostHealth = ({ lastObservedAt: _lastObservedAt, ...host }: HostHealth): string =>
   JSON.stringify(host);
 
-const changedHostInstanceIds = (
+const hostHealthKey = (host: Pick<HostHealth, "hostKind" | "hostInstanceId">): string =>
+  `${host.hostKind.trim()}\u0000${host.hostInstanceId.trim()}`;
+
+const changedHostKeys = (
   previous: readonly HostHealth[],
   next: readonly HostHealth[],
 ): readonly string[] => {
   const previousById = new Map(
-    previous.map((host) => [host.hostInstanceId, stableHostHealth(host)]),
+    previous.map((host) => [hostHealthKey(host), stableHostHealth(host)]),
   );
-  const nextById = new Map(next.map((host) => [host.hostInstanceId, stableHostHealth(host)]));
+  const nextById = new Map(next.map((host) => [hostHealthKey(host), stableHostHealth(host)]));
   return [...new Set([...previousById.keys(), ...nextById.keys()])]
     .filter((id) => previousById.get(id) !== nextById.get(id))
     .sort();
@@ -560,6 +612,7 @@ const appendDistinctExecutions = (
     if (
       !executions.some(
         (candidate) =>
+          candidate.hostKind === execution.hostKind &&
           candidate.hostInstanceId === execution.hostInstanceId &&
           candidate.nativeId === execution.nativeId,
       )
@@ -582,9 +635,79 @@ const nativeConversationFromObservation = (
     : { harnessId, kind, value };
 };
 
-const executionMatches = (agent: Agent, hostInstanceId: string, nativeId: string): boolean =>
+const executionMatches = (
+  agent: Agent,
+  hostKind: string,
+  hostInstanceId: string,
+  nativeId: string,
+): boolean =>
+  agent.execution?.hostKind === hostKind &&
   agent.execution?.hostInstanceId === hostInstanceId &&
   agent.execution.nativeId === nativeId.trim();
+
+const hostExecutionKey = ({ hostKind, hostInstanceId, nativeId }: HostExecutionKey): string =>
+  `${hostKind.trim()}\u0000${hostInstanceId.trim()}\u0000${nativeId.trim()}`;
+
+const bindingExecutionKey = (binding: AgentExecutionBinding): string => hostExecutionKey(binding);
+
+const sameNativeConversation = (
+  left: NativeConversationRef,
+  right: NativeConversationRef,
+): boolean =>
+  left.harnessId === right.harnessId &&
+  left.kind === right.kind &&
+  left.value === right.value &&
+  left.continuityScopeId === right.continuityScopeId;
+
+const providerFactMatches = (
+  reference: NativeConversationRef,
+  session: ProviderSessionFact,
+): boolean =>
+  Boolean(reference.continuityScopeId) &&
+  [session.nativeConversationRef, ...(session.nativeConversationAliases ?? [])].some((candidate) =>
+    sameNativeConversation(reference, candidate),
+  );
+
+const discoveryRecordMatchesAgent = (record: DiscoveredExecutionRecord, agent: Agent): boolean =>
+  (agent.execution &&
+    bindingExecutionKey(agent.execution) === bindingExecutionKey(record.binding)) === true ||
+  (record.nativeConversationRef !== undefined &&
+    agent.nativeConversationRef !== undefined &&
+    nativeConversationKey(record.nativeConversationRef) ===
+      nativeConversationKey(agent.nativeConversationRef));
+
+const catalogueWithoutObservedAt = (
+  session: ProviderSessionFact,
+): Omit<ProviderSessionFact, "observedAt"> => {
+  const { observedAt: _observedAt, ...rest } = session;
+  return rest;
+};
+
+const stableDiscovery = (record: DiscoveredExecutionRecord): string => {
+  const { lastObservedAt: _lastObservedAt, binding, catalogue, ...stable } = record;
+  const { observedAt: _bindingObservedAt, ...stableBinding } = binding;
+  return JSON.stringify({
+    ...stable,
+    binding: stableBinding,
+    catalogue: catalogue ? catalogueWithoutObservedAt(catalogue) : undefined,
+  });
+};
+
+const changedDiscoveryHandles = (
+  previous: ReadonlyMap<string, DiscoveredExecutionRecord>,
+  next: ReadonlyMap<string, DiscoveredExecutionRecord>,
+): readonly string[] =>
+  [...new Set([...previous.keys(), ...next.keys()])]
+    .filter((handle) => {
+      const before = previous.get(handle);
+      const after = next.get(handle);
+      if (!before || !after) return before !== after;
+      return stableDiscovery(before) !== stableDiscovery(after);
+    })
+    .sort();
+
+const MAX_DISCOVERY_ADMISSIONS = 256;
+const MAX_CURRENT_DISCOVERED_EXECUTIONS = 512;
 
 const appendExecutionHistory = (
   agent: Agent,
@@ -593,6 +716,7 @@ const appendExecutionHistory = (
   binding &&
   !agent.executionHistory.some(
     (candidate) =>
+      candidate.hostKind === binding.hostKind &&
       candidate.hostInstanceId === binding.hostInstanceId &&
       candidate.nativeId === binding.nativeId,
   )
@@ -617,6 +741,10 @@ const rejectedReconciliation = (
   error,
 });
 
+const isUntrustedSnapshotRejection = (error: string | undefined): boolean =>
+  error === "Host observation has an empty native identifier." ||
+  error?.startsWith("Duplicate native identity from host:") === true;
+
 const hostHealthFromSnapshot = (
   snapshot: HostSnapshot,
   previous: HostHealth | undefined,
@@ -635,9 +763,17 @@ const hostHealthFromSnapshot = (
   return health;
 };
 
-const markHostUnavailable = (draft: ReconciliationDraft, hostInstanceId: string): void => {
+const markHostUnavailable = (
+  draft: ReconciliationDraft,
+  hostKind: string,
+  hostInstanceId: string,
+): void => {
   draft.state.agents = draft.state.agents.map((agent) => {
-    if (agent.execution?.hostInstanceId !== hostInstanceId || agent.hostHealth === "unavailable")
+    if (
+      agent.execution?.hostKind !== hostKind ||
+      agent.execution.hostInstanceId !== hostInstanceId ||
+      agent.hostHealth === "unavailable"
+    )
       return agent;
     draft.staleAgentIds.push(agent.id);
     return {
@@ -701,7 +837,8 @@ const detachMissingExecutions = (draft: ReconciliationDraft, snapshot: HostSnaps
   const observedIds = new Set(snapshot.agents.map((agent) => agent.nativeId.trim()));
   draft.state.agents = draft.state.agents.map((agent) => {
     if (
-      agent.execution?.hostInstanceId !== snapshot.hostInstanceId ||
+      agent.execution?.hostKind !== snapshot.hostKind ||
+      agent.execution.hostInstanceId !== snapshot.hostInstanceId ||
       observedIds.has(agent.execution.nativeId) ||
       agent.execution.observedAt > snapshot.observedAt
     )
@@ -902,7 +1039,7 @@ const reconcileObservation = (
     exactByConversation ??
     (compatibleProcessAgents.length === 1 ? compatibleProcessAgents[0] : undefined);
   let byExecution = draft.state.agents.find((agent) =>
-    executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
+    executionMatches(agent, snapshot.hostKind, snapshot.hostInstanceId, observation.nativeId),
   );
   const processConversationMatchesExecution = Boolean(
     processEvidence &&
@@ -927,6 +1064,9 @@ const reconcileObservation = (
       !processConversationMatchesExecution) ||
       (byExecution.runtimeStateSource === "observatory.process-start" &&
         Boolean(byExecution.nativeConversationRef) &&
+        !observedConversation) ||
+      (byExecution.execution !== undefined &&
+        byExecution.execution.hostLocator !== observation.hostLocator &&
         !observedConversation))
   ) {
     detachReplacedExecution(
@@ -1007,7 +1147,8 @@ const reconcileObservation = (
     },
     executionHistory:
       existing.execution &&
-      (existing.execution.hostInstanceId !== snapshot.hostInstanceId ||
+      (existing.execution.hostKind !== snapshot.hostKind ||
+        existing.execution.hostInstanceId !== snapshot.hostInstanceId ||
         existing.execution.nativeId !== observation.nativeId.trim())
         ? appendExecutionHistory(existing, existing.execution)
         : existing.executionHistory,
@@ -1051,8 +1192,14 @@ const planReconciliation = (
   if (duplicate) return rejectedReconciliation(duplicate);
 
   const diagnostics = [...snapshot.diagnostics];
+  if (snapshot.agents.length > MAX_CURRENT_DISCOVERED_EXECUTIONS)
+    diagnostics.push(
+      `${snapshot.hostKind} reported ${snapshot.agents.length} agent executions; discovery is retained as uncertain above the ${MAX_CURRENT_DISCOVERED_EXECUTIONS}-execution safety bound.`,
+    );
   const previousHost = previous.hosts.find(
-    (candidate) => candidate.hostInstanceId === snapshot.hostInstanceId,
+    (candidate) =>
+      candidate.hostKind === snapshot.hostKind &&
+      candidate.hostInstanceId === snapshot.hostInstanceId,
   );
   if (
     previousHost?.lastObservedAt !== undefined &&
@@ -1071,7 +1218,7 @@ const planReconciliation = (
     // provider-scoped reference remains canonical.
     if (observation.harnessEvidence?.source === "process") continue;
     const current = previous.agents.find((agent) =>
-      executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
+      executionMatches(agent, snapshot.hostKind, snapshot.hostInstanceId, observation.nativeId),
     )?.nativeConversationRef;
     if (current?.continuityScopeId && sameConversationWithoutScope(current, observed)) {
       scopeDowngrades.add(observation.nativeId.trim());
@@ -1093,7 +1240,7 @@ const planReconciliation = (
   );
 
   if (!snapshot.available) {
-    markHostUnavailable(draft, snapshot.hostInstanceId);
+    markHostUnavailable(draft, snapshot.hostKind, snapshot.hostInstanceId);
     return draft;
   }
 
@@ -1112,6 +1259,11 @@ const planReconciliation = (
 
 export class Universe {
   private state: UniverseState;
+  private discoveries = new Map<string, DiscoveredExecutionRecord>();
+  private discoveredAdmissions = new Map<
+    string,
+    { readonly agentId: AgentId; readonly access: DiscoveredExecutionAccess }
+  >();
 
   constructor(
     private readonly store: UniverseStore,
@@ -1128,17 +1280,344 @@ export class Universe {
     return cloneUniverseState(this.state);
   }
 
+  private retainDiscoveriesAsUnknown(snapshot: HostSnapshot): void {
+    const previousDiscoveries = this.discoveries;
+    const nextDiscoveries = this.planDiscoveredExecutions(this.state, {
+      ...snapshot,
+      agents: [],
+      complete: false,
+    });
+    this.discoveries = nextDiscoveries;
+    this.publishDiscoveredExecutionChanges(
+      changedDiscoveryHandles(previousDiscoveries, nextDiscoveries),
+      snapshot.observedAt,
+      "host-observation",
+    );
+  }
+
   resolveAgentId(reference: NativeConversationRef): AgentId | undefined {
     return resolveConversationAgent(this.state.agents, reference)?.id;
   }
 
+  /** Resolve a browser-safe discovery handle only at the server-side host seam. */
+  resolveDiscoveredExecution(handle: string): DiscoveredExecutionAccess | undefined {
+    const discovery = this.discoveries.get(handle.trim());
+    if (!discovery) return undefined;
+    return {
+      handle: discovery.handle,
+      binding: { ...discovery.binding },
+      nativeConversationRef: discovery.nativeConversationRef
+        ? { ...discovery.nativeConversationRef }
+        : undefined,
+    };
+  }
+
+  /** Resolve a discovery that was admitted by another path during this process. */
+  resolveAdmittedDiscoveredExecution(
+    handle: string,
+  ): { readonly agentId: AgentId; readonly access: DiscoveredExecutionAccess } | undefined {
+    const admitted = this.discoveredAdmissions.get(handle.trim());
+    if (!admitted || !this.state.agents.some((agent) => agent.id === admitted.agentId)) {
+      if (admitted) this.discoveredAdmissions.delete(handle.trim());
+      return undefined;
+    }
+    return {
+      agentId: admitted.agentId,
+      access: {
+        handle: admitted.access.handle,
+        binding: { ...admitted.access.binding },
+        nativeConversationRef: admitted.access.nativeConversationRef
+          ? { ...admitted.access.nativeConversationRef }
+          : undefined,
+      },
+    };
+  }
+
+  private rememberDiscoveryAdmission(discovery: DiscoveredExecutionRecord, agent: Agent): void {
+    this.discoveredAdmissions.set(discovery.handle, {
+      agentId: agent.id,
+      access: {
+        handle: discovery.handle,
+        binding: { ...discovery.binding },
+        nativeConversationRef: discovery.nativeConversationRef
+          ? { ...discovery.nativeConversationRef }
+          : undefined,
+      },
+    });
+    while (this.discoveredAdmissions.size > MAX_DISCOVERY_ADMISSIONS) {
+      const oldest = this.discoveredAdmissions.keys().next().value;
+      if (oldest === undefined) break;
+      this.discoveredAdmissions.delete(oldest);
+    }
+  }
+
+  private rememberAdmittedDiscoveries(state: UniverseState): void {
+    for (const discovery of this.discoveries.values()) {
+      const agent = state.agents.find((candidate) =>
+        discoveryRecordMatchesAgent(discovery, candidate),
+      );
+      if (agent) this.rememberDiscoveryAdmission(discovery, agent);
+    }
+  }
+
   project(query: ProjectionQuery): Projection {
-    return this.projections.project(this.state, query);
+    return this.projections.project(
+      { ...this.state, discoveredExecutions: this.discoveryViews() },
+      query,
+    );
+  }
+
+  private discoveryViews(): readonly DiscoveredExecutionView[] {
+    const liveConversationCounts = new Map<string, number>();
+    for (const discovery of this.discoveries.values()) {
+      if (discovery.presence !== "live" || !discovery.nativeConversationRef) continue;
+      const key = nativeConversationKey(discovery.nativeConversationRef);
+      liveConversationCounts.set(key, (liveConversationCounts.get(key) ?? 0) + 1);
+    }
+    return [...this.discoveries.values()]
+      .map((discovery): DiscoveredExecutionView => {
+        const conversation = safeConversationReference(discovery.nativeConversationRef);
+        const conversationConflictCount = discovery.nativeConversationRef
+          ? (liveConversationCounts.get(nativeConversationKey(discovery.nativeConversationRef)) ??
+            0)
+          : 0;
+        const catalogue = discovery.catalogue;
+        const admission =
+          catalogue &&
+          discovery.nativeConversationRef?.continuityScopeId &&
+          providerFactMatches(discovery.nativeConversationRef, catalogue)
+            ? {
+                status: "available" as const,
+                resumeEligibility: catalogue.resumeEligibility,
+              }
+            : {
+                status: "unavailable" as const,
+                explanation: !discovery.nativeConversationRef
+                  ? "Conversation identity is not identified; refresh the provider catalogue before adding it."
+                  : !discovery.nativeConversationRef.continuityScopeId
+                    ? "Conversation identity is not scoped to a provider catalogue; exact evidence is required before adding it."
+                    : "Exact catalogue evidence is not available for this execution.",
+              };
+        return {
+          type: "discovered-execution",
+          handle: discovery.handle,
+          displayName: discovery.displayName,
+          hostKind: discovery.binding.hostKind,
+          runtimeState: discovery.runtimeState,
+          runtimeStateSource: discovery.runtimeStateSource,
+          presence: discovery.presence,
+          observationHealth: discovery.observationHealth,
+          lastObservedAt: discovery.lastObservedAt,
+          repository: discovery.repository,
+          branch: discovery.branch,
+          worktree: discovery.worktree,
+          provider: discovery.provider,
+          executionContainer: discovery.executionContainer,
+          conversation,
+          conversationIdentified: discovery.nativeConversationRef !== undefined,
+          conversationTitle: catalogue?.title,
+          resumeEligibility: catalogue?.resumeEligibility,
+          admission,
+          conversationConflictCount,
+          mapPosition: discovery.mapPosition,
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.displayName.localeCompare(right.displayName) ||
+          left.handle.localeCompare(right.handle),
+      );
+  }
+
+  private planDiscoveredExecutions(
+    state: UniverseState,
+    snapshot: HostSnapshot,
+    pendingExecutionKeys: readonly HostExecutionKey[] = [],
+  ): Map<string, DiscoveredExecutionRecord> {
+    const next = new Map(this.discoveries);
+    const pending = new Set(pendingExecutionKeys.map(hostExecutionKey));
+    const admitted = state.agents;
+    const hostMatches = (record: DiscoveredExecutionRecord): boolean =>
+      record.binding.hostKind === snapshot.hostKind &&
+      record.binding.hostInstanceId === snapshot.hostInstanceId;
+
+    for (const [handle, record] of next) {
+      if (admitted.some((agent) => discoveryRecordMatchesAgent(record, agent))) next.delete(handle);
+    }
+
+    const markUnknown = (record: DiscoveredExecutionRecord): DiscoveredExecutionRecord => ({
+      ...record,
+      presence: "unknown",
+      observationHealth: snapshot.available ? "unknown" : "unavailable",
+    });
+
+    if (!snapshot.available) {
+      for (const [handle, record] of next)
+        if (hostMatches(record)) next.set(handle, markUnknown(record));
+      return next;
+    }
+
+    if (snapshot.agents.length > MAX_CURRENT_DISCOVERED_EXECUTIONS) {
+      for (const [handle, record] of next)
+        if (hostMatches(record)) next.set(handle, markUnknown(record));
+      return next;
+    }
+
+    const observedKeys = new Set(
+      snapshot.agents.map((observation) =>
+        hostExecutionKey({
+          hostKind: snapshot.hostKind,
+          hostInstanceId: snapshot.hostInstanceId,
+          nativeId: observation.nativeId,
+        }),
+      ),
+    );
+    if (snapshot.complete) {
+      for (const [handle, record] of next) {
+        if (
+          hostMatches(record) &&
+          !observedKeys.has(bindingExecutionKey(record.binding)) &&
+          record.binding.observedAt <= snapshot.observedAt
+        )
+          next.delete(handle);
+      }
+    } else {
+      for (const [handle, record] of next)
+        if (hostMatches(record)) next.set(handle, markUnknown(record));
+    }
+
+    for (const observation of snapshot.agents) {
+      const nativeId = observation.nativeId.trim();
+      const identity: HostExecutionKey = {
+        hostKind: snapshot.hostKind,
+        hostInstanceId: snapshot.hostInstanceId,
+        nativeId,
+      };
+      const identityKey = hostExecutionKey(identity);
+      const existing = [...next.values()].find(
+        (record) => bindingExecutionKey(record.binding) === identityKey,
+      );
+      const observedConversation = nativeConversationFromObservation(observation);
+      if (
+        pending.has(identityKey) ||
+        admitted.some(
+          (agent) =>
+            executionMatches(agent, snapshot.hostKind, snapshot.hostInstanceId, nativeId) ||
+            (observedConversation !== undefined &&
+              agent.nativeConversationRef !== undefined &&
+              nativeConversationKey(agent.nativeConversationRef) ===
+                nativeConversationKey(observedConversation)),
+        )
+      ) {
+        if (existing) next.delete(existing.handle);
+        continue;
+      }
+      if (existing && observation.observedAt < existing.lastObservedAt) continue;
+      const scopeEnrichment =
+        existing?.nativeConversationRef !== undefined &&
+        observedConversation !== undefined &&
+        isScopeEnrichment(existing.nativeConversationRef, observedConversation);
+      const scopeDowngrade =
+        existing?.nativeConversationRef !== undefined &&
+        observedConversation !== undefined &&
+        existing.nativeConversationRef.continuityScopeId !== undefined &&
+        observedConversation.continuityScopeId === undefined &&
+        sameConversationWithoutScope(existing.nativeConversationRef, observedConversation);
+      const effectiveConversation = scopeDowngrade
+        ? existing.nativeConversationRef
+        : observedConversation;
+      const conversationChanged =
+        existing !== undefined &&
+        (Boolean(existing.nativeConversationRef) !== Boolean(effectiveConversation) ||
+          (existing.nativeConversationRef !== undefined &&
+            effectiveConversation !== undefined &&
+            !scopeEnrichment &&
+            nativeConversationKey(existing.nativeConversationRef) !==
+              nativeConversationKey(effectiveConversation)));
+      const targetChanged =
+        existing !== undefined && existing.binding.hostLocator !== observation.hostLocator;
+      const binding: AgentExecutionBinding = {
+        hostKind: snapshot.hostKind,
+        hostInstanceId: snapshot.hostInstanceId,
+        nativeId,
+        hostLocator: observation.hostLocator,
+        observedAt: observation.observedAt,
+      };
+      const handle =
+        existing && !conversationChanged && !targetChanged
+          ? existing.handle
+          : this.ids.next("discovery");
+      if (existing && handle !== existing.handle) next.delete(existing.handle);
+      const mapPosition =
+        existing?.mapPosition ??
+        initialDiscoveredExecutionMapPosition(handle, [
+          ...[...next.values()].map((record) => record.mapPosition),
+          ...state.goals.flatMap((goal) => (goal.mapPosition ? [goal.mapPosition] : [])),
+        ]);
+      next.set(handle, {
+        handle,
+        binding,
+        displayName: normalizeText(observation.displayName) ?? "Unnamed Herdr execution",
+        runtimeState: observation.runtimeState,
+        runtimeStateSource: observation.runtimeStateSource,
+        repository: normalizeText(observation.repository),
+        branch: normalizeText(observation.branch),
+        worktree: normalizeText(observation.worktree),
+        provider: normalizeText(observation.provider),
+        executionContainer: copyExecutionContainer(observation.executionContainer),
+        nativeConversationRef: effectiveConversation,
+        presence: "live",
+        observationHealth: "fresh",
+        lastObservedAt: observation.observedAt,
+        catalogue:
+          existing &&
+          !conversationChanged &&
+          !targetChanged &&
+          existing.nativeConversationRef &&
+          effectiveConversation &&
+          nativeConversationKey(existing.nativeConversationRef) ===
+            nativeConversationKey(effectiveConversation)
+            ? existing.catalogue
+            : undefined,
+        mapPosition,
+      });
+    }
+    return next;
+  }
+
+  private enrichDiscoveredExecutions(
+    options: Pick<
+      Extract<UniverseObservation, { readonly kind: "provider-catalogue" }>,
+      "harnessId" | "continuityScopeId" | "observedAt" | "complete" | "sessions"
+    >,
+  ): Map<string, DiscoveredExecutionRecord> {
+    const next = new Map(this.discoveries);
+    for (const [handle, discovery] of next) {
+      const reference = discovery.nativeConversationRef;
+      if (
+        !reference ||
+        reference.harnessId !== options.harnessId ||
+        reference.continuityScopeId !== options.continuityScopeId
+      )
+        continue;
+      const matching = options.sessions.filter((session) =>
+        providerFactMatches(reference, session),
+      );
+      if (matching.length === 1) {
+        const session = matching[0]!;
+        if (!discovery.catalogue || session.observedAt >= discovery.catalogue.observedAt)
+          next.set(handle, { ...discovery, catalogue: session });
+      } else if (options.complete) {
+        next.set(handle, { ...discovery, catalogue: undefined });
+      }
+    }
+    return next;
   }
 
   /** The sole production interface for accepting host and provider observations. */
   observe(observation: UniverseObservation): ReconciliationResult {
-    if (observation.kind === "host-executions") return this.reconcile(observation.snapshot);
+    if (observation.kind === "host-executions")
+      return this.reconcile(observation.snapshot, observation.pendingExecutionKeys);
     return observation.kind === "provider-unavailable"
       ? this.markProviderUnavailable(observation.harnessId)
       : this.reconcileProviderSessions(observation);
@@ -1174,7 +1653,10 @@ export class Universe {
       };
     }
     this.state = next;
-    this.publishExecutionChanges(previous, next, this.clock.now());
+    const discoveredHandles = [...this.discoveries.keys()];
+    this.discoveries = new Map();
+    this.discoveredAdmissions.clear();
+    this.publishExecutionChanges(previous, next, this.clock.now(), discoveredHandles);
     return { ok: true };
   }
 
@@ -1326,6 +1808,9 @@ export class Universe {
       };
     });
     const updatedAgentIds = changedAgentIds(previous.agents, next.agents);
+    const previousDiscoveries = this.discoveries;
+    const nextDiscoveries = this.enrichDiscoveredExecutions(options);
+    const discoveredHandles = changedDiscoveryHandles(previousDiscoveries, nextDiscoveries);
     try {
       this.store.save(next);
     } catch (error) {
@@ -1334,7 +1819,13 @@ export class Universe {
       );
     }
     this.state = next;
+    this.discoveries = nextDiscoveries;
     this.publishAgentChanges(previous, next, options.observedAt, "provider-catalogue");
+    this.publishDiscoveredExecutionChanges(
+      discoveredHandles,
+      options.observedAt,
+      "provider-catalogue",
+    );
     return {
       accepted: true,
       updatedAgentIds,
@@ -1854,14 +2345,39 @@ export class Universe {
     const previous = this.state;
     this.state = next;
     this.publishSemanticChanges(previous, next, now);
+    const previousDiscoveries = this.discoveries;
+    this.rememberAdmittedDiscoveries(next);
+    const nextDiscoveries = new Map(
+      [...this.discoveries].filter(([, discovery]) =>
+        next.agents.every((agent) => !discoveryRecordMatchesAgent(discovery, agent)),
+      ),
+    );
+    this.discoveries = nextDiscoveries;
+    this.publishDiscoveredExecutionChanges(
+      changedDiscoveryHandles(previousDiscoveries, nextDiscoveries),
+      now,
+      "human-command",
+    );
     return result;
   }
 
-  reconcile(snapshot: HostSnapshot): ReconciliationResult {
+  reconcile(
+    snapshot: HostSnapshot,
+    pendingExecutionKeys: readonly HostExecutionKey[] = [],
+  ): ReconciliationResult {
     const planned = planReconciliation(this.state, snapshot);
-    if ("accepted" in planned) return planned;
+    if ("accepted" in planned) {
+      if (isUntrustedSnapshotRejection(planned.error)) this.retainDiscoveriesAsUnknown(snapshot);
+      return planned;
+    }
 
     appendChanges(this.state, planned.state, snapshot.observedAt);
+    const previousDiscoveries = this.discoveries;
+    const nextDiscoveries = this.planDiscoveredExecutions(
+      planned.state,
+      snapshot,
+      pendingExecutionKeys,
+    );
     try {
       this.store.save(planned.state);
     } catch (error) {
@@ -1875,7 +2391,14 @@ export class Universe {
     }
     const previous = this.state;
     this.state = planned.state;
-    this.publishExecutionChanges(previous, planned.state, snapshot.observedAt);
+    this.rememberAdmittedDiscoveries(planned.state);
+    this.discoveries = nextDiscoveries;
+    this.publishExecutionChanges(
+      previous,
+      planned.state,
+      snapshot.observedAt,
+      changedDiscoveryHandles(previousDiscoveries, nextDiscoveries),
+    );
     return {
       accepted: true,
       updatedAgentIds: [...new Set(planned.updatedAgentIds)],
@@ -1947,25 +2470,54 @@ export class Universe {
       this.events?.publish([{ type: "agent-changed", cause, occurredAt: at, agentIds }]);
   }
 
-  private publishExecutionChanges(previous: UniverseState, next: UniverseState, at: number): void {
+  private publishExecutionChanges(
+    previous: UniverseState,
+    next: UniverseState,
+    at: number,
+    discoveredHandles: readonly string[] = [],
+  ): void {
     const agentIds = changedExecutionAgentIds(previous.agents, next.agents);
-    const hostInstanceIds = changedHostInstanceIds(previous.hosts, next.hosts);
-    if (agentIds.length === 0 && hostInstanceIds.length === 0) return;
+    const hostKeys = changedHostKeys(previous.hosts, next.hosts);
+    if (agentIds.length === 0 && hostKeys.length === 0 && discoveredHandles.length === 0) return;
     const previousStatuses = new Map(
-      previous.hosts.map((host) => [host.hostInstanceId, host.status]),
+      previous.hosts.map((host) => [hostHealthKey(host), host.status]),
     );
-    const nextStatuses = new Map(next.hosts.map((host) => [host.hostInstanceId, host.status]));
-    const availabilityChanged = hostInstanceIds.some(
-      (hostInstanceId) => previousStatuses.get(hostInstanceId) !== nextStatuses.get(hostInstanceId),
+    const nextStatuses = new Map(next.hosts.map((host) => [hostHealthKey(host), host.status]));
+    const availabilityChanged = hostKeys.some(
+      (hostKey) => previousStatuses.get(hostKey) !== nextStatuses.get(hostKey),
     );
-    this.events?.publish([
-      {
+    const events: UnsequencedControlPlaneEvent[] = [];
+    if (agentIds.length > 0 || hostKeys.length > 0)
+      events.push({
         type: "execution-evidence-changed",
         cause: "host-observation",
         occurredAt: at,
         agentIds,
-        hostInstanceIds,
+        hostKeys,
         availabilityChanged,
+      });
+    if (discoveredHandles.length > 0)
+      events.push({
+        type: "discovered-execution-changed",
+        cause: "host-observation",
+        occurredAt: at,
+        handles: discoveredHandles,
+      });
+    this.events?.publish(events);
+  }
+
+  private publishDiscoveredExecutionChanges(
+    handles: readonly string[],
+    at: number,
+    cause: "human-command" | "host-observation" | "provider-catalogue",
+  ): void {
+    if (handles.length === 0) return;
+    this.events?.publish([
+      {
+        type: "discovered-execution-changed",
+        cause,
+        occurredAt: at,
+        handles,
       },
     ]);
   }

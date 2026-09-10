@@ -7,7 +7,7 @@ import {
 } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import type { AgentView } from "../../../src/projection/types.ts";
+import type { AgentView, DiscoveredExecutionView } from "../../../src/projection/types.ts";
 import {
   boundWebTerminalDimensions,
   type WebPendingLaunch,
@@ -36,8 +36,24 @@ interface TerminalSurfaceBaseProps {
 
 type TerminalSurfaceProps = TerminalSurfaceBaseProps &
   (
-    | { readonly agent: AgentView; readonly launch?: never; readonly link?: WebTerminalLink }
-    | { readonly agent?: never; readonly launch: WebPendingLaunch; readonly link?: never }
+    | {
+        readonly agent: AgentView;
+        readonly discovery?: never;
+        readonly launch?: never;
+        readonly link?: WebTerminalLink;
+      }
+    | {
+        readonly agent?: never;
+        readonly discovery: DiscoveredExecutionView;
+        readonly launch?: never;
+        readonly link?: never;
+      }
+    | {
+        readonly agent?: never;
+        readonly discovery?: never;
+        readonly launch: WebPendingLaunch;
+        readonly link?: never;
+      }
   );
 
 const decodeFrame = (value: string): Uint8Array => {
@@ -74,9 +90,15 @@ const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
   return dimensions;
 };
 
+const agentTarget = (candidate: AgentView | undefined) => {
+  if (!candidate) throw new Error("A terminal target is required.");
+  return { agentId: candidate.id };
+};
+
 export const TerminalSurface = ({
   active,
   agent,
+  discovery,
   launch,
   embedded,
   link,
@@ -85,8 +107,13 @@ export const TerminalSurface = ({
   showHeader = true,
   theme,
 }: TerminalSurfaceProps): React.JSX.Element => {
-  const label = launch?.displayName ?? agent?.displayName ?? "Starting agent";
-  const target = launch ? { requestId: launch.requestId } : { agentId: agent.id };
+  const label =
+    launch?.displayName ?? agent?.displayName ?? discovery?.displayName ?? "Starting agent";
+  const target = launch
+    ? { requestId: launch.requestId }
+    : discovery
+      ? { discoveryHandle: discovery.handle }
+      : agentTarget(agent);
   const openingStatus = `Opening ${link?.label ?? label}${link ? " companion" : " terminal"}…`;
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -101,7 +128,7 @@ export const TerminalSurface = ({
   useLayoutEffect(() => {
     setReady(false);
     setStatus(openingStatus);
-  }, [agent?.id, launch?.requestId, link?.id, openingStatus]);
+  }, [agent?.id, discovery?.handle, launch?.requestId, link?.id, openingStatus]);
 
   const scrollTerminal = (request: WebTerminalScrollRequest): void => {
     sendMessageRef.current({ kind: "scroll", ...request });
@@ -289,7 +316,7 @@ export const TerminalSurface = ({
       terminal.dispose();
       if (sessionId) void releaseWebTerminal(sessionId).catch(() => undefined);
     };
-  }, [agent?.id, launch?.requestId, link?.id, resizeMode]);
+  }, [agent?.id, discovery?.handle, launch?.requestId, link?.id, resizeMode]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -312,7 +339,7 @@ export const TerminalSurface = ({
                 ? `COMPANION TERMINAL / ${link.kind}`
                 : launch
                   ? `STARTING / ${launch.harnessId}`
-                  : `HOST-OWNED TERMINAL / ${agent?.execution?.hostKind ?? "detached"}`}
+                  : `HOST-OWNED TERMINAL / ${agent?.execution?.hostKind ?? discovery?.hostKind ?? "detached"}`}
             </p>
             <h2>{link?.label ?? label}</h2>
           </div>

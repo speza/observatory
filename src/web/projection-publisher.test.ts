@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
-import { FixedClock, makeUniverse } from "../universe/test-support.ts";
-import { projectPortfolio, type PortfolioLimits, type PortfolioResponse } from "./portfolio.ts";
+import { FixedClock, hostSnapshot, makeUniverse } from "../universe/test-support.ts";
+import {
+  projectPortfolio,
+  type PortfolioLimits,
+  type PortfolioResponse,
+} from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { ObservatoryWebApi } from "./api.ts";
 import type { WebPortfolioResponse, WebCommandResponse } from "./protocol.ts";
@@ -20,7 +24,17 @@ const request = () =>
 
 const eventData = (
   chunk: Uint8Array,
-): { readonly kind: string; readonly revision: number; readonly affectedAll?: boolean } => {
+): {
+  readonly kind: string;
+  readonly revision: number;
+  readonly affectedAll?: boolean;
+  readonly affected?: readonly { readonly type: string; readonly id: string }[];
+  readonly portfolio?: {
+    readonly commandCentre: {
+      readonly counts: { readonly agents: number; readonly discovered?: number };
+    };
+  };
+} => {
   const text = new TextDecoder().decode(chunk);
   const data = text
     .split("\n")
@@ -170,6 +184,55 @@ describe("projection publisher", () => {
       revision: 2,
     });
     expect(calculations).toBe(2);
+    await reader.cancel();
+    publisher.close();
+  });
+
+  test("publishes discovered executions through the normal projection stream", async () => {
+    const clock = new FixedClock(1_000_000);
+    const hub = new ControlPlaneEventHub();
+    const { universe } = makeUniverse({ clock, events: hub });
+    const publisher = new ProjectionPublisher({
+      events: hub,
+      projectPortfolio: () => projectPortfolio(universe, clock.now())!,
+      pendingLaunches: () => [],
+      now: () => clock.now(),
+      allowedOrigin: "http://127.0.0.1:4310",
+      batchMs: 1,
+      timeRefreshMs: 60_000,
+    });
+    const reader = publisher.stream(request()).body!.getReader();
+    expect(eventData((await reader.read()).value!)).toMatchObject({
+      kind: "snapshot",
+      revision: 1,
+    });
+
+    universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "discovered-stream",
+          displayName: "Streamed discovery",
+          runtimeState: "working",
+          runtimeStateSource: "test-host",
+          observedAt: clock.now(),
+          hostLocator: "opaque:discovered-stream",
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            source: "process",
+            restoreState: "unknown",
+            observedAt: clock.now(),
+          },
+        },
+      ]),
+    );
+
+    const event = eventData((await reader.read()).value!);
+    expect(event).toMatchObject({
+      kind: "snapshot",
+      revision: 2,
+      affected: [{ type: "discovered-execution" }],
+      portfolio: { commandCentre: { counts: { agents: 0, discovered: 1 } } },
+    });
     await reader.cancel();
     publisher.close();
   });

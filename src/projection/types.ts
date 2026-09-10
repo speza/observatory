@@ -3,12 +3,14 @@ import type { AgentObservationKind } from "../plugin-sdk/index.ts";
 import type {
   Goal,
   HostHealth,
+  ExecutionContainerRef,
   MapPosition,
   OperatorCheckpoint,
   RelatedAgentDismissal,
   Agent,
   System,
   UniverseChange,
+  RuntimeState,
 } from "../universe/types.ts";
 
 export type ProjectionQuery =
@@ -52,7 +54,7 @@ export type ProjectionQuery =
       readonly kind: "inspector";
       readonly now: number;
       readonly target: {
-        readonly type: "goal" | "agent";
+        readonly type: "goal" | "agent" | "discovered-execution";
         readonly id: string;
       };
     };
@@ -131,6 +133,45 @@ export interface SystemView extends System {
   readonly staleCount: number;
 }
 
+export type DiscoveredExecutionPresence = "live" | "unknown";
+export type DiscoveredExecutionObservationHealth = "fresh" | "unknown" | "unavailable";
+
+export interface DiscoveredExecutionView {
+  readonly type: "discovered-execution";
+  /** Opaque to the browser; the server resolves this to a fresh host target. */
+  readonly handle: string;
+  readonly displayName: string;
+  readonly hostKind: string;
+  readonly runtimeState: RuntimeState;
+  readonly runtimeStateSource: string;
+  readonly presence: DiscoveredExecutionPresence;
+  readonly observationHealth: DiscoveredExecutionObservationHealth;
+  readonly lastObservedAt: number;
+  readonly repository?: string;
+  readonly branch?: string;
+  readonly worktree?: string;
+  readonly provider?: string;
+  readonly executionContainer?: ExecutionContainerRef;
+  readonly conversation?: {
+    readonly kind: string;
+    readonly id: string;
+  };
+  readonly conversationIdentified: boolean;
+  readonly conversationTitle?: string;
+  readonly resumeEligibility?: "same-site" | "provider-account" | "blocked" | "unknown";
+  readonly admission:
+    | {
+        readonly status: "available";
+        readonly resumeEligibility: "same-site" | "provider-account" | "blocked" | "unknown";
+      }
+    | {
+        readonly status: "unavailable";
+        readonly explanation: string;
+      };
+  readonly conversationConflictCount: number;
+  readonly mapPosition: MapPosition;
+}
+
 export interface CommandCentreProjection {
   readonly kind: "command-centre";
   readonly generatedAt: number;
@@ -141,6 +182,8 @@ export interface CommandCentreProjection {
   readonly unassigned: readonly AgentView[];
   readonly truncated?: boolean;
   readonly omittedAgentCount?: number;
+  /** Host evidence that has not been explicitly admitted as an Agent. */
+  readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   readonly counts: {
     readonly goals: number;
     readonly systems: number;
@@ -149,6 +192,8 @@ export interface CommandCentreProjection {
     readonly uncertainty: number;
     readonly unassigned: number;
     readonly stale: number;
+    /** Kept separate from durable Agent counts and Inbox semantics. */
+    readonly discovered?: number;
   };
 }
 
@@ -170,6 +215,7 @@ export interface UniverseMapProjection {
   readonly attention: AttentionProjection;
   readonly goals: readonly MapGoalView[];
   readonly unassigned: readonly MapAgentView[];
+  readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   readonly inboxPosition: MapPosition;
   readonly truncated?: boolean;
   readonly omittedAgentCount?: number;
@@ -256,7 +302,7 @@ export interface RelatedAgentsProjection {
 }
 
 export interface SearchResult {
-  readonly type: "goal" | "agent";
+  readonly type: "goal" | "agent" | "discovered-execution";
   readonly id: string;
   readonly label: string;
   readonly context: string;
@@ -346,6 +392,11 @@ export type InspectorProjection =
       readonly lines: readonly string[];
     }
   | {
+      readonly kind: "discovered-execution-inspector";
+      readonly execution: DiscoveredExecutionView;
+      readonly lines: readonly string[];
+    }
+  | {
       readonly kind: "empty-inspector";
       readonly lines: readonly string[];
     };
@@ -367,6 +418,7 @@ export interface ProjectionModule {
       readonly systems?: readonly System[];
       readonly agents: readonly Agent[];
       readonly hosts: readonly HostHealth[];
+      readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
       readonly relatedAgentDismissals?: readonly RelatedAgentDismissal[];
       readonly changes: readonly UniverseChange[];
       readonly operatorCheckpoint?: OperatorCheckpoint;

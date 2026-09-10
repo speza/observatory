@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { MockHostAdapter } from "../hosts/mock/adapter.ts";
+import type { MockScenario } from "../hosts/mock/scenarios.ts";
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { loadPluginRegistry } from "../plugins/registry.ts";
 import { resolve } from "node:path";
@@ -39,6 +40,10 @@ type TerminalTestBody =
     }
   | {
       readonly requestId: string;
+      readonly dimensions: { readonly columns: number; readonly rows: number };
+    }
+  | {
+      readonly discoveryHandle: string;
       readonly dimensions: { readonly columns: number; readonly rows: number };
     }
   | { readonly value: string }
@@ -936,6 +941,8 @@ describe("ObservatoryWebApi", () => {
           requestId: "pending-terminal-test",
           harnessId: "codex",
           executionRef: launched.executionRef!,
+          hostKind: "mock",
+          hostInstanceId: "mock:default",
           displayName: "Blank Codex launch",
           message: "Waiting for the first message.",
         },
@@ -973,6 +980,277 @@ describe("ObservatoryWebApi", () => {
       message: expect.stringContaining("mock terminal"),
     });
     expect(fixture.universe.snapshot().agents).toEqual([]);
+    await api.close();
+  });
+
+  test("streams a discovered execution through a fresh opaque handle", async () => {
+    const fixture = makeUniverse();
+    const host = new MockHostAdapter({ clock: fixture.clock });
+    const snapshot = await Effect.runPromise(host.snapshot());
+    const reconciled = fixture.universe.reconcile(snapshot);
+    expect(reconciled.accepted).toBe(true);
+    const projection = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (projection.kind !== "command-centre")
+      throw new Error("Expected command-centre projection.");
+    const discovery = projection.discoveredExecutions?.[0];
+    if (!discovery) throw new Error("Expected a discovered mock execution.");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
+    const mutation = (body: TerminalTestBody): Promise<Response> =>
+      api.fetch(
+        new Request("http://localhost/api/terminal/open", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            "x-ao-command": "1",
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    fixture.clock.value -= 1;
+    const stale = await mutation({
+      discoveryHandle: discovery.handle,
+      dimensions: { columns: 80, rows: 24 },
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({
+      error:
+        "The discovered execution inventory is older than the selected observation; refresh and retry.",
+    });
+
+    fixture.clock.value += 1;
+    const opened = await mutation({
+      discoveryHandle: discovery.handle,
+      dimensions: { columns: 80, rows: 24 },
+    });
+    expect(opened.status).toBe(200);
+    const openedBody: WebTerminalOpenResponse = await opened.json();
+    expect(openedBody.message).toContain("mock terminal");
+    await Bun.sleep(1);
+    const messages: WebTerminalServerMessage[] = [];
+    const connection = api.connectTerminalSocket(openedBody.sessionId, (message) =>
+      messages.push(message),
+    );
+    expect(messages.some((message) => message.kind === "frame")).toBe(true);
+    await connection.close();
+    expect(
+      (
+        await mutation({
+          discoveryHandle: "native-locator-must-not-be-a-handle",
+          dimensions: { columns: 80, rows: 24 },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await api.fetch(
+          new Request(`http://localhost/api/terminal/${openedBody.sessionId}/release`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+              "x-ao-command": "1",
+            },
+            body: JSON.stringify({}),
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    await api.close();
+  });
+
+  test("rejects an unknown discovery handle before attempting admission", async () => {
+    const fixture = makeUniverse();
+    const conversations: ConversationTrackerModule = {
+      refresh: () =>
+        Effect.succeed({ observedProviders: 0, discoveredConversations: 0, diagnostics: [] }),
+      history: () => [],
+      add: () => {
+        throw new Error("History admission must not run.");
+      },
+      admitDiscovered: () => {
+        throw new Error("Admission must not run for an unknown handle.");
+      },
+      observeHost: (snapshot) => admitObservedConversationsAndReconcile(fixture.universe, snapshot),
+    };
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      conversations,
+    });
+
+    const response = await api.fetch(
+      new Request("http://localhost/api/discoveries/admit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({ handle: "native-locator-must-not-be-a-handle" }),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "Discovered execution is no longer visible.",
+    });
+    await api.close();
+  });
+
+  test("streams a host-only discovered execution without conversation evidence", async () => {
+    const fixture = makeUniverse();
+    const scenario: MockScenario = {
+      name: "host-only-terminal",
+      description: "A Herdr-like agent without conversation evidence.",
+      tickMs: 1_000,
+      frames: [
+        {
+          label: "host-only agent",
+          agents: [
+            {
+              nativeId: "host-only-pane",
+              displayName: "Unidentified agent",
+              runtimeState: "working",
+              runtimeStateSource: "mock.host-only",
+              hostLocator: "mock-agent:host-only-pane",
+            },
+          ],
+        },
+      ],
+    };
+    const host = new MockHostAdapter({ clock: fixture.clock, scenario });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const projection = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (projection.kind !== "command-centre")
+      throw new Error("Expected command-centre projection.");
+    const discovery = projection.discoveredExecutions?.[0];
+    if (!discovery) throw new Error("Expected a host-only discovery.");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
+
+    const opened = await api.fetch(
+      new Request("http://localhost/api/terminal/open", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          discoveryHandle: discovery.handle,
+          dimensions: { columns: 80, rows: 24 },
+        }),
+      }),
+    );
+
+    expect(opened.status).toBe(200);
+    const body: WebTerminalOpenResponse = await opened.json();
+    expect(body.message).toContain("mock terminal");
+    await api.close();
+  });
+
+  test("rejects a discovery terminal when the same host target reports another conversation", async () => {
+    const fixture = makeUniverse();
+    const scenario = {
+      name: "target-reuse",
+      description: "A pane keeps its locator while its reported conversation changes.",
+      tickMs: 1_000,
+      frames: [
+        {
+          label: "first conversation",
+          agents: [
+            {
+              nativeId: "reused-pane",
+              displayName: "First conversation",
+              runtimeState: "working",
+              runtimeStateSource: "test-host",
+              hostLocator: "same-pane-locator",
+              harnessEvidence: {
+                detectedHarnessId: "codex",
+                nativeConversationRef: { harnessId: "codex", kind: "id", value: "first" },
+                restoreState: "host-restored",
+                source: "native-integration",
+                observedAt: 0,
+              },
+            },
+          ],
+        },
+        {
+          label: "second conversation",
+          agents: [
+            {
+              nativeId: "reused-pane",
+              displayName: "Second conversation",
+              runtimeState: "working",
+              runtimeStateSource: "test-host",
+              hostLocator: "same-pane-locator",
+              harnessEvidence: {
+                detectedHarnessId: "codex",
+                nativeConversationRef: { harnessId: "codex", kind: "id", value: "second" },
+                restoreState: "host-restored",
+                source: "native-integration",
+                observedAt: 0,
+              },
+            },
+          ],
+        },
+      ],
+    } satisfies MockScenario;
+    const host = new MockHostAdapter({ clock: fixture.clock, scenario });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const projection = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (projection.kind !== "command-centre")
+      throw new Error("Expected command-centre projection.");
+    const discovery = projection.discoveredExecutions?.[0];
+    if (!discovery) throw new Error("Expected a discovered execution.");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
+
+    fixture.clock.value += scenario.tickMs;
+    const opened = await api.fetch(
+      new Request("http://localhost/api/terminal/open", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          discoveryHandle: discovery.handle,
+          dimensions: { columns: 80, rows: 24 },
+        }),
+      }),
+    );
+    expect(opened.status).toBe(409);
+    expect(await opened.json()).toEqual({
+      error:
+        "The discovered execution conversation changed; select it again before opening a terminal.",
+    });
     await api.close();
   });
 

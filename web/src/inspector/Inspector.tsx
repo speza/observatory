@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   AgentView,
   CommandCentreProjection,
+  DiscoveredExecutionView,
   InspectorProjection,
 } from "../../../src/projection/types.ts";
 import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
@@ -18,6 +19,19 @@ interface InspectorProps {
   readonly onCloseAndArchive: (agentIds: readonly string[]) => Promise<boolean>;
   readonly onClose: () => void;
   readonly onOpenTerminal: (agent: AgentView) => void;
+  readonly onOpenDiscoveredTerminal: (execution: DiscoveredExecutionView) => void;
+  readonly onAdmitDiscovered: (
+    handle: string,
+    goalId?: string,
+  ) => Promise<
+    | {
+        readonly agentId: string;
+        readonly goalId?: string;
+        readonly message: string;
+        readonly partial?: boolean;
+      }
+    | undefined
+  >;
   readonly onPullRequestChange?: (agentId: string, url: string | undefined) => void;
   readonly onRetry: () => void;
   readonly onReviewChanges: (agent: AgentView) => void;
@@ -47,6 +61,8 @@ export const Inspector = ({
   onCloseAndArchive,
   onClose,
   onOpenTerminal,
+  onOpenDiscoveredTerminal,
+  onAdmitDiscovered,
   onPullRequestChange,
   onRetry,
   onReviewChanges,
@@ -54,24 +70,30 @@ export const Inspector = ({
 }: InspectorProps): React.JSX.Element => {
   const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
+  const discovery =
+    projection?.kind === "discovered-execution-inspector" ? projection.execution : undefined;
   const conversationId =
     projection?.kind === "agent-inspector" ? projection.conversation?.id : undefined;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
+  const [discoveryGoalId, setDiscoveryGoalId] = useState<string>();
 
   useEffect(() => {
     setTitle(goal?.title ?? "");
     setDescription(goal?.description ?? "");
     setConfirming(undefined);
-  }, [goal?.description, goal?.id, goal?.title, agent?.id]);
+    setDiscoveryGoalId(undefined);
+  }, [goal?.description, goal?.id, goal?.title, agent?.id, discovery?.handle]);
 
   const heading =
     projection?.kind === "goal-inspector"
       ? projection.goal.title
       : projection?.kind === "agent-inspector"
         ? projection.agent.displayName
-        : "Selection";
+        : projection?.kind === "discovered-execution-inspector"
+          ? projection.execution.displayName
+          : "Selection";
   return (
     <aside className="inspector" aria-label="Selection inspector">
       <header>
@@ -205,6 +227,98 @@ export const Inspector = ({
             ) : null}
           </div>
         </div>
+      ) : null}
+      {discovery ? (
+        <section className="inspector__discovered" aria-label="Discovered execution details">
+          <div className="inspector__status-line">
+            <span
+              className={
+                discovery.presence === "live" ? "is-" + discovery.runtimeState : "is-unknown"
+              }
+              aria-hidden="true"
+            />
+            <strong>
+              {discovery.presence === "live" ? discovery.runtimeState : "runtime unknown"}
+            </strong>
+            <span>Discovered in {discovery.hostKind}</span>
+          </div>
+          <dl className="inspector__discovered-facts">
+            <div>
+              <dt>Provider</dt>
+              <dd>{discovery.provider ?? "Unknown"}</dd>
+            </div>
+            <div>
+              <dt>Workspace</dt>
+              <dd title={discovery.worktree ?? discovery.repository}>
+                {discovery.worktree ?? discovery.repository ?? "Unknown"}
+              </dd>
+            </div>
+            <div>
+              <dt>Observation</dt>
+              <dd>{discovery.observationHealth}</dd>
+            </div>
+            <div>
+              <dt>Conversation</dt>
+              <dd>
+                {discovery.conversation
+                  ? `${discovery.conversation.kind} · ${discovery.conversation.id}`
+                  : discovery.conversationIdentified
+                    ? "Identified · value not displayable"
+                    : "Conversation not identified"}
+              </dd>
+            </div>
+          </dl>
+          {discovery.conversationConflictCount > 1 ? (
+            <p className="inspector__discovered-conflict">
+              Conflict: {discovery.conversationConflictCount} live executions claim this
+              conversation. Admission preserves the existing execution conflict.
+            </p>
+          ) : null}
+          <label className="inspector__assignment">
+            <span>Optional Goal</span>
+            <select
+              disabled={commandPending}
+              onChange={(event) => setDiscoveryGoalId(event.target.value || undefined)}
+              value={discoveryGoalId ?? ""}
+            >
+              <option value="">No Goal</option>
+              {commandCentre.goals
+                .filter((candidate) => candidate.status === "active")
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.priority} · {candidate.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <nav className="inspector__actions" aria-label="Discovered execution actions">
+            <button
+              className="is-primary"
+              disabled={commandPending || discovery.admission.status !== "available"}
+              onClick={() => void onAdmitDiscovered(discovery.handle, discoveryGoalId)}
+              type="button"
+            >
+              {discoveryGoalId ? "Add and assign to Goal" : "Add to Observatory"}
+            </button>
+            {discovery.presence === "live" ? (
+              <button onClick={() => onOpenDiscoveredTerminal(discovery)} type="button">
+                Open terminal
+              </button>
+            ) : null}
+          </nav>
+          {discovery.admission.status === "unavailable" ? (
+            <p className="inspector__discovered-note">{discovery.admission.explanation}</p>
+          ) : (
+            <p className="inspector__discovered-note">
+              Exact catalogue evidence is available. Admission remains explicit; terminal access is
+              independent.
+            </p>
+          )}
+          <p className="inspector__discovered-note">
+            Last observed at {new Date(discovery.lastObservedAt).toLocaleString()} ·{" "}
+            {discovery.runtimeStateSource}
+          </p>
+        </section>
       ) : null}
       {projection?.kind === "agent-inspector" ? (
         <>

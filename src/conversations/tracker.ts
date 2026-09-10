@@ -1,9 +1,10 @@
 import { Effect, Either } from "effect";
 import type { AgentHarness, AgentHarnessSnapshotRequest } from "../plugin-sdk/index.ts";
 import type { HostAgentObservation, HostSnapshot } from "../hosts/types.ts";
-import type { ReconciliationResult, Universe } from "../universe/universe.ts";
+import type { HostExecutionKey, ReconciliationResult, Universe } from "../universe/universe.ts";
 import type {
   AddedConversation,
+  AdmittedDiscoveredExecution,
   ConversationCatalogueStore,
   ConversationHistoryView,
   ConversationRefreshResult,
@@ -30,6 +31,7 @@ export class ConversationTracker implements ConversationTrackerModule {
     private readonly store: ConversationCatalogueStore,
     private readonly universe: Universe,
     private readonly configuredWorkspaceRefs: readonly string[] = [],
+    private readonly pendingExecutionKeys?: () => readonly HostExecutionKey[],
   ) {}
 
   refresh(): Effect.Effect<ConversationRefreshResult> {
@@ -143,6 +145,101 @@ export class ConversationTracker implements ConversationTrackerModule {
     return { agentId: result.agentId, goalId: result.goalId };
   }
 
+  admitDiscovered(handle: string, goalId?: string): AdmittedDiscoveredExecution {
+    const normalizedHandle = handle.trim();
+    const discovery = this.universe.resolveDiscoveredExecution(normalizedHandle);
+    const previouslyAdmitted = discovery
+      ? undefined
+      : this.universe.resolveAdmittedDiscoveredExecution(normalizedHandle);
+    if (previouslyAdmitted) {
+      let assignedGoalId: string | undefined;
+      let partial = false;
+      let message = "Execution was already added to Observatory.";
+      if (goalId) {
+        const assigned = this.universe.execute({
+          type: "AssignAgent",
+          agentId: previouslyAdmitted.agentId,
+          goalId,
+        });
+        if (!assigned.ok) {
+          partial = true;
+          message = `Execution was already added to Observatory, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
+        } else {
+          assignedGoalId = assigned.goalId;
+          message = "Execution was already added to Observatory and assigned to the Goal.";
+        }
+      }
+      const admittedAgentId = previouslyAdmitted.agentId;
+      if (partial)
+        return { agentId: admittedAgentId, goalId: assignedGoalId, message, partial: true };
+      return { agentId: admittedAgentId, goalId: assignedGoalId, message };
+    }
+    if (!discovery) throw new Error("Discovered execution is no longer visible.");
+    const reference = discovery.nativeConversationRef;
+    if (!reference?.continuityScopeId)
+      throw new Error("Conversation identity is not identified; refresh the provider catalogue.");
+    const matches = this.store
+      .conversations()
+      .filter((session) =>
+        [session.nativeConversationRef, ...session.nativeConversationAliases].some(
+          (candidate) =>
+            candidate.harnessId === reference.harnessId &&
+            candidate.continuityScopeId === reference.continuityScopeId &&
+            candidate.kind === reference.kind &&
+            candidate.value === reference.value,
+        ),
+      );
+    if (matches.length !== 1)
+      throw new Error(
+        matches.length === 0
+          ? "Exact catalogue evidence is not available; refresh the provider catalogue before adding this execution."
+          : "Admission identity is ambiguous; refresh the provider catalogue before adding this execution.",
+      );
+    const session = matches[0]!;
+    const label =
+      this.harnesses.agentHarness(session.nativeConversationRef.harnessId)?.describe().label ??
+      session.nativeConversationRef.harnessId;
+    const admitted = this.universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: session.resumeEligibility,
+      harnessId: session.nativeConversationRef.harnessId,
+      nativeConversationRef: session.nativeConversationRef,
+      displayName: boundedText(session.title, `${label} conversation`),
+      workspaceRef: session.workspaceRef,
+      observedAt: session.observedAt,
+    });
+    if (!admitted.ok || !admitted.agentId)
+      throw new Error(admitted.error ?? "Discovered execution could not be added.");
+
+    let assignedGoalId: string | undefined;
+    let partial = false;
+    let message = "Execution added to Observatory.";
+    if (goalId) {
+      const assigned = this.universe.execute({
+        type: "AssignAgent",
+        agentId: admitted.agentId,
+        goalId,
+      });
+      if (!assigned.ok) {
+        partial = true;
+        message = `Execution added to Observatory, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
+      } else {
+        assignedGoalId = assigned.goalId;
+        message = "Execution added to Observatory and assigned to the Goal.";
+      }
+    }
+    if (this.lastHostSnapshot) this.observeHost(this.lastHostSnapshot);
+    if (partial)
+      return {
+        agentId: admitted.agentId,
+        goalId: assignedGoalId,
+        message,
+        partial: true,
+      };
+    return { agentId: admitted.agentId, goalId: assignedGoalId, message };
+  }
+
   observeHost(snapshot: HostSnapshot): ReconciliationResult {
     this.lastHostSnapshot = snapshot;
     const sessions = this.store.conversations();
@@ -152,6 +249,7 @@ export class ConversationTracker implements ConversationTrackerModule {
     const result = this.universe.observe({
       kind: "host-executions",
       snapshot: { ...snapshot, agents },
+      pendingExecutionKeys: this.pendingExecutionKeys?.() ?? [],
     });
     if (result.accepted) this.refreshAcceptedProviderFacts(sessions);
     return result;
@@ -204,11 +302,34 @@ export class ConversationTracker implements ConversationTrackerModule {
       ),
     );
     if (matches.length !== 1) return observation;
+    const match = matches[0]!;
+    if (!reference.continuityScopeId) {
+      const primaryIdentityMatches = sessions.filter((session) => {
+        const candidate = session.nativeConversationRef;
+        return (
+          candidate.harnessId === reference.harnessId &&
+          candidate.kind === reference.kind &&
+          candidate.value === reference.value
+        );
+      });
+      const explicitlyAdmitted = this.universe.snapshot().agents.some((agent) => {
+        const admitted = agent.nativeConversationRef;
+        const candidate = match.nativeConversationRef;
+        return (
+          admitted !== undefined &&
+          admitted.harnessId === candidate.harnessId &&
+          admitted.kind === candidate.kind &&
+          admitted.value === candidate.value &&
+          admitted.continuityScopeId === candidate.continuityScopeId
+        );
+      });
+      if (primaryIdentityMatches.length > 0 && !explicitlyAdmitted) return observation;
+    }
     return {
       ...observation,
       harnessEvidence: {
         ...observation.harnessEvidence,
-        nativeConversationRef: matches[0]!.nativeConversationRef,
+        nativeConversationRef: match.nativeConversationRef,
       },
     };
   }

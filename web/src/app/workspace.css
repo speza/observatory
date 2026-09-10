@@ -368,3 +368,28 @@
   width: 100%;
   padding-left: 8px;
 }
+.workspace-tree__discovered-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--hairline);
+}
+.workspace-tree__discovered-section > .overline {
+  color: var(--uncertain);
+}
+.workspace-tree .workspace-tree__discovered {
+  margin-left: 0;
+  width: 100%;
+  padding-left: 8px;
+  color: var(--ink);
+}
+.workspace-tree__discovered .agent-logo {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+.workspace-tree__discovered .workspace-tree__dot {
+  border-style: dashed;
+}
+.workspace-tree__discovered .workspace-tree__dot.is-working {
+  border-style: solid;
+}

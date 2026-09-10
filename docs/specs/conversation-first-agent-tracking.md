@@ -1,8 +1,8 @@
 # Conversation-first Agent tracking
 
-Status: accepted and implemented
+Status: accepted and implemented, including automatic Herdr execution visibility
 
-Updated: 2026-09-02
+Updated: 2026-09-09
 
 This is the canonical conversation identity and recovery model. It replaces the
 earlier admission, Session import and host-first reconciliation model and owns
@@ -18,7 +18,8 @@ snapshot never creates an Agent.
 
 Herdr does not define the Agent. It reports whether and where an admitted
 conversation currently has an execution that Observatory can inspect, attach
-to or close.
+to or close. It may also report a transient, unadmitted execution for spatial
+visibility; that report never creates an Agent.
 
 ```text
 System
@@ -29,16 +30,20 @@ System
         └── execution binding = current runtime location, when proven
 ```
 
-Conversation history is the discovery and admission surface for work started
-outside Observatory. Untracked live executions remain bounded diagnostics until
-the operator explicitly admits their conversation.
+Conversation history remains the admission surface for provider conversations
+started outside Observatory. A live Herdr execution without an admitted Agent
+is additionally shown as a transient `Discovered in Herdr` item in Atlas,
+Ledger, search and the inspector. It is not a Goal, System, Inbox Agent or
+semantic history entry.
 
 ## Why
 
-Automatic discovery made external provider and host observations an implicit
-write authority over the durable Universe. A background catalogue scan could
-create an Agent and put it in Inbox without a user decision, while a host
-snapshot could turn unrelated local activity into managed work.
+Automatic durable admission would make external provider and host observations
+an implicit write authority over the durable Universe. A background catalogue
+scan could create an Agent and put it in Inbox without a user decision, while a
+host snapshot could turn unrelated local activity into managed work. The
+implemented discovery surface provides spatial visibility without granting
+those observations durable write authority.
 
 The product instead answers two separate questions:
 
@@ -60,8 +65,8 @@ Herdr must never damage, duplicate or stale the conversation identity.
 - Keep Goal assignment, human name, archive and admission under human control.
 - Preserve uncertainty without exposing internal reconciliation axes as the
   primary user experience.
-- Keep external conversations discoverable in Conversation history without
-  flooding Atlas or Inbox.
+- Keep dormant provider conversations discoverable in Conversation history and
+  live unadmitted executions visible in Atlas without flooding Inbox.
 - Concentrate matching, admission, launch completion and recovery in one deep
   module with one test surface.
 
@@ -117,7 +122,8 @@ ExecutionKey
 
 An execution may expose an exact `ConversationKey`. If it does, Observatory can
 bind it deterministically. An execution without exact provider identity is an
-unidentified execution, not a durable managed Agent.
+unidentified execution, not a durable managed Agent. It may still be a
+transient discovered execution in the current host inventory.
 
 ### Launch operation
 
@@ -133,6 +139,22 @@ active Observatory. It replaces Session import as a recovery-heavy workflow.
 Selecting an entry performs `Add to Observatory`; this explicit admission is
 required for any conversation started outside Observatory, regardless of
 recency or current execution presence.
+
+### Discovered execution
+
+A discovered execution is current `SessionHost` evidence that has not matched
+an admitted Agent. It is scoped by host kind, host instance and native
+execution identity, receives a deterministic transient map position, and is
+shown separately from durable Agents. A discovery handle is opaque and is
+resolved only at the server-side host seam. Browser projections contain safe
+display metadata, never host locators or native terminal targets.
+
+Discovery is rebuilt from a fresh host snapshot after restart and does not write
+an Agent, assignment or semantic catch-up entry. Partial, stale or unavailable
+host evidence retains the item as `Runtime unknown`; only a fresh complete
+snapshot can prove its absence. Exact scoped catalogue evidence enables an
+explicit `Add to Observatory` or `Add and assign to Goal`. Terminal access is
+independent of admission and is revalidated against the current host target.
 
 ## Authorities
 
@@ -213,7 +235,7 @@ not persisted as one overloaded Agent status.
 2. A managed Agent cannot exist without a canonical conversation key.
 3. A conversation can exist with zero executions.
 4. An execution can temporarily exist without a conversation key, but it is
-   not admitted as a managed Agent.
+   not admitted as a managed Agent; it may be visible as transient discovery.
 5. An exact conversation key is the only automatic join between an Agent and
    an execution.
 6. Exact provider-declared aliases may canonicalise identity; matching UUID
@@ -251,7 +273,10 @@ the host display name as fallback evidence until provider evidence arrives.
 
 An exact resume never creates an Agent: the target conversation must already be
 admitted. Host observations, provider catalogues and provider-native activity
-observations never admit Agents, regardless of liveness or recency.
+observations never admit Agents, regardless of liveness or recency. Host-only
+executions are visible through the separate discovery surface, while their
+durable admission still requires exact scoped catalogue evidence or a proven
+managed launch.
 
 Internal provider sessions, subagents, review threads, compaction sessions and
 other non-user-resumable records are excluded by the harness adapter before
@@ -324,14 +349,14 @@ an ordering failure and must become impossible at the module interface.
   managed-launch Agent only when no conflicting scoped identity exists.
   Provider catalogue evidence then enriches that Agent in place rather than
   creating a duplicate.
-- If no Agent exists for the exact conversation key, retain the execution as
-  untracked diagnostic evidence and do not create or promote an Agent.
+- If no Agent exists for the exact conversation key, retain the execution as a
+  transient `Discovered in Herdr` item and do not create or promote an Agent.
 - If the conversation exists only in history, liveness does not change its
   admission status; the operator must add it explicitly.
 - If an accepted launch operation reports both execution and conversation,
   complete the operation and apply its requested Goal and human name.
-- If an execution lacks conversation identity, retain it only in the transient
-  unidentified-execution inventory.
+- If an execution lacks conversation identity, retain it in the transient
+  `Discovered in Herdr` inventory with `Conversation not identified`.
 - If identity arrives later on that same current execution, bind by the newly
   reported exact conversation key. Do not create a prior host-bound Agent that
   then needs merging.
@@ -361,9 +386,9 @@ bound execution may still expose an explicit Resume action while its headline
 remains `Runtime unknown`. Resume re-checks the current host snapshot and fails
 closed if an ambiguous live execution could already own the conversation.
 
-An unidentified execution is shown separately as `Unidentified process in
-Herdr`. It is not rendered as a Goal satellite and cannot silently inherit a
-Goal.
+An unidentified execution is shown separately as `Discovered in Herdr`. It is
+not rendered as a Goal satellite, Inbox Agent or semantic history entry, and
+cannot silently inherit a Goal.
 
 ## Naming
 
@@ -466,8 +491,9 @@ load Agents, observations and launch operations
   -> deterministically reconstruct the same Agent bindings
 ```
 
-Restart rebinds already admitted Agents only. Newly discovered external
-conversations remain in Conversation history until explicitly added.
+Restart rebinds already admitted Agents. Newly discovered external executions
+are reconstructed from the next fresh host snapshot, while any matching
+provider conversations remain in Conversation history until explicitly added.
 
 ### Database reset
 
@@ -481,9 +507,10 @@ inferred from provider or host facts.
 
 ### Atlas
 
-Atlas renders active admitted Agents only. It never renders launch operations,
-historical conversations, Herdr workspaces or unidentified executions as
-durable nodes.
+Atlas renders active admitted Agents and a clearly separate `Discovered in
+Herdr` area for current host-reported executions. Discovery items are not Goal
+satellites or durable nodes; launch operations and historical conversations do
+not appear on the map.
 
 ### Pending launches
 
@@ -526,11 +553,13 @@ Context
 Operational identifiers remain bounded and available only in the explicit
 local inspector. Transcript paths do not enter browser projections.
 
-### Diagnostics
+### Discovery and diagnostics
 
-Unidentified executions and stale individual observations live in a diagnostic
-or runtime-attention lens. They do not compete with durable Agents in Atlas or
-Inbox.
+Current unadmitted executions live in the normal `Discovered in Herdr` Atlas
+and Ledger sections, with search and inspector access. Stale, partial and
+unavailable host evidence remains visible there as `Runtime unknown`; malformed
+or otherwise untrusted input may still be reported as diagnostics. Discovery
+does not enter Inbox's Agent count or semantic history.
 
 ## Closeout and archive
 
@@ -586,7 +615,8 @@ The implementation removes:
 `ConversationTracker` owns exact alias canonicalisation and Conversation
 history behind one interface. It submits provider observations for already
 admitted Agents only. Production submits accepted host and provider observations
-through `Universe.observe`; untracked identities remain diagnostic.
+through `Universe.observe`; unadmitted executions become transient discovery
+items, while provider-native activity remains admitted-only.
 
 ## Implementation record
 
@@ -612,14 +642,15 @@ Conversation history remain implemented. The explicit-admission revision:
    appears; provider titles replace its fallback and follow later provider renames,
    while an explicit human name remains protected.
 3. Start Claude Code directly in Herdr. No Agent appears automatically; its
-   exact execution remains diagnostic until the conversation is explicitly
-   added.
-4. Start Codex in a native terminal. It may appear in Conversation history but
-   not Atlas or Inbox until explicitly added.
+   exact execution appears in `Discovered in Herdr` and remains transient until
+   the conversation is explicitly added.
+4. Start Codex in a native terminal. It may appear in Conversation history and,
+   when Herdr reports it, in the separate discovery area, but not Inbox until
+   explicitly added.
 5. Add a currently live history entry. Exactly one Agent is created and the
    exact host execution binds regardless of provider-first or host-first order.
-6. Observe an untracked exact execution in every observation order. No durable
-   Agent is created.
+6. Observe an untracked exact execution in every observation order. It remains
+   visible as discovery and no durable Agent is created.
 7. Stop an admitted Herdr process. The Agent becomes Dormant and keeps its Goal,
    name and conversation.
 8. Disconnect Herdr. The Agent becomes Runtime unknown, never stale or dormant.
@@ -629,8 +660,9 @@ Conversation history remain implemented. The explicit-admission revision:
     cannot manufacture an Agent.
 11. Report the same admitted conversation in two live executions. The Agent
     becomes Conflict and neither execution is silently preferred.
-12. Discover 500 conversations. They stay in Conversation history and do not
-    flood Inbox or Atlas, regardless of when they were created.
+12. Keep 500 dormant catalogue entries in Conversation history while two live
+    host executions are reported. Only the two current executions appear in
+    discovery; dormant history does not flood Inbox or Atlas.
 13. Reset the database while conversations are live. No Agent returns until the
     operator explicitly adds it or starts new work through Observatory.
 14. Provider-native observations for untracked conversations do not enter the

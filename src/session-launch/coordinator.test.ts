@@ -331,6 +331,50 @@ describe("agent launch coordinator", () => {
     store.close();
   });
 
+  test("keeps a pending launch pending when the current host does not match its receipt", async () => {
+    const clock = new FixedClock(76_000);
+    const store = new SqliteUniverseStore(":memory:");
+    const { universe } = makeUniverse({ clock, store });
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
+    store.reserveLaunchReceipt({
+      requestId: "host-mismatch",
+      intentFingerprint: "fingerprint",
+      result: { status: "pending", requestId: "host-mismatch", message: "Waiting for identity." },
+    });
+    store.saveLaunchReceipt({
+      requestId: "host-mismatch",
+      intentFingerprint: "fingerprint",
+      result: { status: "pending", requestId: "host-mismatch", message: "Waiting for identity." },
+      recovery: {
+        kind: "start",
+        harnessId: "codex",
+        executionRef: "mock-launch-1",
+        hostKind: "other-host",
+        hostInstanceId: "other-host:default",
+        nativeConversationRef: {
+          harnessId: "codex",
+          kind: "session-id",
+          value: "mock-conversation-1",
+        },
+      },
+    });
+    const coordinator = createStartAgentCoordinator({
+      universe,
+      host,
+      harnesses: { agentHarness: (id) => (id === "codex" ? codexHarness : undefined) },
+      workspace: new TestWorkspaceProvider(),
+      receipts: store,
+    });
+
+    const [recovered] = await Effect.runPromise(coordinator.refreshPending());
+
+    expect(recovered).toMatchObject({ status: "already-observed" });
+    expect(recovered?.message).toContain("does not match the host");
+    expect(coordinator.pendingLaunches()).toHaveLength(1);
+    expect(universe.snapshot().agents).toEqual([]);
+    store.close();
+  });
+
   test("durably records pre-launch failure without creating a requested Goal", async () => {
     const directory = mkdtempSync(join(tmpdir(), "observatory-launch-receipt-"));
     const databasePath = join(directory, "universe.sqlite");

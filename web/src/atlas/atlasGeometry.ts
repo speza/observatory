@@ -1,6 +1,7 @@
 import type {
   MapAgentView,
   MapGoalView,
+  DiscoveredExecutionView,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
@@ -23,6 +24,8 @@ export interface OrbitPlacement {
 
 export const AGENT_CARD_WIDTH = 220;
 export const AGENT_CARD_HEIGHT = 104;
+export const DISCOVERED_CARD_WIDTH = 278;
+export const DISCOVERED_CARD_HEIGHT = 132;
 const AGENT_CARD_GAP = 14;
 const AGENT_CARD_COLUMN_GAP = 18;
 const AGENT_CARD_ROW_GAP = 10;
@@ -64,7 +67,11 @@ export const selectionBelongsToFocus = (
   projection: UniverseMapProjection,
 ): boolean => {
   if (!focus || !next) return false;
-  if (sameSelection(focus, next)) return true;
+  if (sameSelection(focus, next))
+    return (
+      next.type !== "discovered-execution" ||
+      (projection.discoveredExecutions ?? []).some((execution) => execution.handle === next.id)
+    );
   if (focus.type !== "goal" || next.type !== "agent") return false;
   return projection.goals.some(
     (goal) => goal.id === focus.id && goal.agents.some((agent) => agent.id === next.id),
@@ -295,15 +302,22 @@ export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number
   return scale;
 };
 
-/** Bounds of the visible goal bodies, captions, agent nodes, and their outer orbits. */
+const discoveredExecutionBounds = (execution: DiscoveredExecutionView, scale: number) => {
+  const x = execution.mapPosition.x * scale;
+  const y = execution.mapPosition.y * scale;
+  return {
+    minimumX: x - DISCOVERED_CARD_WIDTH / 2 - 8,
+    maximumX: x + DISCOVERED_CARD_WIDTH / 2 + 8,
+    minimumY: y - DISCOVERED_CARD_HEIGHT / 2 - 28,
+    maximumY: y + DISCOVERED_CARD_HEIGHT / 2 + 28,
+  };
+};
+
+/** Bounds of the visible goal bodies, captions, agent nodes, and discoveries. */
 export const atlasContentBounds = (
   projection: UniverseMapProjection,
   goalSpacingScale = 1,
 ): AtlasContentBounds => {
-  if (projection.goals.length === 0) {
-    return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
-  }
-
   const bounds = projection.goals.map((goal) => {
     const local = goalLocalBounds(goal);
     const goalX = goal.mapPosition.x * goalSpacingScale;
@@ -315,6 +329,13 @@ export const atlasContentBounds = (
       maximumY: goalY + local.bottom,
     };
   });
+  bounds.push(
+    ...(projection.discoveredExecutions ?? []).map((execution) =>
+      discoveredExecutionBounds(execution, goalSpacingScale),
+    ),
+  );
+
+  if (bounds.length === 0) return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
 
   return {
     minimumX: Math.min(...bounds.map((bound) => bound.minimumX)),

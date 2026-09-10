@@ -34,6 +34,9 @@ explicit seams instead of leaking through the model.
   never organisational nodes.
 - A durable Agent represents an exactly identified provider conversation, not a
   pane, process or inferred workspace match.
+- A live unadmitted host execution may appear in a separate transient
+  discovered-execution projection, but never becomes an Agent, Goal, System or
+  Inbox entry without explicit admission.
 - Goal priority, completion, archive and Agent archive remain human-controlled
   unless a future explicit policy says otherwise.
 - Missing, stale, partial or conflicting observations remain uncertain. They are
@@ -80,6 +83,7 @@ accepts typed commands and typed observations. It owns:
 - assignment, priority, completion, archive and accepted Goal position;
 - provider continuity and execution-presence invariants;
 - host reconciliation and identity conflict handling;
+- transient discovered-execution reconciliation and opaque target resolution;
 - durable semantic changes and the operator catch-up checkpoint; and
 - atomic persistence through `UniverseStore`.
 
@@ -177,6 +181,12 @@ without granting them admission authority:
 - aliases are canonicalised only with provider proof; and
 - unavailable or incomplete catalogues cannot prove absence.
 
+The same tracker passes the retained host snapshot through Universe's
+reconciliation path. Exact scoped catalogue matches can enrich a discovered
+execution, but do not admit it automatically. Admission is explicit and
+reuses the catalogue's provenance; assignment is a second existing Goal
+command, so a failed assignment is reported as a partial result.
+
 Only `AddConversation` and a proven Observatory-managed new launch create a
 durable Agent. Admission provenance is explicit: catalogue admission carries
 scoped provider evidence, while managed-launch admission may begin with an
@@ -257,8 +267,8 @@ These modules are deterministic, Effect-free views over trusted state and typed
 observations.
 
 - Attention composes independent claims into one decision subject per Agent.
-- Projection builds Atlas, Ledger, Inbox, Needs-you, Catch up, search and
-  inspector views.
+- Projection builds Atlas, Ledger, the separate discovered-execution area,
+  Inbox, Needs-you, Catch up, search and inspector views.
 - Spatial assigns deterministic Goal anchors and Agent satellites, repairs only
   unpinned collisions and keeps viewport state outside persistence.
 
@@ -280,6 +290,13 @@ runtime-complete evidence, and exposes uncertainty as Monitor rather than live
 work. Archive status and assignment are never rewritten to make work visible;
 terminal access still requires fresh SessionHost validation. This is a derived
 visibility policy, not a durable schema or host-protocol change.
+
+Unadmitted discoveries are deliberately outside that archived-Agent policy.
+They are global host evidence, not synthetic Goal membership, and remain a
+separate count/section when a System filter is active. Discovery positions are
+deterministic and do not participate in accepted Goal placement. Their
+in-memory handles are invalidated when a target is reused or host evidence is
+lost; terminal actions require a fresh SessionHost validation.
 
 ### `repositories/`
 
@@ -380,6 +397,13 @@ A complete fresh snapshot can prove execution absence for one host instance. A
 partial snapshot, transport failure or stale last-known state cannot. Provider
 absence likewise requires a complete catalogue for the relevant continuity
 scope.
+
+For unadmitted executions, the host snapshot is also the source of a bounded
+current discovery inventory. An exact admitted execution suppresses its
+discovery entry, including for archived Agents and pending launches. Multiple
+executions claiming one exact conversation remain visible as separate
+discoveries until explicit admission, after which the existing Agent conflict
+model applies.
 
 ## Main flows
 

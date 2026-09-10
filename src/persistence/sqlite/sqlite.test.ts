@@ -174,6 +174,37 @@ describe("SQLite persistence", () => {
     }
   });
 
+  test("scopes persisted host and live execution identities by host kind", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const fixture = makeUniverse({ store });
+      admitObservedConversationsAndReconcile(fixture.universe, hostSnapshot([observation]));
+      const state = store.load();
+      const agent = state.agents[0]!;
+      const execution = agent.execution!;
+      state.hosts.push({
+        ...state.hosts[0]!,
+        hostKind: "other-host",
+      });
+      state.agents.push({
+        ...agent,
+        id: "agent-other-host",
+        execution: { ...execution, hostKind: "other-host" },
+      });
+
+      store.save(state);
+
+      const loaded = store.load();
+      expect(loaded.hosts).toHaveLength(2);
+      expect(loaded.agents.map((candidate) => candidate.execution?.hostKind)).toEqual([
+        "test-host",
+        "other-host",
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   test("bookkeeping recovers after outer rollback, reset and writes from another connection", () => {
     const directory = mkdtempSync(join(tmpdir(), "ao-save-cache-"));
     const path = join(directory, "universe.sqlite");

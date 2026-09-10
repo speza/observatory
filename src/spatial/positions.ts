@@ -362,6 +362,45 @@ export const unassignedAgentPositions = (
 export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): MapPosition =>
   unassignedAgentPositions(anchor, [agentId]).get(agentId) ?? anchor;
 
+const DISCOVERY_ANCHOR: MapPosition = { x: 0, y: 240 };
+const DISCOVERY_HORIZONTAL_STEP = 302;
+const DISCOVERY_VERTICAL_STEP = 156;
+const DISCOVERY_OFFSETS: readonly MapPosition[] = (() => {
+  const offsets: MapPosition[] = [];
+  for (let ring = 0; ring <= 5; ring += 1) {
+    const width = Math.max(1, ring) * DISCOVERY_HORIZONTAL_STEP;
+    const height = Math.max(1, ring) * DISCOVERY_VERTICAL_STEP;
+    for (let x = -Math.max(1, ring); x <= Math.max(1, ring); x += 1)
+      offsets.push({ x: x * DISCOVERY_HORIZONTAL_STEP, y: -height });
+    for (let y = -Math.max(1, ring) + 1; y <= Math.max(1, ring); y += 1)
+      offsets.push({ x: width, y: y * DISCOVERY_VERTICAL_STEP });
+    for (let x = Math.max(1, ring) - 1; x >= -Math.max(1, ring); x -= 1)
+      offsets.push({ x: x * DISCOVERY_HORIZONTAL_STEP, y: height });
+    for (let y = Math.max(1, ring) - 1; y >= -Math.max(1, ring) + 1; y -= 1)
+      offsets.push({ x: -width, y: y * DISCOVERY_VERTICAL_STEP });
+  }
+  return offsets;
+})();
+
+/** Assign a persistent-in-process slot in the global, non-goal discovery area. */
+export const initialDiscoveredExecutionMapPosition = (
+  handle: string,
+  occupied: readonly MapPosition[],
+): MapPosition => {
+  const occupiedKeys = new Set(occupied.map(positionKey));
+  const start = hash(`discovered:${handle}`) % DISCOVERY_OFFSETS.length;
+  for (let offset = 0; offset < DISCOVERY_OFFSETS.length; offset += 1) {
+    const candidate = DISCOVERY_OFFSETS[(start + offset) % DISCOVERY_OFFSETS.length];
+    if (!candidate) continue;
+    const position = { x: DISCOVERY_ANCHOR.x + candidate.x, y: DISCOVERY_ANCHOR.y + candidate.y };
+    if (!occupiedKeys.has(positionKey(position))) return position;
+  }
+  return {
+    x: DISCOVERY_ANCHOR.x,
+    y: DISCOVERY_ANCHOR.y + DISCOVERY_OFFSETS.length * DISCOVERY_VERTICAL_STEP,
+  };
+};
+
 export const isMapPosition = (value: MapPosition): boolean =>
   Number.isFinite(value.x) &&
   Number.isFinite(value.y) &&

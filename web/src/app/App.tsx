@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentView,
   CommandCentreProjection,
+  DiscoveredExecutionView,
   SystemView,
 } from "../../../src/projection/types.ts";
 import type {
@@ -19,6 +20,7 @@ import {
   fetchConversationHistory,
   resumeWebAgent,
   addConversation,
+  admitDiscoveredExecution,
 } from "../api/client.ts";
 import { CloseAgentDialog } from "../agents/CloseAgentDialog.tsx";
 import { Atlas, type AtlasCameraCommand } from "../atlas/Atlas.tsx";
@@ -87,6 +89,7 @@ export const App = (): React.JSX.Element => {
   const [cameraCommand, setCameraCommand] = useState<AtlasCameraCommand>();
   const cameraNonce = useRef(0);
   const [terminalAgent, setTerminalAgent] = useState<AgentView>();
+  const [terminalDiscovery, setTerminalDiscovery] = useState<DiscoveredExecutionView>();
   const [recentTerminalAgentIds, setRecentTerminalAgentIds] = useState<readonly string[]>([]);
   const [terminalLaunch, setTerminalLaunch] = useState<WebPendingLaunch>();
   const [closeoutAgent, setCloseoutAgent] = useState<AgentView>();
@@ -264,6 +267,61 @@ export const App = (): React.JSX.Element => {
     }
   };
 
+  const admitSelectedDiscovery = async (
+    handle: string,
+    goalId?: string,
+  ): Promise<
+    | {
+        readonly agentId: string;
+        readonly goalId?: string;
+        readonly message: string;
+        readonly partial?: boolean;
+      }
+    | undefined
+  > => {
+    setCommandPending(true);
+    setCommandError(undefined);
+    try {
+      const added = await admitDiscoveredExecution(handle, goalId);
+      portfolio.accept(added.portfolio);
+      const agent = agentsFor(added.portfolio.commandCentre).find(
+        (candidate) => candidate.id === added.agentId,
+      );
+      if (agent) {
+        setSelectedSystemId(
+          systemScopeForSelection({ type: "agent", id: agent.id }, added.portfolio.commandCentre),
+        );
+        setSelection({ type: "agent", id: agent.id });
+        setInspectorOpen(true);
+        if (terminalDiscovery?.handle === handle) {
+          setTerminalDiscovery(undefined);
+          setTerminalAgent(agent);
+          setRecentTerminalAgentIds((current) => [
+            agent.id,
+            ...current.filter((id) => id !== agent.id),
+          ]);
+        }
+      }
+      setLaunchNotice(added.message);
+      refreshInspector();
+      if (added.partial)
+        return {
+          agentId: added.agentId,
+          goalId: added.goalId,
+          message: added.message,
+          partial: true,
+        };
+      return { agentId: added.agentId, goalId: added.goalId, message: added.message };
+    } catch (error) {
+      setCommandError(
+        error instanceof Error ? error.message : "Discovered execution admission failed.",
+      );
+      return undefined;
+    } finally {
+      setCommandPending(false);
+    }
+  };
+
   const runCloseout = async (agentIds: readonly string[]): Promise<boolean> => {
     setCommandPending(true);
     setCommandError(undefined);
@@ -287,10 +345,20 @@ export const App = (): React.JSX.Element => {
   };
 
   const allSelections = useMemo<readonly Selection[]>(() => {
-    if (!scopedCommandCentre || (view === "atlas" && !selectedSystemId)) return [];
+    if (!scopedCommandCentre) return [];
+    if (
+      view === "atlas" &&
+      !selectedSystemId &&
+      (scopedCommandCentre.discoveredExecutions?.length ?? 0) === 0
+    )
+      return [];
     return [
       ...scopedCommandCentre.goals.map((goal) => ({ type: "goal" as const, id: goal.id })),
       ...agentsFor(scopedCommandCentre).map((agent) => ({ type: "agent" as const, id: agent.id })),
+      ...(scopedCommandCentre.discoveredExecutions ?? []).map((execution) => ({
+        type: "discovered-execution" as const,
+        id: execution.handle,
+      })),
     ];
   }, [scopedCommandCentre, selectedSystemId, view]);
 
@@ -316,6 +384,7 @@ export const App = (): React.JSX.Element => {
       : undefined;
 
   const switchTerminalAgent = (agent: AgentView): void => {
+    setTerminalDiscovery(undefined);
     setTerminalLaunch(undefined);
     setTerminalAgent(agent);
     setSelection({ type: "agent", id: agent.id });
@@ -326,12 +395,27 @@ export const App = (): React.JSX.Element => {
     switchTerminalAgent(agent);
   };
 
+  const openDiscoveredTerminal = (execution: DiscoveredExecutionView): void => {
+    setTerminalAgent(undefined);
+    setTerminalLaunch(undefined);
+    setTerminalDiscovery(execution);
+    setSelection({ type: "discovered-execution", id: execution.handle });
+    setInspectorOpen(true);
+  };
+
   const openSelectedTerminal = (): void => {
     if (selectedAgent) openAgentTerminal(selectedAgent);
+    else if (selection?.type === "discovered-execution") {
+      const execution = data?.map.discoveredExecutions?.find(
+        (candidate) => candidate.handle === selection.id,
+      );
+      if (execution) openDiscoveredTerminal(execution);
+    }
   };
 
   const openWorkspaceReview = (agent: AgentView): void => {
     setDiffAgent(agent);
+    setTerminalDiscovery(undefined);
     setTerminalAgent(undefined);
     setTerminalLaunch(undefined);
   };
@@ -395,6 +479,7 @@ export const App = (): React.JSX.Element => {
         !conversationHistoryOpen &&
         !closeoutAgent &&
         !terminalAgent &&
+        !terminalDiscovery &&
         !terminalLaunch
       ) {
         event.preventDefault();
@@ -440,6 +525,10 @@ export const App = (): React.JSX.Element => {
           setTerminalAgent(undefined);
           return;
         }
+        if (terminalDiscovery) {
+          setTerminalDiscovery(undefined);
+          return;
+        }
         if (terminalLaunch) {
           setTerminalLaunch(undefined);
           return;
@@ -471,6 +560,7 @@ export const App = (): React.JSX.Element => {
         conversationHistoryOpen ||
         closeoutAgent ||
         terminalAgent ||
+        terminalDiscovery ||
         terminalLaunch ||
         shortcutsOpen ||
         catchUpOpen
@@ -511,7 +601,8 @@ export const App = (): React.JSX.Element => {
       } else if (key === "Enter") {
         event.preventDefault();
         if (!selection) moveSelection(1);
-        else if (selection.type === "agent") openSelectedTerminal();
+        else if (selection.type === "agent" || selection.type === "discovered-execution")
+          openSelectedTerminal();
         else focusSelection();
       } else if (key === " ") {
         event.preventDefault();
@@ -582,6 +673,7 @@ export const App = (): React.JSX.Element => {
     inspectorOpen,
     shortcutsOpen,
     terminalAgent,
+    terminalDiscovery,
     terminalLaunch,
     updateSetting,
     view,
@@ -696,6 +788,7 @@ export const App = (): React.JSX.Element => {
           />
           <span>{hostLabel(data.commandCentre)}</span>
           <b>{data.commandCentre.counts.agents} OBSERVED</b>
+          <b>{data.commandCentre.counts.discovered ?? 0} DISCOVERED</b>
         </div>
       </header>
       <Workspace
@@ -785,6 +878,8 @@ export const App = (): React.JSX.Element => {
                 onCloseAndArchive={runCloseout}
                 projection={inspector}
                 onOpenTerminal={openAgentTerminal}
+                onOpenDiscoveredTerminal={openDiscoveredTerminal}
+                onAdmitDiscovered={admitSelectedDiscovery}
                 onPullRequestChange={recordPullRequest}
                 onRetry={refreshInspector}
                 onReviewChanges={openWorkspaceReview}
@@ -853,11 +948,14 @@ export const App = (): React.JSX.Element => {
                 if (terminalLaunch?.requestId === requestId) setTerminalLaunch(undefined);
               }}
               onOpen={(launch) => {
+                setTerminalDiscovery(undefined);
                 setTerminalAgent(undefined);
                 setTerminalLaunch(launch);
               }}
             />
-            {view === "atlas" && !selectedSystemId ? (
+            {view === "atlas" &&
+            !selectedSystemId &&
+            (data.commandCentre.discoveredExecutions?.length ?? 0) === 0 ? (
               <SystemsOverview
                 onCreate={() => {
                   setEditingSystem(undefined);
@@ -888,6 +986,7 @@ export const App = (): React.JSX.Element => {
                 }}
                 onSelect={select}
                 onOpenTerminal={openAgentTerminal}
+                onOpenDiscoveredTerminal={openDiscoveredTerminal}
                 onReviewChanges={openWorkspaceReview}
                 onClearSelection={() => {
                   setSelection(undefined);
@@ -984,11 +1083,18 @@ export const App = (): React.JSX.Element => {
           theme={theme}
         />
       ) : null}
-      {terminalAgent ? (
+      {terminalAgent || terminalDiscovery ? (
         <TerminalDeck
-          agent={terminalAgents.find((agent) => agent.id === terminalAgent.id) ?? terminalAgent}
+          agent={
+            terminalAgent
+              ? (terminalAgents.find((agent) => agent.id === terminalAgent.id) ?? terminalAgent)
+              : terminalDiscovery!
+          }
           agents={terminalAgents}
-          onClose={() => setTerminalAgent(undefined)}
+          onClose={() => {
+            setTerminalAgent(undefined);
+            setTerminalDiscovery(undefined);
+          }}
           onSwitchAgent={switchTerminalAgent}
           onTerminalAppearanceChange={(appearance) => setSetting("terminalAppearance", appearance)}
           terminalAppearance={terminalAppearance}
@@ -1059,6 +1165,7 @@ export const App = (): React.JSX.Element => {
                 next.delete(pendingLaunch.requestId);
                 return next;
               });
+              setTerminalDiscovery(undefined);
               setTerminalAgent(undefined);
               setTerminalLaunch(pendingLaunch);
             } else if (response.result.agentId) {

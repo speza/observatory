@@ -119,7 +119,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           args: intent.harness.args,
         })
         .pipe(Effect.mapError(mapError("harness.plan-start")));
-      yield* this.observeHost();
+      const before = yield* this.observeHost();
       const goalId = yield* this.resolveGoal(intent);
       launchAttempted = true;
       const launched = yield* this.options.host
@@ -148,6 +148,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             kind: "start",
             harnessId,
             executionRef: launched.executionRef,
+            hostKind: before.hostKind,
+            hostInstanceId: before.hostInstanceId,
             displayName: requestedAgentName,
             nativeConversationRef: plan.nativeConversationRef,
             goalId,
@@ -347,6 +349,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               kind: "resume",
               harnessId: saved.harnessId,
               executionRef: launched.executionRef,
+              hostKind: before.hostKind,
+              hostInstanceId: before.hostInstanceId,
               nativeConversationRef: saved.nativeConversationRef,
               goalId: saved.primaryGoalId,
               agentId: saved.id,
@@ -367,7 +371,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           (candidate) => candidate.nativeId === launched.executionRef,
         );
         const exactlyRebound = launched.executionRef
-          ? this.findAgentByExecution(after.hostInstanceId, launched.executionRef)
+          ? this.findAgentByExecution(after.hostKind, after.hostInstanceId, launched.executionRef)
           : undefined;
         if (
           exactlyRebound?.id === saved.id &&
@@ -439,6 +443,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         requestId: receipt.requestId,
         harnessId: receipt.recovery.harnessId,
         executionRef: receipt.recovery.executionRef,
+        hostKind: receipt.recovery.hostKind,
+        hostInstanceId: receipt.recovery.hostInstanceId,
         displayName: receipt.recovery.displayName?.trim() || `${receipt.recovery.harnessId} agent`,
         goalId: receipt.recovery.goalId,
         message: receipt.result.message,
@@ -548,10 +554,21 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       const recovery = receipt.recovery!;
       const harness = yield* this.requireHarness(recovery.harnessId);
       const snapshot = yield* this.observeHost();
+      if (
+        (recovery.hostKind !== undefined && recovery.hostKind !== snapshot.hostKind) ||
+        (recovery.hostInstanceId !== undefined &&
+          recovery.hostInstanceId !== snapshot.hostInstanceId)
+      )
+        return {
+          ...receipt.result,
+          status: "already-observed",
+          message: `Request ${receipt.requestId} remains pending; the current host does not match the host that accepted the launch.`,
+        };
       const observation = snapshot.agents.find(
         (candidate) => candidate.nativeId === recovery.executionRef,
       );
       const reconciledAgent = this.findAgentByExecution(
+        snapshot.hostKind,
         snapshot.hostInstanceId,
         recovery.executionRef,
       );
@@ -830,11 +847,16 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         );
   }
 
-  private findAgentByExecution(hostInstanceId: string, executionRef: string): Agent | undefined {
+  private findAgentByExecution(
+    hostKind: string,
+    hostInstanceId: string,
+    executionRef: string,
+  ): Agent | undefined {
     return this.options.universe
       .snapshot()
       .agents.find(
         (agent) =>
+          agent.execution?.hostKind === hostKind &&
           agent.execution?.hostInstanceId === hostInstanceId &&
           agent.execution.nativeId === executionRef,
       );

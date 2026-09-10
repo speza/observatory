@@ -22,7 +22,7 @@ export class SystemClock implements Clock {
 class RuntimeIds implements IdGenerator {
   private sequence = 0;
 
-  next(kind: "system" | "goal" | "agent"): string {
+  next(kind: "system" | "goal" | "agent" | "discovery"): string {
     this.sequence += 1;
     return `${kind}-${Date.now().toString(36)}-${this.sequence.toString(36)}`;
   }

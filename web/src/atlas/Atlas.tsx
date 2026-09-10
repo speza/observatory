@@ -6,12 +6,18 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { ArchiveX, GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
-import type { AgentView, UniverseMapProjection } from "../../../src/projection/types.ts";
+import type {
+  AgentView,
+  DiscoveredExecutionView,
+  UniverseMapProjection,
+} from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
+  DISCOVERED_CARD_HEIGHT,
+  DISCOVERED_CARD_WIDTH,
   goalAgentPoints,
   goalRadius,
   hash,
@@ -63,6 +69,7 @@ interface AtlasProps {
   ) => void | Promise<void>;
   readonly onCloseAndArchive?: (agent: AgentView) => void;
   readonly onOpenTerminal?: (agent: AgentView) => void;
+  readonly onOpenDiscoveredTerminal?: (execution: DiscoveredExecutionView) => void;
   readonly onReviewChanges?: (agent: AgentView) => void;
   readonly pullRequestUrls?: ReadonlyMap<string, string>;
   readonly onSelect: (selection: Selection) => void;
@@ -108,6 +115,7 @@ export const Atlas = ({
   onMoveGoal,
   onCloseAndArchive,
   onOpenTerminal,
+  onOpenDiscoveredTerminal,
   onReviewChanges,
   pullRequestUrls,
   onSelect,
@@ -228,7 +236,7 @@ export const Atlas = ({
         </span>
       </div>
       <svg
-        aria-label={`${projection.counts.goals} goals and ${projection.counts.agents} agents`}
+        aria-label={`${projection.counts.goals} goals and ${projection.counts.agents} agents${(projection.counts.discovered ?? 0) > 0 ? `, ${projection.counts.discovered} discovered executions` : ""}`}
         className={isPanning ? "is-panning" : ""}
         onClick={(event) => {
           if (event.target === event.currentTarget) onClearSelection?.();
@@ -722,6 +730,156 @@ export const Atlas = ({
               </g>
             );
           })}
+          {(projection.discoveredExecutions ?? []).length > 0 ? (
+            <g aria-label="Discovered in Herdr executions" className="discovered-executions">
+              {projection.discoveredExecutions?.map((execution, index) => {
+                const centre = screenPoint(execution.mapPosition);
+                const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+                const selected =
+                  selection?.type === "discovered-execution" && selection.id === execution.handle;
+                const focused =
+                  focusedSelection?.type === "discovered-execution" &&
+                  focusedSelection.id === execution.handle;
+                const title = linesFor(execution.displayName);
+                const workspace = execution.worktree ?? execution.repository ?? "Workspace unknown";
+                const conversation = execution.conversation
+                  ? `Conversation · ${execution.conversation.id}`
+                  : execution.conversationIdentified
+                    ? "Conversation · identified"
+                    : "Conversation not identified";
+                const terminalAvailable =
+                  execution.presence === "live" && onOpenDiscoveredTerminal !== undefined;
+                const focusExecution = (): void =>
+                  (onFocusSelection ?? onSelect)({
+                    type: "discovered-execution",
+                    id: execution.handle,
+                  });
+                return (
+                  <g
+                    className={`discovered-execution discovered-execution--${state} ${selected ? "is-selected" : ""} ${focused ? "is-focused" : ""}`}
+                    data-discovery-handle={execution.handle}
+                    key={execution.handle}
+                    transform={`translate(${centre.x} ${centre.y})`}
+                  >
+                    <g
+                      aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+                      className="discovered-execution__card-target"
+                      onClick={() =>
+                        onSelect({ type: "discovered-execution", id: execution.handle })
+                      }
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        focusPoint(centre, {
+                          type: "discovered-execution",
+                          id: execution.handle,
+                        });
+                      }}
+                      onFocus={focusExecution}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        onSelect({ type: "discovered-execution", id: execution.handle });
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <rect
+                        className="discovered-execution__card"
+                        height={DISCOVERED_CARD_HEIGHT}
+                        rx="5"
+                        width={DISCOVERED_CARD_WIDTH}
+                        x={-DISCOVERED_CARD_WIDTH / 2}
+                        y={-DISCOVERED_CARD_HEIGHT / 2}
+                      />
+                      <rect
+                        className="discovered-execution__selection"
+                        height={DISCOVERED_CARD_HEIGHT + 8}
+                        rx="7"
+                        width={DISCOVERED_CARD_WIDTH + 8}
+                        x={-DISCOVERED_CARD_WIDTH / 2 - 4}
+                        y={-DISCOVERED_CARD_HEIGHT / 2 - 4}
+                      />
+                      <line
+                        className="discovered-execution__rule"
+                        x1={-DISCOVERED_CARD_WIDTH / 2 + 14}
+                        x2={DISCOVERED_CARD_WIDTH / 2 - 14}
+                        y1="-38"
+                        y2="-38"
+                      />
+                      <g className="discovered-execution__provider" transform="translate(-124 -54)">
+                        <AgentLogo map provider={execution.provider} />
+                      </g>
+                      <text className="discovered-execution__identity" x="-108" y="-51">
+                        DISCOVERED / {execution.hostKind.toUpperCase()}
+                      </text>
+                      <g className="discovered-execution__state" transform="translate(122 -54)">
+                        <circle r="3" />
+                        <text x="-8" y="3">
+                          {state.toUpperCase()}
+                        </text>
+                      </g>
+                      <text className="discovered-execution__name" x="-124" y="-15">
+                        {title.map((line, lineIndex) => (
+                          <tspan
+                            dy={lineIndex === 0 ? 0 : 15}
+                            key={`${line}-${lineIndex}`}
+                            x="-124"
+                          >
+                            {line}
+                          </tspan>
+                        ))}
+                      </text>
+                      <text className="discovered-execution__context" x="-124" y="34">
+                        {workspace}
+                      </text>
+                      <text className="discovered-execution__conversation" x="-124" y="51">
+                        {conversation}
+                      </text>
+                    </g>
+                    {terminalAvailable ? (
+                      <g
+                        aria-label={`Open ${execution.displayName} terminal`}
+                        className="discovered-execution__quick-action"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenDiscoveredTerminal?.(execution);
+                        }}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onFocus={focusExecution}
+                        onKeyDown={(event) =>
+                          runQuickAction(event, () => onOpenDiscoveredTerminal?.(execution))
+                        }
+                        onPointerDown={(event) => event.stopPropagation()}
+                        role="button"
+                        tabIndex={0}
+                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 22} ${DISCOVERED_CARD_HEIGHT / 2 + 8})`}
+                      >
+                        <title>Open terminal</title>
+                        <rect height="20" rx="3" width="22" x="0" y="0" />
+                        <Terminal
+                          aria-hidden="true"
+                          height="14"
+                          strokeWidth="1.8"
+                          width="14"
+                          x="4"
+                          y="3"
+                        />
+                      </g>
+                    ) : null}
+                    {index === 0 ? (
+                      <text
+                        className="discovered-executions__heading"
+                        x={-DISCOVERED_CARD_WIDTH / 2}
+                        y={-DISCOVERED_CARD_HEIGHT / 2 - 22}
+                      >
+                        DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
+                      </text>
+                    ) : null}
+                  </g>
+                );
+              })}
+            </g>
+          ) : null}
         </g>
       </svg>
       <div className="zoom-control" aria-label="Map zoom controls">

@@ -258,7 +258,8 @@ export class ProjectionPublisher {
       if (
         event.type === "pending-launch-changed" ||
         event.type === "agent-changed" ||
-        event.type === "execution-evidence-changed"
+        event.type === "execution-evidence-changed" ||
+        event.type === "discovered-execution-changed"
       )
         this.pendingLaunches = true;
       if (event.type === "system-changed") this.addSubjects("system", event.systemIds);
@@ -269,6 +270,8 @@ export class ProjectionPublisher {
         event.type === "provider-evidence-changed"
       )
         this.addSubjects("agent", event.agentIds);
+      else if (event.type === "discovered-execution-changed")
+        this.addSubjects("discovered-execution", event.handles);
     }
     this.scheduleBatch(this.batchMs);
   }

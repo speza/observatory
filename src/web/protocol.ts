@@ -129,7 +129,7 @@ export interface WebPendingLaunchesResponse {
 }
 
 export interface RendererSubject {
-  readonly type: "system" | "goal" | "agent";
+  readonly type: "system" | "goal" | "agent" | "discovered-execution";
   readonly id: string;
 }
 
@@ -197,6 +197,14 @@ export interface WebConversationHistoryResponse {
 export interface WebAddConversationResponse {
   readonly agentId: string;
   readonly goalId?: string;
+  readonly portfolio: WebPortfolioResponse;
+}
+
+export interface WebAdmitDiscoveredExecutionResponse {
+  readonly agentId: string;
+  readonly goalId?: string;
+  readonly message: string;
+  readonly partial?: boolean;
   readonly portfolio: WebPortfolioResponse;
 }
 

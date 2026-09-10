@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { AgentView } from "../../../src/projection/types.ts";
+import type { AgentView, DiscoveredExecutionView } from "../../../src/projection/types.ts";
 import type { WebTerminalLink } from "../../../src/web/protocol.ts";
 import { fetchTerminalLinks } from "../api/client.ts";
 import type { TerminalAppearance } from "../settings/browserSettings.ts";
@@ -12,7 +12,7 @@ interface TerminalTab {
 }
 
 export interface TerminalDeckProps {
-  readonly agent: AgentView;
+  readonly agent: AgentView | DiscoveredExecutionView;
   readonly agents?: readonly AgentView[];
   readonly embedded?: boolean;
   readonly onClose: () => void;
@@ -29,7 +29,7 @@ const terminalAppearanceLabel = (appearance: TerminalAppearance): string =>
 
 export const TerminalDeck = ({
   agent,
-  agents = [agent],
+  agents,
   embedded = false,
   onClose,
   onSwitchAgent,
@@ -37,6 +37,11 @@ export const TerminalDeck = ({
   terminalAppearance,
   onTerminalAppearanceChange,
 }: TerminalDeckProps): React.JSX.Element => {
+  const discovery = "handle" in agent ? agent : undefined;
+  const selectedAgent = "handle" in agent ? undefined : agent;
+  const isDiscovery = discovery !== undefined;
+  const subjectId = discovery?.handle ?? selectedAgent?.id;
+  const availableAgents = agents ?? (selectedAgent ? [selectedAgent] : []);
   const [tabs, setTabs] = useState<readonly TerminalTab[]>([primaryTab]);
   const [activeTabId, setActiveTabId] = useState(primaryTab.id);
   const [links, setLinks] = useState<readonly WebTerminalLink[]>([]);
@@ -55,26 +60,38 @@ export const TerminalDeck = ({
     setPickerOpen(false);
     setAgentPickerOpen(false);
     setAgentQuery("");
-  }, [agent.id]);
+  }, [subjectId]);
 
-  const canSwitchAgent = Boolean(onSwitchAgent) && agents.length > 1;
+  const canSwitchAgent = !isDiscovery && Boolean(onSwitchAgent) && availableAgents.length > 1;
   const terminalTheme = terminalAppearance === "application" ? theme : terminalAppearance;
   const cycleTerminalAppearance = (): void => {
     const index = terminalAppearances.indexOf(terminalAppearance);
     onTerminalAppearanceChange(terminalAppearances[(index + 1) % terminalAppearances.length]!);
   };
   const filteredAgents = useMemo(
-    () => filterTerminalAgents(agents, agentQuery),
-    [agentQuery, agents],
+    () => filterTerminalAgents(availableAgents, agentQuery),
+    [agentQuery, availableAgents],
   );
 
   const loadLinks = useCallback((): void => {
     linksRequestRef.current?.abort();
+    if (isDiscovery) {
+      setLinks([]);
+      setLinksError(undefined);
+      setLinksLoading(false);
+      return;
+    }
+    if (!subjectId) {
+      setLinks([]);
+      setLinksError("Terminal target unavailable.");
+      setLinksLoading(false);
+      return;
+    }
     setLinksLoading(true);
     setLinksError(undefined);
     const controller = new AbortController();
     linksRequestRef.current = controller;
-    void fetchTerminalLinks(agent.id, controller.signal)
+    void fetchTerminalLinks(subjectId, controller.signal)
       .then((response) => {
         setLinks(response.links);
         if (response.message) setLinksError(response.message);
@@ -89,7 +106,7 @@ export const TerminalDeck = ({
         if (!controller.signal.aborted && linksRequestRef.current === controller)
           setLinksLoading(false);
       });
-  }, [agent.id]);
+  }, [isDiscovery, subjectId]);
 
   useEffect(() => {
     loadLinks();
@@ -105,8 +122,9 @@ export const TerminalDeck = ({
   };
 
   const switchAgent = (delta: number): void => {
+    if (isDiscovery || !selectedAgent) return;
     if (!onSwitchAgent) return;
-    const candidate = cycleTerminalAgent(agents, agent.id, delta);
+    const candidate = cycleTerminalAgent(availableAgents, selectedAgent.id, delta);
     if (candidate) onSwitchAgent(candidate);
   };
 
@@ -187,7 +205,8 @@ export const TerminalDeck = ({
           type="button"
         >
           <span className="overline">
-            TERMINAL DECK / {agent.execution?.hostKind ?? "detached"}
+            TERMINAL DECK /{" "}
+            {discovery ? discovery.hostKind : (selectedAgent?.execution?.hostKind ?? "detached")}
           </span>
           <strong>{agent.displayName}</strong>
           {canSwitchAgent ? <span aria-hidden="true">⌄</span> : null}
@@ -223,7 +242,7 @@ export const TerminalDeck = ({
           <button
             aria-expanded={pickerOpen}
             className="terminal-deck__companion"
-            disabled={linksLoading}
+            disabled={isDiscovery || linksLoading}
             onClick={() => {
               setPickerOpen((open) => !open);
               setAgentPickerOpen(false);
@@ -285,21 +304,33 @@ export const TerminalDeck = ({
               key={tab.id}
               role="tabpanel"
             >
-              <TerminalSurface
-                active={isActive}
-                agent={agent}
-                embedded
-                link={tab.link}
-                onClose={() => closeTab(tab.id)}
-                resizeMode="fit"
-                showHeader={false}
-                theme={terminalTheme}
-              />
+              {discovery ? (
+                <TerminalSurface
+                  active={isActive}
+                  discovery={discovery}
+                  embedded
+                  onClose={() => closeTab(tab.id)}
+                  resizeMode="fit"
+                  showHeader={false}
+                  theme={terminalTheme}
+                />
+              ) : selectedAgent ? (
+                <TerminalSurface
+                  active={isActive}
+                  agent={selectedAgent}
+                  embedded
+                  link={tab.link}
+                  onClose={() => closeTab(tab.id)}
+                  resizeMode="fit"
+                  showHeader={false}
+                  theme={terminalTheme}
+                />
+              ) : null}
             </div>
           );
         })}
       </div>
-      {agentPickerOpen ? (
+      {!isDiscovery && selectedAgent && agentPickerOpen ? (
         <div
           aria-label="Switch agent terminal"
           className="terminal-deck__picker terminal-deck__agent-picker"
@@ -328,11 +359,11 @@ export const TerminalDeck = ({
             ) : null}
             {filteredAgents.map((candidate) => (
               <button
-                aria-current={candidate.id === agent.id ? "true" : undefined}
+                aria-current={candidate.id === selectedAgent.id ? "true" : undefined}
                 className="terminal-deck__picker-item"
                 key={candidate.id}
                 onClick={() => {
-                  if (candidate.id !== agent.id) onSwitchAgent?.(candidate);
+                  if (candidate.id !== selectedAgent.id) onSwitchAgent?.(candidate);
                   else {
                     setAgentPickerOpen(false);
                     setAgentQuery("");
@@ -350,7 +381,7 @@ export const TerminalDeck = ({
                     {candidate.lifecycleState.replaceAll("-", " ")}
                   </small>
                 </span>
-                <em>{candidate.id === agent.id ? "CURRENT" : "OPEN"}</em>
+                <em>{candidate.id === selectedAgent.id ? "CURRENT" : "OPEN"}</em>
               </button>
             ))}
           </div>
@@ -360,7 +391,7 @@ export const TerminalDeck = ({
           </footer>
         </div>
       ) : null}
-      {pickerOpen ? (
+      {!isDiscovery && pickerOpen ? (
         <div
           aria-label="Companion terminals"
           className="terminal-deck__picker"

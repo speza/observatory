@@ -3,6 +3,7 @@ import { AgentLogo } from "../shared/AgentLogo.tsx";
 import type {
   AgentView,
   CommandCentreProjection,
+  DiscoveredExecutionView,
   GoalView,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "./selection.ts";
@@ -71,6 +72,7 @@ export const WorkspaceNavigation = ({
   const unassigned = projection.unassigned.filter(
     (agent) => view !== "attention" || needsHumanInput(agent),
   );
+  const discoveredExecutions = view === "all" ? (projection.discoveredExecutions ?? []) : [];
   const systems = projection.systems
     .map((system) => ({ ...system, goals: goals.filter((goal) => goal.systemId === system.id) }))
     .filter((system) => view === "all" || system.goals.length);
@@ -110,6 +112,33 @@ export const WorkspaceNavigation = ({
       ) : null}
     </details>
   );
+  const discoveredRow = (execution: DiscoveredExecutionView): React.JSX.Element => {
+    const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+    return (
+      <button
+        type="button"
+        className="workspace-tree__agent workspace-tree__discovered"
+        key={execution.handle}
+        aria-current={
+          selection?.type === "discovered-execution" && selection.id === execution.handle
+            ? "true"
+            : undefined
+        }
+        title={`${execution.displayName} · ${state} · discovered in ${execution.hostKind}`}
+        onClick={() => onSelect({ type: "discovered-execution", id: execution.handle })}
+      >
+        <AgentLogo provider={execution.provider} />
+        <span>{execution.displayName}</span>
+        <span
+          className="workspace-tree__status"
+          role="img"
+          aria-label={`${state} · discovered in ${execution.hostKind}`}
+        >
+          <i className={`workspace-tree__dot is-${state}`} />
+        </span>
+      </button>
+    );
+  };
   return (
     <nav className="workspace-tree" aria-label="Systems and goals">
       <p className="overline">
@@ -156,6 +185,12 @@ export const WorkspaceNavigation = ({
         <section className="workspace-tree__unassigned" aria-label="Unassigned agents">
           {view !== "unassigned" ? <p className="overline">Unassigned</p> : null}
           {unassigned.map(agentRow)}
+        </section>
+      ) : null}
+      {discoveredExecutions.length ? (
+        <section className="workspace-tree__discovered-section" aria-label="Discovered in Herdr">
+          <p className="overline">Discovered in Herdr · {discoveredExecutions.length}</p>
+          {discoveredExecutions.map(discoveredRow)}
         </section>
       ) : null}
       {view !== "all" && !goals.length && !unassigned.length ? (

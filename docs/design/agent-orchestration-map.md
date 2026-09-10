@@ -1,7 +1,7 @@
 # Goal-centred agent orchestration map
 
 Status: implemented V1 product model; spatial value under active evaluation
-Updated: 2026-09-02
+Updated: 2026-09-09
 
 Related documents:
 
@@ -19,7 +19,9 @@ Observatory tests one product hypothesis: a stable spatial universe organised
 around human Goals can make concurrent agent work easier to supervise than a
 flat list. Its durable geography is `System → Goal → Agent`. Atlas is the
 primary proof surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
-review and terminals are supporting lenses over the same trusted state.
+review and terminals are supporting lenses over the same trusted state. Live
+host executions without an admitted Agent appear in a separate transient
+`Discovered in Herdr` surface; they do not extend the durable hierarchy.
 
 ## Positioning
 
@@ -125,6 +127,8 @@ memory. The layout therefore follows these rules:
 - An unpinned Goal may move locally when its own expanded footprint collides.
 - Attention changes emphasis and navigation, not durable position.
 - Repositories, runtimes and hosts never become spatial parent nodes.
+- Discovered executions use a deterministic neutral area and never relocate
+  accepted Goals or imply System membership.
 
 Space must carry semantic value. If operators consistently choose Ledger or a
 host sidebar to orient, the Atlas hypothesis has failed regardless of visual
@@ -142,6 +146,14 @@ Needs-you count. Entering a System reveals its Atlas or Ledger.
 Atlas shows Goal bodies and their direct Agent satellites. It is designed for
 orientation, relationship memory and navigation rather than full text
 legibility for every card at every scale.
+
+Atlas also shows a labelled `Discovered in Herdr` area for current host-reported
+agent executions that have no admitted Agent match. These cards are visibly
+separate from Goal or System geography and carry safe host/runtime/workspace
+metadata, freshness and conversation-identification state. Selecting one opens
+the same inspector; terminal access is available through a freshly validated
+SessionHost capability. Exact catalogue evidence enables explicit admission,
+and promotion replaces the discovery card while retaining the selection.
 
 Geometric zoom changes camera scale. Presentation density changes labels and
 metadata while preserving positions. Selected and attention-bearing work retain
@@ -209,23 +221,28 @@ Inbox contains accepted Agents that do not yet have a Goal. Conversation history
 is a supporting catalogue of provider conversations that are not active
 Observatory Agents. Catalogue and host observations never admit Agents;
 Conversation history requires an explicit add action regardless of recency or
-liveness.
+liveness. Discovered executions have their own global count and section; they
+are not included in Inbox's Agent count and are not hidden behind History.
 
 ### Inspector and review
 
 The inspector explains accepted metadata, continuity, execution presence,
-provider evidence and current capabilities. Repository status and bounded
-working-tree review provide verification context without exposing arbitrary
-filesystem access to the browser.
+provider evidence and current capabilities. For a discovered execution it
+additionally shows host-reported identity, freshness, safe workspace context,
+conversation identification and whether exact catalogue admission is
+available. Repository status and bounded working-tree review provide
+verification context without exposing arbitrary filesystem access to the
+browser.
 
 ### Terminal deck
 
 The terminal deck renders host-owned terminal streams. It preserves the Atlas
 viewport while the operator inspects or interacts with an Agent. Previous/next
 controls and a searchable picker switch directly among Agents with observed
-executions; switching updates the background selection without moving the
-camera. Access is still validated freshly when a terminal opens. Linked shell
-or sibling-Agent surfaces are transient host capabilities, not new durable
+executions. A discovered execution can open its own terminal, but it cannot be
+silently renamed, assigned or switched into as a durable Agent before explicit
+admission. Access is still validated freshly when a terminal opens. Linked
+shell or sibling-Agent surfaces are transient host capabilities, not new durable
 Agents.
 
 ## Primary workflows
@@ -257,6 +274,14 @@ Agents.
 2. Start a new provider conversation or resume one exact dormant conversation.
 3. Show launch as pending until exact provider identity exists.
 4. Admit and assign the resulting Agent without creating a host-only phantom.
+
+### Observe external work
+
+1. Start a supported agent directly in Herdr.
+2. Let the normal host refresh place it in `Discovered in Herdr`.
+3. Inspect safe runtime and workspace evidence or open its validated terminal.
+4. Admit it only when exact catalogue identity is available, optionally
+   assigning it to an existing Goal.
 
 ### Review and close
 
@@ -343,8 +368,9 @@ Observatory is not:
 
 The desktop workspace has a resizable navigation column (240px initially),
 the Atlas or Ledger, and a resizable inspector column (360px initially).
-Navigation holds system/goal/agent discovery, counts, Inbox, Needs you and
-Catch up. Selecting a goal or agent locates it on Atlas and opens its inspector;
+Navigation holds system/goal/agent discovery, a separate discovered-execution
+count/section, Inbox, Needs you and Catch up. Selecting a goal, Agent or
+discovered execution locates it on Atlas and opens its inspector;
 All work, Needs you and Unassigned are views of the same sidebar list. Needs
 you retains system/goal context and includes unassigned agents requiring
 attention. Unassigned agents are assigned through the existing inspector.

@@ -73,6 +73,9 @@ export interface LaunchRecovery {
   readonly kind: "start" | "resume";
   readonly harnessId: string;
   readonly executionRef: string;
+  /** Scope the pending identity to the host that launched it. */
+  readonly hostKind?: string;
+  readonly hostInstanceId?: string;
   readonly displayName?: string;
   readonly nativeConversationRef?: OpaqueNativeConversationRef;
   readonly goalId?: GoalId;
@@ -94,6 +97,8 @@ export interface PendingLaunch {
   readonly requestId: string;
   readonly harnessId: string;
   readonly executionRef: string;
+  readonly hostKind?: string;
+  readonly hostInstanceId?: string;
   readonly displayName: string;
   readonly goalId?: GoalId;
   readonly message: string;

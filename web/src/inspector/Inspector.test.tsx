@@ -51,6 +51,8 @@ describe("Inspector", () => {
         onCloseAndArchive={async () => true}
         onCommand={async () => undefined}
         onOpenTerminal={() => {}}
+        onOpenDiscoveredTerminal={() => {}}
+        onAdmitDiscovered={async () => undefined}
         onRetry={() => {}}
         onReviewChanges={() => {}}
         onResume={async () => {}}
@@ -113,6 +115,8 @@ describe("Inspector", () => {
         onCloseAndArchive={async () => true}
         onCommand={async () => undefined}
         onOpenTerminal={() => {}}
+        onOpenDiscoveredTerminal={() => {}}
+        onAdmitDiscovered={async () => undefined}
         onRetry={() => {}}
         onReviewChanges={() => {}}
         onResume={async () => {}}

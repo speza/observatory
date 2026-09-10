@@ -177,6 +177,37 @@ const SystemView = Schema.Struct({
   attentionCount: Schema.Number,
   staleCount: Schema.Number,
 });
+const DiscoveredExecution = Schema.Struct({
+  type: Schema.Literal("discovered-execution"),
+  handle: Schema.String,
+  displayName: Schema.String,
+  hostKind: Schema.String,
+  runtimeState: RuntimeState,
+  runtimeStateSource: Schema.String,
+  presence: Schema.Literal("live", "unknown"),
+  observationHealth: Schema.Literal("fresh", "unknown", "unavailable"),
+  lastObservedAt: Schema.Number,
+  repository: Schema.optional(Schema.String),
+  branch: Schema.optional(Schema.String),
+  worktree: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+  executionContainer: Schema.optional(ExecutionContainer),
+  conversation: Schema.optional(Schema.Struct({ kind: Schema.String, id: Schema.String })),
+  conversationIdentified: Schema.Boolean,
+  conversationTitle: Schema.optional(Schema.String),
+  resumeEligibility: Schema.optional(
+    Schema.Literal("same-site", "provider-account", "blocked", "unknown"),
+  ),
+  admission: Schema.Union(
+    Schema.Struct({
+      status: Schema.Literal("available"),
+      resumeEligibility: Schema.Literal("same-site", "provider-account", "blocked", "unknown"),
+    }),
+    Schema.Struct({ status: Schema.Literal("unavailable"), explanation: Schema.String }),
+  ),
+  conversationConflictCount: Schema.Number,
+  mapPosition: MapPosition,
+});
 const MapGoalView = Schema.Struct({
   ...GoalFields,
   mapPosition: MapPosition,
@@ -194,6 +225,7 @@ const PortfolioCounts = Schema.Struct({
   uncertainty: Schema.Number,
   unassigned: Schema.Number,
   stale: Schema.Number,
+  discovered: Schema.optional(Schema.Number),
 });
 const CommandCentre = Schema.Struct({
   kind: Schema.Literal("command-centre"),
@@ -205,6 +237,7 @@ const CommandCentre = Schema.Struct({
   unassigned: Schema.Array(AgentView),
   truncated: Schema.optional(Schema.Boolean),
   omittedAgentCount: Schema.optional(Schema.Number),
+  discoveredExecutions: Schema.optional(Schema.Array(DiscoveredExecution)),
   counts: PortfolioCounts,
 });
 const UniverseMap = Schema.Struct({
@@ -214,6 +247,7 @@ const UniverseMap = Schema.Struct({
   attention: AttentionProjection,
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
+  discoveredExecutions: Schema.optional(Schema.Array(DiscoveredExecution)),
   inboxPosition: MapPosition,
   truncated: Schema.optional(Schema.Boolean),
   omittedAgentCount: Schema.optional(Schema.Number),
@@ -306,7 +340,7 @@ export const WebPortfolioResponseSchema = Schema.Struct({
   pendingLaunches: Schema.Array(PendingLaunch),
 });
 const RendererSubject = Schema.Struct({
-  type: Schema.Literal("system", "goal", "agent"),
+  type: Schema.Literal("system", "goal", "agent", "discovered-execution"),
   id: Schema.String,
 });
 const ProjectionEventFields = {
@@ -352,6 +386,11 @@ export const InspectorProjectionSchema = Schema.Union(
     ),
     lines: Schema.Array(Schema.String),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("discovered-execution-inspector"),
+    execution: DiscoveredExecution,
+    lines: Schema.Array(Schema.String),
+  }),
   Schema.Struct({ kind: Schema.Literal("empty-inspector"), lines: Schema.Array(Schema.String) }),
 );
 
@@ -360,7 +399,7 @@ export const SearchProjectionSchema = Schema.Struct({
   query: Schema.String,
   results: Schema.Array(
     Schema.Struct({
-      type: Schema.Literal("goal", "agent"),
+      type: Schema.Literal("goal", "agent", "discovered-execution"),
       id: Schema.String,
       label: Schema.String,
       context: Schema.String,

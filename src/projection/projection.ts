@@ -1,6 +1,7 @@
 import { evaluateAttention, formatAge, type AttentionItem } from "../attention/attention.ts";
 import {
   priorityRank,
+  safeConversationReference,
   type Goal,
   type HostHealth,
   type Agent,
@@ -36,6 +37,7 @@ import type {
   SearchResult,
   SystemView,
   AgentView,
+  DiscoveredExecutionView,
   UniverseMapProjection,
 } from "./types.ts";
 
@@ -65,6 +67,15 @@ const compareAgents = (left: AgentView, right: AgentView): number => {
     return hostHealthRank[left.hostHealth] - hostHealthRank[right.hostHealth];
   return compareText(left.displayName, right.displayName) || compareText(left.id, right.id);
 };
+
+const compareDiscoveredExecutions = (
+  left: DiscoveredExecutionView,
+  right: DiscoveredExecutionView,
+): number =>
+  (left.presence === right.presence ? 0 : left.presence === "live" ? -1 : 1) ||
+  left.displayName.localeCompare(right.displayName) ||
+  left.hostKind.localeCompare(right.hostKind) ||
+  left.handle.localeCompare(right.handle);
 
 const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   if (hosts.length === 0) return undefined;
@@ -129,6 +140,7 @@ const projectCommandCentre = (
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   now: number,
   includeArchived = false,
@@ -237,6 +249,9 @@ const projectCommandCentre = (
     if (bucket) bucket.push(goal);
     else goalsBySystem.set(goal.systemId, [goal]);
   }
+  const discoveredExecutions = [...(state.discoveredExecutions ?? [])].sort(
+    compareDiscoveredExecutions,
+  );
   const systems = (state.systems ?? [])
     .map((system): SystemView => {
       const goals = goalsBySystem.get(system.id) ?? [];
@@ -275,6 +290,7 @@ const projectCommandCentre = (
     systems,
     goals: goalViews,
     unassigned,
+    discoveredExecutions,
     counts: {
       goals: goalViews.length,
       systems: systems.length,
@@ -283,6 +299,7 @@ const projectCommandCentre = (
       uncertainty: visibleAttention.uncertaintyCount,
       unassigned: unassigned.length,
       stale: visibleStaleCount,
+      discovered: discoveredExecutions.length,
     },
   };
   if (truncated && maximum !== undefined)
@@ -329,6 +346,7 @@ const projectCodeContexts = (
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   now: number,
   includeArchived = false,
@@ -394,6 +412,7 @@ const projectCodeContextMap = (
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   now: number,
   includeArchived = false,
@@ -612,6 +631,7 @@ const projectUniverseMap = (
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   now: number,
   includeArchived = false,
@@ -663,6 +683,7 @@ export const mapFromCommandCentre = (
     attention: commandCentre.attention,
     goals: mapGoals,
     unassigned: mapUnassigned,
+    discoveredExecutions: commandCentre.discoveredExecutions,
     inboxPosition,
     counts: commandCentre.counts,
   };
@@ -680,6 +701,7 @@ const projectSearch = (
   state: {
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   query: string,
   limit?: number,
@@ -731,6 +753,29 @@ const projectSearch = (
       if (agent.primaryGoalId) Object.assign(result, { goalId: agent.primaryGoalId });
       results.push(result);
     }
+  }
+  for (const execution of state.discoveredExecutions ?? []) {
+    const haystack = [
+      execution.displayName,
+      execution.hostKind,
+      execution.provider,
+      execution.repository,
+      execution.branch,
+      execution.worktree,
+      execution.conversationTitle,
+      execution.runtimeState,
+      execution.presence,
+    ]
+      .map(searchable)
+      .join(" ");
+    if (!haystack.includes(normalized)) continue;
+    results.push({
+      type: "discovered-execution",
+      id: execution.handle,
+      label: execution.displayName,
+      context: `discovered in ${execution.hostKind}`,
+      status: execution.presence === "live" ? execution.runtimeState : "runtime unknown",
+    });
   }
   return { kind: "search", query, results };
 };
@@ -1014,14 +1059,41 @@ const projectInspector = (
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
+    readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
   },
   now: number,
-  target: { readonly type: "goal" | "agent"; readonly id: string },
+  target: { readonly type: "goal" | "agent" | "discovered-execution"; readonly id: string },
 ): InspectorProjection => {
   const activeAgents = state.agents.filter(
     (agent) => agent.archivedAt === undefined || hasUnresolvedExecution(agent),
   );
   const attention = evaluateAttention(now, state.goals, activeAgents, state.hosts);
+  if (target.type === "discovered-execution") {
+    const execution = state.discoveredExecutions?.find(
+      (candidate) => candidate.handle === target.id,
+    );
+    if (!execution)
+      return { kind: "empty-inspector", lines: ["Discovered execution is no longer visible."] };
+    return {
+      kind: "discovered-execution-inspector",
+      execution,
+      lines: [
+        `state   ${execution.presence === "live" ? execution.runtimeState : "runtime unknown"}`,
+        `source  ${execution.runtimeStateSource}`,
+        `host    ${execution.hostKind}`,
+        `provider ${execution.provider ?? "unknown"}`,
+        `workspace ${execution.worktree ?? execution.repository ?? "unknown"}`,
+        `freshness ${execution.observationHealth} · ${formatAge(Math.max(0, now - execution.lastObservedAt))} ago`,
+        `conversation ${execution.conversationIdentified ? "identified" : "not identified"}`,
+        `admission ${execution.admission.status}`,
+        ...(execution.conversationConflictCount > 1
+          ? [
+              `conflict ${execution.conversationConflictCount} live executions claim this conversation`,
+            ]
+          : []),
+      ],
+    };
+  }
   if (target.type === "goal") {
     const goal = state.goals.find((candidate) => candidate.id === target.id);
     if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
@@ -1051,22 +1123,7 @@ const projectInspector = (
   const agent = state.agents.find((candidate) => candidate.id === target.id);
   if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
   const view = agentView(agent, state.goals, attention.items);
-  const conversation = (() => {
-    const reference = agent.nativeConversationRef;
-    if (!reference) return undefined;
-    const kind = reference.kind.trim();
-    const value = reference.value.trim();
-    if (
-      !kind ||
-      !value ||
-      kind.toLowerCase().includes("path") ||
-      value.startsWith("/") ||
-      value.startsWith("\\") ||
-      /^[A-Za-z]:[\\/]/u.test(value)
-    )
-      return undefined;
-    return { kind, id: value };
-  })();
+  const conversation = safeConversationReference(agent.nativeConversationRef);
   const lines = [
     `state   ${view.lifecycleState} · ${agent.runtimeState}`,
     `source  ${agent.runtimeStateSource}`,

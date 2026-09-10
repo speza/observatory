@@ -460,6 +460,133 @@
 .agent__quick-action:focus svg {
   color: var(--paper-panel);
 }
+
+.discovered-executions {
+  pointer-events: none;
+}
+.discovered-execution {
+  color: var(--uncertain);
+  pointer-events: none;
+}
+.discovered-execution--working {
+  color: var(--good);
+}
+.discovered-execution--waiting,
+.discovered-execution--blocked {
+  color: var(--accent);
+}
+.discovered-execution--idle,
+.discovered-execution--done {
+  color: var(--muted);
+}
+.discovered-execution__card-target,
+.discovered-execution__quick-action {
+  pointer-events: all;
+  cursor: pointer;
+  outline: none;
+}
+.discovered-execution__card {
+  fill: color-mix(in srgb, var(--paper-panel) 94%, var(--uncertain));
+  stroke: currentColor;
+  stroke-width: 1.1;
+  stroke-dasharray: 5 3;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 2px 3px rgb(24 21 17 / 8%));
+}
+.discovered-execution--unknown .discovered-execution__card {
+  opacity: 0.72;
+}
+.discovered-execution__selection {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.discovered-execution.is-selected .discovered-execution__selection,
+.discovered-execution__card-target:hover .discovered-execution__selection,
+.discovered-execution__card-target:focus .discovered-execution__selection {
+  opacity: 0.95;
+}
+.discovered-execution__rule {
+  stroke: var(--hairline);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+.discovered-execution__provider .agent-logo {
+  width: 16px;
+  height: 16px;
+}
+.discovered-execution__identity,
+.discovered-execution__state,
+.discovered-execution__context,
+.discovered-execution__conversation,
+.discovered-executions__heading {
+  font-family: "DM Mono", ui-monospace, monospace;
+}
+.discovered-execution__identity {
+  fill: var(--ink);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+}
+.discovered-execution__state circle {
+  fill: currentColor;
+}
+.discovered-execution__state text {
+  fill: currentColor;
+  text-anchor: end;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+}
+.discovered-execution__name {
+  fill: var(--ink);
+  font-family:
+    Iowan Old Style,
+    Baskerville,
+    Georgia,
+    serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.discovered-execution__context,
+.discovered-execution__conversation {
+  fill: var(--ink);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  opacity: 0.62;
+}
+.discovered-execution__conversation {
+  opacity: 0.48;
+}
+.discovered-execution__quick-action rect {
+  fill: var(--paper-panel);
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.discovered-execution__quick-action svg {
+  color: currentColor;
+  pointer-events: none;
+}
+.discovered-execution__quick-action:hover rect,
+.discovered-execution__quick-action:focus rect {
+  fill: currentColor;
+}
+.discovered-execution__quick-action:hover svg,
+.discovered-execution__quick-action:focus svg {
+  color: var(--paper-panel);
+}
+.discovered-executions__heading {
+  fill: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
 @media (hover: none) {
   .agent__quick-actions {
     opacity: 1;

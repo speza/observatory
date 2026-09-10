@@ -187,6 +187,21 @@ interface ObservationTransitionRow extends ObservationRow {
   sequence: number;
 }
 
+const storedHostInstanceId = (hostKind: string, hostInstanceId: string): string =>
+  JSON.stringify([hostKind, hostInstanceId]);
+
+const loadedHostInstanceId = (hostKind: string, value: string | null): string => {
+  if (!value) return `${hostKind}:legacy`;
+  try {
+    const decoded: unknown = JSON.parse(value);
+    if (Array.isArray(decoded) && decoded[0] === hostKind && Schema.is(Schema.String)(decoded[1]))
+      return decoded[1];
+    return value;
+  } catch {
+    return value;
+  }
+};
+
 export const SQLITE_SCHEMA_GENERATION = 4;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
@@ -236,6 +251,8 @@ const LaunchRecoverySchema: Schema.Schema<LaunchRecovery> = Schema.Struct({
   kind: Schema.Literal("start", "resume"),
   harnessId: Schema.String,
   executionRef: Schema.String,
+  hostKind: Schema.optional(Schema.String),
+  hostInstanceId: Schema.optional(Schema.String),
   displayName: Schema.optional(Schema.String),
   nativeConversationRef: Schema.optional(NativeConversationRefSchema),
   goalId: Schema.optional(Schema.String),
@@ -454,7 +471,7 @@ export class SqliteUniverseStore
           row.status === "live" || row.status === "unavailable" ? row.status : "stale";
         const host = {
           hostKind: row.host_kind,
-          hostInstanceId: row.host_instance_id ?? `${row.host_kind}:legacy`,
+          hostInstanceId: loadedHostInstanceId(row.host_kind, row.host_instance_id),
           status,
           diagnosticCount: row.diagnostic_count,
         };
@@ -596,7 +613,7 @@ export class SqliteUniverseStore
       for (const row of state.hosts)
         host.run(
           row.hostKind,
-          row.hostInstanceId,
+          storedHostInstanceId(row.hostKind, row.hostInstanceId),
           row.status,
           row.lastObservedAt ?? null,
           row.lastError ?? null,
@@ -1538,8 +1555,9 @@ export class SqliteUniverseStore
         last_sequence INTEGER NOT NULL,
         acknowledged_at INTEGER NOT NULL
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS agents_live_execution_identity
-        ON agents(host_instance_id, native_id)
+      DROP INDEX IF EXISTS agents_live_execution_identity;
+      CREATE UNIQUE INDEX agents_live_execution_identity
+        ON agents(host_kind, host_instance_id, native_id)
         WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS agents_primary_goal
         ON agents(primary_goal_id)
