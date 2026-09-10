@@ -359,9 +359,12 @@ Provider catalogue ──► exact conversation ref ──┐
 Host snapshot ───────► execution + exact ref ────┘
 ```
 
-Cwd, repository, title, recency and plausible process location are supporting
-facts only. They may block an unsafe resume but never establish identity or
-inherit a Goal.
+Cwd, repository, title, recency and a bare process name are supporting facts
+only. They may block an unsafe resume but never establish identity or inherit
+a Goal. A host may additionally report an exact provider session id from a
+supported process argument; that remains identity evidence only when the
+selected harness validates the argument and the id matches a canonical
+conversation.
 
 A complete fresh snapshot can prove execution absence for one host instance. A
 partial snapshot, transport failure or stale last-known state cannot. Provider
@@ -375,8 +378,8 @@ scope.
 1. Poll the selected SessionHost through a serialized, deadline-bounded refresh loop.
 2. Enrich host observations with exact harness evidence where available.
 3. Refresh provider catalogues at startup or on explicit history requests.
-4. Receive ephemeral provider hook events through the owning harness and
-   immediately reconcile its bounded observation snapshot.
+4. If an optional provider-observation plugin is loaded, receive its bounded
+   observations through the owning harness and reconcile its snapshot.
 5. Submit typed host and catalogue observations to Universe; provider evidence
    remains in its separate operational store.
 6. Persist accepted state atomically, then publish an authority-specific typed

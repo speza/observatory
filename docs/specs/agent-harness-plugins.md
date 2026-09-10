@@ -124,10 +124,17 @@ interface AgentHarness {
   readonly harnessId: string;
   describe(): AgentHarnessDescriptor;
   availability(): Effect<HarnessAvailability, HarnessError>;
-  snapshotSessions(): Effect<ProviderSessionSnapshot, HarnessError>;
+  snapshotSessions(
+    request?: AgentHarnessSnapshotRequest,
+  ): Effect<ProviderSessionSnapshot, HarnessError>;
   planStart(request: StartHarnessSessionRequest): Effect<AgentProcessPlan, HarnessError>;
   planResume(request: ResumeHarnessSessionRequest): Effect<AgentProcessPlan, HarnessError>;
   proveContinuity(request: ContinuityRequest): Effect<ContinuityResult, HarnessError>;
+}
+
+interface AgentHarnessSnapshotRequest {
+  /** Provider-neutral workspace hints for directory-scoped catalogues. */
+  readonly workspaceRefs?: readonly string[];
 }
 ```
 
@@ -135,8 +142,10 @@ Every production harness must implement:
 
 1. **Availability** — detect the executable, supported version and required
    integration health without installing or upgrading anything silently.
-2. **Catalogue** — report a scoped metadata-only provider-session snapshot.
-   Partial or bounded snapshots must never claim complete absence.
+2. **Catalogue** — report a scoped metadata-only provider-session snapshot,
+   using optional workspace hints when the provider's catalogue is
+   directory-scoped. Partial or bounded snapshots must never claim complete
+   absence.
 3. **Start** — construct a structured executable, argument and environment
    plan for a genuinely new native conversation.
 4. **Resume** — construct a structured plan for one exact native conversation;
@@ -188,10 +197,15 @@ fixed:
 - the harness decides whether the evidence is sufficient for `same`,
   `replaced`, `absent` or `unknown`;
 - weak hints such as process name, current directory or display name cannot
-  become native conversation proof; and
+  become native conversation proof. A supported exact session selector in a
+  process argv may be translated into evidence, but only the selected harness
+  can accept it as continuity; and
 - evidence and references are redacted from ordinary diagnostics and fixtures.
 
-Herdr's native agent-session reference is the first strong evidence source.
+Herdr's native agent-session reference is the strongest evidence source. A
+host may also expose a supported exact session selector from the foreground
+process argv when a provider's integration is unavailable; this is distinct
+from process-title matching and still goes through harness continuity rules.
 The mock host supplies deterministic equivalents. A future host that cannot
 produce strong evidence remains useful for terminals and live discovery, but
 cannot silently preserve semantic identity across a cold restart.

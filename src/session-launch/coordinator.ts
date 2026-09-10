@@ -56,9 +56,11 @@ const sameReference = (
   right: OpaqueNativeConversationRef,
 ): boolean =>
   left?.harnessId === right.harnessId &&
-  left.continuityScopeId === right.continuityScopeId &&
   left.kind === right.kind &&
-  left.value === right.value;
+  left.value === right.value &&
+  (left.continuityScopeId === undefined ||
+    right.continuityScopeId === undefined ||
+    left.continuityScopeId === right.continuityScopeId);
 
 class MemoryLaunchReceiptStore implements LaunchReceiptStore {
   private readonly receipts = new Map<string, LaunchReceipt>();

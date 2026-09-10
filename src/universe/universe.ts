@@ -763,7 +763,8 @@ const reconcileObservation = (
   conversationExecutions: ReadonlyMap<string, Agent["conflictingExecutions"]>,
 ): void => {
   const observedConversation = nativeConversationFromObservation(observation);
-  const byConversation = observedConversation
+  const processEvidence = observation.harnessEvidence?.source === "process";
+  const exactByConversation = observedConversation
     ? draft.state.agents.find(
         (agent) =>
           agent.nativeConversationRef &&
@@ -771,8 +772,26 @@ const reconcileObservation = (
             nativeConversationKey(observedConversation),
       )
     : undefined;
+  const compatibleProcessAgents =
+    processEvidence && observedConversation && observedConversation.continuityScopeId === undefined
+      ? draft.state.agents.filter(
+          (agent) =>
+            agent.nativeConversationRef !== undefined &&
+            sameConversationWithoutScope(agent.nativeConversationRef, observedConversation),
+        )
+      : [];
+  const byConversation =
+    exactByConversation ??
+    (compatibleProcessAgents.length === 1 ? compatibleProcessAgents[0] : undefined);
   let byExecution = draft.state.agents.find((agent) =>
     executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
+  );
+  const processConversationMatchesExecution = Boolean(
+    processEvidence &&
+    observedConversation &&
+    compatibleProcessAgents.length <= 1 &&
+    byExecution?.nativeConversationRef &&
+    sameConversationWithoutScope(byExecution.nativeConversationRef, observedConversation),
   );
 
   if (byConversation && byExecution && byConversation.id !== byExecution.id) {
@@ -786,7 +805,8 @@ const reconcileObservation = (
       observedConversation &&
       nativeConversationKey(byExecution.nativeConversationRef) !==
         nativeConversationKey(observedConversation) &&
-      !isScopeEnrichment(byExecution.nativeConversationRef, observedConversation)) ||
+      !isScopeEnrichment(byExecution.nativeConversationRef, observedConversation) &&
+      !processConversationMatchesExecution) ||
       (byExecution.runtimeStateSource === "observatory.process-start" &&
         Boolean(byExecution.nativeConversationRef) &&
         !observedConversation))
@@ -809,6 +829,14 @@ const reconcileObservation = (
   }
 
   existing = consolidateLegacyConversationVariants(draft, existing);
+
+  const preserveScopedProcessConversation = Boolean(
+    processEvidence &&
+    observedConversation &&
+    existing.nativeConversationRef?.continuityScopeId &&
+    observedConversation.continuityScopeId === undefined &&
+    sameConversationWithoutScope(existing.nativeConversationRef, observedConversation),
+  );
 
   const conflicts = observedConversation
     ? (conversationExecutions.get(nativeConversationKey(observedConversation)) ?? [])
@@ -867,7 +895,9 @@ const reconcileObservation = (
       observation.harnessEvidence?.detectedHarnessId ??
       observedConversation?.harnessId ??
       existing.harnessId,
-    nativeConversationRef: observedConversation ?? existing.nativeConversationRef,
+    nativeConversationRef: preserveScopedProcessConversation
+      ? existing.nativeConversationRef
+      : (observedConversation ?? existing.nativeConversationRef),
     continuity: observedConversation ? "proved" : existing.continuity,
     displayName:
       existing.displayNameSource === "fallback" ? observation.displayName : existing.displayName,
@@ -908,6 +938,10 @@ const planReconciliation = (
   const scopeDowngrade = snapshot.agents.find((observation) => {
     const observed = nativeConversationFromObservation(observation);
     if (!observed || observed.continuityScopeId !== undefined) return false;
+    // A process argument is host evidence, not a new provider-catalogue
+    // identity. It can prove the exact session value while the existing
+    // provider-scoped reference remains canonical.
+    if (observation.harnessEvidence?.source === "process") return false;
     const current = previous.agents.find((agent) =>
       executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
     )?.nativeConversationRef;

@@ -100,6 +100,59 @@ class FakeRunner implements CommandRunner {
   }
 }
 
+class ProcessInfoRunner implements CommandRunner {
+  readonly calls: string[][] = [];
+
+  constructor(
+    private readonly snapshot: {
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    },
+    private readonly processInfo: {
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    },
+  ) {}
+
+  async run(argv: readonly string[]) {
+    this.calls.push([...argv]);
+    if (argv[1] === "pane") return this.processInfo;
+    return this.snapshot;
+  }
+}
+
+const openCodeSnapshotPayload = (paneId: string): JsonRecord => ({
+  result: {
+    snapshot: {
+      panes: [
+        {
+          pane_id: paneId,
+          terminal_id: "term",
+          workspace_id: "w",
+          tab_id: "t",
+          cwd: "/ordinary/workspace",
+        },
+      ],
+      agents: [{ pane_id: paneId, agent: "opencode", agent_status: "idle", name: "OpenCode" }],
+      workspaces: [],
+    },
+  },
+});
+
+const openCodeProcessPayload = (paneId: string, argv: readonly string[]): JsonRecord => ({
+  result: {
+    process_info: {
+      pane_id: paneId,
+      foreground_processes: [{ argv: [...argv], argv0: argv[0] ?? "" }],
+    },
+  },
+});
+
+const processQueryCount = (runner: ProcessInfoRunner): number =>
+  runner.calls.filter(([, command]) => command === "pane").length;
+
 class FakeTerminalProcess implements TerminalProcess {
   readonly writes: (string | Uint8Array)[] = [];
   killed = false;
@@ -250,6 +303,134 @@ describe("Herdr adapter", () => {
       observedAt: 99,
     });
     expect(snapshot.agents[0]?.worktree).toBe("/ordinary/workspace");
+  });
+
+  test("prefers a precise reported harness over a generic process detector label", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            panes: [
+              {
+                pane_id: "opencode",
+                terminal_id: "term",
+                workspace_id: "w",
+                tab_id: "t",
+                cwd: "/ordinary/workspace",
+              },
+            ],
+            agents: [
+              {
+                pane_id: "opencode",
+                agent: "opencode",
+                agent_session: {
+                  source: "observatory:opencode",
+                  agent: "opencode",
+                  kind: "id",
+                  value: "ses_synthetic",
+                },
+              },
+            ],
+            workspaces: [],
+          },
+        },
+      },
+      99,
+    );
+
+    expect(snapshot.agents[0]?.harnessEvidence).toMatchObject({
+      detectedHarnessId: "opencode",
+      nativeConversationRef: {
+        harnessId: "opencode",
+        value: "ses_synthetic",
+      },
+    });
+  });
+
+  test("recovers an exact OpenCode session from the foreground process argv", async () => {
+    const runner = new ProcessInfoRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(openCodeSnapshotPayload("opencode:p1")),
+        stderr: "",
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(
+          openCodeProcessPayload("opencode:p1", ["opencode", "--session", "ses_from_process"]),
+        ),
+        stderr: "",
+      },
+    );
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(99) });
+
+    const snapshot = await Effect.runPromise(adapter.snapshot());
+
+    expect(snapshot.agents[0]?.harnessEvidence).toEqual({
+      detectedHarnessId: "opencode",
+      nativeConversationRef: {
+        harnessId: "opencode",
+        kind: "id",
+        value: "ses_from_process",
+      },
+      restoreState: "unknown",
+      source: "process",
+      observedAt: 99,
+    });
+    expect(runner.calls).toContainEqual(["herdr", "pane", "process-info", "--pane", "opencode:p1"]);
+  });
+
+  test("queries process info once per OpenCode terminal and refreshes evidence time", async () => {
+    const runner = new ProcessInfoRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(openCodeSnapshotPayload("opencode:p1")),
+        stderr: "",
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(
+          openCodeProcessPayload("opencode:p1", ["opencode", "--session", "ses_cached"]),
+        ),
+        stderr: "",
+      },
+    );
+    const clock = new FixedClock(99);
+    const adapter = new HerdrHostAdapter({ runner, clock });
+
+    const first = await Effect.runPromise(adapter.snapshot());
+    clock.value = 100;
+    const second = await Effect.runPromise(adapter.snapshot());
+
+    expect(processQueryCount(runner)).toBe(1);
+    expect(first.agents[0]?.harnessEvidence?.nativeConversationRef?.value).toBe("ses_cached");
+    expect(second.agents[0]?.harnessEvidence).toMatchObject({
+      source: "process",
+      observedAt: 100,
+      nativeConversationRef: { harnessId: "opencode", kind: "id", value: "ses_cached" },
+    });
+  });
+
+  test("caches a recognised OpenCode process without a session selector", async () => {
+    const runner = new ProcessInfoRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(openCodeSnapshotPayload("opencode:p1")),
+        stderr: "",
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(openCodeProcessPayload("opencode:p1", ["opencode"])),
+        stderr: "",
+      },
+    );
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(99) });
+
+    await Effect.runPromise(adapter.snapshot());
+    const second = await Effect.runPromise(adapter.snapshot());
+
+    expect(processQueryCount(runner)).toBe(1);
+    expect(second.agents[0]?.harnessEvidence?.nativeConversationRef).toBeUndefined();
   });
 
   test("skips malformed observations without throwing", () => {

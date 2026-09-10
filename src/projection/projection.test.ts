@@ -50,6 +50,35 @@ describe("projections", () => {
     expect(queries).toEqual(["command-centre", "catch-up"]);
   });
 
+  test("offers explicit resume for an admitted provider conversation without host execution evidence", () => {
+    const { universe, clock } = makeUniverse();
+    const result = universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "opencode",
+      nativeConversationRef: {
+        harnessId: "opencode",
+        continuityScopeId: "opencode-local",
+        kind: "id",
+        value: "ses_fixture",
+      },
+      displayName: "Imported OpenCode work",
+      observedAt: clock.now(),
+      workspaceRef: "/synthetic/project",
+    });
+    expect(result.ok).toBe(true);
+
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre")
+      throw new Error("Expected Command Centre projection.");
+    expect(projection.unassigned[0]).toMatchObject({
+      lifecycleState: "runtime-unknown",
+      executionPresence: "unknown",
+      canResume: true,
+    });
+  });
+
   test("exposes an ID-backed provider session only in its explicit inspector projection", () => {
     const { universe, clock } = makeUniverse();
     admitObservedConversationsAndReconcile(

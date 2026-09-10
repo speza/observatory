@@ -28,12 +28,10 @@ browsers do not poll portfolio or pending-launch endpoints. A process-local
 exist, but performs no external acquisition.
 
 Provider conversation catalogues refresh at startup and on explicit Conversation
-history requests. Built-in provider hook observations arrive through an
-authenticated loopback ingress and trigger immediate bounded reconciliation;
-they are not polled. A contributed pull-only observation source retains the
-configured observation refresh loop because it has no receiver to wake
-reconciliation. There is also one bounded operation-local Herdr poll after
-launch.
+history requests. The built-in harnesses do not install provider hooks or
+extensions, so Herdr is the only maintained live execution source. A future
+contributed pull-only observation source may add its own bounded refresh loop.
+There is also one bounded operation-local Herdr poll after launch.
 
 | Poll or timed recovery                                 | Default interval | Work performed                                                |
 | ------------------------------------------------------ | ---------------: | ------------------------------------------------------------- |
@@ -45,18 +43,16 @@ launch.
 For a connected browser and no pending launch, defaults produce no recurring
 portfolio or pending-launch HTTP requests. The server still performs about 30
 Herdr snapshot subprocesses per minute. Closing the browser stops renderer time
-refresh while the server continues observing Herdr and receiving hook events.
+refresh while the server continues observing Herdr.
+
+An OpenCode pane without a native session report triggers one bounded
+`herdr pane process-info` query per terminal. The adapter caches the recognised
+foreground process for that terminal, so later snapshots reuse the evidence
+instead of spawning another query.
 
 ## Current end-to-end data flow
 
 ```text
-Claude/Codex/Pi hook event
-    -> best-effort authenticated loopback POST
-    -> owning AgentHarness receiver
-    -> process-local current/transition reduction
-    -> immediate AgentObservationCoordinator snapshot
-    -> bounded operational evidence store
-
 Claude/Codex/Pi catalogue request
     -> bounded provider metadata snapshot
     -> ConversationTracker
@@ -77,19 +73,19 @@ Universe + evidence store + launch receipts
 
 The evidence authorities remain independent:
 
-- hook observations contain provider activity, input, outcome and context
-  evidence received while Observatory was running;
 - provider catalogues contain recoverable conversation identity and metadata;
 - `SessionHost` snapshots contain execution presence, placement, lifecycle and
   host availability; and
 - Universe commands contain accepted human semantic state.
+
+An optional future provider-observation plugin may add provider activity,
+input, outcome or context evidence through the generic observation boundary.
 
 ## What counts as polling
 
 Polling means repeatedly reading a source on a timer to discover change. It does
 not include:
 
-- a hook POST that arrives because an event occurred;
 - startup reconciliation;
 - an explicit Conversation history refresh;
 - fresh revalidation before a sensitive operation;
@@ -134,37 +130,17 @@ the new pane appears or the bounded deadline expires. This bridges process-start
 acknowledgement and inventory visibility and supports exact launch correlation.
 It is operation-local rather than idle steady-state work.
 
-## Provider hook delivery
+## Optional provider observations
 
-The provider-observation journal poll has been removed. Installed hooks now send
-a bounded payload to `/api/provider-observations` using a per-install bearer
-token. The ingress enforces:
+Provider-native observations are deliberately deferred. The generic
+`AgentObservationSourceV1` and receiver boundary remains available for a future
+plugin, but no built-in Claude Code, Codex or Pi source is installed or loaded.
+Herdr restores current execution truth on startup; provider-specific reasons
+remain unknown until an optional source can establish them.
 
-- loopback-only server binding;
-- exact POST and JSON requirements;
-- a 32 KiB request limit;
-- bearer authentication;
-- harness-owned parsing and reduction; and
-- serialized coordinator reconciliation.
+## Time-derived observation changes for optional sources
 
-Hook reporters use a 200 ms deadline and return successfully on missing token,
-unavailable Observatory, invalid response or timeout. They never write SQLite
-or Universe state directly.
-
-Built-in harness sources retain at most 1,000 process-local normalised
-transitions plus bounded current claims. Process-local cursor epochs prevent a
-server restart from reusing an earlier cursor. The coordinator and SQLite store
-continue to validate, correlate, deduplicate and retain evidence that was
-successfully received.
-
-There is no offline replay. When Observatory is stopped, hook events are lost.
-On startup, Herdr restores current execution truth and the hook source starts
-empty. A waiting or blocked Agent therefore remains actionable even when the
-provider-specific reason is unknown.
-
-## Time-derived observation changes
-
-Provider evidence has useful lifetimes:
+If a future provider source is loaded, its evidence will have useful lifetimes:
 
 | Evidence kind       | Built-in freshness |
 | ------------------- | -----------------: |
@@ -173,10 +149,9 @@ Provider evidence has useful lifetimes:
 | Turn outcome        |           24 hours |
 | Context pressure    |         10 minutes |
 
-Projection enrichment compares current time with `observedAt`, so evidence can
-become stale without a new provider event. The browser portfolio poll continues
-to re-evaluate these rules while the UI is open. No backend observation timer is
-needed merely to advance projection time.
+Projection enrichment compares current time with `observedAt`, so optional
+evidence can become stale without a new provider event. No built-in provider
+source currently produces these records.
 
 ## Provider catalogue refresh
 
@@ -191,26 +166,25 @@ The remaining obvious repeated external work is full Herdr subprocess snapshots
 when inventory is unchanged. The browser's former unchanged portfolio and empty
 pending-launch retrieval loops no longer exist.
 
-The former provider-journal read/parse loop also no longer exists. Built-in
-provider hooks perform work only when provider events occur. A provider polling
-loop exists only when a loaded observation source exposes no live receiver.
+There is no built-in provider journal, hook delivery or provider polling loop.
+A provider polling loop exists only when a future loaded observation source
+exposes no live receiver.
 
 ## Failure and uncertainty
 
 - A failed Herdr snapshot marks host evidence unavailable; it does not prove
   executions absent.
-- A missed hook event leaves provider semantics unknown; Herdr current state
-  remains authoritative for execution.
+- Missing provider-native evidence leaves provider semantics unknown; Herdr
+  current state remains authoritative for execution.
 - A failed catalogue refresh preserves earlier conversation metadata with
   degraded health.
 - Browser request failure preserves the last rendered projection until retry.
-- Notifications and hook events never replace fresh operation-specific checks.
+- Optional provider notifications never replace fresh operation-specific checks.
 
 ## Current conclusion
 
-With the built-in live sources and a connected renderer, Observatory now has one
+With the built-in configuration and a connected renderer, Observatory has one
 recurring external-source poller: SessionHost. It remains the highest-cost and
 most correctness-sensitive loop because it launches a Herdr subprocess and
-establishes execution presence and absence. Browser delivery and provider
-semantic enrichment are event-driven, with complete snapshot recovery and no
-provider journal, filesystem polling or offline reconstruction.
+establishes execution presence and absence. Browser delivery is event-driven;
+provider semantic enrichment is deferred and has no built-in delivery path.

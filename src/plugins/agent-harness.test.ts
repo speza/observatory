@@ -7,6 +7,7 @@ import type {
   AgentHarness,
   BoundedProcessRunner,
   OpaqueNativeConversationRef,
+  ProcessResult,
 } from "../plugin-sdk/index.ts";
 import { loadPluginRegistry } from "./registry.ts";
 
@@ -20,6 +21,22 @@ const runner = (exitCode = 0): BoundedProcessRunner => ({
     stdoutTruncated: false,
     stderrTruncated: false,
   }),
+});
+
+const processResult = (stdout: string, exitCode = 0): ProcessResult => ({
+  exitCode,
+  stdout,
+  stderr: exitCode === 0 ? "" : "private diagnostic with secret-token",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+});
+
+const commandFor = (argv: readonly string[]): string => argv.join("\u0000");
+
+const scriptedRunner = (
+  handler: (argv: readonly string[]) => ProcessResult,
+): BoundedProcessRunner => ({
+  run: async (argv) => handler(argv),
 });
 
 const loadHarnesses = async (
@@ -41,15 +58,27 @@ const sessionRef = (harnessId: string, value = "session-123") =>
   ({ harnessId, kind: "id", value }) satisfies OpaqueNativeConversationRef;
 
 describe("agent harness plugins", () => {
-  test("loads Claude Code, Codex and Pi through the contributed registry", async () => {
+  test("loads all built-in harnesses through the contributed registry", async () => {
     const harnesses = await loadHarnesses();
 
-    expect(harnesses.map(({ harnessId }) => harnessId)).toEqual(["claude", "codex", "pi"]);
+    expect(harnesses.map(({ harnessId }) => harnessId)).toEqual([
+      "claude",
+      "codex",
+      "pi",
+      "opencode",
+    ]);
     expect(harnesses.map((harness) => harness.describe().label)).toEqual([
       "Claude Code",
       "Codex",
       "Pi",
+      "OpenCode",
     ]);
+    expect(
+      harnesses.every(
+        ({ observationSource, observationReceiver }) =>
+          observationSource === undefined && observationReceiver === undefined,
+      ),
+    ).toBe(true);
   });
 
   test("discovers Claude and Codex from provider metadata without retaining transcript fields", async () => {
@@ -126,33 +155,10 @@ describe("agent harness plugins", () => {
       const [claude, codex] = await loadHarnesses(runner(), {
         claudeProjectsRoot: claudeRoot,
         codexRoot,
-        providerObservationsEnabled: true,
         maxSessions: 20,
       });
       const claudeSnapshot = await Effect.runPromise(claude!.snapshotSessions());
       const codexSnapshot = await Effect.runPromise(codex!.snapshotSessions());
-      await Effect.runPromise(
-        claude!.observationReceiver!.receive({
-          hook_event_name: "PermissionRequest",
-          session_id: "claude-session",
-          tool_name: "Bash",
-          prompt: "SECRET_PROMPT",
-        }),
-      );
-      await Effect.runPromise(
-        codex!.observationReceiver!.receive({
-          hook_event_name: "PermissionRequest",
-          session_id: "codex-session",
-          tool_name: "shell",
-          prompt: "SECRET_PROMPT",
-        }),
-      );
-      const claudeObservations = await Effect.runPromise(
-        claude!.observationSource!.snapshot({ providerInstanceId: "", limit: 20 }),
-      );
-      const codexObservations = await Effect.runPromise(
-        codex!.observationSource!.snapshot({ providerInstanceId: "", limit: 20 }),
-      );
 
       expect(claudeSnapshot.sessions[0]).toMatchObject({
         workspaceRef: "/synthetic/project",
@@ -165,15 +171,10 @@ describe("agent harness plugins", () => {
       expect(codexSnapshot.sessions).toHaveLength(1);
       expect(JSON.stringify(codexSnapshot.sessions)).not.toContain("codex-guardian");
       expect(JSON.stringify([claudeSnapshot, codexSnapshot])).not.toContain("SECRET_");
-      expect(claudeObservations.current[0]).toMatchObject({
-        kind: "human-input-request",
-        payload: { requestKind: "permission", state: "open" },
-      });
-      expect(codexObservations.current[0]).toMatchObject({
-        kind: "human-input-request",
-        payload: { requestKind: "permission", state: "open" },
-      });
-      expect(JSON.stringify([claudeObservations, codexObservations])).not.toContain("SECRET_");
+      expect(claude!.observationSource).toBeUndefined();
+      expect(claude!.observationReceiver).toBeUndefined();
+      expect(codex!.observationSource).toBeUndefined();
+      expect(codex!.observationReceiver).toBeUndefined();
       expect(claudeSnapshot.sessions[0]?.nativeConversationRef.continuityScopeId).toBeDefined();
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -359,6 +360,231 @@ describe("agent harness plugins", () => {
     expect(
       await Effect.runPromise(
         codex.proveContinuity({ observation: evidence, launchExecutionRef: "pane-1" }),
+      ),
+    ).toMatchObject({ kind: "same" });
+  });
+
+  test("catalogues OpenCode root sessions", async () => {
+    const process = scriptedRunner((argv) => {
+      const command = commandFor(argv);
+      if (command === "opencode\u0000--pure\u0000db\u0000path")
+        return processResult("/synthetic/opencode-v1.db\n");
+      if (argv[0] === "opencode" && argv.includes("session"))
+        return processResult(
+          JSON.stringify([
+            {
+              id: "ses_v1_root",
+              title: "  OpenCode root  ",
+              created: 1_700_000_000_000,
+              updated: 1_700_000_001_000,
+              directory: "/synthetic/opencode",
+              projectId: "private-project-id",
+            },
+            { id: "", title: "invalid" },
+            { id: "ses_v1_child", parentID: "ses_v1_root" },
+          ]),
+        );
+      return processResult("", 1);
+    });
+
+    const harnesses = await loadHarnesses(process, { maxSessions: 20 });
+    const opencode = harnesses.find(({ harnessId }) => harnessId === "opencode")!;
+    const snapshot = await Effect.runPromise(opencode.snapshotSessions());
+
+    expect(snapshot).toMatchObject({
+      harnessId: "opencode",
+      complete: false,
+      sessions: [
+        {
+          nativeConversationRef: { harnessId: "opencode", kind: "id", value: "ses_v1_root" },
+          title: "OpenCode root",
+          workspaceRef: "/synthetic/opencode",
+          resumeEligibility: "same-site",
+          provenance: "provider-index",
+        },
+      ],
+    });
+    expect(snapshot.diagnostics).toEqual([
+      "1 OpenCode session rows were ignored.",
+      "1 OpenCode child sessions were ignored.",
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("private-project-id");
+  });
+
+  test("queries OpenCode 1 from known workspace hints", async () => {
+    const sessionDirectories: string[] = [];
+    const processRunner: BoundedProcessRunner = {
+      run: async (argv, options) => {
+        const command = commandFor(argv);
+        if (command === "opencode\u0000--pure\u0000db\u0000path")
+          return processResult("/synthetic/opencode-v1.db\n");
+        if (argv[0] === "opencode" && argv.includes("session")) {
+          sessionDirectories.push(options?.cwd ?? "");
+          return processResult(
+            JSON.stringify([
+              {
+                id: options?.cwd === "/synthetic/frontier" ? "ses_frontier" : "ses_observatory",
+                title:
+                  options?.cwd === "/synthetic/frontier" ? "Frontier work" : "Observatory work",
+                directory: options?.cwd ?? "/synthetic/unknown",
+                created: 1_700_000_000_000,
+                updated: 1_700_000_001_000,
+              },
+            ]),
+          );
+        }
+        return processResult("", 1);
+      },
+    };
+    const harnesses = await loadHarnesses(processRunner);
+    const opencode = harnesses.find(({ harnessId }) => harnessId === "opencode")!;
+    const snapshot = await Effect.runPromise(
+      opencode.snapshotSessions({ workspaceRefs: ["/synthetic/frontier", "/synthetic/frontier"] }),
+    );
+
+    expect(sessionDirectories).toEqual([resolve("."), "/synthetic/frontier"]);
+    expect(snapshot.sessions.map((session) => session.title)).toEqual([
+      "Observatory work",
+      "Frontier work",
+    ]);
+    expect(snapshot.complete).toBe(true);
+  });
+
+  test("gates availability and builds interactive OpenCode plans", async () => {
+    const process = scriptedRunner((argv) => {
+      if (commandFor(argv) === "opencode\u0000--version") return processResult("opencode 1.2.3");
+      if (commandFor(argv) === "opencode\u0000--pure\u0000db\u0000path")
+        return processResult("/synthetic/opencode-v1.db");
+      return processResult("", 1);
+    });
+    const harnesses = await loadHarnesses(process);
+    const opencode = harnesses.find(({ harnessId }) => harnessId === "opencode")!;
+
+    expect(await Effect.runPromise(opencode.availability())).toMatchObject({
+      available: true,
+      version: "opencode 1.2.3",
+    });
+    expect(
+      await Effect.runPromise(
+        opencode.planStart({
+          workingDirectory: "/repo",
+          prompt: "Start fresh",
+          args: ["--model", "synthetic-model"],
+        }),
+      ),
+    ).toMatchObject({
+      executable: "opencode",
+      args: ["--prompt", "Start fresh", "--model", "synthetic-model"],
+      sensitiveArgumentIndexes: [1],
+    });
+    expect(
+      await Effect.runPromise(
+        opencode.planResume({
+          workingDirectory: "/repo",
+          nativeConversationRef: sessionRef("opencode", "ses_v1_root"),
+        }),
+      ),
+    ).toMatchObject({ executable: "opencode", args: ["--session", "ses_v1_root"] });
+    expect(
+      Exit.isFailure(
+        await Effect.runPromiseExit(
+          opencode.planStart({ workingDirectory: "/repo", args: ["--continue"] }),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      Exit.isFailure(
+        await Effect.runPromiseExit(
+          opencode.planResume({
+            workingDirectory: "/repo",
+            prompt: "Do not drop this",
+            nativeConversationRef: sessionRef("opencode", "ses_v1_root"),
+          }),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects OpenCode lifecycle overrides and extra positionals", async () => {
+    const harnesses = await loadHarnesses();
+    const opencode = harnesses.find(({ harnessId }) => harnessId === "opencode")!;
+    const rejected = [
+      ["--session", "ses_other"],
+      ["-s", "ses_other"],
+      ["-s_ses_other"],
+      ["--session=ses_other"],
+      ["--continue"],
+      ["-c"],
+      ["--fork"],
+      ["--prompt", "override"],
+      ["serve"],
+      ["--model", "synthetic-model", "/synthetic/project"],
+      ["--model=synthetic-model", "/synthetic/project"],
+    ] as const;
+
+    const exits = await Promise.all(
+      rejected.map((args) =>
+        Effect.runPromiseExit(opencode.planStart({ workingDirectory: "/repo", args: [...args] })),
+      ),
+    );
+    expect(exits.every((exit) => Exit.isFailure(exit))).toBe(true);
+    expect(
+      await Effect.runPromise(
+        opencode.planStart({
+          workingDirectory: "/repo",
+          args: ["--model", "synthetic-model"],
+        }),
+      ),
+    ).toMatchObject({ args: ["--model", "synthetic-model"] });
+  });
+
+  test("keeps OpenCode continuity exact and scoped", async () => {
+    const harnesses = await loadHarnesses();
+    const opencode = harnesses.find(({ harnessId }) => harnessId === "opencode")!;
+    const expected = sessionRef("opencode", "ses_exact");
+    const evidence = {
+      executionRef: "execution-1",
+      detectedHarnessId: "opencode",
+      nativeConversationRef: expected,
+      source: "native-integration" as const,
+      observedAt: 123,
+    };
+
+    expect(
+      await Effect.runPromise(
+        opencode.proveContinuity({
+          expectedNativeConversationRef: expected,
+          observation: evidence,
+        }),
+      ),
+    ).toMatchObject({ kind: "same", nativeConversationRef: expected });
+    expect(
+      await Effect.runPromise(
+        opencode.proveContinuity({
+          expectedNativeConversationRef: { ...expected, continuityScopeId: "scope-a" },
+          observation: {
+            ...evidence,
+            nativeConversationRef: { ...expected, continuityScopeId: "scope-b" },
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "replaced" });
+    expect(
+      await Effect.runPromise(
+        opencode.proveContinuity({
+          expectedNativeConversationRef: expected,
+          observation: { ...evidence, detectedHarnessId: "codex" },
+        }),
+      ),
+    ).toMatchObject({ kind: "unknown" });
+    expect(
+      await Effect.runPromise(
+        opencode.proveContinuity({ expectedNativeConversationRef: expected }),
+      ),
+    ).toMatchObject({ kind: "absent" });
+    expect(
+      await Effect.runPromise(
+        opencode.proveContinuity({ observation: evidence, launchExecutionRef: "execution-1" }),
       ),
     ).toMatchObject({ kind: "same" });
   });

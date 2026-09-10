@@ -19,12 +19,38 @@ describe("ConversationHistoryDialog", () => {
           },
         ]}
         error={undefined}
-        goals={[]}
+        goals={[
+          {
+            id: "goal-1",
+            title: "Regression goal",
+            systemId: "system-1",
+            priority: "P1",
+            status: "active",
+            createdAt: 0,
+            updatedAt: 0,
+            agents: [],
+            attentionCount: 0,
+            staleCount: 0,
+          },
+        ]}
         onAdd={async () => ({ agentId: "agent-1" })}
         onAdded={() => {}}
         onClose={() => {}}
         onRefresh={async () => {}}
         pending={false}
+        systems={[
+          {
+            id: "system-1",
+            title: "Platform",
+            createdAt: 0,
+            updatedAt: 0,
+            goals: [],
+            agentCount: 0,
+            workingCount: 0,
+            attentionCount: 0,
+            staleCount: 0,
+          },
+        ]}
       />,
     );
 
@@ -34,6 +60,7 @@ describe("ConversationHistoryDialog", () => {
     expect(markup).toContain("Search");
     expect(markup).toContain("All providers");
     expect(markup).toContain("Destination Goal");
+    expect(markup).toContain("Platform · P1 · Regression goal");
     expect(markup).toContain("Add to goal");
     expect(markup).toContain("Add unassigned");
     expect(markup).toContain("The Agent will appear in Inbox.");

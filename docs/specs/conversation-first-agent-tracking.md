@@ -356,6 +356,11 @@ It derives a small vocabulary:
 `Stale` describes an individual observation in diagnostics. It is never the
 headline state of a durable Agent.
 
+An explicitly admitted conversation with confirmed provider identity and no
+bound execution may still expose an explicit Resume action while its headline
+remains `Runtime unknown`. Resume re-checks the current host snapshot and fails
+closed if an ambiguous live execution could already own the conversation.
+
 An unidentified execution is shown separately as `Unidentified process in
 Herdr`. It is not rendered as a Goal satellite and cannot silently inherit a
 Goal.

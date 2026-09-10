@@ -821,6 +821,15 @@ button {
 .app--dark .agent-logo {
   --agent-logo-monochrome: #ffffff;
 }
+.agent-logo__opencode--dark {
+  display: none;
+}
+.app--dark .agent-logo--opencode .agent-logo__opencode--light {
+  display: none;
+}
+.app--dark .agent-logo--opencode .agent-logo__opencode--dark {
+  display: inline;
+}
 
 .inspector__loading {
   padding: 20px;

@@ -21,6 +21,28 @@ flat list. Its durable geography is `System → Goal → Agent`. Atlas is the
 primary proof surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
 review and terminals are supporting lenses over the same trusted state.
 
+## Positioning
+
+Observatory is the single place where an operator's agent work is organised by
+intent, verified against evidence, and decided by the operator, regardless of
+where the agents run.
+
+Observation alone is a commodity capability. The defensible claim is
+accountability: observe, notice, judge, verify, intervene. Agent counts grow
+faster than human attention, so supervision must concentrate into judgment over
+evidence rather than direct observation. "All my agents" is a
+host-neutrality claim and must stay honest. For V0/V1, Herdr is the only live
+host, so the truthful current scope is every agent the operator runs in Herdr
+across its supported providers and CLIs. The `SessionHost` seam exists so that
+supporting a future host never requires changing the Universe, persistence,
+projections or renderer; the positioning sentence becomes fully true without a
+rewrite.
+
+Every surface must also close the review loop in one place. A needs-you item
+must be resolvable — read the evidence, accept, reject or intervene — without
+bouncing to a second tool. Observatory is one deliberate destination for
+judgment, not another hop per item.
+
 ## Operator questions
 
 The product should answer five questions quickly:

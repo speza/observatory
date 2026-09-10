@@ -17,6 +17,14 @@ export interface HarnessAvailability {
   readonly message: string;
 }
 
+export interface AgentHarnessSnapshotRequest {
+  /**
+   * Workspace hints supplied by the composition root. Providers may use them
+   * to scope a metadata query; they are never provider identity.
+   */
+  readonly workspaceRefs?: readonly string[];
+}
+
 /** Sensitive provider identity. Core may persist and compare it, but never parses `value`. */
 export interface OpaqueNativeConversationRef {
   readonly harnessId: string;
@@ -324,7 +332,9 @@ export interface AgentHarness {
   readonly observationReceiver?: AgentObservationReceiverV1;
   describe(): AgentHarnessDescriptor;
   availability(): Effect.Effect<HarnessAvailability, HarnessError>;
-  snapshotSessions(): Effect.Effect<ProviderSessionSnapshot, HarnessError>;
+  snapshotSessions(
+    request?: AgentHarnessSnapshotRequest,
+  ): Effect.Effect<ProviderSessionSnapshot, HarnessError>;
   planStart(request: StartHarnessSessionRequest): Effect.Effect<AgentProcessPlan, HarnessError>;
   planResume(request: ResumeHarnessSessionRequest): Effect.Effect<AgentProcessPlan, HarnessError>;
   proveContinuity(request: ContinuityRequest): Effect.Effect<ContinuityResult, HarnessError>;

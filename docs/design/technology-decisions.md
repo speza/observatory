@@ -150,7 +150,7 @@ Browser -------> 127.0.0.1 HTTP mutations + SSE projections + terminal WebSocket
                                       |
                                       v
                          Universe + SessionHost + SQLite
-Provider hooks -> authenticated POST -> harness observation receiver
+Optional provider observations -> authenticated POST -> harness receiver
 ```
 
 Browser mutation endpoints require exact loopback Origin, JSON content type and
@@ -160,9 +160,10 @@ narrow projections and operation results, never SQLite records, arbitrary
 filesystem paths or the internal command union.
 
 Host snapshots are polled. Browser projections use revisioned SSE replacements,
-with HTTP refresh for startup and recovery; provider hooks trigger immediate
-reconciliation and are not polled. This transport remains in the existing Bun
-process; it does not require a daemon.
+with HTTP refresh for startup and recovery. A future provider-observation plugin
+may trigger immediate reconciliation through the same in-process boundary; no
+provider hook is installed by the built-in configuration. This transport remains
+in the existing Bun process; it does not require a daemon.
 
 ## Toolchain and quality
 

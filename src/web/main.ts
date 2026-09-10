@@ -162,7 +162,12 @@ const program = Effect.scoped(
       workspace,
       plugins,
     );
-    const conversations = new ConversationTracker(plugins, runtime.store, runtime.universe);
+    const conversations = new ConversationTracker(
+      plugins,
+      runtime.store,
+      runtime.universe,
+      configuredWorkspaceLocations,
+    );
     const agentObservations = new AgentObservationCoordinator(
       plugins,
       runtime.store,
@@ -180,6 +185,10 @@ const program = Effect.scoped(
       events,
       now: () => runtime.clock.now(),
     });
+    const initialMessage = yield* initializeObservatoryRuntime(
+      runtime,
+      conversations.observeHost.bind(conversations),
+    );
     const providerRefresh = runtime.useMockHost
       ? {
           observedProviders: 0,
@@ -188,10 +197,6 @@ const program = Effect.scoped(
         }
       : yield* conversations.refresh();
     const observationRefresh = yield* agentObservations.refresh();
-    const initialMessage = yield* initializeObservatoryRuntime(
-      runtime,
-      conversations.observeHost.bind(conversations),
-    );
     if (runtime.useMockHost && process.env.AO_MOCK_SEED === "portfolio") {
       const catchUp = runtime.universe.project({ kind: "catch-up", now: runtime.clock.now() });
       if (catchUp.kind === "catch-up" && catchUp.sinceAt === undefined) {

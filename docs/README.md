@@ -31,7 +31,10 @@ architecture overview.
 
 - [Agent launch and workspace preparation](specs/session-launch.md)
 - [Agent harness plugins](specs/agent-harness-plugins.md)
-- [Provider-native Agent observations](specs/provider-native-agent-observations.md)
+- [OpenCode harness](specs/opencode-harness.md) — OpenCode lifecycle support;
+  Herdr remains the live-status source.
+- [Provider-native Agent observations](specs/provider-native-agent-observations.md) —
+  deferred optional enrichment boundary.
 - [Plugin system](specs/observatory-plugin-system.md)
 - [Repository status and code-host plugins](specs/agent-repository-and-code-host-plugins.md)
 
@@ -45,7 +48,6 @@ architecture overview.
 ## Guides and operations
 
 - [Plugin contributor guide](guides/plugin-contributor.md)
-- [Provider observation hooks](guides/provider-observation-hooks.md)
 
 ## Historical evidence
 

@@ -640,10 +640,10 @@ The process epoch changes. The publisher rebuilds current projections from
 Universe, retained provider evidence and launch receipts before accepting
 subscribers. The browser replaces all prior projection state.
 
-### Provider-event loss
+### Optional provider-event loss
 
-Missed provider hooks remain unknown. A projection snapshot cannot reconstruct
-them and must not imply complete provider history.
+Missed provider observations remain unknown. A projection snapshot cannot
+reconstruct them and must not imply complete provider history.
 
 ### Host loss
 

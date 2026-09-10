@@ -37,7 +37,7 @@ agent work.
 | Inbox and Conversation history                        | Implemented | Explicit add plus Observatory-managed launch admission    |
 | New launch and exact resume                           | Implemented | Idempotent coordinator and browser gateway tests          |
 | Claude Code, Codex and Pi harnesses                   | Implemented | Plugin contract and live validation                       |
-| Metadata-only provider observations                   | Implemented | Activity, input, outcome and context evidence             |
+| Metadata-only provider observations                   | Deferred    | Optional future enrichment; Herdr supplies live status    |
 | Host-owned primary and linked terminals               | Implemented | Mock and Herdr stream contract tests                      |
 | Repository and code-host status                       | Implemented | Bounded local reader and plugin evidence                  |
 | Multi-pane workspace review                           | Initial     | Bounded tree, source/baseline, diff and opaque handles    |

@@ -92,6 +92,13 @@ const publicAgent = (agent: Agent) => {
     ...publicFields
   } = agent;
   const state = lifecycleState(agent);
+  const canResume =
+    agent.providerContinuity === "confirmed" &&
+    agent.resumeCapability === "eligible" &&
+    (state === "dormant" ||
+      (state === "runtime-unknown" &&
+        agent.execution === undefined &&
+        agent.observationHealth === "fresh"));
   return {
     ...publicFields,
     execution: execution
@@ -99,10 +106,7 @@ const publicAgent = (agent: Agent) => {
       : undefined,
     lifecycleState: state,
     executionConflictCount: conflictingExecutions.length,
-    canResume:
-      state === "dormant" &&
-      agent.providerContinuity === "confirmed" &&
-      agent.resumeCapability === "eligible",
+    canResume,
   };
 };
 

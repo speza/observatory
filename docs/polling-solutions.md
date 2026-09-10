@@ -1,6 +1,6 @@
 # Observatory polling solutions
 
-Status: solution options after ephemeral provider-hook delivery
+Status: Herdr-first polling decision; provider-native delivery deferred
 
 Date: 2026-09-02
 
@@ -8,31 +8,21 @@ Depends on: [Observatory polling analysis](polling-analysis.md)
 
 Detailed proposal: [Control-plane events and browser projection delivery](specs/control-plane-events-and-projection-delivery.md)
 
-## Accepted provider-observation decision
+## Current provider-observation decision
 
-Provider hooks now use best-effort authenticated loopback delivery while the
-Observatory control plane is running:
+Herdr is the only maintained live-status source in the built-in configuration.
+Claude Code, Codex and Pi harnesses do not install hooks or extensions. The
+generic observation boundary remains available for a future optional plugin,
+but missing provider-native evidence stays unknown rather than being inferred.
 
-```text
-hook event -> bounded invalidation payload -> harness receiver
-           -> immediate trusted snapshot -> coordinator reconciliation
-```
-
-There is no provider journal or file watcher, and built-in hook sources require
-no provider-observation polling loop. Pull-only contributed sources retain their
-snapshot timer. Herdr remains the restart-recovery source for current execution truth. Missing
-provider events remain unknown, and Catch up does not claim to be a complete
-provider audit history.
-
-This decision removes idle journal reads, JSONL parsing, locking, compaction,
-file-change detection and offline replay. A durable host-local outbox may be
-added for future remote sites only if disconnected delivery becomes a measured
-requirement.
+This keeps the current runtime free of hook delivery, provider journals,
+extension manifests and offline replay. A future provider source must justify
+the added operational surface with a concrete supervision workflow.
 
 ## Desired outcome for remaining polling
 
 ```text
-normal operation: source notifications wake bounded reconciliation
+normal operation: Herdr snapshots establish current execution facts
 idle operation:   little repeated external work
 recovery:         trusted snapshots restore current evidence
 sensitive action: fresh explicit revalidation remains mandatory
@@ -109,7 +99,6 @@ needed.
 
 ## Rejected shortcuts
 
-- Treat a hook event as host execution truth.
 - Treat Herdr silence or stream disconnection as execution absence.
 - Remove startup or sensitive-operation snapshots.
 - Parse terminal output or provider transcripts to replace structured evidence.
@@ -131,8 +120,6 @@ needed.
 
 ## Success criteria
 
-- Provider events appear promptly while Observatory runs and never interrupt a
-  provider when it does not.
 - Startup remains truthful with no provider replay.
 - Browser idle work falls substantially without weakening reconnect recovery.
 - Herdr absence is accepted only from a complete trusted snapshot.

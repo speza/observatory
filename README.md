@@ -65,7 +65,7 @@ remote session is not presented as locally portable without provider proof.
 
 - [Bun](https://bun.sh/) 1.3.14 or newer.
 - For live agent supervision, [Herdr](https://herdr.dev/docs/) 0.8.2 or newer
-  and at least one supported agent harness: Claude Code, Codex or Pi.
+  and at least one supported agent harness: Claude Code, Codex, OpenCode or Pi.
 - Mock mode requires no Herdr installation, provider login or local agent
   history.
 
@@ -107,20 +107,15 @@ starting Herdr or writing Observatory state:
 bun run sessions:discover
 ```
 
-Install the local metadata-only observation hooks and Pi extension with:
+Live execution status comes from Herdr's host observations. The built-in Claude
+Code, Codex and Pi harnesses do not require provider hooks or extensions; their
+provider-native observation contract remains an optional future capability.
 
-```sh
-bun run observations:install
-```
-
-Check the installed bundles, endpoint configuration and delivery token without modifying them:
-
-```sh
-bun run observations:doctor
-```
-
-See [Provider observation hooks](docs/guides/provider-observation-hooks.md) for
-the best-effort delivery, retained fields, coexistence and removal boundaries.
+OpenCode session identity comes from Herdr's own OpenCode integration. When it
+is unavailable, Observatory falls back to the exact session id in a resumed
+pane's `opencode --session` process arguments, so exact resumes still reconcile
+without title or cwd matching. A newly created session with no reported id
+remains unknown rather than being guessed from its title or workspace.
 
 Run the deterministic 12-goal, 75-agent development portfolio:
 

@@ -1,5 +1,5 @@
 import { Effect, Either } from "effect";
-import type { AgentHarness } from "../plugin-sdk/index.ts";
+import type { AgentHarness, AgentHarnessSnapshotRequest } from "../plugin-sdk/index.ts";
 import type { HostAgentObservation, HostSnapshot } from "../hosts/types.ts";
 import type { ReconciliationResult, Universe } from "../universe/universe.ts";
 import type {
@@ -29,14 +29,16 @@ export class ConversationTracker implements ConversationTrackerModule {
     },
     private readonly store: ConversationCatalogueStore,
     private readonly universe: Universe,
+    private readonly configuredWorkspaceRefs: readonly string[] = [],
   ) {}
 
   refresh(): Effect.Effect<ConversationRefreshResult> {
     const operation = Effect.gen(this, function* () {
       const configuredHarnesses = this.harnesses.agentHarnesses();
+      const snapshotRequest = this.snapshotRequest();
       const results = yield* Effect.forEach(
         configuredHarnesses,
-        (harness) => Effect.either(harness.snapshotSessions()),
+        (harness) => Effect.either(harness.snapshotSessions(snapshotRequest)),
         { concurrency: "unbounded" },
       );
       const diagnostics: string[] = [];
@@ -82,6 +84,17 @@ export class ConversationTracker implements ConversationTrackerModule {
       };
     });
     return this.refreshSemaphore.withPermits(1)(operation);
+  }
+
+  private snapshotRequest(): AgentHarnessSnapshotRequest | undefined {
+    const workspaceRefs = [
+      ...this.configuredWorkspaceRefs,
+      ...(this.lastHostSnapshot?.agents.map((agent) => agent.worktree) ?? []),
+      ...this.universe.snapshot().agents.map((agent) => agent.worktree),
+      ...this.store.conversations().map((conversation) => conversation.workspaceRef),
+    ].filter((value): value is string => Boolean(value));
+    const uniqueWorkspaceRefs = [...new Set(workspaceRefs)];
+    return uniqueWorkspaceRefs.length ? { workspaceRefs: uniqueWorkspaceRefs } : undefined;
   }
 
   history(): readonly ConversationHistoryView[] {

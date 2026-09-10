@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
 import type { ConversationHistoryView } from "../../../src/conversations/types.ts";
-import type { GoalView } from "../../../src/projection/types.ts";
+import type { GoalView, SystemView } from "../../../src/projection/types.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
 
 interface ConversationHistoryDialogProps {
   readonly conversations: readonly ConversationHistoryView[];
   readonly goals: readonly GoalView[];
+  readonly systems: readonly SystemView[];
   readonly pending: boolean;
   readonly error?: string;
   readonly onClose: () => void;
@@ -47,6 +48,7 @@ const lastActiveLabel = (value: number | undefined): string =>
 export const ConversationHistoryDialog = ({
   conversations,
   goals,
+  systems,
   pending,
   error,
   onClose,
@@ -61,6 +63,12 @@ export const ConversationHistoryDialog = ({
   const [goalId, setGoalId] = useState("");
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [notice, setNotice] = useState<string>();
+  const systemTitles = useMemo(
+    () => new Map(systems.map((system) => [system.id, system.title])),
+    [systems],
+  );
+  const goalOptionLabel = (goal: GoalView): string =>
+    `${goal.systemId ? (systemTitles.get(goal.systemId) ?? "Unknown system") : "No system"} · ${goal.priority} · ${goal.title}`;
 
   const providers = useMemo(
     () => [...new Set(conversations.map((conversation) => conversation.providerLabel))].sort(),
@@ -311,7 +319,7 @@ export const ConversationHistoryDialog = ({
                 .filter((goal) => goal.status === "active")
                 .map((goal) => (
                   <option key={goal.id} value={goal.id}>
-                    {goal.priority} · {goal.title}
+                    {goalOptionLabel(goal)}
                   </option>
                 ))}
             </select>

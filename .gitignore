@@ -8,4 +8,5 @@ data/
 *.log
 coverage/
 .amp/portals/
+.worktrees/
 web/dist/

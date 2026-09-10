@@ -115,8 +115,13 @@ const harnessEvidenceFor = (
   const source = stringValue(session, "source");
   const restored = agent.agent_session_restored;
   if (!detectedHarnessId && (!sessionHarnessId || !kind || !value)) return undefined;
+  // A host may recognize a beta or custom executable under a generic screen
+  // detector label while its native integration reports the precise harness.
+  // The session-bearing report is the stronger identity signal; keeping the
+  // generic label here would make exact continuity look contradictory.
+  const preciseHarnessId = kind && value ? sessionHarnessId : detectedHarnessId;
   return {
-    detectedHarnessId,
+    detectedHarnessId: preciseHarnessId,
     nativeConversationRef:
       sessionHarnessId && kind && value ? { harnessId: sessionHarnessId, kind, value } : undefined,
     restoreState:
@@ -125,6 +130,84 @@ const harnessEvidenceFor = (
     observedAt,
   };
 };
+
+const OPEN_CODE_HARNESSES = new Set(["opencode"]);
+const MAX_PROCESS_SESSION_LENGTH = 512;
+
+const executableName = (value: string): string =>
+  value.split(/[\\/]/u).at(-1)?.trim().toLowerCase() ?? "";
+
+const boundedSessionArgument = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  if (!normalized || normalized.startsWith("-") || normalized.length > MAX_PROCESS_SESSION_LENGTH)
+    return undefined;
+  return normalized;
+};
+
+const sessionArgumentFor = (argv: readonly string[]): string | undefined => {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]?.trim() ?? "";
+    if (argument === "--session" || argument === "-s")
+      return boundedSessionArgument(argv[index + 1]);
+    if (argument.startsWith("--session="))
+      return boundedSessionArgument(argument.slice("--session=".length));
+  }
+  return undefined;
+};
+
+interface OpenCodeProcess {
+  readonly harnessId: string;
+  readonly session?: string;
+}
+
+const openCodeProcessFor = (
+  payload: JsonValue | undefined,
+  paneId: string,
+  detectedHarnessId: string,
+): OpenCodeProcess | undefined => {
+  if (!OPEN_CODE_HARNESSES.has(detectedHarnessId)) return undefined;
+  if (!isRecord(payload)) return undefined;
+  const processInfo = nonEmptyRecord(nonEmptyRecord(payload.result).process_info);
+  const reportedPaneId = stringValue(processInfo, "pane_id");
+  if (reportedPaneId && reportedPaneId !== paneId) return undefined;
+  if (!Array.isArray(processInfo.foreground_processes)) return undefined;
+
+  const candidates = processInfo.foreground_processes.flatMap((value) => {
+    const process = nonEmptyRecord(value);
+    const argv = Array.isArray(process.argv)
+      ? process.argv.filter((argument): argument is string => Schema.is(Schema.String)(argument))
+      : [];
+    const executable = executableName(argv[0] ?? stringValue(process, "argv0") ?? "");
+    if (!OPEN_CODE_HARNESSES.has(executable)) return [];
+    return [{ harnessId: executable, session: sessionArgumentFor(argv) }];
+  });
+  if (candidates.length !== 1) return undefined;
+  return candidates[0];
+};
+
+const processEvidenceFor = (
+  process: OpenCodeProcess,
+  observedAt: number,
+  session = process.session,
+): HostAgentObservation["harnessEvidence"] => {
+  if (!session) return undefined;
+  return {
+    detectedHarnessId: process.harnessId,
+    nativeConversationRef: {
+      harnessId: process.harnessId,
+      kind: "id",
+      value: session,
+    },
+    restoreState: "unknown",
+    source: "process",
+    observedAt,
+  };
+};
+
+interface OpenCodeProcessCacheEntry {
+  readonly fingerprint: string;
+  readonly process: OpenCodeProcess;
+}
 
 export const parseHerdrSnapshot = (
   payload: JsonValue | undefined,
@@ -539,6 +622,7 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly livePaneWorkspaces = new Map<string, string>();
   private readonly liveTerminalFingerprints = new Map<string, string>();
   private readonly liveAgentFingerprints = new Map<string, string>();
+  private readonly openCodeProcessCache = new Map<string, OpenCodeProcessCacheEntry>();
 
   constructor(options: {
     readonly runner?: CommandRunner;
@@ -736,13 +820,17 @@ export class HerdrHostAdapter implements SessionHost {
       };
     }
     const parsedPayload = parseJsonValue(result.stdout);
-    const snapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
+    const parsedSnapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
+    const paneFingerprints = paneFingerprintsFor(parsedPayload);
+    const snapshot = parsedSnapshot.available
+      ? await this.enrichOpenCodeProcessEvidence(parsedSnapshot, paneFingerprints)
+      : parsedSnapshot;
     if (!snapshot.available) return snapshot;
     for (const [paneId, workingDirectory] of paneWorkingDirectoriesFor(parsedPayload))
       this.livePaneWorkingDirectories.set(paneId, workingDirectory);
     for (const [paneId, workspaceId] of paneWorkspaceIdsFor(parsedPayload))
       this.livePaneWorkspaces.set(paneId, workspaceId);
-    for (const [paneId, fingerprint] of paneFingerprintsFor(parsedPayload))
+    for (const [paneId, fingerprint] of paneFingerprints)
       this.liveTerminalFingerprints.set(paneId, fingerprint);
     const linkedExecutions = linkedExecutionsFor(parsedPayload, snapshot.agents);
     this.liveTargets.clear();
@@ -768,6 +856,59 @@ export class HerdrHostAdapter implements SessionHost {
           this.liveLinkedExecutions.set(agent.nativeId, agentLinkedExecutions);
       }
     return snapshot;
+  }
+
+  private async enrichOpenCodeProcessEvidence(
+    snapshot: HostSnapshot,
+    fingerprints: ReadonlyMap<string, string>,
+  ): Promise<HostSnapshot> {
+    const agents = await Promise.all(
+      snapshot.agents.map(async (observation): Promise<HostAgentObservation> => {
+        const evidence = observation.harnessEvidence;
+        if (
+          !evidence ||
+          evidence.nativeConversationRef ||
+          !evidence.detectedHarnessId ||
+          !OPEN_CODE_HARNESSES.has(evidence.detectedHarnessId)
+        )
+          return observation;
+        const fingerprint = fingerprints.get(observation.nativeId);
+        const cached = this.openCodeProcessCache.get(observation.nativeId);
+        if (fingerprint !== undefined && cached?.fingerprint === fingerprint) {
+          const cachedEvidence = processEvidenceFor(cached.process, observation.observedAt);
+          return cachedEvidence ? { ...observation, harnessEvidence: cachedEvidence } : observation;
+        }
+        try {
+          const result = await this.runner.run(
+            ["herdr", "pane", "process-info", "--pane", observation.nativeId],
+            { maxOutputBytes: 128 * 1024, timeoutMs: 2_000 },
+          );
+          if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated)
+            return observation;
+          const process = openCodeProcessFor(
+            parseJsonValue(result.stdout),
+            observation.nativeId,
+            evidence.detectedHarnessId,
+          );
+          if (process && fingerprint !== undefined)
+            this.openCodeProcessCache.set(observation.nativeId, { fingerprint, process });
+          const processEvidence = process
+            ? processEvidenceFor(process, observation.observedAt)
+            : undefined;
+          return processEvidence
+            ? { ...observation, harnessEvidence: processEvidence }
+            : observation;
+        } catch {
+          return observation;
+        }
+      }),
+    );
+    const livePaneIds = new Set(snapshot.agents.map((agent) => agent.nativeId));
+    for (const paneId of this.openCodeProcessCache.keys())
+      if (!livePaneIds.has(paneId)) this.openCodeProcessCache.delete(paneId);
+    return agents.every((agent, index) => agent === snapshot.agents[index])
+      ? snapshot
+      : { ...snapshot, agents };
   }
 
   access(agentRef: {

@@ -895,6 +895,61 @@ describe("Universe", () => {
     });
   });
 
+  test("uses exact process evidence without downgrading a scoped conversation", () => {
+    const { universe, clock } = makeUniverse();
+    const scoped = {
+      ...observation("pane-1", "OpenCode", "working"),
+      harnessEvidence: {
+        detectedHarnessId: "opencode",
+        nativeConversationRef: {
+          harnessId: "opencode",
+          continuityScopeId: "scope-test",
+          kind: "id",
+          value: "ses_process",
+        },
+        restoreState: "unknown" as const,
+        source: "native-integration" as const,
+        observedAt: 1_000_000,
+      },
+    };
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([scoped]));
+
+    clock.value += 1_000;
+    const result = universe.reconcile(
+      hostSnapshot(
+        [
+          {
+            ...observation("pane-1", "OpenCode", "working", clock.now()),
+            harnessEvidence: {
+              detectedHarnessId: "opencode",
+              nativeConversationRef: {
+                harnessId: "opencode",
+                kind: "id",
+                value: "ses_process",
+              },
+              restoreState: "unknown" as const,
+              source: "process" as const,
+              observedAt: clock.now(),
+            },
+          },
+        ],
+        clock.now(),
+      ),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      continuity: "proved",
+      execution: { nativeId: "pane-1" },
+      nativeConversationRef: {
+        harnessId: "opencode",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "ses_process",
+      },
+    });
+  });
+
   test("uses scoped provider admission to enrich one compatible managed launch", () => {
     const { universe } = makeUniverse();
     expect(

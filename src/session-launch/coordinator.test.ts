@@ -47,7 +47,7 @@ const codexHarness: AgentHarness = {
   proveContinuity: ({ observation, launchExecutionRef }) =>
     Effect.succeed(
       observation !== undefined &&
-        observation.executionRef === launchExecutionRef &&
+        (!launchExecutionRef || observation.executionRef === launchExecutionRef) &&
         observation.detectedHarnessId === "codex"
         ? { kind: "same", nativeConversationRef: observation.nativeConversationRef, reason: "same" }
         : { kind: "unknown", reason: "unknown" },
@@ -518,7 +518,7 @@ describe("agent launch coordinator", () => {
     if (projected.kind !== "command-centre") throw new Error("Expected command centre.");
     expect(projected.unassigned.find((agent) => agent.id === adopted.agentId)).toMatchObject({
       lifecycleState: "runtime-unknown",
-      canResume: false,
+      canResume: true,
     });
     clock.value = 91_000;
     const coordinator = createStartAgentCoordinator({
@@ -533,5 +533,76 @@ describe("agent launch coordinator", () => {
     expect(Exit.isFailure(result)).toBe(true);
     expect(JSON.stringify(result)).toContain("prevent a duplicate");
     expect(universe.snapshot().agents).toHaveLength(1);
+  });
+
+  test("rebinds an exact live conversation when host evidence omits its catalogue scope", async () => {
+    const clock = new FixedClock(90_000);
+    const { universe } = makeUniverse({ clock });
+    const host = new MockHostAdapter({
+      clock,
+      scenario: {
+        name: "unscoped-exact-resume",
+        description: "The host reports the exact native id without provider scope.",
+        tickMs: 60_000,
+        frames: [
+          {
+            label: "live",
+            agents: [
+              {
+                nativeId: "exact-pane",
+                displayName: "Durable Codex work",
+                runtimeState: "idle",
+                runtimeStateSource: "mock",
+                worktree: "/synthetic/project",
+                hostLocator: "mock-agent:exact-pane",
+                harnessEvidence: {
+                  detectedHarnessId: "codex",
+                  nativeConversationRef: {
+                    harnessId: "codex",
+                    kind: "id",
+                    value: "durable-conversation",
+                  },
+                  restoreState: "unknown",
+                  source: "native-integration",
+                  observedAt: 90_000,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const adopted = universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "test",
+        kind: "id",
+        value: "durable-conversation",
+      },
+      displayName: "Durable Codex work",
+      workspaceRef: "/synthetic/project",
+      observedAt: 90_000,
+    });
+    universe.reconcile(await Effect.runPromise(host.snapshot()));
+    const coordinator = createStartAgentCoordinator({
+      universe,
+      host,
+      harnesses: { agentHarness: (id) => (id === "codex" ? codexHarness : undefined) },
+      workspace: new TestWorkspaceProvider(),
+    });
+
+    const result = await Effect.runPromise(
+      coordinator.resume({ requestId: "unscoped-exact-resume", agentId: adopted.agentId! }),
+    );
+
+    expect(result).toMatchObject({ status: "already-observed", agentId: adopted.agentId });
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      executionPresence: "live",
+      continuity: "proved",
+    });
   });
 });

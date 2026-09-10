@@ -1,6 +1,6 @@
 # Provider-native Agent observations
 
-Status: metadata-only Claude Code, Codex and Pi observation path implemented
+Status: deferred optional provider-native enrichment; Herdr is the live-status source
 
 Updated: 2026-09-02
 
@@ -24,7 +24,7 @@ ingest prompts, messages, transcripts, tool inputs or outputs, commands, raw
 terminal output, credentials, or provider payloads.
 
 ```text
-provider hooks -> authenticated local ingress
+optional provider hooks -> authenticated local ingress
 structured API / local metadata -> snapshot source
                        |
                        v
@@ -49,6 +49,11 @@ Universe/human ------- Goals, assignment, priority and accepted completion
 This deepens `AgentHarness`; it does not add a `ProviderFactsService`, a
 provider-specific core union, a generic event bus, or a second host seam. The
 durable topology remains `System -> Goal -> Agent`.
+
+The current product slice deliberately relies on Herdr for live execution
+status. Built-in Claude Code, Codex and Pi harnesses do not install provider
+hooks or extensions. The observation contract remains available for a future
+plugin when a concrete workflow justifies richer provider-owned evidence.
 
 ## User workflows
 
@@ -353,19 +358,19 @@ source scope proves it absent; a partial snapshot never closes it.
 
 ### Missed events, loss and restart
 
-Hooks are asynchronous, best-effort hints. Matching handlers may run
-concurrently, Observatory may be stopped, processes can exit before delivery,
-and a provider may not hook every path. The reporter therefore uses a short
-deadline and never interrupts the provider when delivery fails.
+If a provider source is reintroduced, its hooks are asynchronous, best-effort
+hints. Matching handlers may run concurrently, Observatory may be stopped,
+processes can exit before delivery, and a provider may not hook every path. A
+reporter must therefore use a short deadline and never interrupt the provider
+when delivery fails.
 
-Observatory is expected to remain running while supervised Herdr Agents are
-active, even when the browser is closed. Events received during that period are
-reconciled into the bounded operational evidence store. Events emitted while
-the control plane is unavailable are not replayed or reconstructed. On startup,
-Herdr restores current execution truth, the process-local hook source starts
-empty, and provider enrichment resumes with the next event. A blocked Agent may
-therefore retain actionable Herdr attention while its exact provider reason is
-unknown.
+Herdr remains the current source of execution truth while supervised Agents are
+active, even when the browser is closed. If a future provider source is loaded,
+events received during that period may be reconciled into the bounded
+operational evidence store. Events emitted while the control plane is
+unavailable are not replayed or reconstructed. On startup, Herdr restores
+current execution truth and provider-specific reasons remain unknown until a
+future source establishes them.
 
 Catch up is complete for accepted semantic changes, but provider transitions
 are only those received while Observatory was running. It is not an audit log.
@@ -469,11 +474,12 @@ comes from reviewed hook configuration, the provider-generated scoped session
 id and a local authenticated transport. The UI labels its mechanism as a hook,
 not as independently verified truth.
 
-The implemented local sink is loopback HTTP with a per-install bearer secret,
-strict method, content-type and 32 KiB body limits, serialized reconciliation
-and no CORS. It must never bind a public interface unauthenticated. Hook setup is
-explicit and reviewable. Observatory does not silently rewrite provider
-settings, bypass hook trust or weaken managed policy.
+If a future source uses live delivery, its sink should be loopback HTTP with a
+per-install bearer secret, strict method, content-type and 32 KiB body limits,
+serialized reconciliation and no CORS. It must never bind a public interface
+unauthenticated. Hook setup must be explicit and reviewable; Observatory must
+not silently rewrite provider settings, bypass hook trust or weaken managed
+policy.
 
 Remote sites are not V1 scope. If remote Herdr is later supported, keep one
 authoritative Observatory rather than placing an independent semantic Universe
@@ -498,23 +504,23 @@ Capability discovery distinguishes:
 - `degraded`: only a declared subset of kinds or acquisition paths works.
 
 `AgentHarness.availability` and plugin status include bounded setup diagnostics;
-the observation descriptor carries kind-level support. A doctor/setup flow may
-show the exact reviewed provider hook entry, required minimum version,
-transport reachability and last safe receipt. V1 changes provider settings only
-through the explicit operator-run installer and never bypasses provider trust
-or managed policy.
+the observation descriptor carries kind-level support. If a future source needs
+setup diagnostics, it may report the exact reviewed provider hook entry,
+required minimum version, transport reachability and last safe receipt. The
+built-in configuration currently changes no provider settings.
 
 Activation remains transactional. The source starts and stops with normal
 plugin activation/disposal. A source failure degrades only provider enrichment,
 not start, resume, catalogue, terminal or accepted semantic state. Core startup
 and all normal supervision flows remain valid with no source.
 
-## Reference mappings
+## Reference mappings for future reintroduction
 
 The provider APIs below were checked against official documentation on
 2026-08-30. Both products are versioned rapidly; setup must detect the installed
 version, and fixtures must name the documented version. Documentation or a
 `main`-branch schema is not proof that a field exists in the installed release.
+These are retained design notes, not active built-in integrations.
 
 ### Claude Code
 
@@ -608,105 +614,35 @@ uses the release documentation and never parses transcripts.
 
 ## Implementation evidence
 
-### Current implementation
+### Current runtime choice
 
-The first implementation covers the deterministic Slice 1 path and the safe
-acquisition boundary needed to dogfood three providers:
+The built-in Claude Code, Codex and Pi harnesses currently provide catalogue,
+start, resume and continuity support only. They do not install hooks, register
+provider extensions or publish an `observationSource`/`observationReceiver`.
+Herdr is the maintained live-status source for execution presence, lifecycle,
+placement and terminal state.
 
-- `AgentHarness.observationSource` is available for the built-in Claude Code,
-  Codex and Pi harnesses;
-- each built-in harness exposes a best-effort hook receiver and a bounded
-  process-local observation source, or reports `not-configured`;
-- the kernel validates, deduplicates, correlates and stores current claims,
-  transitions, source health and cursors in the operational SQLite cache;
-- attention, catch-up and inspector projections fuse an immutable evidence
-  snapshot without issuing Universe commands; and
-- one catch-up acknowledgement checkpoints accepted semantic changes and
-  observed evidence independently.
+The generic observation contract, coordinator, persistence and projections remain
+available for a future optional harness plugin. The deterministic mock harness
+and kernel tests continue to exercise that boundary without making provider
+hooks part of the supported installation path. This keeps future enrichment
+additive and preserves explicit unknown or stale evidence when Herdr cannot
+establish a fact.
 
-The kernel boundary rejects unbounded identities, diagnostics, cursors and
-non-namespaced extensions. Projection fusion applies the shorter of provider
-and kernel freshness, preserves conflicting host/provider claims, uses the
-canonical attention ordering and recomputes nested Goal/System counts from the
-fused Agent views. Removing a source marks its saved evidence unavailable.
-Repeated activity transitions are coalesced in catch-up.
+### Future reintroduction gate
 
-The installed reporters submit bounded fields to an authenticated loopback
-ingress with a 200 ms deadline and fail open when Observatory is unavailable.
-The owning harness adapter translates Claude Code, Codex and Pi event names into
-one private lifecycle vocabulary and holds bounded current claims and
-transitions in process memory. The ingress then invokes the existing coordinator
-snapshot path, which is the only writer of operational evidence. There is no
-hook journal, lock, compaction, file poll or offline replay.
+Provider-native enrichment can return when a concrete supervision workflow is
+not adequately served by Herdr. A future implementation must:
 
-The explicit operator-run installer composes with existing provider settings,
-publishes content-addressed bundles and creates a user-only bearer token. It
-never replaces unrelated hooks, packages or extensions. An `AO_PLUGIN_CONFIG`
-entry may set `providerObservationsEnabled` and custom provider roots without
-creating a duplicate plugin. `bun run web:mock` loads a mock harness package
-through the same source contract; it does not seed the observation store
-directly.
+- contribute an optional source and receiver through the existing harness
+  contract;
+- keep provider-specific translation, authentication and lifecycle details at
+  the plugin edge;
+- pass the shared contract, sanitised fixture and live smoke tests; and
+- remain supporting evidence rather than changing accepted Agent or Goal state.
 
-### Contract and provider evidence
-
-- Add synthetic V1 types, bounds and a shared source contract suite.
-- Verify exact installed Claude and Codex versions and document supported event
-  matrices.
-- Spike Claude hook setup/status-line coexistence and Codex hook failure/status
-  mapping; separately assess app-server reconnect snapshots without changing
-  launch ownership.
-- Decide freshness defaults and operational retention from mock supervision.
-
-Gate: two synthetic sources express identical normalised claims with no
-provider brand switch in coordinator, persistence or projections.
-
-### Deterministic kernel path (implemented)
-
-- Add a kernel-owned operational observation repository to the clean-break
-  SQLite schema for envelopes, latest claims, source health and cursors.
-- Add the Effectful composition-root coordinator and immutable evidence
-  snapshot.
-- Add attention, catch-up, inspector and verification projections against a
-  deterministic mock source and clock.
-- Dogfood supported and unsupported states with `bun run web:mock`; cover source
-  loss with deterministic coordinator tests.
-
-Gate: synthetic observations enrich every target projection without changing
-an Agent/Goal record or the `System -> Goal -> Agent` topology.
-
-### Claude Code reference source (implemented locally)
-
-- Add an explicit reviewed local reporter and bounded authenticated sink.
-- Translate only the verified event matrix; add status-line context pressure
-  only if the Slice 0 coexistence spike succeeds.
-- Add duplicate, late-event, missed-start and hook-disabled smokes.
-
-Gate: while Observatory is running, a real Claude session opens a permission
-signal and reports response stop with no transcript or raw payload stored;
-a missed event after restart remains explicitly unknown.
-
-### Codex reference source (implemented locally)
-
-- Implement the same contract from supported Codex hooks.
-- Leave unsupported failure/context claims explicit.
-- Use app-server only where the selected Codex runtime already provides the
-  transport and the spike proves snapshot/reconnect behavior without moving
-  PTY ownership.
-
-Gate: adding Codex changes only its harness package, configuration and fixtures;
-core vocabulary, storage, attention and renderer code require no provider edit.
-
-Pi reuses the same ephemeral ingress and vocabulary through its extension lifecycle. It
-also supplies a provider-owned session catalogue and exact start/resume plans
-through the existing harness seam; no Pi brand enters the coordinator,
-persistence or projections.
-
-### Measured additions
-
-Consider normalised usage, remote reporter transport or an optional live stream
-only after real workflows show the need and both reference sources prove the
-semantics. Transcript ingestion and provider-native controls each require a new
-explicit product decision.
+No built-in provider hook installer, delivery manifest or provider extension is
+required while Herdr supplies the live execution facts.
 
 ## Persistence and retention
 
@@ -741,16 +677,15 @@ and rediscover it.
 - Security tests: oversized/deep payload rejection, namespace validation,
   replay authentication and sentinel prompts, credentials, commands, errors
   and transcript paths absent from storage/log/browser snapshots.
-- Sanitised Claude and Codex fixtures pass the same source contract. Core tests
-  pass with neither provider installed.
-- Opt-in live smokes exercise provider versions and hook trust; they never read
-  transcripts. `bun run web:mock` is the deterministic browser dogfood path.
+- A future provider source must pass sanitised provider fixtures and opt-in live
+  smokes without reading transcripts. `bun run web:mock` remains the
+  deterministic browser dogfood path.
 
 Release acceptance requires:
 
-1. Claude and Codex both work through `AgentHarness.observationSource` without
-   provider checks outside their packages.
-2. Disabling or losing either source visibly degrades enrichment while launch,
+1. A future Claude, Codex, Pi or other source works through
+   `AgentHarness.observationSource` without provider checks outside its plugin.
+2. Disabling or losing a source visibly degrades enrichment while launch,
    resume, terminal, Agent and Goal state remain valid.
 3. Provider-reported completion never changes accepted completion and never
    substitutes for diff/check evidence.
@@ -762,11 +697,10 @@ Release acceptance requires:
 
 ## Roadmap decision
 
-Move the metadata-only observation path from **Later** to **Next**. It directly
-unblocks the already-prioritised rich attention and coherent completion review
-workflows, and Claude plus Codex now provide enough documented evidence to test
-the generic contract. Ship synthetic projection behavior before live hooks and
-require the second provider proof before calling the seam complete.
+Keep the metadata-only observation path deferred until dogfooding shows a
+supervision workflow that Herdr cannot answer. The generic contract and
+deterministic mock evidence remain in place, so a future provider source can be
+added without changing the trusted topology or host seam.
 
 This does not move transcript ingestion, provider-native controls, generic
 usage analytics, remote service operation or a new host forward.

@@ -1,10 +1,11 @@
-export type AgentBrand = "claude" | "codex" | "pi" | "generic";
+export type AgentBrand = "claude" | "codex" | "opencode" | "pi" | "generic";
 
 export const agentBrandFor = (harnessId?: string, provider?: string): AgentBrand => {
   const identity = (harnessId ?? provider ?? "").trim().toLocaleLowerCase();
   if (identity === "claude" || identity.startsWith("claude-")) return "claude";
   if (identity === "codex" || identity.startsWith("codex-") || identity === "openai")
     return "codex";
+  if (identity === "opencode" || identity.startsWith("opencode-")) return "opencode";
   if (identity === "pi" || identity.startsWith("pi-")) return "pi";
   return "generic";
 };
@@ -51,6 +52,28 @@ const mark = (brand: AgentBrand): React.JSX.Element => {
       </>
     );
   }
+  if (brand === "opencode") {
+    return (
+      <>
+        <image
+          className="agent-logo__opencode agent-logo__opencode--light"
+          href="/opencode-logo-light.svg"
+          height="300"
+          width="240"
+          x="0"
+          y="0"
+        />
+        <image
+          className="agent-logo__opencode agent-logo__opencode--dark"
+          href="/opencode-logo-dark.svg"
+          height="300"
+          width="240"
+          x="0"
+          y="0"
+        />
+      </>
+    );
+  }
   return (
     <g fill="currentColor">
       <circle cx="12" cy="5.5" r="2.2" />
@@ -67,6 +90,7 @@ const viewBoxFor = (brand: AgentBrand): string => {
   if (brand === "claude") return "-5 -5 110 110";
   if (brand === "codex") return "160 160 395 395";
   if (brand === "pi") return "140 140 520 520";
+  if (brand === "opencode") return "0 0 240 300";
   return "0 0 24 24";
 };
 

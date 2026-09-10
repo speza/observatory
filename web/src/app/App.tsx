@@ -1085,6 +1085,7 @@ export const App = (): React.JSX.Element => {
           onClose={() => setConversationHistoryOpen(false)}
           onRefresh={refreshConversationHistory}
           pending={commandPending}
+          systems={data.commandCentre.systems}
         />
       ) : null}
       {searchOpen ? (
