@@ -125,6 +125,22 @@ export interface LinkedExecution {
   readonly explanation: string;
 }
 
+/** Normalized host geometry. Targets and tab identities remain adapter-owned and opaque. */
+export interface HostTerminalLayout {
+  readonly tabs: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly panes: readonly {
+      readonly primary: boolean;
+      readonly target: OpaqueAccessTarget;
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }[];
+  }[];
+}
+
 /** A deliberately small, agent-specific set of interaction surfaces. */
 export type AgentCapability =
   | "embedded-terminal"
@@ -142,6 +158,8 @@ export interface AgentAccess {
   readonly terminalTarget?: OpaqueAccessTarget;
   /** Existing surfaces and repeatable host-owned creation actions, never durable AO agents. */
   readonly linkedExecutions: readonly LinkedExecution[];
+  /** Absent when the host cannot supply a complete layout. */
+  readonly terminalLayout?: HostTerminalLayout;
   readonly explanation: string;
 }
 

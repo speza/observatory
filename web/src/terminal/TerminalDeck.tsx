@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentView } from "../../../src/projection/types.ts";
-import type { WebTerminalLink } from "../../../src/web/protocol.ts";
+import type { WebTerminalLayout, WebTerminalLink } from "../../../src/web/protocol.ts";
+import { HostTerminalView } from "./HostTerminalView.tsx";
 import { fetchTerminalLinks } from "../api/client.ts";
 import type { TerminalAppearance } from "../settings/browserSettings.ts";
 import { TerminalSurface, type TerminalTheme } from "./TerminalSurface.tsx";
@@ -37,6 +38,8 @@ export const TerminalDeck = ({
   terminalAppearance,
   onTerminalAppearanceChange,
 }: TerminalDeckProps): React.JSX.Element => {
+  const [layoutResolved, setLayoutResolved] = useState(false);
+  const [layout, setLayout] = useState<WebTerminalLayout>();
   const [tabs, setTabs] = useState<readonly TerminalTab[]>([primaryTab]);
   const [activeTabId, setActiveTabId] = useState(primaryTab.id);
   const [links, setLinks] = useState<readonly WebTerminalLink[]>([]);
@@ -48,6 +51,8 @@ export const TerminalDeck = ({
   const linksRequestRef = useRef<AbortController | undefined>(undefined);
 
   useLayoutEffect(() => {
+    setLayoutResolved(false);
+    setLayout(undefined);
     setTabs([primaryTab]);
     setActiveTabId(primaryTab.id);
     setLinks([]);
@@ -69,31 +74,44 @@ export const TerminalDeck = ({
   );
 
   const loadLinks = useCallback((): void => {
-    linksRequestRef.current?.abort();
+    if (linksRequestRef.current) return;
     setLinksLoading(true);
     setLinksError(undefined);
     const controller = new AbortController();
     linksRequestRef.current = controller;
     void fetchTerminalLinks(agent.id, controller.signal)
       .then((response) => {
+        if (controller.signal.aborted) return;
+        setLayoutResolved(true);
+        setLayout(response.layout);
         setLinks(response.links);
         if (response.message) setLinksError(response.message);
       })
       .catch((error) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          setLayoutResolved(true);
+          setLayout(undefined);
           setLinksError(
             error instanceof Error ? error.message : "Companion terminals unavailable.",
           );
+        }
       })
       .finally(() => {
-        if (!controller.signal.aborted && linksRequestRef.current === controller)
+        if (!controller.signal.aborted && linksRequestRef.current === controller) {
           setLinksLoading(false);
+          linksRequestRef.current = undefined;
+        }
       });
   }, [agent.id]);
 
   useEffect(() => {
     loadLinks();
-    return () => linksRequestRef.current?.abort();
+    const timer = window.setInterval(loadLinks, 3000);
+    return () => {
+      window.clearInterval(timer);
+      linksRequestRef.current?.abort();
+      linksRequestRef.current = undefined;
+    };
   }, [loadLinks]);
 
   const cycle = (delta: number): void => {
@@ -112,6 +130,7 @@ export const TerminalDeck = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (layout) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.key.toLowerCase() === "tab") {
         event.preventDefault();
@@ -127,7 +146,7 @@ export const TerminalDeck = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [tabs]);
+  }, [tabs, layout]);
 
   const closeTab = (tabId: string): void => {
     if (tabId === primaryTab.id) {
@@ -220,85 +239,102 @@ export const TerminalDeck = ({
           >
             {terminalAppearanceLabel(terminalAppearance)}
           </button>
-          <button
-            aria-expanded={pickerOpen}
-            className="terminal-deck__companion"
-            disabled={linksLoading}
-            onClick={() => {
-              setPickerOpen((open) => !open);
-              setAgentPickerOpen(false);
-              setAgentQuery("");
-            }}
-            type="button"
-          >
-            {linksLoading ? "Loading…" : "+ Companion"}
-          </button>
+          {!layout ? (
+            <button
+              aria-expanded={pickerOpen}
+              className="terminal-deck__companion"
+              disabled={linksLoading}
+              onClick={() => {
+                setPickerOpen((open) => !open);
+                setAgentPickerOpen(false);
+                setAgentQuery("");
+              }}
+              type="button"
+            >
+              {linksLoading ? "Loading…" : "+ Companion"}
+            </button>
+          ) : null}
           <button aria-label="Close terminal deck" onClick={onClose} type="button">
             ×
           </button>
         </div>
       </header>
-      <div className="terminal-deck__tabbar">
-        <div aria-label="Open terminals" className="terminal-deck__tablist" role="tablist">
-          {tabs.map((tab, index) => (
-            <div className="terminal-deck__tab-item" key={tab.id}>
-              <button
-                aria-controls={`terminal-panel-${tab.id}`}
-                aria-selected={tab.id === activeTabId}
-                className="terminal-deck__tab"
-                id={`terminal-tab-${tab.id}`}
-                onClick={() => setActiveTabId(tab.id)}
-                role="tab"
-                tabIndex={tab.id === activeTabId ? 0 : -1}
-                type="button"
-              >
-                <span
-                  className={`terminal-deck__tab-dot terminal-deck__tab-dot--${tab.link?.kind ?? "primary"}`}
-                />
-                <span>{tab.link?.label ?? `Main · ${agent.displayName}`}</span>
-                <small>{index + 1}</small>
-              </button>
-              {tab.link ? (
-                <button
-                  aria-label={`Close ${tab.link.label}`}
-                  className="terminal-deck__tab-close"
-                  onClick={() => closeTab(tab.id)}
-                  type="button"
+      {!layoutResolved ? (
+        <p role="status">Loading host terminals…</p>
+      ) : layout ? (
+        <HostTerminalView
+          key={agent.id}
+          agent={agent}
+          layout={layout}
+          links={links}
+          theme={terminalTheme}
+          onClose={onClose}
+        />
+      ) : (
+        <>
+          <div className="terminal-deck__tabbar">
+            <div aria-label="Open terminals" className="terminal-deck__tablist" role="tablist">
+              {tabs.map((tab, index) => (
+                <div className="terminal-deck__tab-item" key={tab.id}>
+                  <button
+                    aria-controls={`terminal-panel-${tab.id}`}
+                    aria-selected={tab.id === activeTabId}
+                    className="terminal-deck__tab"
+                    id={`terminal-tab-${tab.id}`}
+                    onClick={() => setActiveTabId(tab.id)}
+                    role="tab"
+                    tabIndex={tab.id === activeTabId ? 0 : -1}
+                    type="button"
+                  >
+                    <span
+                      className={`terminal-deck__tab-dot terminal-deck__tab-dot--${tab.link?.kind ?? "primary"}`}
+                    />
+                    <span>{tab.link?.label ?? `Main · ${agent.displayName}`}</span>
+                    <small>{index + 1}</small>
+                  </button>
+                  {tab.link ? (
+                    <button
+                      aria-label={`Close ${tab.link.label}`}
+                      className="terminal-deck__tab-close"
+                      onClick={() => closeTab(tab.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <span className="terminal-deck__hint">⌘/Ctrl+Tab to switch</span>
+          </div>
+          <div className="terminal-deck__body">
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeTabId;
+              return (
+                <div
+                  aria-hidden={!isActive}
+                  aria-labelledby={`terminal-tab-${tab.id}`}
+                  className={`terminal-deck__panel${isActive ? " is-active" : ""}`}
+                  id={`terminal-panel-${tab.id}`}
+                  key={tab.id}
+                  role="tabpanel"
                 >
-                  ×
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-        <span className="terminal-deck__hint">⌘/Ctrl+Tab to switch</span>
-      </div>
-      <div className="terminal-deck__body">
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTabId;
-          return (
-            <div
-              aria-hidden={!isActive}
-              aria-labelledby={`terminal-tab-${tab.id}`}
-              className={`terminal-deck__panel${isActive ? " is-active" : ""}`}
-              id={`terminal-panel-${tab.id}`}
-              key={tab.id}
-              role="tabpanel"
-            >
-              <TerminalSurface
-                active={isActive}
-                agent={agent}
-                embedded
-                link={tab.link}
-                onClose={() => closeTab(tab.id)}
-                resizeMode="fit"
-                showHeader={false}
-                theme={terminalTheme}
-              />
-            </div>
-          );
-        })}
-      </div>
+                  <TerminalSurface
+                    active={isActive}
+                    agent={agent}
+                    embedded
+                    link={tab.link}
+                    onClose={() => closeTab(tab.id)}
+                    resizeMode="fit"
+                    showHeader={false}
+                    theme={terminalTheme}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
       {agentPickerOpen ? (
         <div
           aria-label="Switch agent terminal"

@@ -2,7 +2,7 @@
 
 Status: accepted web-only V1 implementation decision
 
-Updated: 2026-09-03
+Updated: 2026-09-08
 
 Related: [Observatory technical architecture](technical-architecture.md)
 
@@ -118,6 +118,25 @@ xterm.js as text unchanged. The browser consumes the complete DOM event
 sequence for a mapped key and emits terminal bytes only on `keydown`; allowing
 the follow-up legacy `keypress` through would also emit ordinary `Enter`.
 
+When Agent access includes a complete host terminal layout, the deck mirrors the
+host's tab order, labels and normalized pane rectangles in the Agent's execution
+container. Herdr translation remains in its adapter; the gateway exchanges all
+native targets and tab identities for process-local browser handles. Layouts
+are observations, never durable Universe topology. The renderer refreshes its
+layout observation every three seconds while the deck is open; the existing
+backend host refresh supplies the underlying observation.
+
+Opening an Agent selects its host tab and highlights its pane. Tab switching,
+keyboard focus and temporary pane maximisation remain browser-local. Changes
+observed from Herdr replace the layout; vanished targets unmount and release
+browser controllers. Other panes remain visible and receive output, but input
+is routed only to the locally focused pane. Leaving the deck releases controllers
+without closing any host process. The first pass displays existing tabs and
+splits; host tab creation, splitting, rearrangement and termination controls are
+deferred. A missing, incomplete or host-zoomed layout uses the existing deck
+below rather than inventing geometry. Unsupported layout does not remove basic
+terminal access.
+
 The terminal deck contains a primary `Main` tab and any selected companion
 tabs. Inactive tabs may remain mounted and receive frames; only the active tab
 receives ordinary keyboard input, paste and scroll. Opening, switching or
@@ -142,6 +161,13 @@ the diff when runtime context is useful and hide it again without leaving the
 review. Both are transient views over the same accepted Agent. `resizeMode:
 fit` lets the host PTY follow the visible xterm.js dimensions so wrapping stays
 faithful.
+
+Herdr publishes its cached access inventory synchronously after snapshot I/O
+settles. A refresh in flight must not temporarily erase Agent or companion
+access when multiple panes open together. A completed unavailable or malformed
+snapshot still clears access. Terminal-open failures stop the busy indicator
+and expose an explicit Retry connection action; retry uses the same server-side
+target revalidation and releases the previous browser controller.
 
 ## Failure and uncertainty rules
 

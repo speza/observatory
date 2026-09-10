@@ -264,11 +264,28 @@ export interface WebTerminalLink {
   readonly explanation: string;
 }
 
+export interface WebTerminalLayout {
+  readonly tabs: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly panes: readonly {
+      readonly id: string;
+      readonly linkId?: string;
+      readonly primary: boolean;
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }[];
+  }[];
+}
+
 export interface WebTerminalLinksResponse {
   readonly kind: "terminal-links";
   readonly agentId: string;
   readonly agentName: string;
   readonly links: readonly WebTerminalLink[];
+  readonly layout?: WebTerminalLayout;
   readonly message?: string;
 }
 

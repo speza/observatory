@@ -1,7 +1,9 @@
+import { parseTerminalLayout } from "./layout.ts";
 import { Effect, Schema } from "effect";
 import { appendFile } from "node:fs/promises";
 import type { Clock } from "../../universe/types.ts";
 import type {
+  HostTerminalLayout,
   HostActionResult,
   HostExecutionLaunchRequest,
   HostLaunchResult,
@@ -422,9 +424,8 @@ const linkedExecutionsFor = (
           paneId !== agent.nativeId &&
           Boolean(workspaceId) &&
           paneWorkspaceId === workspaceId &&
-          Boolean(wanted) &&
-          Boolean(paneCwd) &&
-          normalizedPath(paneCwd!) === wanted
+          (Array.isArray(snapshot.layouts) ||
+            (Boolean(wanted) && Boolean(paneCwd) && normalizedPath(paneCwd!) === wanted))
         );
       })
       .map((pane, index): LinkedExecution | undefined => {
@@ -533,6 +534,7 @@ export class HerdrHostAdapter implements SessionHost {
   private readonly runner: CommandRunner;
   private readonly terminalRunner: TerminalCommandRunner | undefined;
   private readonly clock: Clock;
+  private readonly liveLayouts = new Map<string, HostTerminalLayout>();
   private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
   private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
   private readonly livePaneWorkingDirectories = new Map<string, string>();
@@ -701,17 +703,22 @@ export class HerdrHostAdapter implements SessionHost {
     return this.waitForAgentObservation(paneId, remainingAttempts - 1);
   }
 
-  private async snapshotInternal(): Promise<HostSnapshot> {
+  private clearSnapshotAccess(): void {
     this.liveTargets.clear();
     this.liveLinkedExecutions.clear();
     this.livePaneWorkingDirectories.clear();
+    this.liveLayouts.clear();
     this.livePaneWorkspaces.clear();
     this.liveTerminalFingerprints.clear();
     this.liveAgentFingerprints.clear();
+  }
+
+  private async snapshotInternal(): Promise<HostSnapshot> {
     let result;
     try {
       result = await this.runner.run(["herdr", "api", "snapshot"]);
     } catch (error) {
+      this.clearSnapshotAccess();
       return {
         hostKind: "herdr",
         hostInstanceId: HERDR_HOST_INSTANCE_ID,
@@ -723,6 +730,9 @@ export class HerdrHostAdapter implements SessionHost {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+    // Publish access changes synchronously after I/O. Concurrent terminal opens
+    // must not observe an empty inventory while a refresh is still in flight.
+    this.clearSnapshotAccess();
     if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated) {
       return {
         hostKind: "herdr",
@@ -763,6 +773,12 @@ export class HerdrHostAdapter implements SessionHost {
           agent.nativeId,
           herdrTarget("herdr-agent-attach", agent.nativeId, fingerprint),
         );
+        const layout = parseTerminalLayout(
+          unwrapSnapshot(parsedPayload),
+          agent.nativeId,
+          this.liveTerminalFingerprints,
+        );
+        if (layout) this.liveLayouts.set(agent.nativeId, layout);
         const agentLinkedExecutions = linkedExecutions.get(agent.nativeId);
         if (agentLinkedExecutions)
           this.liveLinkedExecutions.set(agent.nativeId, agentLinkedExecutions);
@@ -813,6 +829,7 @@ export class HerdrHostAdapter implements SessionHost {
             }
           : undefined,
         linkedExecutions,
+        terminalLayout: this.liveLayouts.get(agentRef.nativeId),
         explanation: "Attach directly or open an embedded terminal for the running Herdr agent.",
       } satisfies AgentAccess;
     });

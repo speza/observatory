@@ -803,11 +803,16 @@ describe("ObservatoryWebApi", () => {
     expect(linksBody.links).toHaveLength(4);
     expect(firstLink).toBeDefined();
     expect(firstLink).not.toHaveProperty("target");
+    expect(linksBody.layout?.tabs[0]?.panes).toHaveLength(2);
+    expect(linksBody.layout?.tabs[0]?.panes[1]?.linkId).toBe(firstLink?.id);
+    expect(JSON.stringify(linksBody.layout)).not.toContain("mock-p01");
+    expect(JSON.stringify(linksBody.layout)).not.toContain("target");
     const refreshedLinksResponse = await api.fetch(
       new Request(`http://localhost/api/terminal/links?agentId=${encodeURIComponent(agent.id)}`),
     );
     const refreshedLinksBody: WebTerminalLinksResponse = await refreshedLinksResponse.json();
     expect(refreshedLinksResponse.status).toBe(200);
+    expect(refreshedLinksBody.layout).toEqual(linksBody.layout);
     expect(refreshedLinksBody.links.find((link) => link.label === firstLink?.label)?.id).toBe(
       firstLink?.id,
     );

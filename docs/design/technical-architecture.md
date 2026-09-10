@@ -138,7 +138,9 @@ and deliberately smaller than any concrete host protocol. It supports:
 - activation or native handoff;
 - close with target revalidation;
 - host-owned terminal streams; and
-- transient linked execution terminals.
+- transient linked execution terminals; and
+- optional host terminal layout observations, expressed as opaque tab identities
+  and normalized pane rectangles through Agent access.
 
 Identifiers and targets remain opaque outside the adapter. Herdr protocol
 names, workspace/tab/pane concepts and lifecycle rules stay in `hosts/herdr/`.

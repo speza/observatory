@@ -335,6 +335,47 @@ export class MockHostAdapter implements SessionHost {
           token: agent.nativeId,
         },
         linkedExecutions,
+        terminalLayout: {
+          tabs: [
+            {
+              id: "mock-layout",
+              label: "Agent and shell",
+              panes: [
+                {
+                  primary: true,
+                  target: { kind: "mock-terminal", token: agent.nativeId },
+                  x: 0,
+                  y: 0,
+                  width: linkedExecutions.some(
+                    (link) => link.source === "observed" && link.target && link.available,
+                  )
+                    ? 0.6
+                    : 1,
+                  height: 1,
+                },
+                ...linkedExecutions
+                  .filter((link) => link.source === "observed" && link.target && link.available)
+                  .slice(0, 1)
+                  .map((link) => ({
+                    primary: false,
+                    target: link.target!,
+                    x: 0.6,
+                    y: 0,
+                    width: 0.4,
+                    height: 1,
+                  })),
+              ],
+            },
+            ...linkedExecutions
+              .filter((link) => link.source === "observed" && link.target && link.available)
+              .slice(1)
+              .map((link) => ({
+                id: `mock-layout-${link.target!.token}`,
+                label: link.label,
+                panes: [{ primary: false, target: link.target!, x: 0, y: 0, width: 1, height: 1 }],
+              })),
+          ],
+        },
         explanation: "Simulate focus or open an embedded terminal in the deterministic mock host.",
       } satisfies AgentAccess;
     });

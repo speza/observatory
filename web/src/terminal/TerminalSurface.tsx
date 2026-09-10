@@ -27,6 +27,8 @@ export type TerminalTheme = "light" | "dark";
 
 interface TerminalSurfaceBaseProps {
   readonly active: boolean;
+  readonly visible?: boolean;
+  readonly focusRequest?: number;
   readonly embedded: boolean;
   readonly onClose: () => void;
   readonly resizeMode?: "fit" | "preserve";
@@ -76,6 +78,8 @@ const fitTerminal = (terminal: Terminal, fit: FitAddon) => {
 
 export const TerminalSurface = ({
   active,
+  visible = active,
+  focusRequest = 0,
   agent,
   launch,
   embedded,
@@ -95,13 +99,19 @@ export const TerminalSurface = ({
   const socketRef = useRef<WebSocket | null>(null);
   const sendMessageRef = useRef<(message: WebTerminalClientMessage) => void>(() => undefined);
   const activeRef = useRef(active);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const [status, setStatus] = useState(openingStatus);
   const [ready, setReady] = useState(false);
+  const [openingFailed, setOpeningFailed] = useState(false);
+  const [openAttempt, setOpenAttempt] = useState(0);
 
   useLayoutEffect(() => {
     setReady(false);
+    setOpeningFailed(false);
     setStatus(openingStatus);
-  }, [agent?.id, launch?.requestId, link?.id, openingStatus]);
+    // Display labels can change while the same connection remains healthy.
+  }, [agent?.id, launch?.requestId, link?.id, resizeMode, openAttempt]);
 
   const scrollTerminal = (request: WebTerminalScrollRequest): void => {
     sendMessageRef.current({ kind: "scroll", ...request });
@@ -127,7 +137,7 @@ export const TerminalSurface = ({
     terminal.focus();
     if (resizeMode === "preserve") return;
     sendMessageRef.current({ kind: "resize", ...dimensions });
-  }, [active, resizeMode]);
+  }, [active, resizeMode, focusRequest]);
 
   useEffect(() => {
     const element = host.current;
@@ -175,7 +185,10 @@ export const TerminalSurface = ({
     };
 
     const sendMessage = (message: WebTerminalClientMessage): void => {
-      if (!sessionId || !activeRef.current) return;
+      if (!sessionId) return;
+      if (message.kind === "resize") {
+        if (!visibleRef.current || resizeMode === "preserve") return;
+      } else if (!activeRef.current) return;
       const encoded = JSON.stringify(message);
       if (socket?.readyState === WebSocket.OPEN) socket.send(encoded);
       else if (!terminalClosed && queuedMessages.length < MAX_QUEUED_TERMINAL_MESSAGES)
@@ -259,15 +272,18 @@ export const TerminalSurface = ({
         };
         connectSocket();
         observer = new ResizeObserver(() => {
+          if (!visibleRef.current) return;
           const resized = fitTerminal(terminal, fit);
-          if (resizeMode === "preserve" || !activeRef.current) return;
+          if (resizeMode === "preserve") return;
           sendMessage({ kind: "resize", ...resized });
         });
         observer.observe(element);
       })
-      .catch((error) =>
-        setStatus(error instanceof Error ? error.message : "Terminal could not be opened."),
-      );
+      .catch((error) => {
+        if (disposed) return;
+        setOpeningFailed(true);
+        setStatus(error instanceof Error ? error.message : "Terminal could not be opened.");
+      });
 
     const input = terminal.onData(sendInput);
 
@@ -289,7 +305,7 @@ export const TerminalSurface = ({
       terminal.dispose();
       if (sessionId) void releaseWebTerminal(sessionId).catch(() => undefined);
     };
-  }, [agent?.id, launch?.requestId, link?.id, resizeMode]);
+  }, [agent?.id, launch?.requestId, link?.id, resizeMode, openAttempt]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -299,7 +315,7 @@ export const TerminalSurface = ({
 
   return (
     <section
-      aria-hidden={!active}
+      aria-hidden={!visible}
       aria-label={`${link?.label ?? label} terminal`}
       className={`terminal-surface terminal-surface--${theme}${embedded ? " terminal-surface--embedded" : ""}${launch ? " terminal-surface--pending" : ""}${showHeader ? "" : " terminal-surface--compact"}`}
       data-active={active ? "true" : "false"}
@@ -322,15 +338,22 @@ export const TerminalSurface = ({
         </header>
       ) : null}
       <div
-        aria-busy={!ready}
+        aria-busy={!ready && !openingFailed}
         className={`terminal-surface__viewport${ready ? " is-ready" : " is-preparing"}`}
         onWheelCapture={handleWheel}
       >
         <div className="terminal-surface__frame" ref={host} />
         {!ready ? (
           <div aria-live="polite" className="terminal-surface__mask">
-            <span className="overline">TERMINAL CONNECTION</span>
+            <span className="overline">
+              {openingFailed ? "TERMINAL UNAVAILABLE" : "TERMINAL CONNECTION"}
+            </span>
             <strong>{status}</strong>
+            {openingFailed ? (
+              <button type="button" onClick={() => setOpenAttempt((attempt) => attempt + 1)}>
+                Retry connection
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -81,6 +81,27 @@ const TerminalLinksSchema: Schema.Schema<WebTerminalLinksResponse> = Schema.Stru
   agentId: Schema.String,
   agentName: Schema.String,
   links: Schema.Array(TerminalLinkSchema),
+  layout: Schema.optional(
+    Schema.Struct({
+      tabs: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          label: Schema.String,
+          panes: Schema.Array(
+            Schema.Struct({
+              id: Schema.String,
+              linkId: Schema.optional(Schema.String),
+              primary: Schema.Boolean,
+              x: Schema.Number,
+              y: Schema.Number,
+              width: Schema.Number,
+              height: Schema.Number,
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
   message: Schema.optional(Schema.String),
 });
 const TerminalActionSchema = Schema.Struct({ ok: Schema.Literal(true), message: Schema.String });

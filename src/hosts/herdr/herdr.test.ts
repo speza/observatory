@@ -162,6 +162,41 @@ class FakeTerminalRunner implements TerminalCommandRunner {
   }
 }
 
+test("access remains available while another pane revalidates the host snapshot", async () => {
+  let releaseRefresh: (() => void) | undefined;
+  let refreshStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    refreshStarted = resolve;
+  });
+  let delayed = false;
+  const host = new HerdrHostAdapter({
+    clock: new FixedClock(1000),
+    runner: {
+      run: async () => {
+        if (delayed) {
+          refreshStarted!();
+          await new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+          });
+        }
+        return { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" };
+      },
+    },
+  });
+  await Effect.runPromise(host.snapshot());
+  const agent = { hostKind: "herdr", nativeId: "fixture-w2:p1" };
+  const before = await Effect.runPromise(host.access(agent));
+  expect(before.supported).toBe(true);
+  delayed = true;
+  const refresh = Effect.runPromise(host.snapshot());
+  await started;
+  const during = await Effect.runPromise(host.access(agent));
+  releaseRefresh!();
+  await refresh;
+  expect(during).toEqual(before);
+  expect(during.linkedExecutions.some((link) => link.available)).toBe(true);
+});
+
 describe("Herdr adapter", () => {
   test("parses recognized agents into agents and ignores non-agent panes", () => {
     const snapshot = parseHerdrSnapshot(fixture, 12_345);

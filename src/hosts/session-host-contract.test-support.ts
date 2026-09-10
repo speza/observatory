@@ -35,6 +35,32 @@ export const defineSessionHostContractTests = (
       expect(access.explanation.length).toBeGreaterThan(0);
     });
 
+    test("layout observations reference the same revalidated terminal capabilities", async () => {
+      const { host, agent } = await createHarness();
+      await Effect.runPromise(host.snapshot());
+      const access = await Effect.runPromise(host.access(agent));
+      if (!access.terminalLayout) return;
+      const panes = access.terminalLayout.tabs.flatMap((tab) => tab.panes);
+      expect(panes.filter((pane) => pane.primary)).toHaveLength(1);
+      for (const pane of panes) {
+        expect(pane.width).toBeGreaterThan(0);
+        expect(pane.height).toBeGreaterThan(0);
+        expect(pane.x + pane.width).toBeLessThanOrEqual(1);
+        expect(pane.y + pane.height).toBeLessThanOrEqual(1);
+        if (pane.primary) expect(pane.target).toEqual(access.terminalTarget!);
+        else
+          expect(
+            access.linkedExecutions.some(
+              (link) =>
+                link.available &&
+                link.target?.kind === pane.target.kind &&
+                link.target.token === pane.target.token &&
+                link.target.fingerprint === pane.target.fingerprint,
+            ),
+          ).toBe(true);
+      }
+    });
+
     test("supports the primary terminal lifecycle", async () => {
       const { host, agent } = await createHarness();
       await Effect.runPromise(host.snapshot());

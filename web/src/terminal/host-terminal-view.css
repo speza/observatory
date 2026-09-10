@@ -1,0 +1,46 @@
+.host-terminal-layout {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.host-terminal-pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--hairline);
+}
+.host-terminal-pane[hidden] {
+  display: none;
+}
+.host-terminal-pane.is-focused {
+  border-color: var(--accent);
+}
+.host-terminal-pane > header {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  gap: 6px;
+}
+.host-terminal-pane > header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.host-terminal-pane__focus {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 11px;
+}
+.host-terminal-pane > .terminal-surface {
+  flex: 1;
+  min-height: 0;
+}

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { Effect, Schema, Stream } from "effect";
 import {
   hasAgentCapability,
@@ -23,6 +24,10 @@ import {
   type WebTerminalScrollRequest,
   type WebTerminalServerMessage,
 } from "./protocol.ts";
+
+const layoutHandleKey = crypto.randomUUID();
+const layoutHandle = (value: string): string =>
+  createHmac("sha256", layoutHandleKey).update(value).digest("hex");
 
 const MAX_TERMINAL_BODY_BYTES = 65_536;
 const MAX_REPLAY_EVENTS = 128;
@@ -188,6 +193,28 @@ export class WebTerminalGateway {
       agentId: agent.id,
       agentName: agent.displayName,
       links,
+      layout: access.terminalLayout
+        ? {
+            tabs: access.terminalLayout.tabs.map((tab) => ({
+              id: layoutHandle(`${agent.id}:${tab.id}`),
+              label: boundedText(tab.label, "Terminal"),
+              panes: tab.panes.map((pane) => {
+                const index = access.linkedExecutions.findIndex(
+                  (link) =>
+                    link.target?.kind === pane.target.kind &&
+                    link.target.token === pane.target.token &&
+                    link.target.fingerprint === pane.target.fingerprint,
+                );
+                const { target, ...geometry } = pane;
+                return {
+                  ...geometry,
+                  id: layoutHandle(`${agent.id}:${target.token}:${target.fingerprint}`),
+                  linkId: pane.primary ? undefined : links[index]?.id,
+                };
+              }),
+            })),
+          }
+        : undefined,
     } satisfies WebTerminalLinksResponse;
   }
 
