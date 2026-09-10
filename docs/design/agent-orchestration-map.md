@@ -75,6 +75,10 @@ A System is a broad human-authored area of work. It can span repositories,
 worktrees, hosts and providers. Systems scope the top-level portfolio without
 turning infrastructure into organisation.
 
+A reserved `Default` System is seeded automatically and receives Goals created
+without an explicit System. It is an ordinary, renamable System and behaves like
+any other scope; it exists so that organisation never blocks starting work.
+
 ### Goal
 
 A Goal is a durable human intention within a System. It owns priority,

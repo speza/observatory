@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Priority } from "../../../src/universe/types.ts";
+import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
 import type { SystemView } from "../../../src/projection/types.ts";
 import type { WebCommand } from "../../../src/web/protocol.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
@@ -26,7 +26,7 @@ export const NewGoalDialog = ({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("P2");
-  const [systemId, setSystemId] = useState(defaultSystemId ?? "");
+  const [systemId, setSystemId] = useState(defaultSystemId ?? DEFAULT_SYSTEM_ID);
   return (
     <ModalDialog ariaLabelledBy="new-goal-title" className="modal-backdrop" onClose={onCancel}>
       <section className="goal-dialog">
@@ -61,7 +61,6 @@ export const NewGoalDialog = ({
           <label>
             <span>System</span>
             <select onChange={(event) => setSystemId(event.target.value)} value={systemId}>
-              <option value="">No system</option>
               {systems.map((system) => (
                 <option key={system.id} value={system.id}>
                   {system.title}
@@ -100,7 +99,7 @@ export const NewGoalDialog = ({
                 title,
                 description,
                 priority,
-                systemId: systemId || undefined,
+                systemId,
               })
             }
             type="button"

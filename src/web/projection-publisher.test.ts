@@ -61,7 +61,11 @@ describe("projection publisher", () => {
     expect(command.portfolio.epoch).toBe(first.epoch);
     expect(command.portfolio.revision).toBeGreaterThan(first.revision);
     expect(command.portfolio.map.generatedAt).toBe(first.map.generatedAt);
-    expect(command.portfolio.commandCentre.systems).toHaveLength(1);
+    const createdSystemId = command.result.systemId;
+    if (!createdSystemId) throw new Error("Expected a created system id.");
+    expect(command.portfolio.commandCentre.systems.map((system) => system.id)).toContain(
+      createdSystemId,
+    );
     const reader = publisher.stream(request()).body!.getReader();
     expect(eventData((await reader.read()).value!).revision).toBe(command.portfolio.revision);
     expect(publisher.current().portfolio).toEqual({

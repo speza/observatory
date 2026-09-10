@@ -12,6 +12,7 @@ import type {
   WebPendingLaunch,
 } from "../../../src/web/protocol.ts";
 import type { ConversationHistoryView } from "../../../src/conversations/types.ts";
+import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
 import {
   closeAndArchiveAgents,
   executeCommand,
@@ -40,7 +41,7 @@ import { SystemsOverview } from "../systems/SystemsOverview.tsx";
 import { ThemeToggle } from "../shared/ThemeToggle.tsx";
 import { useBrowserSettings } from "../settings/browserSettings.ts";
 import { scopePortfolio } from "../systems/scopedPortfolio.ts";
-import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "../systems/systemScope.ts";
+import { systemScopeForSelection } from "../systems/systemScope.ts";
 import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "../workspace-review/WorkspaceReview.tsx";
 import { useSearch } from "../search/useSearch.ts";
@@ -149,7 +150,7 @@ export const App = (): React.JSX.Element => {
       const response = await executeCommand(command);
       portfolio.accept(response.portfolio);
       if (command.type === "AssignGoalToSystem") {
-        setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
+        setSelectedSystemId(response.result.systemId);
       } else if (command.type === "AssignAgent") {
         setSelectedSystemId(
           systemScopeForSelection(
@@ -798,7 +799,7 @@ export const App = (): React.JSX.Element => {
                     <p className="overline">Overview</p>
                     <h2>
                       {data.commandCentre.systems.find((system) => system.id === selectedSystemId)
-                        ?.title ?? (selectedSystemId ? "No system" : "All systems")}
+                        ?.title ?? "All systems"}
                     </h2>
                   </div>
                 </header>
@@ -808,7 +809,7 @@ export const App = (): React.JSX.Element => {
                       ?.description ?? "Select a goal or agent to see its details and actions."}
                   </p>
 
-                  {selectedSystemId && selectedSystemId !== NO_SYSTEM_SCOPE ? (
+                  {selectedSystemId ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -1014,13 +1015,12 @@ export const App = (): React.JSX.Element => {
             const goalId = response?.result.goalId;
             if (!goalId) return;
             setNewGoalOpen(false);
-            if (command.type === "CreateGoal")
-              setSelectedSystemId(command.systemId ?? NO_SYSTEM_SCOPE);
+            if (command.type === "CreateGoal") setSelectedSystemId(response.result.systemId);
             setSelection({ type: "goal", id: goalId });
           }}
           pending={commandPending}
           systems={data.commandCentre.systems}
-          defaultSystemId={selectedSystemId === NO_SYSTEM_SCOPE ? undefined : selectedSystemId}
+          defaultSystemId={selectedSystemId ?? DEFAULT_SYSTEM_ID}
         />
       ) : null}
       {systemDialogOpen ? (

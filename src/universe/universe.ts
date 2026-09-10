@@ -5,8 +5,8 @@ import type {
 import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
 import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
 import {
+  DEFAULT_SYSTEM_ID,
   cloneUniverseState,
-  emptyUniverseState,
   isCurrentAttentionState,
   type Clock,
   type ExecutionContainerRef,
@@ -209,6 +209,36 @@ const replaceSystem = (state: UniverseState, system: System): void => {
 
 const replaceAgent = (state: UniverseState, agent: Agent): void => {
   state.agents = state.agents.map((candidate) => (candidate.id === agent.id ? agent : candidate));
+};
+
+const DEFAULT_SYSTEM_TITLE = "Default";
+const DEFAULT_SYSTEM_DESCRIPTION = "Work that has not been filed into another System.";
+
+/**
+ * Seeds the reserved Default System when missing and files any legacy unfiled
+ * Goals into it. This is a one-way normalisation: System membership becomes
+ * total without inventing a Goal or Agent.
+ */
+const ensureDefaultSystem = (state: UniverseState, now: number): boolean => {
+  const hasDefault = state.systems.some((system) => system.id === DEFAULT_SYSTEM_ID);
+  const unfiledGoals = state.goals.filter((goal) => !goal.systemId);
+  if (hasDefault && unfiledGoals.length === 0) return false;
+  if (!hasDefault)
+    state.systems = [
+      ...state.systems,
+      {
+        id: DEFAULT_SYSTEM_ID,
+        title: DEFAULT_SYSTEM_TITLE,
+        description: DEFAULT_SYSTEM_DESCRIPTION,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+  if (unfiledGoals.length > 0)
+    state.goals = state.goals.map((goal) =>
+      goal.systemId ? goal : { ...goal, systemId: DEFAULT_SYSTEM_ID },
+    );
+  return true;
 };
 
 const repairUnpinnedGoalPosition = (state: UniverseState, goalId: GoalId): void => {
@@ -991,6 +1021,7 @@ export class Universe {
     private readonly events?: ControlPlaneEventSink,
   ) {
     this.state = store.load();
+    if (ensureDefaultSystem(this.state, this.clock.now())) this.store.save(this.state);
   }
 
   snapshot(): UniverseState {
@@ -1233,12 +1264,12 @@ export class Universe {
         const id = command.id ?? this.ids.next("goal");
         if (next.goals.some((goal) => goal.id === id))
           return { ok: false, error: `Goal ${id} already exists.` };
-        if (command.systemId && !findSystem(next, command.systemId))
-          return { ok: false, error: "System not found." };
+        const systemId = command.systemId ?? DEFAULT_SYSTEM_ID;
+        if (!findSystem(next, systemId)) return { ok: false, error: "System not found." };
         const description = normalizeText(command.description);
         const goal = {
           id,
-          systemId: command.systemId,
+          systemId,
           title,
           priority: command.priority ?? "P2",
           status: "active" as const,
@@ -1249,7 +1280,7 @@ export class Universe {
         };
         if (description) Object.assign(goal, { description });
         next.goals = [...next.goals, goal];
-        result = { ok: true, goalId: id };
+        result = { ok: true, goalId: id, systemId };
         break;
       }
       case "RenameGoal": {
@@ -1323,10 +1354,10 @@ export class Universe {
       case "AssignGoalToSystem": {
         const goal = findGoal(next, command.goalId);
         if (!goal) return { ok: false, error: "Goal not found." };
-        if (command.systemId && !findSystem(next, command.systemId))
-          return { ok: false, error: "System not found." };
-        replaceGoal(next, { ...goal, systemId: command.systemId, updatedAt: now });
-        result = { ok: true, goalId: goal.id, systemId: command.systemId };
+        const systemId = command.systemId ?? DEFAULT_SYSTEM_ID;
+        if (!findSystem(next, systemId)) return { ok: false, error: "System not found." };
+        replaceGoal(next, { ...goal, systemId, updatedAt: now });
+        result = { ok: true, goalId: goal.id, systemId };
         break;
       }
       case "AssignAgent": {
@@ -1761,9 +1792,4 @@ export const createEmptyUniverse = (
   clock: Clock,
   ids: IdGenerator,
   projections: ProjectionModule,
-): Universe => {
-  const state = store.load();
-  if (state.systems.length === 0 && state.goals.length === 0 && state.agents.length === 0)
-    store.save(emptyUniverseState());
-  return new Universe(store, clock, ids, projections);
-};
+): Universe => new Universe(store, clock, ids, projections);

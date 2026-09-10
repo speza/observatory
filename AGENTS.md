@@ -10,8 +10,9 @@
   queues, inboxes and inspectors are supporting lenses.
 - V1's durable topology is `System -> Goal -> Agent`. A System is a
   human-authored broad area of work that may span repositories, worktrees and
-  hosts. Repositories, worktrees and Herdr spaces remain agent metadata, not
-  organisational nodes.
+  hosts. A reserved `Default` System is seeded at startup and receives Goals
+  created without an explicit System. Repositories, worktrees and Herdr spaces
+  remain agent metadata, not organisational nodes.
 - Goal priority, completion and agent/goal archive remain human-controlled
   unless an explicit auto policy says otherwise.
 - Preserve uncertainty. Never convert missing, stale or inferred host facts

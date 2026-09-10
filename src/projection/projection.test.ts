@@ -190,16 +190,14 @@ describe("projections", () => {
 
     const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
-    expect(projection.systems).toMatchObject([
-      {
-        title: "Observatory",
-        agentCount: 1,
-        workingCount: 1,
-        goals: [{ title: "Ship systems" }],
-      },
-    ]);
+    expect(projection.systems.find((system) => system.id === "system-1")).toMatchObject({
+      title: "Observatory",
+      agentCount: 1,
+      workingCount: 1,
+      goals: [{ title: "Ship systems" }],
+    });
     expect(projection.goals[0]?.agents[0]?.primaryGoalId).toBe("goal-1");
-    expect(projection.counts.systems).toBe(1);
+    expect(projection.counts.systems).toBe(2);
   });
 
   test("groups agents by observed code context without changing goal assignment", () => {

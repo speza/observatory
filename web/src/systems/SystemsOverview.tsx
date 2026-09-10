@@ -1,9 +1,4 @@
-import type {
-  CommandCentreProjection,
-  GoalView,
-  SystemView,
-} from "../../../src/projection/types.ts";
-import { NO_SYSTEM_SCOPE } from "./systemScope.ts";
+import type { CommandCentreProjection, SystemView } from "../../../src/projection/types.ts";
 
 interface SystemsOverviewProps {
   readonly projection: CommandCentreProjection;
@@ -53,39 +48,12 @@ const SystemCard = ({
   </article>
 );
 
-const UnassignedGoalsCard = ({
-  goals,
-  onOpen,
-}: {
-  readonly goals: readonly GoalView[];
-  readonly onOpen: () => void;
-}): React.JSX.Element => (
-  <article className="system-card system-card--unassigned">
-    <button className="system-card__open" onClick={onOpen} type="button">
-      <span className="overline">NO SYSTEM / {String(goals.length).padStart(2, "0")} GOALS</span>
-      <strong>Unassigned goals</strong>
-      <p>Open a Goal in the Ledger or Atlas to place it in a System.</p>
-      <dl>
-        <div>
-          <dt>Agents</dt>
-          <dd>{goals.reduce((total, goal) => total + goal.agents.length, 0)}</dd>
-        </div>
-        <div className={goals.some((goal) => goal.attentionCount > 0) ? "is-attention" : ""}>
-          <dt>Needs you</dt>
-          <dd>{goals.reduce((total, goal) => total + goal.attentionCount, 0)}</dd>
-        </div>
-      </dl>
-    </button>
-  </article>
-);
-
 export const SystemsOverview = ({
   projection,
   onCreate,
   onEdit,
   onOpen,
 }: SystemsOverviewProps): React.JSX.Element => {
-  const unassignedGoals = projection.goals.filter((goal) => !goal.systemId);
   return (
     <section className="systems-overview" aria-label="Systems overview">
       <header>
@@ -102,11 +70,8 @@ export const SystemsOverview = ({
         {projection.systems.map((system) => (
           <SystemCard key={system.id} onEdit={onEdit} onOpen={onOpen} system={system} />
         ))}
-        {unassignedGoals.length > 0 ? (
-          <UnassignedGoalsCard goals={unassignedGoals} onOpen={() => onOpen(NO_SYSTEM_SCOPE)} />
-        ) : null}
       </div>
-      {projection.systems.length === 0 && unassignedGoals.length === 0 ? (
+      {projection.systems.length === 0 ? (
         <div className="systems-overview__empty">
           <p>No Systems yet.</p>
           <button onClick={onCreate} type="button">

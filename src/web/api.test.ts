@@ -622,7 +622,10 @@ describe("ObservatoryWebApi", () => {
     const goalId = createdBody.result.goalId;
     if (!goalId) throw new Error("Expected created goal id.");
     expect(createdBody.portfolio.commandCentre.goals[0]?.title).toBe("Build the command loop");
-    expect(createdBody.portfolio.commandCentre.systems[0]?.goals[0]?.id).toBe(goalId);
+    expect(
+      createdBody.portfolio.commandCentre.systems.find((system) => system.id === systemId)?.goals[0]
+        ?.id,
+    ).toBe(goalId);
 
     expect(
       (await command({ type: "AssignGoalToSystem", goalId, systemId: undefined })).status,

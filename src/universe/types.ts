@@ -10,6 +10,9 @@ export type RuntimeState = (typeof RUNTIME_STATES)[number];
 export type GoalId = string;
 export type SystemId = string;
 export type AgentId = string;
+
+/** Reserved System that receives Goals created without an explicit System. */
+export const DEFAULT_SYSTEM_ID = "system:default";
 export type AgentContinuity = "proved" | "interrupted" | "replaced" | "unknown";
 export type ProviderContinuity = "confirmed" | "missing" | "unknown";
 export type ExecutionPresence = "live" | "absent" | "unknown" | "conflict";

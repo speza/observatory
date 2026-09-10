@@ -6,7 +6,6 @@ import type {
   GoalView,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "./selection.ts";
-import { NO_SYSTEM_SCOPE } from "../systems/systemScope.ts";
 
 export type NavigationView = "all" | "attention" | "unassigned";
 
@@ -153,24 +152,6 @@ export const WorkspaceNavigation = ({
           {system.goals.map(goalRow)}
         </details>
       ))}
-      {goals.some((goal) => !goal.systemId) ? (
-        <details
-          className="workspace-tree__system"
-          open={view === "attention" || systemId === NO_SYSTEM_SCOPE || undefined}
-        >
-          <summary
-            aria-current={systemId === NO_SYSTEM_SCOPE && !selection ? "true" : undefined}
-            className={systemId === NO_SYSTEM_SCOPE && selection ? "is-ancestor" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              onSystem(NO_SYSTEM_SCOPE);
-            }}
-          >
-            <span>No system</span>
-          </summary>
-          {goals.filter((goal) => !goal.systemId).map(goalRow)}
-        </details>
-      ) : null}
       {unassigned.length ? (
         <section className="workspace-tree__unassigned" aria-label="Unassigned agents">
           {view !== "unassigned" ? <p className="overline">Unassigned</p> : null}

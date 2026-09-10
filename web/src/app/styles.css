@@ -2045,9 +2045,6 @@ button {
   text-transform: uppercase;
   cursor: pointer;
 }
-.system-card--unassigned {
-  border-style: dashed;
-}
 .systems-overview__empty {
   max-width: 1100px;
   margin: 50px auto;

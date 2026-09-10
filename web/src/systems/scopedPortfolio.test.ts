@@ -4,8 +4,9 @@ import {
   hostSnapshot,
   makeUniverse,
 } from "../../../src/universe/test-support.ts";
+import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
 import { scopePortfolio } from "./scopedPortfolio.ts";
-import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
+import { systemScopeForSelection } from "./systemScope.ts";
 import { projectPortfolio } from "../../../src/web/portfolio.ts";
 import { orderTerminalAgents } from "../terminal/terminalAgents.ts";
 
@@ -75,7 +76,7 @@ describe("scopePortfolio", () => {
       universe.execute({ type: "CompleteGoal", goalId: "goal-1" });
       universe.execute({ type: "ArchiveGoal", goalId: "goal-1" });
       const current = projectPortfolio(universe, clock.now())!;
-      const scope = systemId ?? NO_SYSTEM_SCOPE;
+      const scope = systemId ?? DEFAULT_SYSTEM_ID;
       expect(systemScopeForSelection({ type: "agent", id: "agent-1" }, current.commandCentre)).toBe(
         scope,
       );
@@ -141,10 +142,10 @@ describe("scopePortfolio", () => {
     expect(scoped.workingAgentCount).toBe(1);
   });
 
-  test("represents ungrouped Goals as an explicit scope", () => {
-    const scoped = scopePortfolio(portfolio, NO_SYSTEM_SCOPE);
+  test("represents the Default system as a first-class scope", () => {
+    const scoped = scopePortfolio(portfolio, DEFAULT_SYSTEM_ID);
 
-    expect(scoped.commandCentre.systems).toEqual([]);
+    expect(scoped.commandCentre.systems.map((system) => system.id)).toEqual([DEFAULT_SYSTEM_ID]);
     expect(scoped.commandCentre.goals.map((goal) => goal.id)).toEqual(["goal-2"]);
     expect(scoped.map.goals.map((goal) => goal.id)).toEqual(["goal-2"]);
     expect(scoped.workingAgentCount).toBe(0);

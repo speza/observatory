@@ -26,7 +26,10 @@ explicit seams instead of leaking through the model.
 ## Product invariants
 
 - The durable topology is `System → Goal → Agent`.
-- Systems and Goals are human-authored semantic organisation.
+- Systems and Goals are human-authored semantic organisation. The single
+  exception is a reserved `Default` System seeded at startup: Goals created
+  without an explicit System are filed into it, so System membership is total
+  without making organisation a prerequisite.
 - Repositories, worktrees, hosts and terminal containers are Agent metadata,
   never organisational nodes.
 - A durable Agent represents an exactly identified provider conversation, not a

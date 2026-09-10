@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import { createProjectionModule } from "../projection/projection.ts";
 import { createEmptyUniverse } from "./universe.ts";
+import { DEFAULT_SYSTEM_ID, emptyUniverseState } from "./types.ts";
 import {
   makeUniverse,
   hostSnapshot,
@@ -70,8 +71,56 @@ describe("Universe", () => {
 
     const reloaded = createEmptyUniverse(store, clock, new SequenceIds(), createProjectionModule());
 
-    expect(reloaded.snapshot().systems[0]?.title).toBe("Long-running system");
+    expect(reloaded.snapshot().systems.find((system) => system.id === "system-1")?.title).toBe(
+      "Long-running system",
+    );
     expect(store.saves).toBe(saves);
+  });
+
+  test("seeds one Default system and routes unfiled goals into it", () => {
+    const { universe } = makeUniverse();
+    expect(universe.snapshot().systems).toMatchObject([
+      { id: DEFAULT_SYSTEM_ID, title: "Default" },
+    ]);
+    expect(universe.execute({ type: "CreateGoal", title: "Unsorted" })).toEqual({
+      ok: true,
+      goalId: "goal-1",
+      systemId: DEFAULT_SYSTEM_ID,
+    });
+    expect(universe.execute({ type: "AssignGoalToSystem", goalId: "goal-1" }).ok).toBe(true);
+    expect(universe.snapshot().goals[0]?.systemId).toBe(DEFAULT_SYSTEM_ID);
+
+    universe.execute({ type: "CreateSystem", title: "Observatory" });
+    expect(
+      universe.execute({
+        type: "AssignGoalToSystem",
+        goalId: "goal-1",
+        systemId: "system-1",
+      }),
+    ).toEqual({ ok: true, goalId: "goal-1", systemId: "system-1" });
+    expect(universe.execute({ type: "AssignGoalToSystem", goalId: "goal-1" })).toEqual({
+      ok: true,
+      goalId: "goal-1",
+      systemId: DEFAULT_SYSTEM_ID,
+    });
+  });
+
+  test("adopts legacy unfiled goals into the Default system on load", () => {
+    const state = emptyUniverseState();
+    state.goals.push({
+      id: "goal-legacy",
+      title: "Legacy unfiled goal",
+      priority: "P2",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const { universe } = makeUniverse({ state });
+    const snapshot = universe.snapshot();
+
+    expect(snapshot.systems).toMatchObject([{ id: DEFAULT_SYSTEM_ID, title: "Default" }]);
+    expect(snapshot.goals[0]?.systemId).toBe(DEFAULT_SYSTEM_ID);
   });
 
   test("organises goals into durable human-authored systems", () => {
@@ -89,7 +138,7 @@ describe("Universe", () => {
         title: "Ship the Atlas",
         systemId: "system-1",
       }),
-    ).toEqual({ ok: true, goalId: "goal-1" });
+    ).toEqual({ ok: true, goalId: "goal-1", systemId: "system-1" });
     expect(
       universe.execute({
         type: "CreateGoal",
@@ -112,8 +161,10 @@ describe("Universe", () => {
     ).toBe(true);
 
     const state = universe.snapshot();
-    expect(state.systems[0]?.title).toBe("Observatory product");
-    expect(state.goals[0]?.systemId).toBeUndefined();
+    expect(state.systems.find((system) => system.id === "system-1")?.title).toBe(
+      "Observatory product",
+    );
+    expect(state.goals[0]?.systemId).toBe(DEFAULT_SYSTEM_ID);
   });
 
   test("enforces goal lifecycle and direct assignment through its interface", () => {
@@ -125,7 +176,7 @@ describe("Universe", () => {
         priority: "P0",
         description: "Walk the live path.",
       }),
-    ).toEqual({ ok: true, goalId: "goal-1" });
+    ).toEqual({ ok: true, goalId: "goal-1", systemId: DEFAULT_SYSTEM_ID });
     expect(
       admitObservedConversationsAndReconcile(
         universe,

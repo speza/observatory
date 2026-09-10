@@ -66,15 +66,6 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
     description: system.description,
     goals: projection.goals.filter((goal) => goal.systemId === system.id),
   }));
-  const ungroupedGoals = projection.goals.filter((goal) => !goal.systemId);
-  if (ungroupedGoals.length > 0)
-    groups.push({
-      id: "unassigned",
-      title: "No system",
-      description: "Goals awaiting broader organisation.",
-      goals: ungroupedGoals,
-    });
-
   return (
     <section className="ledger" aria-label="Systems, goals, and agents ledger">
       <header>

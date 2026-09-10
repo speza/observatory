@@ -4,7 +4,6 @@ import type {
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
 import type { PortfolioResponse } from "../../../src/web/portfolio.ts";
-import { NO_SYSTEM_SCOPE } from "./systemScope.ts";
 
 export interface ScopedPortfolio {
   readonly commandCentre: CommandCentreProjection;
@@ -27,11 +26,7 @@ export const scopePortfolio = (
   const map = selectedSystemId
     ? {
         ...portfolio.map,
-        goals: portfolio.map.goals.filter((goal) =>
-          selectedSystemId === NO_SYSTEM_SCOPE
-            ? goal.systemId === undefined
-            : goal.systemId === selectedSystemId,
-        ),
+        goals: portfolio.map.goals.filter((goal) => goal.systemId === selectedSystemId),
         counts: commandCentre.counts,
       }
     : portfolio.map;
@@ -49,11 +44,7 @@ const scopeCommandCentre = (
   projection: CommandCentreProjection,
   selectedSystemId: string,
 ): CommandCentreProjection => {
-  const goals = projection.goals.filter((goal) =>
-    selectedSystemId === NO_SYSTEM_SCOPE
-      ? goal.systemId === undefined
-      : goal.systemId === selectedSystemId,
-  );
+  const goals = projection.goals.filter((goal) => goal.systemId === selectedSystemId);
   const goalIds = new Set(goals.map((goal) => goal.id));
   const agents = goals.flatMap((goal) => goal.agents);
   const attentionItems = projection.attention.items.filter(
@@ -71,7 +62,7 @@ const scopeCommandCentre = (
     },
     counts: {
       ...projection.counts,
-      systems: selectedSystemId === NO_SYSTEM_SCOPE ? 0 : 1,
+      systems: 1,
       goals: goals.length,
       agents: agents.length,
       attention: goals.reduce((total, goal) => total + goal.attentionCount, 0),

@@ -4,7 +4,7 @@ import type {
   CommandCentreProjection,
   InspectorProjection,
 } from "../../../src/projection/types.ts";
-import type { Priority } from "../../../src/universe/types.ts";
+import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol.ts";
 import { RepositoryStatus } from "./RepositoryStatus.tsx";
 
@@ -137,12 +137,11 @@ export const Inspector = ({
                 void onCommand({
                   type: "AssignGoalToSystem",
                   goalId: goal.id,
-                  systemId: event.target.value || undefined,
+                  systemId: event.target.value,
                 })
               }
-              value={goal.systemId ?? ""}
+              value={goal.systemId ?? DEFAULT_SYSTEM_ID}
             >
-              <option value="">No system</option>
               {commandCentre.systems.map((system) => (
                 <option key={system.id} value={system.id}>
                   {system.title}

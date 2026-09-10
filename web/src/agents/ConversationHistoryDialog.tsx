@@ -68,7 +68,7 @@ export const ConversationHistoryDialog = ({
     [systems],
   );
   const goalOptionLabel = (goal: GoalView): string =>
-    `${goal.systemId ? (systemTitles.get(goal.systemId) ?? "Unknown system") : "No system"} · ${goal.priority} · ${goal.title}`;
+    `${systemTitles.get(goal.systemId ?? "") ?? "Unknown system"} · ${goal.priority} · ${goal.title}`;
 
   const providers = useMemo(
     () => [...new Set(conversations.map((conversation) => conversation.providerLabel))].sort(),

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
 import {
   admitObservedConversationsAndReconcile,
   hostSnapshot,
   makeUniverse,
 } from "../../../src/universe/test-support.ts";
-import { NO_SYSTEM_SCOPE, systemScopeForSelection } from "./systemScope.ts";
+import { systemScopeForSelection } from "./systemScope.ts";
 
 const fixture = makeUniverse();
 fixture.universe.execute({ type: "CreateSystem", title: "Observatory" });
@@ -47,7 +48,7 @@ describe("systemScopeForSelection", () => {
     expect(systemScopeForSelection({ type: "goal", id: "goal-1" }, projection)).toBe("system-1");
     expect(systemScopeForSelection({ type: "agent", id: "agent-1" }, projection)).toBe("system-1");
     expect(systemScopeForSelection({ type: "goal", id: "goal-2" }, projection)).toBe(
-      NO_SYSTEM_SCOPE,
+      DEFAULT_SYSTEM_ID,
     );
     expect(systemScopeForSelection({ type: "agent", id: "agent-2" }, projection)).toBeUndefined();
     expect(systemScopeForSelection({ type: "agent", id: "missing" }, projection)).toBeUndefined();
