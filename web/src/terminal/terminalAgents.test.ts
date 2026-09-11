@@ -26,12 +26,12 @@ const agent = (id: string, overrides: Partial<AgentView> = {}): AgentView => ({
 const atlas = agent("atlas", {
   displayName: "Atlas implementation",
   goalTitle: "Observatory UX",
-  execution: { hostKind: "mock", nativeId: "opaque-atlas" },
+  execution: { hostKind: "mock" },
 });
 const ledger = agent("ledger", {
   displayName: "Ledger polish",
   goalTitle: "Accessibility",
-  execution: { hostKind: "herdr", nativeId: "opaque-ledger" },
+  execution: { hostKind: "herdr" },
 });
 const dormant = agent("dormant", {
   executionPresence: "absent",

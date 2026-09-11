@@ -23,7 +23,7 @@ import {
 import { configuredLoopbackOrigin, isAllowedWebRequest } from "./security.ts";
 import { positiveIntegerSetting } from "../runtime/config.ts";
 import { pendingLaunchView } from "./launch.ts";
-import { projectPortfolio } from "./portfolio.ts";
+import { projectPortfolio, type PortfolioLimits } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { startSerializedRefreshLoop } from "./refresh-loop.ts";
 
@@ -216,17 +216,20 @@ const program = Effect.scoped(
       process.env.AO_WEB_ALLOWED_ORIGIN,
       `http://127.0.0.1:${port}`,
     );
+    const buildPortfolio = (limits?: PortfolioLimits) => {
+      const portfolio = projectPortfolio(
+        runtime.universe,
+        runtime.clock.now(),
+        agentObservations,
+        limits,
+      );
+      if (!portfolio) throw new Error("Projection contract mismatch.");
+      return portfolio;
+    };
     const projectionPublisher = new ProjectionPublisher({
       events,
-      projectPortfolio: () => {
-        const portfolio = projectPortfolio(
-          runtime.universe,
-          runtime.clock.now(),
-          agentObservations,
-        );
-        if (!portfolio) throw new Error("Projection contract mismatch.");
-        return portfolio;
-      },
+      projectPortfolio: () => buildPortfolio(),
+      projectPortfolioWithinLimits: (limits) => buildPortfolio(limits),
       pendingLaunches: () => startAgent.pendingLaunches().map(pendingLaunchView),
       now: () => runtime.clock.now(),
       allowedOrigin,

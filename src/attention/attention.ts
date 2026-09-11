@@ -223,7 +223,11 @@ export const evaluateAttention = (
       });
     }
 
-    if (agent.primaryGoalId && agent.executionPresence === "absent") {
+    if (
+      agent.archivedAt === undefined &&
+      agent.primaryGoalId &&
+      agent.executionPresence === "absent"
+    ) {
       const startedAt = agent.lastSeenAt;
       items.push({
         id: `${agent.id}:ended-externally`,
@@ -277,9 +281,9 @@ export const evaluateAttention = (
     if (host.status === "unavailable") {
       const startedAt = host.lastObservedAt ?? now;
       items.push({
-        id: `${host.hostKind}:host-unavailable`,
+        id: `${host.hostKind}:${host.hostInstanceId}:host-unavailable`,
         targetType: "host",
-        targetId: host.hostKind,
+        targetId: `${host.hostKind}:${host.hostInstanceId}`,
         reason: "runtime-unknown",
         action: "monitor",
         requiresHumanInput: false,

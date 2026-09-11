@@ -16,21 +16,25 @@ export type ProjectionQuery =
       readonly kind: "command-centre";
       readonly now: number;
       readonly includeArchived?: boolean;
+      readonly maximumAgents?: number;
     }
   | {
       readonly kind: "universe-map";
       readonly now: number;
       readonly includeArchived?: boolean;
+      readonly maximumAgents?: number;
     }
   | {
       readonly kind: "code-contexts";
       readonly now: number;
       readonly includeArchived?: boolean;
+      readonly maximumAgents?: number;
     }
   | {
       readonly kind: "code-context-map";
       readonly now: number;
       readonly includeArchived?: boolean;
+      readonly maximumAgents?: number;
     }
   | {
       readonly kind: "related-agents";
@@ -38,8 +42,12 @@ export type ProjectionQuery =
       readonly goalId: string;
       readonly includeDismissed?: boolean;
     }
-  | { readonly kind: "search"; readonly now: number; readonly query: string }
-  | { readonly kind: "catch-up"; readonly now: number }
+  | { readonly kind: "search"; readonly query: string; readonly limit?: number }
+  | {
+      readonly kind: "catch-up";
+      readonly now: number;
+      readonly maximumTransitions?: number;
+    }
   | {
       readonly kind: "inspector";
       readonly now: number;
@@ -58,9 +66,13 @@ export type AgentLifecycleState =
 
 export interface AgentView extends Omit<
   Agent,
-  "execution" | "nativeConversationRef" | "executionHistory" | "conflictingExecutions"
+  | "execution"
+  | "executionContainer"
+  | "nativeConversationRef"
+  | "executionHistory"
+  | "conflictingExecutions"
 > {
-  readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind" | "nativeId">;
+  readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind">;
   readonly goalTitle?: string;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;
@@ -127,6 +139,8 @@ export interface CommandCentreProjection {
   readonly systems: readonly SystemView[];
   readonly goals: readonly GoalView[];
   readonly unassigned: readonly AgentView[];
+  readonly truncated?: boolean;
+  readonly omittedAgentCount?: number;
   readonly counts: {
     readonly goals: number;
     readonly systems: number;
@@ -157,6 +171,8 @@ export interface UniverseMapProjection {
   readonly goals: readonly MapGoalView[];
   readonly unassigned: readonly MapAgentView[];
   readonly inboxPosition: MapPosition;
+  readonly truncated?: boolean;
+  readonly omittedAgentCount?: number;
   readonly counts: CommandCentreProjection["counts"];
 }
 
@@ -296,6 +312,8 @@ export interface CatchUpProjection {
   readonly pending: boolean;
   readonly subjects: readonly CatchUpSubject[];
   readonly counts: Record<UniverseChange["outcome"], number>;
+  readonly truncated?: boolean;
+  readonly omittedTransitionCount?: number;
   readonly evidenceTransitionCount?: number;
 }
 

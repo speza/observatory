@@ -14,13 +14,27 @@ export interface PortfolioResponse {
   readonly catchUp: CatchUpProjection;
 }
 
+export interface PortfolioLimits {
+  readonly maximumAgents?: number;
+  readonly maximumTransitions?: number;
+}
+
 export const projectPortfolio = (
   universe: Universe,
   now: number,
   agentObservations?: AgentObservationModule,
+  limits?: PortfolioLimits,
 ): PortfolioResponse | undefined => {
-  const commandCentre = universe.project({ kind: "command-centre", now });
-  const catchUp = universe.project({ kind: "catch-up", now });
+  const commandCentre = universe.project({
+    kind: "command-centre",
+    now,
+    maximumAgents: limits?.maximumAgents,
+  });
+  const catchUp = universe.project({
+    kind: "catch-up",
+    now,
+    maximumTransitions: limits?.maximumTransitions,
+  });
   if (commandCentre.kind !== "command-centre" || catchUp.kind !== "catch-up") return undefined;
   const map = mapFromCommandCentre(commandCentre);
   if (!agentObservations) return { map, commandCentre, catchUp };

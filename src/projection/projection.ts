@@ -47,20 +47,34 @@ const byAttention = (attention: readonly AttentionItem[]): Map<string, Attention
   return result;
 };
 
+const textCollator = new Intl.Collator("en", { sensitivity: "variant" });
+const compareText = (left: string, right: string): number => textCollator.compare(left, right);
+
+const hostHealthRank = {
+  live: 0,
+  stale: 1,
+  unavailable: 2,
+} satisfies Record<HostHealth["status"], number>;
+
 const compareAgents = (left: AgentView, right: AgentView): number => {
   if (Boolean(left.attention) !== Boolean(right.attention)) return left.attention ? -1 : 1;
   if (left.attention && right.attention && left.attention.startedAt !== right.attention.startedAt) {
     return left.attention.startedAt - right.attention.startedAt;
   }
-  if (left.hostHealth !== right.hostHealth) return left.hostHealth === "live" ? -1 : 1;
-  return left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id);
+  if (left.hostHealth !== right.hostHealth)
+    return hostHealthRank[left.hostHealth] - hostHealthRank[right.hostHealth];
+  return compareText(left.displayName, right.displayName) || compareText(left.id, right.id);
 };
 
 const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   if (hosts.length === 0) return undefined;
   return [...hosts].sort((left, right) => {
     const rank = { unavailable: 0, stale: 1, live: 2 };
-    return rank[left.status] - rank[right.status] || left.hostKind.localeCompare(right.hostKind);
+    return (
+      rank[left.status] - rank[right.status] ||
+      compareText(left.hostKind, right.hostKind) ||
+      compareText(left.hostInstanceId, right.hostInstanceId)
+    );
   })[0];
 };
 
@@ -86,6 +100,7 @@ const hasUnresolvedExecution = (agent: Agent): boolean =>
 const publicAgent = (agent: Agent) => {
   const {
     execution,
+    executionContainer: _executionContainer,
     nativeConversationRef: _nativeConversationRef,
     executionHistory: _executionHistory,
     conflictingExecutions,
@@ -101,9 +116,7 @@ const publicAgent = (agent: Agent) => {
         agent.observationHealth === "fresh"));
   return {
     ...publicFields,
-    execution: execution
-      ? { hostKind: execution.hostKind, nativeId: execution.nativeId }
-      : undefined,
+    execution: execution ? { hostKind: execution.hostKind } : undefined,
     lifecycleState: state,
     executionConflictCount: conflictingExecutions.length,
     canResume,
@@ -119,6 +132,7 @@ const projectCommandCentre = (
   },
   now: number,
   includeArchived = false,
+  maximumAgents?: number,
 ): CommandCentreProjection => {
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
   const projectedAgents = state.agents.filter(
@@ -130,7 +144,7 @@ const projectCommandCentre = (
   );
   const attention = evaluateAttention(now, state.goals, projectedAgents, state.hosts);
   const attentionByAgent = byAttention(attention.items);
-  const views = projectedAgents.map((agent): AgentView => {
+  const allViews = projectedAgents.map((agent): AgentView => {
     return {
       ...publicAgent(agent),
       goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
@@ -138,15 +152,64 @@ const projectCommandCentre = (
     };
   });
 
+  const maximum = maximumAgents === undefined ? undefined : Math.max(0, Math.floor(maximumAgents));
+  const truncated = maximum !== undefined && allViews.length > maximum;
+  let views = allViews;
+  if (truncated && maximum !== undefined) {
+    const truncationRank = (view: AgentView): number => {
+      const item = attentionByAgent.get(view.id);
+      if (item?.requiresHumanInput) return 0;
+      return item ? 1 : 2;
+    };
+    views = [...allViews]
+      .sort((left, right) => {
+        const rankDelta = truncationRank(left) - truncationRank(right);
+        if (rankDelta !== 0) return rankDelta;
+        const leftPriority = priorityRank(
+          goalsById.get(left.primaryGoalId ?? "")?.priority ?? "P3",
+        );
+        const rightPriority = priorityRank(
+          goalsById.get(right.primaryGoalId ?? "")?.priority ?? "P3",
+        );
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+        return compareAgents(left, right);
+      })
+      .slice(0, maximum);
+  }
+  const visibleAttention = truncated
+    ? (() => {
+        const visibleIds = new Set(views.map((view) => view.id));
+        const items = attention.items.filter(
+          (item) =>
+            item.targetType === "host" ||
+            (item.agentId !== undefined && visibleIds.has(item.agentId)),
+        );
+        return {
+          items,
+          currentCount: items.filter((item) => item.requiresHumanInput).length,
+          uncertaintyCount: items.filter((item) => !item.requiresHumanInput).length,
+        };
+      })()
+    : attention;
+
+  const viewsByGoal = new Map<string, AgentView[]>();
+  const unassignedViews: AgentView[] = [];
+  let visibleStaleCount = 0;
+  for (const view of views) {
+    if (agentIsUncertain(view)) visibleStaleCount += 1;
+    if (view.primaryGoalId) {
+      const bucket = viewsByGoal.get(view.primaryGoalId);
+      if (bucket) bucket.push(view);
+      else viewsByGoal.set(view.primaryGoalId, [view]);
+    } else {
+      unassignedViews.push(view);
+    }
+  }
+
   const goalViews = state.goals
-    .filter(
-      (goal) =>
-        includeArchived ||
-        goal.status !== "archived" ||
-        views.some((agent) => agent.primaryGoalId === goal.id),
-    )
+    .filter((goal) => includeArchived || goal.status !== "archived" || viewsByGoal.has(goal.id))
     .map((goal): GoalView => {
-      const agents = views.filter((agent) => agent.primaryGoalId === goal.id).sort(compareAgents);
+      const agents = [...(viewsByGoal.get(goal.id) ?? [])].sort(compareAgents);
       return {
         ...goal,
         agents,
@@ -163,35 +226,52 @@ const projectCommandCentre = (
         const rank = { active: 0, completed: 1, archived: 2 };
         return rank[left.status] - rank[right.status];
       }
-      return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+      return compareText(left.title, right.title) || compareText(left.id, right.id);
     });
 
-  const unassigned = views.filter((agent) => !agent.primaryGoalId).sort(compareAgents);
+  const unassigned = [...unassignedViews].sort(compareAgents);
+  const goalsBySystem = new Map<string, GoalView[]>();
+  for (const goal of goalViews) {
+    if (!goal.systemId) continue;
+    const bucket = goalsBySystem.get(goal.systemId);
+    if (bucket) bucket.push(goal);
+    else goalsBySystem.set(goal.systemId, [goal]);
+  }
   const systems = (state.systems ?? [])
     .map((system): SystemView => {
-      const goals = goalViews.filter((goal) => goal.systemId === system.id);
-      const agents = goals.flatMap((goal) => goal.agents);
+      const goals = goalsBySystem.get(system.id) ?? [];
+      let agentCount = 0;
+      let workingCount = 0;
+      let attentionCount = 0;
+      let staleCount = 0;
+      for (const goal of goals) {
+        attentionCount += goal.attentionCount;
+        staleCount += goal.staleCount;
+        for (const agent of goal.agents) {
+          agentCount += 1;
+          if (agent.executionPresence === "live" && agent.runtimeState === "working")
+            workingCount += 1;
+        }
+      }
       return {
         ...system,
         goals,
-        agentCount: agents.length,
-        workingCount: agents.filter(
-          (agent) => agent.executionPresence === "live" && agent.runtimeState === "working",
-        ).length,
-        attentionCount: goals.reduce((total, goal) => total + goal.attentionCount, 0),
-        staleCount: goals.reduce((total, goal) => total + goal.staleCount, 0),
+        agentCount,
+        workingCount,
+        attentionCount,
+        staleCount,
       };
     })
     .sort((left, right) => {
       if (left.attentionCount !== right.attentionCount)
         return right.attentionCount - left.attentionCount;
-      return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+      return compareText(left.title, right.title) || compareText(left.id, right.id);
     });
-  return {
+  const projection: CommandCentreProjection = {
     kind: "command-centre",
     generatedAt: now,
     host: hostFor(state.hosts),
-    attention,
+    attention: visibleAttention,
     systems,
     goals: goalViews,
     unassigned,
@@ -199,12 +279,18 @@ const projectCommandCentre = (
       goals: goalViews.length,
       systems: systems.length,
       agents: views.length,
-      attention: attention.currentCount,
-      uncertainty: attention.uncertaintyCount,
+      attention: visibleAttention.currentCount,
+      uncertainty: visibleAttention.uncertaintyCount,
       unassigned: unassigned.length,
-      stale: views.filter(agentIsUncertain).length,
+      stale: visibleStaleCount,
     },
   };
+  if (truncated && maximum !== undefined)
+    Object.assign(projection, {
+      truncated: true,
+      omittedAgentCount: allViews.length - maximum,
+    });
+  return projection;
 };
 
 const normalizeContextValue = (value: string | undefined): string | undefined => {
@@ -246,8 +332,9 @@ const projectCodeContexts = (
   },
   now: number,
   includeArchived = false,
+  maximumAgents?: number,
 ): CodeContextProjection => {
-  const commandCentre = projectCommandCentre(state, now, includeArchived);
+  const commandCentre = projectCommandCentre(state, now, includeArchived, maximumAgents);
   const agents = [
     ...commandCentre.goals.flatMap((goal) => goal.agents),
     ...commandCentre.unassigned,
@@ -286,7 +373,7 @@ const projectCodeContexts = (
       if (left.attentionCount !== right.attentionCount)
         return right.attentionCount - left.attentionCount;
       if (left.staleCount !== right.staleCount) return right.staleCount - left.staleCount;
-      return left.label.localeCompare(right.label) || left.key.localeCompare(right.key);
+      return compareText(left.label, right.label) || compareText(left.key, right.key);
     });
 
   return {
@@ -310,8 +397,9 @@ const projectCodeContextMap = (
   },
   now: number,
   includeArchived = false,
+  maximumAgents?: number,
 ): CodeContextMapProjection => {
-  const codeContexts = projectCodeContexts(state, now, includeArchived);
+  const codeContexts = projectCodeContexts(state, now, includeArchived, maximumAgents);
   const occupied: {
     readonly position: { readonly x: number; readonly y: number };
     readonly agentCount: number;
@@ -322,7 +410,7 @@ const projectCodeContextMap = (
   // key and deterministic ordering on every projection. No position is
   // accepted into Universe state and no goal layout is affected.
   for (const context of [...codeContexts.contexts].sort((left, right) =>
-    left.key.localeCompare(right.key),
+    compareText(left.key, right.key),
   )) {
     const mapPosition = initialGoalMapPosition(
       `code-context:${context.key}`,
@@ -400,6 +488,7 @@ const projectRelatedAgents = (
   }
 
   const targetAgents = goal.agents;
+  const rawAgentsById = new Map(state.agents.map((agent) => [agent.id, agent]));
   const dismissedAtByAgent = new Map(
     (state.relatedAgentDismissals ?? [])
       .filter((dismissal) => dismissal.goalId === goal.id)
@@ -413,16 +502,19 @@ const projectRelatedAgents = (
   ];
   const candidates = otherAgents.flatMap((agent): RelatedAgentCandidate[] => {
     const evidence: RelatedAgentEvidence[] = [];
-    const executionContainerId = opaqueContextValue(agent.executionContainer?.id);
+    const executionContainer = rawAgentsById.get(agent.id)?.executionContainer;
+    const executionContainerId = opaqueContextValue(executionContainer?.id);
     const sharedExecutionContainer = executionContainerId
       ? targetAgents.find(
-          (target) => opaqueContextValue(target.executionContainer?.id) === executionContainerId,
+          (target) =>
+            opaqueContextValue(rawAgentsById.get(target.id)?.executionContainer?.id) ===
+            executionContainerId,
         )
       : undefined;
     if (sharedExecutionContainer) {
       const label =
-        agent.executionContainer?.label?.trim() ??
-        sharedExecutionContainer.executionContainer?.label?.trim();
+        executionContainer?.label?.trim() ??
+        rawAgentsById.get(sharedExecutionContainer.id)?.executionContainer?.label?.trim();
       evidence.push({
         signal: "execution-container",
         strength: "strong",
@@ -482,8 +574,8 @@ const projectRelatedAgents = (
     if (Boolean(left.agent.attention) !== Boolean(right.agent.attention))
       return left.agent.attention ? -1 : 1;
     return (
-      left.agent.displayName.localeCompare(right.agent.displayName) ||
-      left.agent.id.localeCompare(right.agent.id)
+      compareText(left.agent.displayName, right.agent.displayName) ||
+      compareText(left.agent.id, right.agent.id)
     );
   });
 
@@ -523,8 +615,9 @@ const projectUniverseMap = (
   },
   now: number,
   includeArchived = false,
+  maximumAgents?: number,
 ): UniverseMapProjection => {
-  return mapFromCommandCentre(projectCommandCentre(state, now, includeArchived));
+  return mapFromCommandCentre(projectCommandCentre(state, now, includeArchived, maximumAgents));
 };
 
 export const mapFromCommandCentre = (
@@ -563,7 +656,7 @@ export const mapFromCommandCentre = (
     ...agent,
     mapPosition: unassignedPositions.get(agent.id) ?? inboxPosition,
   }));
-  return {
+  const projection: UniverseMapProjection = {
     kind: "universe-map",
     generatedAt: commandCentre.generatedAt,
     host: commandCentre.host,
@@ -573,9 +666,15 @@ export const mapFromCommandCentre = (
     inboxPosition,
     counts: commandCentre.counts,
   };
+  if (commandCentre.truncated)
+    Object.assign(projection, {
+      truncated: true,
+      omittedAgentCount: commandCentre.omittedAgentCount ?? 0,
+    });
+  return projection;
 };
 
-const searchable = (value: string | undefined): string => value?.toLocaleLowerCase() ?? "";
+const searchable = (value: string | undefined): string => value?.toLowerCase() ?? "";
 
 const projectSearch = (
   state: {
@@ -583,12 +682,15 @@ const projectSearch = (
     readonly agents: readonly Agent[];
   },
   query: string,
+  limit?: number,
 ): SearchProjection => {
-  const normalized = query.trim().toLocaleLowerCase();
+  const normalized = query.trim().toLowerCase();
   if (!normalized) return { kind: "search", query, results: [] };
+  const maximum = limit === undefined ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(limit));
   const results: SearchResult[] = [];
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
   for (const goal of state.goals) {
+    if (results.length >= maximum) break;
     const haystack = [goal.title, goal.description, goal.priority, goal.status]
       .map(searchable)
       .join(" ");
@@ -603,11 +705,11 @@ const projectSearch = (
     }
   }
   for (const agent of state.agents) {
+    if (results.length >= maximum) break;
     const haystack = [
       agent.displayName,
       agent.description,
       agent.execution?.hostKind,
-      agent.execution?.nativeId,
       agent.repository,
       agent.branch,
       agent.worktree,
@@ -737,6 +839,19 @@ const catchUpSubjectFor = (
   return { id: "unassigned", subjectType: "unassigned", title: "Unassigned work" };
 };
 
+/**
+ * Universe changes are appended in sequence order, so walk from the tail
+ * instead of scanning retained history that predates the checkpoint.
+ */
+const changesAfter = (
+  changes: readonly UniverseChange[],
+  lastSequence: number,
+): readonly UniverseChange[] => {
+  let start = changes.length;
+  while (start > 0 && (changes[start - 1]?.sequence ?? 0) > lastSequence) start -= 1;
+  return start === 0 ? changes : changes.slice(start);
+};
+
 const projectCatchUp = (
   state: {
     readonly systems?: readonly System[];
@@ -746,9 +861,18 @@ const projectCatchUp = (
     readonly operatorCheckpoint?: OperatorCheckpoint;
   },
   now: number,
+  maximumTransitions?: number,
 ): CatchUpProjection => {
   const lastSequence = state.operatorCheckpoint?.lastSequence ?? 0;
-  const unread = state.changes.filter((item) => item.sequence > lastSequence);
+  const allUnread = changesAfter(state.changes, lastSequence);
+  const maximum =
+    maximumTransitions === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, Math.floor(maximumTransitions));
+  const truncated = allUnread.length > maximum;
+  // Keep the oldest unread transitions so acknowledging throughSequence never
+  // marks an unread change the operator has not seen.
+  const unread = truncated ? allUnread.slice(0, maximum) : allUnread;
   const agents = new Map(state.agents.map((agent) => [agent.id, agent]));
   const attentionAgents = state.agents.filter(
     (agent) => agent.archivedAt === undefined || hasUnresolvedExecution(agent),
@@ -811,7 +935,7 @@ const projectCatchUp = (
         .sort(
           (left, right) =>
             catchUpSummaryOrder.indexOf(left.kind) - catchUpSummaryOrder.indexOf(right.kind) ||
-            left.targetType.localeCompare(right.targetType),
+            compareText(left.targetType, right.targetType),
         )
         .map((summary) => ({
           kind: summary.kind,
@@ -849,18 +973,25 @@ const projectCatchUp = (
         catchUpOutcomeRank[left.outcome] - catchUpOutcomeRank[right.outcome] ||
         right.occurredAt - left.occurredAt ||
         right.sequence - left.sequence ||
-        left.title.localeCompare(right.title),
+        compareText(left.title, right.title),
     );
   const projection: CatchUpProjection = {
     kind: "catch-up",
     generatedAt: now,
-    throughSequence: state.changes.at(-1)?.sequence ?? 0,
+    throughSequence: truncated
+      ? (unread.at(-1)?.sequence ?? lastSequence)
+      : (state.changes.at(-1)?.sequence ?? 0),
     evidenceThroughSequence: 0,
     transitionCount: unread.length,
-    pending: unread.length > 0,
+    pending: allUnread.length > 0,
     subjects,
     counts,
   };
+  if (truncated)
+    Object.assign(projection, {
+      truncated: true,
+      omittedTransitionCount: allUnread.length - unread.length,
+    });
   if (state.operatorCheckpoint)
     Object.assign(projection, { sinceAt: state.operatorCheckpoint.acknowledgedAt });
   return projection;
@@ -928,8 +1059,9 @@ const projectInspector = (
     if (
       !kind ||
       !value ||
-      kind.toLocaleLowerCase().includes("path") ||
+      kind.toLowerCase().includes("path") ||
       value.startsWith("/") ||
+      value.startsWith("\\") ||
       /^[A-Za-z]:[\\/]/u.test(value)
     )
       return undefined;
@@ -939,7 +1071,6 @@ const projectInspector = (
     `state   ${view.lifecycleState} · ${agent.runtimeState}`,
     `source  ${agent.runtimeStateSource}`,
     `host    ${agent.execution?.hostKind ?? "detached"}`,
-    `native  ${agent.execution?.nativeId ?? "none"}`,
     `harness ${agent.harnessId ?? "unknown"}`,
     `continuity ${agent.continuity}`,
     `provider ${agent.providerContinuity} · execution ${agent.executionPresence}`,
@@ -963,19 +1094,19 @@ export const createProjectionModule = (): ProjectionModule => ({
   project(state, query): Projection {
     switch (query.kind) {
       case "command-centre":
-        return projectCommandCentre(state, query.now, query.includeArchived);
+        return projectCommandCentre(state, query.now, query.includeArchived, query.maximumAgents);
       case "universe-map":
-        return projectUniverseMap(state, query.now, query.includeArchived);
+        return projectUniverseMap(state, query.now, query.includeArchived, query.maximumAgents);
       case "code-contexts":
-        return projectCodeContexts(state, query.now, query.includeArchived);
+        return projectCodeContexts(state, query.now, query.includeArchived, query.maximumAgents);
       case "code-context-map":
-        return projectCodeContextMap(state, query.now, query.includeArchived);
+        return projectCodeContextMap(state, query.now, query.includeArchived, query.maximumAgents);
       case "related-agents":
         return projectRelatedAgents(state, query.now, query.goalId, query.includeDismissed);
       case "search":
-        return projectSearch(state, query.query);
+        return projectSearch(state, query.query, query.limit);
       case "catch-up":
-        return projectCatchUp(state, query.now);
+        return projectCatchUp(state, query.now, query.maximumTransitions);
       case "inspector":
         return projectInspector(state, query.now, query.target);
     }

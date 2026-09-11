@@ -42,6 +42,30 @@ const hash = (value: string): number => {
 };
 
 const positionKey = (position: MapPosition): string => `${position.x}:${position.y}`;
+const cellKey = (x: number, y: number): string => `${x}:${y}`;
+
+const compareIdentity = (left: string, right: string): number => {
+  const leftParts = left.match(/\d+|\D+/gu) ?? [];
+  const rightParts = right.match(/\d+|\D+/gu) ?? [];
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index];
+    const rightPart = rightParts[index];
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    if (leftPart === rightPart) continue;
+    const leftNumeric = /^\d+$/u.test(leftPart);
+    const rightNumeric = /^\d+$/u.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      const difference = Number(leftPart) - Number(rightPart);
+      if (difference !== 0) return difference;
+      continue;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return 0;
+};
 
 const stableSlotPositions = (
   anchor: MapPosition,
@@ -52,7 +76,7 @@ const stableSlotPositions = (
 ): Map<string, MapPosition> => {
   const result = new Map<string, MapPosition>();
   const occupied = new Set<string>();
-  const uniqueIds = [...new Set(ids)].sort((left, right) => left.localeCompare(right));
+  const uniqueIds = [...new Set(ids)].sort(compareIdentity);
   for (const id of uniqueIds) {
     const preferredCount = Math.max(1, Math.min(offsets.length, preferredSlotCount));
     const start = hash(`${namespace}:${id}`) % preferredCount;
@@ -85,9 +109,9 @@ const stableSlotPositions = (
  * from one another. The slots are deliberately screen-friendly at the
  * renderer's normal zoom range rather than following random angles.
  */
-const SATELLITE_OFFSETS: readonly MapPosition[] = (() => {
+const satelliteOffsets = (minimumCount: number): readonly MapPosition[] => {
   const offsets: MapPosition[] = [];
-  for (let ring = 1; ring <= 5; ring += 1) {
+  for (let ring = 1; offsets.length < minimumCount; ring += 1) {
     const width = ring * 32;
     const height = ring * 24;
     for (let x = -ring; x <= ring; x += 1) offsets.push({ x: x * 32, y: -height });
@@ -96,16 +120,16 @@ const SATELLITE_OFFSETS: readonly MapPosition[] = (() => {
     for (let y = ring - 1; y >= -ring + 1; y -= 1) offsets.push({ x: -width, y: y * 24 });
   }
   return offsets;
-})();
+};
 
 /**
  * Inbox cards use a compact rectangular orbit around the neutral inbox body.
  * The first ring has twelve slots, enough for the normal live slice, and
  * later rings expand only when the inbox outgrows it.
  */
-const INBOX_OFFSETS: readonly MapPosition[] = (() => {
+const inboxOffsets = (minimumCount: number): readonly MapPosition[] => {
   const offsets: MapPosition[] = [];
-  for (let ring = 1; ring <= 4; ring += 1) {
+  for (let ring = 1; offsets.length < minimumCount; ring += 1) {
     const width = ring * 72;
     const height = ring * 32;
     for (let x = -width; x <= width; x += 36) offsets.push({ x, y: -height });
@@ -114,7 +138,7 @@ const INBOX_OFFSETS: readonly MapPosition[] = (() => {
     for (let y = height - 32; y >= -height + 32; y -= 32) offsets.push({ x: -width, y });
   }
   return offsets;
-})();
+};
 
 /** Return the same default position for an id on every process and refresh. */
 export const defaultGoalMapPosition = (goalId: string): MapPosition => {
@@ -143,31 +167,36 @@ export const goalLayoutFootprint = (agentCount: number): GoalLayoutFootprint => 
   };
 };
 
-const goalCandidates = (goalId: string): readonly MapPosition[] => {
-  const candidates: MapPosition[] = [];
-  for (let ring = 0; ring <= 16; ring += 1) {
-    for (let gridY = -ring; gridY <= ring; gridY += 1) {
-      for (let gridX = -ring; gridX <= ring; gridX += 1) {
-        if (Math.max(Math.abs(gridX), Math.abs(gridY)) !== ring) continue;
-        candidates.push({
-          x: gridX === 0 ? 0 : gridX * GOAL_GRID_STEP_X,
-          y: gridY === 0 ? 0 : gridY * GOAL_GRID_STEP_Y,
-        });
-      }
+const orderedRingCoordinates = (namespace: string, ring: number): readonly MapPosition[] => {
+  const coordinates: MapPosition[] = [];
+  for (let gridY = -ring; gridY <= ring; gridY += 1) {
+    for (let gridX = -ring; gridX <= ring; gridX += 1) {
+      if (Math.max(Math.abs(gridX), Math.abs(gridY)) !== ring) continue;
+      coordinates.push({ x: gridX, y: gridY });
     }
   }
-  return candidates.sort((left, right) => {
-    const gridRadius = (point: MapPosition): number =>
-      Math.max(Math.abs(point.x) / GOAL_GRID_STEP_X, Math.abs(point.y) / GOAL_GRID_STEP_Y);
-    const radiusDelta = gridRadius(left) - gridRadius(right);
-    if (radiusDelta !== 0) return radiusDelta;
+  return coordinates.sort((left, right) => {
     // Prefer another portfolio row before consuming scarce terminal height.
     const verticalDelta = Math.abs(left.y) - Math.abs(right.y);
     if (verticalDelta !== 0) return verticalDelta;
     const horizontalDelta = Math.abs(left.x) - Math.abs(right.x);
     if (horizontalDelta !== 0) return horizontalDelta;
-    return hash(`${goalId}:${positionKey(left)}`) - hash(`${goalId}:${positionKey(right)}`);
+    return hash(`${namespace}:${positionKey(left)}`) - hash(`${namespace}:${positionKey(right)}`);
   });
+};
+
+const goalRingCandidates = (goalId: string, ring: number): readonly MapPosition[] =>
+  orderedRingCoordinates(goalId, ring).map((coordinate) => ({
+    x: coordinate.x === 0 ? 0 : coordinate.x * GOAL_GRID_STEP_X,
+    y: coordinate.y === 0 ? 0 : coordinate.y * GOAL_GRID_STEP_Y,
+  }));
+
+const goalCandidates = (goalId: string, maximumRing = 16): readonly MapPosition[] => {
+  const candidates: MapPosition[] = [];
+  for (let ring = 0; ring <= maximumRing; ring += 1) {
+    for (const candidate of goalRingCandidates(goalId, ring)) candidates.push(candidate);
+  }
+  return candidates;
 };
 
 const goalsOverlap = (left: GoalLayoutOccupancy, right: GoalLayoutOccupancy): boolean => {
@@ -179,6 +208,55 @@ const goalsOverlap = (left: GoalLayoutOccupancy, right: GoalLayoutOccupancy): bo
     Math.abs(left.position.y - right.position.y) <
       leftFootprint.halfHeight + rightFootprint.halfHeight + GOAL_GAP_Y
   );
+};
+
+/**
+ * The fine grid packs small goals, but its finite candidate set cannot serve an
+ * arbitrarily large portfolio. Once it is saturated, fall back to a coarser
+ * lattice whose pitch exceeds the largest possible overlapping pair, so any
+ * free cell is guaranteed not to collide. A per-cell bucket index keeps the
+ * neighbour check bounded for large universes.
+ */
+const overflowGoalMapPosition = (
+  goalId: string,
+  occupied: readonly GoalLayoutOccupancy[],
+  agentCount: number,
+): MapPosition => {
+  const candidateFootprint = goalLayoutFootprint(agentCount);
+  let maximumHalfWidth = candidateFootprint.halfWidth;
+  let maximumHalfHeight = candidateFootprint.halfHeight;
+  for (const entry of occupied) {
+    const footprint = goalLayoutFootprint(entry.agentCount);
+    if (footprint.halfWidth > maximumHalfWidth) maximumHalfWidth = footprint.halfWidth;
+    if (footprint.halfHeight > maximumHalfHeight) maximumHalfHeight = footprint.halfHeight;
+  }
+  const stepX = maximumHalfWidth * 2 + GOAL_GAP_X;
+  const stepY = maximumHalfHeight * 2 + GOAL_GAP_Y;
+  const buckets = new Map<string, GoalLayoutOccupancy[]>();
+  for (const entry of occupied) {
+    const key = cellKey(Math.round(entry.position.x / stepX), Math.round(entry.position.y / stepY));
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(entry);
+    else buckets.set(key, [entry]);
+  }
+  const overlapsNeighbourhood = (position: MapPosition): boolean => {
+    const cellX = Math.round(position.x / stepX);
+    const cellY = Math.round(position.y / stepY);
+    const next: GoalLayoutOccupancy = { position, agentCount };
+    for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        const bucket = buckets.get(cellKey(cellX + offsetX, cellY + offsetY));
+        if (bucket?.some((entry) => goalsOverlap(next, entry))) return true;
+      }
+    }
+    return false;
+  };
+  for (let ring = 0; ; ring += 1) {
+    for (const coordinate of orderedRingCoordinates(goalId, ring)) {
+      const position = { x: coordinate.x * stepX, y: coordinate.y * stepY };
+      if (!overlapsNeighbourhood(position)) return position;
+    }
+  }
 };
 
 /**
@@ -200,8 +278,7 @@ export const initialGoalMapPosition = (
     const next = { ...candidateOccupancy, position: candidate };
     if (occupied.every((existing) => !goalsOverlap(next, existing))) return { ...candidate };
   }
-  const fallback = goalCandidates(goalId).at(-1) ?? { x: 0, y: 0 };
-  return { ...fallback };
+  return overflowGoalMapPosition(goalId, occupied, agentCount);
 };
 
 /**
@@ -226,13 +303,13 @@ export const repairGoalMapPosition = (
       (position.x - current.x) ** 2 + (position.y - current.y) ** 2;
     const distanceDelta = distanceFromCurrent(left) - distanceFromCurrent(right);
     if (distanceDelta !== 0) return distanceDelta;
-    return positionKey(left).localeCompare(positionKey(right));
+    return left.x - right.x || left.y - right.y;
   });
   for (const candidate of candidates) {
     const next = { position: candidate, agentCount };
     if (occupied.every((existing) => !goalsOverlap(next, existing))) return { ...candidate };
   }
-  return { ...(candidates.at(-1) ?? current) };
+  return overflowGoalMapPosition(goalId, occupied, agentCount);
 };
 
 /**
@@ -245,7 +322,7 @@ export const agentSatellitePositions = (
   goalId: string,
   agentIds: readonly string[],
 ): Map<string, MapPosition> =>
-  stableSlotPositions(goal, agentIds, SATELLITE_OFFSETS, `satellite:${goalId}`, 8);
+  stableSlotPositions(goal, agentIds, satelliteOffsets(agentIds.length), `satellite:${goalId}`, 8);
 
 /** Keep the original single-agent helper for callers and unit fixtures. */
 export const agentSatellitePosition = (
@@ -263,11 +340,15 @@ export const agentSatellitePosition = (
  */
 export const mapInboxAnchor = (goals: readonly MapPosition[]): MapPosition => {
   if (goals.length === 0) return { x: 0, y: 0 };
-  const minimumX = Math.min(...goals.map((goal) => goal.x));
-  const averageY = Math.round(goals.reduce((total, goal) => total + goal.y, 0) / goals.length);
+  let minimumX = goals[0]?.x ?? 0;
+  let totalY = 0;
+  for (const goal of goals) {
+    if (goal.x < minimumX) minimumX = goal.x;
+    totalY += goal.y;
+  }
   // Leave room for the inbox orbit's outer edge and both card bounds. This
   // keeps the neutral sector separate even at the minimum wide-map zoom.
-  return { x: minimumX - 144, y: averageY };
+  return { x: minimumX - 144, y: Math.round(totalY / goals.length) };
 };
 
 /** Place unassigned agents in a stable, collision-free neutral orbit. */
@@ -275,7 +356,7 @@ export const unassignedAgentPositions = (
   anchor: MapPosition,
   agentIds: readonly string[],
 ): Map<string, MapPosition> =>
-  stableSlotPositions(anchor, agentIds, INBOX_OFFSETS, "unassigned", 12);
+  stableSlotPositions(anchor, agentIds, inboxOffsets(agentIds.length), "unassigned", 12);
 
 /** Keep the original single-agent helper for callers and unit fixtures. */
 export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): MapPosition =>

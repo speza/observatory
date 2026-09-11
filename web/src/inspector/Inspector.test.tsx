@@ -174,7 +174,7 @@ describe("Inspector", () => {
     expect(markup).toContain("Also observed: The host also reports done.");
     expect(markup).toContain("Agent ID");
     expect(markup).toContain("provider-visible");
-    expect(markup).toContain("execution-visible");
+    expect(markup).not.toContain("execution-visible");
     expect(markup).toContain("Workspace");
     expect(markup).toContain("PROVIDER SIGNALS");
     expect(markup).toContain("Observations only · not accepted state");

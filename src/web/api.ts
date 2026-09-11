@@ -45,7 +45,7 @@ import type { AgentCloseoutCoordinator } from "../agent-closeout/types.ts";
 import { WebCloseoutError, decodeWebCloseoutRequest } from "./closeout.ts";
 import type { AgentObservationModule } from "../agent-observations/types.ts";
 import { enrichInspector } from "../agent-observations/projection.ts";
-import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
+import { projectPortfolio, type PortfolioLimits, type PortfolioResponse } from "./portfolio.ts";
 export type { PortfolioResponse } from "./portfolio.ts";
 import { isAllowedWebRequest } from "./security.ts";
 
@@ -160,15 +160,17 @@ export class ObservatoryWebApi {
       host && launch && plugins
         ? new WebLaunchGateway(universe, plugins, launch.workspace, launch.coordinator)
         : undefined;
+    const buildPortfolio = (limits?: PortfolioLimits): PortfolioResponse => {
+      const portfolio = projectPortfolio(universe, clock.now(), agentObservations, limits);
+      if (!portfolio) throw new Error("Projection contract mismatch.");
+      return portfolio;
+    };
     this.projectionPublisher =
       projectionPublisher ??
       new ProjectionPublisher({
         events: new ControlPlaneEventHub(),
-        projectPortfolio: () => {
-          const portfolio = projectPortfolio(universe, clock.now(), agentObservations);
-          if (!portfolio) throw new Error("Projection contract mismatch.");
-          return portfolio;
-        },
+        projectPortfolio: () => buildPortfolio(),
+        projectPortfolioWithinLimits: (limits) => buildPortfolio(limits),
         pendingLaunches: () => launch?.coordinator.pendingLaunches().map(pendingLaunchView) ?? [],
         now: () => clock.now(),
         allowedOrigin,
@@ -281,13 +283,14 @@ export class ObservatoryWebApi {
       if (!query) return json({ error: "A search query is required." }, 400);
       if (query.length > MAXIMUM_SEARCH_QUERY_LENGTH)
         return json({ error: "The search query is too long." }, 400);
-      const projection = this.universe.project({ kind: "search", now, query });
+      const projection = this.universe.project({
+        kind: "search",
+        query,
+        limit: MAXIMUM_SEARCH_RESULTS,
+      });
       if (projection.kind !== "search")
         return json({ error: "Projection contract mismatch." }, 500);
-      return json({
-        ...projection,
-        results: projection.results.slice(0, MAXIMUM_SEARCH_RESULTS),
-      } satisfies SearchProjection);
+      return json(projection satisfies SearchProjection);
     }
 
     if (url.pathname === "/api/plugins") {

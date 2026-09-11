@@ -96,6 +96,53 @@ describe("attention", () => {
     expect(projection.items[0]?.explanation).toContain("archived conversation");
   });
 
+  test("does not ask for review of an already archived and ended Agent", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [goal("p0", "P0")],
+      [
+        {
+          ...agent("settled", "idle", "p0", 0),
+          execution: undefined,
+          executionPresence: "absent",
+          archivedAt: 5_000,
+        },
+      ],
+    );
+
+    expect(projection.items).toEqual([]);
+    expect(projection.currentCount).toBe(0);
+  });
+
+  test("keeps unavailable host instances as distinct uncertainty subjects", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [],
+      [],
+      [
+        {
+          hostKind: "herdr",
+          hostInstanceId: "herdr:local",
+          status: "unavailable",
+          diagnosticCount: 0,
+        },
+        {
+          hostKind: "herdr",
+          hostInstanceId: "herdr:remote",
+          status: "unavailable",
+          diagnosticCount: 0,
+        },
+      ],
+    );
+
+    expect(projection.items.map((item) => item.id)).toEqual([
+      "herdr:herdr:local:host-unavailable",
+      "herdr:herdr:remote:host-unavailable",
+    ]);
+    expect(projection.currentCount).toBe(0);
+    expect(projection.uncertaintyCount).toBe(2);
+  });
+
   test("routes runtime results and confirmed ended work into one decision queue", () => {
     const projection = evaluateAttention(
       20_000,

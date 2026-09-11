@@ -56,7 +56,6 @@ export const Inspector = ({
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
   const conversationId =
     projection?.kind === "agent-inspector" ? projection.conversation?.id : undefined;
-  const executionId = agent?.execution?.nativeId;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
@@ -413,21 +412,6 @@ export const Inspector = ({
                 <div>
                   <dt>Execution</dt>
                   <dd>{projection.agent.executionPresence}</dd>
-                </div>
-                <div>
-                  <dt>Execution ID</dt>
-                  <dd className="inspector__identifier">
-                    {executionId ? (
-                      <>
-                        <code title={executionId}>{executionId}</code>
-                        <button onClick={() => copyIdentifier(executionId)} type="button">
-                          Copy
-                        </button>
-                      </>
-                    ) : (
-                      "No current execution"
-                    )}
-                  </dd>
                 </div>
               </dl>
               <h4>Context</h4>
