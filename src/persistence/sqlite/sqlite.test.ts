@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
-import { SqliteUniverseStore } from "./sqlite-store.ts";
+import { SQLITE_SCHEMA_GENERATION, SqliteUniverseStore } from "./sqlite-store.ts";
 import {
   admitObservedConversationsAndReconcile,
   makeUniverse,
@@ -581,7 +581,7 @@ describe("SQLite persistence", () => {
     const databasePath = join(directory, "universe.sqlite");
     try {
       const conflict = new Database(databasePath, { create: true });
-      conflict.exec("PRAGMA user_version = 3");
+      conflict.exec(`PRAGMA user_version = ${SQLITE_SCHEMA_GENERATION}`);
       conflict.exec("CREATE TABLE agents_primary_goal (placeholder INTEGER)");
       conflict.close();
 
