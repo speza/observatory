@@ -2,14 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub, type ControlPlaneEvent } from "../control-plane-events/index.ts";
 import { createProjectionModule } from "../projection/projection.ts";
 import { createEmptyUniverse } from "./universe.ts";
-import { DEFAULT_SYSTEM_ID, emptyUniverseState } from "./types.ts";
+import { DEFAULT_SYSTEM_ID, emptyUniverseState, type Agent } from "./types.ts";
 import {
   makeUniverse,
   hostSnapshot,
   SequenceIds,
   admitObservedConversationsAndReconcile,
 } from "./test-support.ts";
-
 const observation = (
   nativeId: string,
   displayName = nativeId,
@@ -41,6 +40,26 @@ const observedConversation = (
     source: "native-integration" as const,
     observedAt,
   },
+});
+
+const scopedConversation = (nativeId: string, conversationId: string, observedAt = 1_000_000) => ({
+  ...observedConversation(nativeId, conversationId, observedAt),
+  harnessEvidence: {
+    ...observedConversation(nativeId, conversationId, observedAt).harnessEvidence,
+    nativeConversationRef: {
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      kind: "session-id",
+      value: conversationId,
+    },
+  },
+});
+
+const conversationAlias = (value: string, scope: string) => ({
+  harnessId: "codex",
+  continuityScopeId: scope,
+  kind: "id",
+  value,
 });
 
 describe("Universe", () => {
@@ -909,7 +928,7 @@ describe("Universe", () => {
     });
   });
 
-  test("rejects an unscoped observation that would downgrade a scoped execution", () => {
+  test("ignores an unscoped observation that would downgrade a scoped execution", () => {
     const { universe, clock } = makeUniverse();
     const scoped = observedConversation("pane-1", "conversation-a");
     admitObservedConversationsAndReconcile(
@@ -933,8 +952,9 @@ describe("Universe", () => {
       hostSnapshot([observedConversation("pane-1", "conversation-a", clock.now())], clock.now()),
     );
 
-    expect(result.accepted).toBe(false);
-    expect(result.error).toContain("cannot replace its scoped conversation");
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("Ignored unscoped provider identity");
+    expect(result.updatedAgentIds).toEqual([]);
     expect(universe.snapshot().agents).toHaveLength(1);
     expect(universe.snapshot().agents[0]).toMatchObject({
       continuity: "proved",
@@ -1144,7 +1164,7 @@ describe("Universe", () => {
     );
 
     expect(result.accepted).toBe(true);
-    expect(result.diagnostics.join(" ")).toContain("Consolidated legacy duplicate Agent");
+    expect(result.diagnostics.join(" ")).toContain("Consolidated duplicate Agent");
     expect(universe.snapshot().agents).toHaveLength(1);
     expect(universe.snapshot().agents[0]).toMatchObject({
       id: "agent-1",
@@ -1331,5 +1351,454 @@ describe("Universe", () => {
       outcome: "attention",
       summary: "Agent state · worker · working → blocked",
     });
+  });
+
+  test("preserves a consolidated duplicate's live execution as history", () => {
+    const legacy: Agent = {
+      id: "agent-legacy",
+      harnessId: "codex",
+      nativeConversationRef: { harnessId: "codex", kind: "session-id", value: "conversation-a" },
+      continuity: "proved",
+      providerContinuity: "unknown",
+      executionPresence: "live",
+      resumeCapability: "unknown",
+      observationHealth: "fresh",
+      executionHistory: [],
+      conflictingExecutions: [],
+      displayName: "legacy",
+      displayNameSource: "fallback",
+      runtimeState: "working",
+      runtimeStateSource: "test-host",
+      hostHealth: "live",
+      lastSeenAt: 1_000_000,
+      lastObservedAt: 1_000_000,
+      lastChangedAt: 1_000_000,
+      execution: {
+        hostKind: "test-host",
+        hostInstanceId: "test-host:default",
+        nativeId: "pane-2",
+        hostLocator: "opaque:pane-2",
+        observedAt: 1_000_000,
+      },
+    };
+    const canonical: Agent = {
+      ...legacy,
+      id: "agent-canonical",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "session-id",
+        value: "conversation-a",
+      },
+      execution: undefined,
+      executionPresence: "unknown",
+      displayName: "canonical",
+    };
+    const state = emptyUniverseState();
+    state.systems.push({
+      id: DEFAULT_SYSTEM_ID,
+      title: "Default",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    state.agents.push(canonical, legacy);
+    const { universe, clock } = makeUniverse({ state });
+    clock.value = 1_001_000;
+
+    const result = universe.reconcile(
+      hostSnapshot(
+        [
+          scopedConversation("pane-1", "conversation-a", clock.now()),
+          {
+            ...observation("pane-2", "weak pane", "working", clock.now()),
+            harnessEvidence: {
+              detectedHarnessId: "codex",
+              nativeConversationRef: {
+                harnessId: "codex",
+                kind: "session-id",
+                value: "conversation-a",
+              },
+              restoreState: "unknown" as const,
+              source: "hook" as const,
+              observedAt: clock.now(),
+            },
+          },
+        ],
+        clock.now(),
+      ),
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(universe.snapshot().agents).toHaveLength(1);
+    const merged = universe.snapshot().agents[0];
+    expect(merged?.id).toBe("agent-canonical");
+    expect(merged?.executionHistory.map((binding) => binding.nativeId)).toContain("pane-2");
+    expect(merged?.conflictingExecutions.map((binding) => binding.nativeId)).toEqual([
+      "pane-1",
+      "pane-2",
+    ]);
+    expect(merged).toMatchObject({
+      executionPresence: "conflict",
+      resumeCapability: "blocked",
+    });
+  });
+
+  test("restores provider resume eligibility when an execution conflict clears", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "session-id",
+        value: "conversation-a",
+      },
+      displayName: "Work",
+      observedAt: 1_000_000,
+    });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([scopedConversation("pane-a", "conversation-a")]),
+    );
+    clock.value = 1_001_000;
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot(
+        [
+          scopedConversation("pane-a", "conversation-a", clock.now()),
+          scopedConversation("pane-b", "conversation-a", clock.now()),
+        ],
+        clock.now(),
+      ),
+    );
+    expect(universe.snapshot().agents[0]?.resumeCapability).toBe("blocked");
+
+    clock.value = 1_002_000;
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([scopedConversation("pane-a", "conversation-a", clock.now())], clock.now()),
+    );
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      executionPresence: "live",
+      providerContinuity: "confirmed",
+      providerResumeEligibility: "same-site",
+      resumeCapability: "eligible",
+      conflictingExecutions: [],
+    });
+  });
+
+  test("merges two agents canonicalised onto the same alias target", () => {
+    const { universe } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: conversationAlias("alias-1", "scope-c"),
+      displayName: "First",
+      observedAt: 1_000_000,
+    });
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: conversationAlias("alias-2", "scope-c"),
+      displayName: "Second",
+      observedAt: 1_000_000,
+    });
+
+    const result = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-c",
+      observedAt: 1_100_000,
+      complete: true,
+      sessions: [
+        {
+          nativeConversationRef: conversationAlias("canonical", "scope-c"),
+          observedAt: 1_100_000,
+          resumeEligibility: "same-site",
+          nativeConversationAliases: [
+            conversationAlias("alias-1", "scope-c"),
+            conversationAlias("alias-2", "scope-c"),
+          ],
+        },
+      ],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("Consolidated duplicate Agent");
+    expect(universe.snapshot().agents).toHaveLength(1);
+    expect(universe.snapshot().agents[0]?.nativeConversationRef).toMatchObject({
+      value: "canonical",
+      continuityScopeId: "scope-c",
+    });
+  });
+
+  test("keeps provider freshness monotonic across per-session timestamps", () => {
+    const { universe } = makeUniverse();
+    const reference = {
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      kind: "id",
+      value: "conversation-a",
+    };
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: reference,
+      displayName: "Work",
+      observedAt: 2_000_000,
+    });
+    const newer = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 2_500_000,
+      complete: false,
+      sessions: [
+        { nativeConversationRef: reference, observedAt: 1_000_000, resumeEligibility: "same-site" },
+      ],
+    });
+    const stale = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 1_500_000,
+      complete: true,
+      sessions: [],
+    });
+
+    expect(newer.accepted).toBe(true);
+    expect(universe.snapshot().agents[0]?.providerObservedAt).toBe(2_000_000);
+    expect(stale.accepted).toBe(false);
+    expect(stale.error).toContain("Out-of-order");
+    expect(universe.snapshot().agents[0]?.providerContinuity).toBe("confirmed");
+  });
+
+  test("rejects archived agents, unknown priorities and non-finite observation times", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Destination" });
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane-1")]));
+    universe.execute({ type: "ArchiveAgent", agentId: "agent-1" });
+
+    expect(universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" })).toEqual(
+      { ok: false, error: "Archived agents cannot be assigned." },
+    );
+    expect(
+      universe.execute({ type: "AssignAgents", agentIds: ["agent-1"], goalId: "goal-1" }),
+    ).toEqual({ ok: false, error: "Archived agents cannot be assigned." });
+    expect(
+      universe.execute({
+        type: "AddConversation",
+        admissionSource: "managed-launch",
+        harnessId: "test-harness",
+        nativeConversationRef: {
+          harnessId: "test-harness",
+          continuityScopeId: "test-scope",
+          kind: "conversation-id",
+          value: "pane-1",
+        },
+        displayName: "Re-added",
+        observedAt: 1_000_000,
+      }),
+    ).toEqual({ ok: false, error: "Archived agents cannot be added." });
+
+    // SAFETY: Simulates an untrusted JavaScript caller bypassing the priority union.
+    const invalidPriority = "P9" as never;
+    expect(
+      universe.execute({ type: "CreateGoal", title: "Bad", priority: invalidPriority }),
+    ).toEqual({ ok: false, error: "Unknown goal priority." });
+    expect(
+      universe.execute({ type: "SetGoalPriority", goalId: "goal-1", priority: invalidPriority }),
+    ).toEqual({ ok: false, error: "Unknown goal priority." });
+    expect(
+      universe.execute({
+        type: "AddConversation",
+        admissionSource: "managed-launch",
+        harnessId: "test-harness",
+        nativeConversationRef: {
+          harnessId: "test-harness",
+          kind: "conversation-id",
+          value: "pane-9",
+        },
+        displayName: "Bad time",
+        observedAt: Number.NaN,
+      }),
+    ).toEqual({ ok: false, error: "Observation time is invalid." });
+  });
+
+  test("rejects a provider catalogue that escapes its declared scope", () => {
+    const { universe } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: "codex",
+      nativeConversationRef: { harnessId: "codex", kind: "id", value: "conversation-a" },
+      displayName: "Work",
+      observedAt: 1_000_000,
+    });
+
+    const result = universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 1_100_000,
+      complete: false,
+      sessions: [
+        {
+          nativeConversationRef: {
+            harnessId: "codex",
+            continuityScopeId: "other-scope",
+            kind: "id",
+            value: "conversation-a",
+          },
+          observedAt: 1_100_000,
+          resumeEligibility: "same-site",
+        },
+      ],
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.error).toContain("escaped its declared");
+    expect(universe.snapshot().agents[0]?.nativeConversationRef?.continuityScopeId).toBeUndefined();
+  });
+
+  test("blocks resume when an unscoped execution claims a scoped conversation", () => {
+    const { universe } = makeUniverse();
+    universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "codex",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "session-id",
+        value: "conversation-a",
+      },
+      displayName: "Work",
+      observedAt: 1_000_000,
+    });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([scopedConversation("pane-a", "conversation-a")]),
+    );
+
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        scopedConversation("pane-a", "conversation-a"),
+        {
+          ...observation("pane-b", "weak pane", "working"),
+          harnessEvidence: {
+            detectedHarnessId: "codex",
+            nativeConversationRef: {
+              harnessId: "codex",
+              kind: "session-id",
+              value: "conversation-a",
+            },
+            restoreState: "unknown" as const,
+            source: "hook" as const,
+            observedAt: 1_000_000,
+          },
+        },
+      ]),
+    );
+
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      executionPresence: "conflict",
+      resumeCapability: "blocked",
+    });
+    expect(universe.snapshot().agents[0]?.conflictingExecutions).toHaveLength(2);
+  });
+
+  test("rolls back runtime invalidation when persistence fails", () => {
+    const { universe, store } = makeUniverse();
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([observation("pane-1")]));
+    const before = universe.snapshot();
+    store.failNextSave = true;
+
+    const result = universe.invalidateRuntimeFacts();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Runtime invalidation rolled back");
+    expect(universe.snapshot()).toEqual(before);
+  });
+
+  test("marks a provider unavailable using the conversation harness identity", () => {
+    const state = emptyUniverseState();
+    state.agents.push({
+      id: "agent-legacy",
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "conversation-a",
+      },
+      continuity: "proved",
+      providerContinuity: "confirmed",
+      executionPresence: "absent",
+      resumeCapability: "eligible",
+      observationHealth: "fresh",
+      executionHistory: [],
+      conflictingExecutions: [],
+      displayName: "Legacy",
+      displayNameSource: "provider",
+      runtimeState: "unknown",
+      runtimeStateSource: "codex",
+      hostHealth: "stale",
+      lastSeenAt: 1,
+      lastObservedAt: 1,
+      lastChangedAt: 1,
+      providerObservedAt: 1,
+    });
+    const { universe } = makeUniverse({ state });
+
+    const result = universe.observe({ kind: "provider-unavailable", harnessId: "codex" });
+
+    expect(result.updatedAgentIds).toEqual(["agent-legacy"]);
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      providerContinuity: "unknown",
+      resumeCapability: "unknown",
+    });
+  });
+
+  test("does not share execution container references with snapshots or emit no-op changes", () => {
+    const events = new ControlPlaneEventHub();
+    const received: ControlPlaneEvent[] = [];
+    events.subscribe((batch) => received.push(...batch));
+    const { universe, clock } = makeUniverse({ events });
+    universe.execute({ type: "CreateGoal", title: "Same" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          ...observation("pane-1"),
+          executionContainer: { id: "container-1", label: "Container" },
+        },
+      ]),
+    );
+
+    const snapshot = universe.snapshot();
+    const container = snapshot.agents[0]?.executionContainer;
+    expect(container).toBeDefined();
+    if (container) {
+      Object.assign(container, { id: "mutated" });
+      expect(universe.snapshot().agents[0]?.executionContainer?.id).toBe("container-1");
+    }
+
+    const updatedAt = universe.snapshot().goals[0]?.updatedAt;
+    const eventCount = received.length;
+    clock.value += 1_000;
+    expect(universe.execute({ type: "RenameGoal", goalId: "goal-1", title: "Same" }).ok).toBe(true);
+    expect(received).toHaveLength(eventCount);
+    expect(universe.snapshot().goals[0]?.updatedAt).toBe(updatedAt);
   });
 });

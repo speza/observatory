@@ -6,6 +6,7 @@ import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
 import type { Projection, ProjectionModule, ProjectionQuery } from "../projection/types.ts";
 import {
   DEFAULT_SYSTEM_ID,
+  PRIORITIES,
   cloneUniverseState,
   isCurrentAttentionState,
   type Clock,
@@ -21,6 +22,7 @@ import {
   type AgentId,
   type Agent,
   type NativeConversationRef,
+  type RuntimeInvalidationResult,
   type UniverseChange,
   type UniverseChangeOutcome,
   type UniverseState,
@@ -164,6 +166,9 @@ const normalizeText = (value: string | undefined): string | undefined => {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
 };
+
+const isPriority = (value: string): value is Priority =>
+  PRIORITIES.some((priority) => priority === value);
 
 const copyExecutionContainer = (
   value: ExecutionContainerRef | undefined,
@@ -645,27 +650,52 @@ const markHostUnavailable = (draft: ReconciliationDraft, hostInstanceId: string)
   });
 };
 
-const indexConversationExecutions = (
-  snapshot: HostSnapshot,
-): Map<string, Agent["conflictingExecutions"]> => {
-  const executions = new Map<string, Agent["conflictingExecutions"]>();
+interface IndexedExecution {
+  readonly reference: NativeConversationRef;
+  readonly binding: NonNullable<Agent["conflictingExecutions"]>[number];
+}
+
+const conversationValueKey = (reference: NativeConversationRef): string =>
+  `${reference.harnessId}\u0000${reference.kind}\u0000${reference.value}`;
+
+const scopeCompatibleConversation = (
+  left: NativeConversationRef,
+  right: NativeConversationRef,
+): boolean =>
+  nativeConversationKey(left) === nativeConversationKey(right) ||
+  left.continuityScopeId === undefined ||
+  right.continuityScopeId === undefined;
+
+const indexConversationExecutions = (snapshot: HostSnapshot): Map<string, IndexedExecution[]> => {
+  const executions = new Map<string, IndexedExecution[]>();
   for (const observation of snapshot.agents) {
     const reference = nativeConversationFromObservation(observation);
     if (!reference) continue;
-    const key = nativeConversationKey(reference);
+    const key = conversationValueKey(reference);
     executions.set(key, [
       ...(executions.get(key) ?? []),
       {
-        hostKind: snapshot.hostKind,
-        hostInstanceId: snapshot.hostInstanceId,
-        nativeId: observation.nativeId.trim(),
-        hostLocator: observation.hostLocator,
-        observedAt: observation.observedAt,
+        reference,
+        binding: {
+          hostKind: snapshot.hostKind,
+          hostInstanceId: snapshot.hostInstanceId,
+          nativeId: observation.nativeId.trim(),
+          hostLocator: observation.hostLocator,
+          observedAt: observation.observedAt,
+        },
       },
     ]);
   }
   return executions;
 };
+
+const compatibleExecutionBindings = (
+  executions: ReadonlyMap<string, readonly IndexedExecution[]>,
+  reference: NativeConversationRef,
+): Agent["conflictingExecutions"] =>
+  (executions.get(conversationValueKey(reference)) ?? [])
+    .filter((entry) => scopeCompatibleConversation(entry.reference, reference))
+    .map((entry) => entry.binding);
 
 const detachMissingExecutions = (draft: ReconciliationDraft, snapshot: HostSnapshot): void => {
   const observedIds = new Set(snapshot.agents.map((agent) => agent.nativeId.trim()));
@@ -677,7 +707,8 @@ const detachMissingExecutions = (draft: ReconciliationDraft, snapshot: HostSnaps
     )
       return agent;
     draft.staleAgentIds.push(agent.id);
-    return {
+    if (!draft.updatedAgentIds.includes(agent.id)) draft.updatedAgentIds.push(agent.id);
+    const detached: Agent = {
       ...agent,
       execution: undefined,
       executionHistory: appendExecutionHistory(agent, agent.execution),
@@ -688,6 +719,7 @@ const detachMissingExecutions = (draft: ReconciliationDraft, snapshot: HostSnaps
       executionObservedAt: snapshot.observedAt,
       continuity: agent.nativeConversationRef ? agent.continuity : "unknown",
     };
+    return { ...detached, resumeCapability: deriveResumeCapability(detached) };
   });
 };
 
@@ -711,34 +743,40 @@ const detachReplacedExecution = (
     continuity,
   });
   if (!draft.staleAgentIds.includes(agent.id)) draft.staleAgentIds.push(agent.id);
+  if (!draft.updatedAgentIds.includes(agent.id)) draft.updatedAgentIds.push(agent.id);
 };
 
 const displayNameRank = (source: Agent["displayNameSource"]): number =>
   source === "human" ? 2 : source === "provider" ? 1 : 0;
 
-const consolidateLegacyConversationVariants = (
-  draft: ReconciliationDraft,
-  canonical: Agent,
-): Agent => {
-  const reference = canonical.nativeConversationRef;
-  if (!reference?.continuityScopeId) return canonical;
-  const legacy = draft.state.agents.filter(
-    (candidate) =>
-      candidate.id !== canonical.id &&
-      candidate.nativeConversationRef !== undefined &&
-      candidate.nativeConversationRef.continuityScopeId === undefined &&
-      sameConversationWithoutScope(candidate.nativeConversationRef, reference),
-  );
-  if (legacy.length === 0) return canonical;
+const providerContinuityRank = (continuity: Agent["providerContinuity"]): number =>
+  continuity === "confirmed" ? 2 : continuity === "missing" ? 1 : 0;
 
-  let merged = canonical;
-  for (const duplicate of legacy) {
+const combinedProviderObservedAt = (left: Agent, right: Agent): number | undefined => {
+  if (left.providerObservedAt === undefined) return right.providerObservedAt;
+  if (right.providerObservedAt === undefined) return left.providerObservedAt;
+  return Math.max(left.providerObservedAt, right.providerObservedAt);
+};
+
+/**
+ * Merge every duplicate of one canonical conversation into a single Agent.
+ * Executions on the losing records are never dropped: their current binding,
+ * history and conflict evidence all move into the keeper's execution history.
+ */
+const mergeConversationAgents = (
+  state: UniverseState,
+  keeper: Agent,
+  duplicates: readonly Agent[],
+  diagnostics: string[],
+): Agent => {
+  let merged = keeper;
+  for (const duplicate of duplicates) {
     if (
       merged.primaryGoalId &&
       duplicate.primaryGoalId &&
       merged.primaryGoalId !== duplicate.primaryGoalId
     )
-      draft.diagnostics.push(
+      diagnostics.push(
         `Consolidated duplicate Agent ${duplicate.id} into ${merged.id}; retained the canonical Goal assignment.`,
       );
     const duplicateNameWins =
@@ -748,10 +786,12 @@ const consolidateLegacyConversationVariants = (
       displayNameSource: duplicateNameWins ? duplicate.displayNameSource : merged.displayNameSource,
       description: merged.description ?? duplicate.description,
       primaryGoalId: merged.primaryGoalId ?? duplicate.primaryGoalId,
-      executionHistory: appendDistinctExecutions(
-        merged.executionHistory,
-        duplicate.executionHistory,
-      ),
+      harnessId: merged.harnessId ?? duplicate.harnessId,
+      executionHistory: appendDistinctExecutions(merged.executionHistory, [
+        ...duplicate.executionHistory,
+        ...(duplicate.execution ? [duplicate.execution] : []),
+        ...duplicate.conflictingExecutions,
+      ]),
       lastSeenAt: Math.max(merged.lastSeenAt, duplicate.lastSeenAt),
       lastObservedAt: Math.max(merged.lastObservedAt, duplicate.lastObservedAt),
       lastChangedAt: Math.max(merged.lastChangedAt, duplicate.lastChangedAt),
@@ -759,6 +799,15 @@ const consolidateLegacyConversationVariants = (
       branch: merged.branch ?? duplicate.branch,
       worktree: merged.worktree ?? duplicate.worktree,
       provider: merged.provider ?? duplicate.provider,
+      providerContinuity:
+        providerContinuityRank(duplicate.providerContinuity) >
+        providerContinuityRank(merged.providerContinuity)
+          ? duplicate.providerContinuity
+          : merged.providerContinuity,
+      providerResumeEligibility:
+        merged.providerResumeEligibility ?? duplicate.providerResumeEligibility,
+      providerObservedAt: combinedProviderObservedAt(merged, duplicate),
+      executionContainer: merged.executionContainer ?? duplicate.executionContainer,
       archivedAt:
         merged.archivedAt === undefined
           ? duplicate.archivedAt
@@ -766,9 +815,9 @@ const consolidateLegacyConversationVariants = (
             ? merged.archivedAt
             : Math.min(merged.archivedAt, duplicate.archivedAt),
     });
-    draft.state.agents = draft.state.agents.filter((candidate) => candidate.id !== duplicate.id);
-    const dismissals = new Map<string, (typeof draft.state.relatedAgentDismissals)[number]>();
-    for (const dismissal of draft.state.relatedAgentDismissals) {
+    state.agents = state.agents.filter((candidate) => candidate.id !== duplicate.id);
+    const dismissals = new Map<string, (typeof state.relatedAgentDismissals)[number]>();
+    for (const dismissal of state.relatedAgentDismissals) {
       const normalized =
         dismissal.agentId === duplicate.id ? { ...dismissal, agentId: merged.id } : dismissal;
       const key = dismissalKey(normalized.goalId, normalized.agentId);
@@ -776,21 +825,60 @@ const consolidateLegacyConversationVariants = (
       if (!previous || normalized.dismissedAt < previous.dismissedAt)
         dismissals.set(key, normalized);
     }
-    draft.state.relatedAgentDismissals = [...dismissals.values()];
-    draft.diagnostics.push(
-      `Consolidated legacy duplicate Agent ${duplicate.id} into scoped Agent ${merged.id}.`,
-    );
+    state.relatedAgentDismissals = [...dismissals.values()];
+    diagnostics.push(`Consolidated duplicate Agent ${duplicate.id} into ${merged.id}.`);
   }
-  replaceAgent(draft.state, merged);
-  if (!draft.updatedAgentIds.includes(merged.id)) draft.updatedAgentIds.push(merged.id);
+  replaceAgent(state, merged);
   return merged;
+};
+
+/**
+ * Any Agent that shares the canonical conversation identity of `canonical`:
+ * an exact key match (alias collision) or an unscoped variant of a scoped
+ * reference (managed-launch admission before provider scope was known).
+ */
+const duplicateConversationAgents = (state: UniverseState, canonical: Agent): Agent[] => {
+  const reference = canonical.nativeConversationRef;
+  if (!reference) return [];
+  return state.agents.filter(
+    (candidate) =>
+      candidate.id !== canonical.id &&
+      candidate.nativeConversationRef !== undefined &&
+      (nativeConversationKey(candidate.nativeConversationRef) ===
+        nativeConversationKey(reference) ||
+        (reference.continuityScopeId !== undefined &&
+          candidate.nativeConversationRef.continuityScopeId === undefined &&
+          sameConversationWithoutScope(candidate.nativeConversationRef, reference))),
+  );
+};
+
+const consolidateConversationDuplicates = (
+  state: UniverseState,
+  canonical: Agent,
+  diagnostics: string[],
+): Agent => {
+  const duplicates = duplicateConversationAgents(state, canonical);
+  return duplicates.length === 0
+    ? canonical
+    : mergeConversationAgents(state, canonical, duplicates, diagnostics);
+};
+
+const deriveResumeCapability = (agent: Agent): Agent["resumeCapability"] => {
+  if (agent.executionPresence === "conflict" || agent.conflictingExecutions.length > 0)
+    return "blocked";
+  if (agent.providerContinuity !== "confirmed" || agent.providerResumeEligibility === undefined)
+    return agent.resumeCapability;
+  return agent.providerResumeEligibility === "same-site" ||
+    agent.providerResumeEligibility === "provider-account"
+    ? "eligible"
+    : "blocked";
 };
 
 const reconcileObservation = (
   draft: ReconciliationDraft,
   snapshot: HostSnapshot,
   observation: HostAgentObservation,
-  conversationExecutions: ReadonlyMap<string, Agent["conflictingExecutions"]>,
+  conversationExecutions: ReadonlyMap<string, readonly IndexedExecution[]>,
 ): void => {
   const observedConversation = nativeConversationFromObservation(observation);
   const processEvidence = observation.harnessEvidence?.source === "process";
@@ -858,7 +946,13 @@ const reconcileObservation = (
     return;
   }
 
-  existing = consolidateLegacyConversationVariants(draft, existing);
+  const agentCountBeforeConsolidation = draft.state.agents.length;
+  existing = consolidateConversationDuplicates(draft.state, existing, draft.diagnostics);
+  if (
+    draft.state.agents.length !== agentCountBeforeConsolidation &&
+    !draft.updatedAgentIds.includes(existing.id)
+  )
+    draft.updatedAgentIds.push(existing.id);
 
   const preserveScopedProcessConversation = Boolean(
     processEvidence &&
@@ -869,7 +963,7 @@ const reconcileObservation = (
   );
 
   const conflicts = observedConversation
-    ? (conversationExecutions.get(nativeConversationKey(observedConversation)) ?? [])
+    ? compatibleExecutionBindings(conversationExecutions, observedConversation)
     : [];
   if (conflicts.length > 1) {
     replaceAgent(draft.state, {
@@ -942,8 +1036,11 @@ const reconcileObservation = (
     provider: observation.provider,
     executionContainer: copyExecutionContainer(observation.executionContainer),
   };
-  replaceAgent(draft.state, updated);
-  draft.updatedAgentIds.push(existing.id);
+  replaceAgent(draft.state, {
+    ...updated,
+    resumeCapability: deriveResumeCapability(updated),
+  });
+  if (!draft.updatedAgentIds.includes(existing.id)) draft.updatedAgentIds.push(existing.id);
 };
 
 const planReconciliation = (
@@ -965,23 +1062,24 @@ const planReconciliation = (
     return rejectedReconciliation(error, diagnostics);
   }
 
-  const scopeDowngrade = snapshot.agents.find((observation) => {
+  const scopeDowngrades = new Set<string>();
+  for (const observation of snapshot.agents) {
     const observed = nativeConversationFromObservation(observation);
-    if (!observed || observed.continuityScopeId !== undefined) return false;
+    if (!observed || observed.continuityScopeId !== undefined) continue;
     // A process argument is host evidence, not a new provider-catalogue
     // identity. It can prove the exact session value while the existing
     // provider-scoped reference remains canonical.
-    if (observation.harnessEvidence?.source === "process") return false;
+    if (observation.harnessEvidence?.source === "process") continue;
     const current = previous.agents.find((agent) =>
       executionMatches(agent, snapshot.hostInstanceId, observation.nativeId),
     )?.nativeConversationRef;
-    return Boolean(current?.continuityScopeId && sameConversationWithoutScope(current, observed));
-  });
-  if (scopeDowngrade)
-    return rejectedReconciliation(
-      `Unscoped provider identity for ${scopeDowngrade.nativeId.trim()} cannot replace its scoped conversation without canonical evidence.`,
-      diagnostics,
-    );
+    if (current?.continuityScopeId && sameConversationWithoutScope(current, observed)) {
+      scopeDowngrades.add(observation.nativeId.trim());
+      diagnostics.push(
+        `Ignored unscoped provider identity for ${observation.nativeId.trim()}; the scoped conversation remains canonical.`,
+      );
+    }
+  }
 
   const draft: ReconciliationDraft = {
     state: cloneUniverseState(previous),
@@ -1005,8 +1103,10 @@ const planReconciliation = (
     draft.diagnostics.push(
       `Incomplete ${snapshot.hostKind} snapshot did not prove any execution absent.`,
     );
-  for (const observation of snapshot.agents)
+  for (const observation of snapshot.agents) {
+    if (scopeDowngrades.has(observation.nativeId.trim())) continue;
     reconcileObservation(draft, snapshot, observation, conversationExecutions);
+  }
   return draft;
 };
 
@@ -1045,7 +1145,7 @@ export class Universe {
   }
 
   /** Discard persisted runtime certainty before the first fresh host observation. */
-  invalidateRuntimeFacts(): void {
+  invalidateRuntimeFacts(): RuntimeInvalidationResult {
     const previous = this.state;
     const next = cloneUniverseState(previous);
     next.agents = next.agents.map((agent) =>
@@ -1065,9 +1165,17 @@ export class Universe {
     next.hosts = next.hosts.map((host) =>
       host.status === "live" ? { ...host, status: "stale" as const } : host,
     );
-    this.store.save(next);
+    try {
+      this.store.save(next);
+    } catch (error) {
+      return {
+        ok: false,
+        error: `Runtime invalidation rolled back: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     this.state = next;
     this.publishExecutionChanges(previous, next, this.clock.now());
+    return { ok: true };
   }
 
   private reconcileProviderSessions(options: {
@@ -1090,7 +1198,22 @@ export class Universe {
       return rejectedReconciliation(
         `Out-of-order ${options.harnessId} provider catalogue ignored: ${options.observedAt} is older than ${latestAcceptedAt}.`,
       );
+    const escapedSession = options.sessions.find(
+      (session) =>
+        session.nativeConversationRef.harnessId !== options.harnessId ||
+        session.nativeConversationRef.continuityScopeId !== options.continuityScopeId ||
+        (session.nativeConversationAliases ?? []).some(
+          (alias) =>
+            alias.harnessId !== options.harnessId ||
+            alias.continuityScopeId !== options.continuityScopeId,
+        ),
+    );
+    if (escapedSession)
+      return rejectedReconciliation(
+        `Provider session ${escapedSession.nativeConversationRef.value} escaped its declared ${options.harnessId} catalogue scope.`,
+      );
     const next = cloneUniverseState(previous);
+    const diagnostics: string[] = [];
     const canonicalAliases = options.sessions.flatMap((session) =>
       (session.nativeConversationAliases ?? []).map((alias) => ({
         alias,
@@ -1105,6 +1228,14 @@ export class Universe {
           nativeConversationRef: session.nativeConversationRef,
         });
     }
+    const canonicalOwners = new Map<string, Agent>();
+    for (const agent of next.agents) {
+      const reference = agent.nativeConversationRef;
+      if (!reference) continue;
+      const key = nativeConversationKey(reference);
+      if (!canonicalOwners.has(key)) canonicalOwners.set(key, agent);
+    }
+    const aliasDuplicates: { readonly ownerId: AgentId; readonly duplicateId: AgentId }[] = [];
     next.agents = next.agents.map((agent) => {
       const reference = agent.nativeConversationRef;
       if (!reference) return agent;
@@ -1118,15 +1249,33 @@ export class Universe {
       );
       if (matches.length !== 1) return agent;
       const canonical = matches[0]!.canonical;
-      const canonicalOwned = next.agents.some(
-        (candidate) =>
-          candidate.id !== agent.id &&
-          candidate.nativeConversationRef &&
-          nativeConversationKey(candidate.nativeConversationRef) ===
-            nativeConversationKey(canonical),
-      );
-      return canonicalOwned ? agent : { ...agent, nativeConversationRef: canonical };
+      const canonicalKey = nativeConversationKey(canonical);
+      const owner = canonicalOwners.get(canonicalKey);
+      if (owner && owner.id !== agent.id) {
+        aliasDuplicates.push({ ownerId: owner.id, duplicateId: agent.id });
+        return agent;
+      }
+      canonicalOwners.set(canonicalKey, agent);
+      return { ...agent, nativeConversationRef: canonical };
     });
+    for (const { ownerId, duplicateId } of aliasDuplicates) {
+      const owner = next.agents.find((candidate) => candidate.id === ownerId);
+      const duplicate = next.agents.find((candidate) => candidate.id === duplicateId);
+      if (!owner || !duplicate) continue;
+      mergeConversationAgents(next, owner, [duplicate], diagnostics);
+    }
+    const exactKeyOwners = new Map<string, Agent>();
+    for (const agent of next.agents) {
+      const reference = agent.nativeConversationRef;
+      if (!reference || !next.agents.some((candidate) => candidate.id === agent.id)) continue;
+      const key = nativeConversationKey(reference);
+      const owner = exactKeyOwners.get(key);
+      if (!owner) {
+        exactKeyOwners.set(key, agent);
+        continue;
+      }
+      exactKeyOwners.set(key, mergeConversationAgents(next, owner, [agent], diagnostics));
+    }
     const observed = new Map(
       options.sessions.map((session) => [
         nativeConversationKey(session.nativeConversationRef),
@@ -1158,8 +1307,12 @@ export class Universe {
       return {
         ...agent,
         providerContinuity: "confirmed" as const,
+        providerResumeEligibility: session.resumeEligibility,
         resumeCapability: eligible ? ("eligible" as const) : ("blocked" as const),
-        providerObservedAt: session.observedAt,
+        providerObservedAt: Math.max(
+          agent.providerObservedAt ?? Number.NEGATIVE_INFINITY,
+          session.observedAt,
+        ),
         continuity: "proved" as const,
         displayName:
           agent.displayNameSource !== "human" && normalizeText(session.title)
@@ -1186,7 +1339,7 @@ export class Universe {
       accepted: true,
       updatedAgentIds,
       staleAgentIds: [],
-      diagnostics: [],
+      diagnostics,
     };
   }
 
@@ -1194,7 +1347,8 @@ export class Universe {
     const previous = this.state;
     const next = cloneUniverseState(previous);
     next.agents = next.agents.map((agent) =>
-      agent.harnessId === harnessId && agent.nativeConversationRef
+      (agent.nativeConversationRef?.harnessId ?? agent.harnessId) === harnessId &&
+      agent.nativeConversationRef
         ? {
             ...agent,
             providerContinuity: "unknown" as const,
@@ -1243,6 +1397,7 @@ export class Universe {
         const system = findSystem(next, command.systemId);
         if (!title) return { ok: false, error: "System title is required." };
         if (!system) return { ok: false, error: "System not found." };
+        if (system.title === title) return { ok: true, systemId: system.id };
         replaceSystem(next, { ...system, title, updatedAt: now });
         result = { ok: true, systemId: system.id };
         break;
@@ -1250,9 +1405,11 @@ export class Universe {
       case "SetSystemDescription": {
         const system = findSystem(next, command.systemId);
         if (!system) return { ok: false, error: "System not found." };
+        const description = normalizeText(command.description);
+        if (system.description === description) return { ok: true, systemId: system.id };
         replaceSystem(next, {
           ...system,
-          description: normalizeText(command.description),
+          description,
           updatedAt: now,
         });
         result = { ok: true, systemId: system.id };
@@ -1266,6 +1423,8 @@ export class Universe {
           return { ok: false, error: `Goal ${id} already exists.` };
         const systemId = command.systemId ?? DEFAULT_SYSTEM_ID;
         if (!findSystem(next, systemId)) return { ok: false, error: "System not found." };
+        if (command.priority !== undefined && !isPriority(command.priority))
+          return { ok: false, error: "Unknown goal priority." };
         const description = normalizeText(command.description);
         const goal = {
           id,
@@ -1288,6 +1447,7 @@ export class Universe {
         const goal = findGoal(next, command.goalId);
         if (!title) return { ok: false, error: "Goal title is required." };
         if (!goal) return { ok: false, error: "Goal not found." };
+        if (goal.title === title) return { ok: true, goalId: goal.id };
         replaceGoal(next, { ...goal, title, updatedAt: now });
         result = { ok: true, goalId: goal.id };
         break;
@@ -1296,6 +1456,7 @@ export class Universe {
         const goal = findGoal(next, command.goalId);
         if (!goal) return { ok: false, error: "Goal not found." };
         const description = normalizeText(command.description);
+        if (goal.description === (description || undefined)) return { ok: true, goalId: goal.id };
         replaceGoal(next, {
           ...goal,
           description: description || undefined,
@@ -1307,6 +1468,8 @@ export class Universe {
       case "SetGoalPriority": {
         const goal = findGoal(next, command.goalId);
         if (!goal) return { ok: false, error: "Goal not found." };
+        if (!isPriority(command.priority)) return { ok: false, error: "Unknown goal priority." };
+        if (goal.priority === command.priority) return { ok: true, goalId: goal.id };
         replaceGoal(next, {
           ...goal,
           priority: command.priority,
@@ -1370,6 +1533,8 @@ export class Universe {
             ok: false,
             error: "Archived goals cannot receive agents.",
           };
+        if (agent.archivedAt !== undefined)
+          return { ok: false, error: "Archived agents cannot be assigned." };
         replaceAgent(next, { ...agent, primaryGoalId: goal.id });
         next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
           (dismissal) => dismissal.goalId !== goal.id || dismissal.agentId !== command.agentId,
@@ -1387,6 +1552,10 @@ export class Universe {
         if (agentIds.length === 0) return { ok: false, error: "At least one agent is required." };
         const missingAgentId = agentIds.find((agentId) => !findAgent(next, agentId));
         if (missingAgentId) return { ok: false, error: `Agent ${missingAgentId} not found.` };
+        const archivedAgentId = agentIds.find(
+          (agentId) => findAgent(next, agentId)?.archivedAt !== undefined,
+        );
+        if (archivedAgentId) return { ok: false, error: "Archived agents cannot be assigned." };
         const selected = new Set(agentIds);
         next.agents = next.agents.map((agent) =>
           selected.has(agent.id) ? { ...agent, primaryGoalId: goal.id } : agent,
@@ -1479,6 +1648,8 @@ export class Universe {
         const agent = findAgent(next, command.agentId);
         if (!displayName) return { ok: false, error: "Agent name is required." };
         if (!agent) return { ok: false, error: "Agent not found." };
+        if (agent.displayName === displayName && agent.displayNameSource === "human")
+          return { ok: true, agentId: agent.id };
         replaceAgent(next, {
           ...agent,
           displayName,
@@ -1491,6 +1662,8 @@ export class Universe {
         const agent = findAgent(next, command.agentId);
         if (!agent) return { ok: false, error: "Agent not found." };
         const description = normalizeText(command.description);
+        if (agent.description === (description || undefined))
+          return { ok: true, agentId: agent.id };
         replaceAgent(next, {
           ...agent,
           description: description || undefined,
@@ -1509,6 +1682,8 @@ export class Universe {
           return { ok: false, error: "Harness id and Agent name are required." };
         if (reference.harnessId !== harnessId || !kind || !value)
           return { ok: false, error: "Provider conversation reference is invalid." };
+        if (!Number.isFinite(command.observedAt))
+          return { ok: false, error: "Observation time is invalid." };
         if (command.admissionSource === "provider-catalogue" && !continuityScopeId)
           return { ok: false, error: "Provider catalogue admission requires a scoped reference." };
         if (command.admissionSource === "provider-catalogue" && !command.resumeEligibility)
@@ -1528,6 +1703,8 @@ export class Universe {
           command.resumeEligibility === "provider-account";
         const existing = resolveConversationAgent(next.agents, normalizedReference);
         if (existing) {
+          if (existing.archivedAt !== undefined)
+            return { ok: false, error: "Archived agents cannot be added." };
           replaceAgent(next, {
             ...existing,
             nativeConversationRef:
@@ -1535,13 +1712,19 @@ export class Universe {
                 ? normalizedReference
                 : existing.nativeConversationRef,
             providerContinuity: providerAdmission ? "confirmed" : existing.providerContinuity,
+            providerResumeEligibility: providerAdmission
+              ? command.resumeEligibility
+              : existing.providerResumeEligibility,
             resumeCapability: providerAdmission
               ? resumeEligible
                 ? "eligible"
                 : "blocked"
               : existing.resumeCapability,
             providerObservedAt: providerAdmission
-              ? command.observedAt
+              ? Math.max(
+                  existing.providerObservedAt ?? Number.NEGATIVE_INFINITY,
+                  command.observedAt,
+                )
               : existing.providerObservedAt,
             displayName:
               providerAdmission && existing.displayNameSource === "fallback"
@@ -1564,6 +1747,7 @@ export class Universe {
           nativeConversationRef: normalizedReference,
           continuity: "proved",
           providerContinuity: providerAdmission ? "confirmed" : "unknown",
+          providerResumeEligibility: providerAdmission ? command.resumeEligibility : undefined,
           executionPresence: "unknown",
           resumeCapability: providerAdmission
             ? resumeEligible
@@ -1694,7 +1878,7 @@ export class Universe {
     this.publishExecutionChanges(previous, planned.state, snapshot.observedAt);
     return {
       accepted: true,
-      updatedAgentIds: planned.updatedAgentIds,
+      updatedAgentIds: [...new Set(planned.updatedAgentIds)],
       staleAgentIds: planned.staleAgentIds,
       diagnostics: planned.diagnostics,
     };

@@ -351,7 +351,7 @@ describe("SQLite persistence", () => {
     const store = new SqliteUniverseStore(":memory:");
     expect(
       store.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
-    ).toBe(3);
+    ).toBe(4);
     expect(
       store.db
         .query<{ name: string }, []>(
@@ -366,6 +366,7 @@ describe("SQLite persistence", () => {
     expect(columns.map((column) => column.name)).toContain("execution_container_id");
     expect(columns.map((column) => column.name)).toContain("execution_container_label");
     expect(columns.map((column) => column.name)).toContain("continuity_scope_id");
+    expect(columns.map((column) => column.name)).toContain("provider_resume_eligibility");
     const goalColumns = store.db.query<{ name: string }, []>("PRAGMA table_info(goals)").all();
     expect(goalColumns.map((column) => column.name)).toContain("map_x");
     expect(goalColumns.map((column) => column.name)).toContain("map_pinned");
@@ -483,6 +484,7 @@ describe("SQLite persistence", () => {
       const second = new SqliteUniverseStore(databasePath);
       expect(second.load().agents[0]).toMatchObject({
         providerContinuity: "confirmed",
+        providerResumeEligibility: "same-site",
         executionPresence: "absent",
         resumeCapability: "eligible",
         observationHealth: "fresh",

@@ -75,7 +75,9 @@ export const createObservatoryRuntime = (events?: ControlPlaneEventSink): Observ
       })()
     : new HerdrHostAdapter({ clock });
   const universe = new Universe(store, clock, new RuntimeIds(), createProjectionModule(), events);
-  universe.invalidateRuntimeFacts();
+  const invalidation = universe.invalidateRuntimeFacts();
+  if (!invalidation.ok)
+    throw new Error(invalidation.error ?? "Persisted runtime facts could not be invalidated.");
   const reconcile = createReconcile(host, universe);
   return {
     clock,

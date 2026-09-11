@@ -191,7 +191,14 @@ Universe owns admitted-reference resolution. Conversation history, provider
 observation correlation and launch coordination ask Universe to resolve an
 identity rather than reimplementing scope matching. A scoped provider reference
 may enrich one compatible unscoped managed launch only when no conflicting
-scope exists.
+scope exists, and duplicate records of one canonical conversation are merged
+without dropping their execution evidence.
+
+Agents persist the provider's raw resume eligibility alongside the derived
+`resumeCapability`, so clearing a transient execution conflict restores the
+provider-derived capability instead of leaving resume blocked until another
+catalogue refresh. Provider freshness is monotonic per Agent: a later accepted
+catalogue can never lower `providerObservedAt`.
 
 ### `agent-observations/`
 
