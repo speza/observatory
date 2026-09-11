@@ -27,6 +27,7 @@ import type {
   AgentObservation,
   AgentObservationCapability,
   AgentObservationSnapshot,
+  OpaqueNativeConversationRef,
   ProviderSessionSnapshot,
 } from "../../plugin-sdk/index.ts";
 import type {
@@ -337,6 +338,7 @@ export class SqliteUniverseStore
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path);
     this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.initializeSchema();
   }
 
@@ -817,12 +819,22 @@ export class SqliteUniverseStore
   }
 
   conversations(): readonly StoredConversation[] {
+    const aliases = new Map<string, OpaqueNativeConversationRef[]>();
+    for (const row of this.db
+      .query<ProviderConversationAliasRow, []>(
+        "SELECT * FROM provider_conversation_aliases ORDER BY handle, native_kind, native_value",
+      )
+      .all()) {
+      const list = aliases.get(row.handle) ?? [];
+      list.push(this.conversationAlias(row));
+      aliases.set(row.handle, list);
+    }
     return this.db
       .query<ProviderConversationRow, []>(
         "SELECT * FROM provider_conversations ORDER BY COALESCE(last_active_at, created_at, observed_at) DESC, handle",
       )
       .all()
-      .map((row) => this.conversationFromRow(row));
+      .map((row) => this.conversationFromRow(row, aliases.get(row.handle) ?? []));
   }
 
   conversation(handle: string): StoredConversation | undefined {
@@ -831,7 +843,7 @@ export class SqliteUniverseStore
         "SELECT * FROM provider_conversations WHERE handle = ?",
       )
       .get(handle);
-    return row ? this.conversationFromRow(row) : undefined;
+    return row ? this.conversationFromRow(row, this.conversationAliases(handle)) : undefined;
   }
 
   observationSource(harnessId: string): StoredObservationSource | undefined {
@@ -849,7 +861,10 @@ export class SqliteUniverseStore
         "SELECT * FROM agent_observation_sources ORDER BY harness_id",
       )
       .all()
-      .map((row) => this.observationSourceFromRow(row));
+      .flatMap((row) => {
+        const source = this.observationSourceFromRow(row);
+        return source ? [source] : [];
+      });
   }
 
   reconcileAgentObservations(
@@ -932,18 +947,28 @@ export class SqliteUniverseStore
       const transition = this.db.prepare(`
         INSERT OR IGNORE INTO agent_observation_transitions (
           harness_id, observation_id, revision, observation_json, received_at
-        ) VALUES (?, ?, ?, ?, ?)
+        )
+        SELECT ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM agent_observation_transitions
+          WHERE harness_id = ? AND observation_id = ? AND revision >= ?
+        )
       `);
       const changed = new Map<string, AgentObservation>();
       for (const observation of snapshot.transitions) {
+        const storageKey = observationStorageKey(observation);
+        const revision = observation.revision ?? 0;
         const result = transition.run(
           snapshot.harnessId,
-          observationStorageKey(observation),
-          observation.revision ?? 0,
+          storageKey,
+          revision,
           JSON.stringify(observation),
           receivedAt,
+          snapshot.harnessId,
+          storageKey,
+          revision,
         );
-        if (result.changes > 0) changed.set(observationStorageKey(observation), observation);
+        if (result.changes > 0) changed.set(storageKey, observation);
       }
       this.db.exec(`
         DELETE FROM agent_observation_transitions
@@ -1023,7 +1048,10 @@ export class SqliteUniverseStore
         "SELECT * FROM agent_observation_current ORDER BY harness_id, observation_id",
       )
       .all()
-      .map((row) => this.observationFromRow(row));
+      .flatMap((row) => {
+        const observation = this.observationFromRow(row);
+        return observation ? [observation] : [];
+      });
   }
 
   agentObservationTransitions(afterSequence: number): readonly AgentEvidenceTransition[] {
@@ -1032,7 +1060,10 @@ export class SqliteUniverseStore
         "SELECT * FROM agent_observation_transitions WHERE sequence > ? ORDER BY sequence",
       )
       .all(afterSequence)
-      .map((row) => ({ sequence: row.sequence, observation: this.observationFromRow(row) }));
+      .flatMap((row) => {
+        const observation = this.observationFromRow(row);
+        return observation ? [{ sequence: row.sequence, observation }] : [];
+      });
   }
 
   observationCheckpoint():
@@ -1079,44 +1110,62 @@ export class SqliteUniverseStore
     return sequence;
   }
 
-  private observationSourceFromRow(row: ObservationSourceRow): StoredObservationSource {
-    // SAFETY: These JSON values are written only by reconcileAgentObservations from the typed plugin contract.
-    const capability = JSON.parse(row.capability_json) as AgentObservationCapability;
-    // SAFETY: Source health is written only from a validated AgentObservationSnapshot.
-    const health = JSON.parse(row.health_json) as StoredObservationSource["health"];
-    return {
-      pluginId: row.plugin_id,
-      harnessId: row.harness_id,
-      providerInstanceId: row.provider_instance_id,
-      continuityScopeId: row.continuity_scope_id,
-      capability,
-      health,
-      cursor: row.cursor ?? undefined,
-      capturedAt: row.captured_at,
-    };
+  private observationSourceFromRow(row: ObservationSourceRow): StoredObservationSource | undefined {
+    try {
+      // SAFETY: These JSON values are written only by reconcileAgentObservations from the typed plugin contract.
+      const capability = JSON.parse(row.capability_json) as AgentObservationCapability;
+      // SAFETY: Source health is written only from a validated AgentObservationSnapshot.
+      const health = JSON.parse(row.health_json) as StoredObservationSource["health"];
+      return {
+        pluginId: row.plugin_id,
+        harnessId: row.harness_id,
+        providerInstanceId: row.provider_instance_id,
+        continuityScopeId: row.continuity_scope_id,
+        capability,
+        health,
+        cursor: row.cursor ?? undefined,
+        capturedAt: row.captured_at,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
-  private observationFromRow(row: ObservationRow): StoredAgentObservation {
-    // SAFETY: Observation JSON is persisted only after coordinator validation of the V1 union.
-    const observation = JSON.parse(row.observation_json) as AgentObservation;
-    return {
-      ...observation,
-      receivedAt: row.received_at,
-    };
+  private observationFromRow(row: ObservationRow): StoredAgentObservation | undefined {
+    try {
+      // SAFETY: Observation JSON is persisted only after coordinator validation of the V1 union.
+      const observation = JSON.parse(row.observation_json) as AgentObservation;
+      return {
+        ...observation,
+        receivedAt: row.received_at,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
-  private conversationFromRow(row: ProviderConversationRow): StoredConversation {
-    const aliases = this.db
+  private conversationAliases(handle: string): OpaqueNativeConversationRef[] {
+    return this.db
       .query<ProviderConversationAliasRow, [string]>(
         "SELECT * FROM provider_conversation_aliases WHERE handle = ? ORDER BY native_kind, native_value",
       )
-      .all(row.handle)
-      .map((alias) => ({
-        harnessId: alias.harness_id,
-        continuityScopeId: alias.continuity_scope_id,
-        kind: alias.native_kind,
-        value: alias.native_value,
-      }));
+      .all(handle)
+      .map((alias) => this.conversationAlias(alias));
+  }
+
+  private conversationAlias(alias: ProviderConversationAliasRow): OpaqueNativeConversationRef {
+    return {
+      harnessId: alias.harness_id,
+      continuityScopeId: alias.continuity_scope_id,
+      kind: alias.native_kind,
+      value: alias.native_value,
+    };
+  }
+
+  private conversationFromRow(
+    row: ProviderConversationRow,
+    aliases: readonly OpaqueNativeConversationRef[],
+  ): StoredConversation {
     return {
       handle: row.handle,
       nativeConversationRef: {
@@ -1143,8 +1192,8 @@ export class SqliteUniverseStore
   }
 
   resetSemanticState(): DatabaseResetSummary {
-    const counts = this.resetCounts();
-    this.db.transaction(() => {
+    const counts = this.db.transaction(() => {
+      const summary = this.resetCounts();
       this.db.exec(`
         DELETE FROM related_agent_dismissals;
         UPDATE agents
@@ -1171,6 +1220,7 @@ export class SqliteUniverseStore
         DELETE FROM agent_observation_transitions;
         DELETE FROM agent_observation_checkpoint;
       `);
+      return summary;
     })();
     return {
       removedGoals: counts.goals,
@@ -1181,8 +1231,8 @@ export class SqliteUniverseStore
   }
 
   resetAllState(): DatabaseResetSummary {
-    const counts = this.resetCounts();
-    this.db.transaction(() => {
+    const counts = this.db.transaction(() => {
+      const summary = this.resetCounts();
       this.db.exec(`
         DELETE FROM related_agent_dismissals;
         DELETE FROM agents;
@@ -1199,6 +1249,7 @@ export class SqliteUniverseStore
         DELETE FROM agent_observation_transitions;
         DELETE FROM agent_observation_checkpoint;
       `);
+      return summary;
     })();
     return {
       removedGoals: counts.goals,
@@ -1248,8 +1299,12 @@ export class SqliteUniverseStore
       )
       .all()
       .flatMap((row) => {
-        const receipt = this.loadLaunchReceipt(row.request_id);
-        return receipt ? [receipt] : [];
+        try {
+          const receipt = this.loadLaunchReceipt(row.request_id);
+          return receipt ? [receipt] : [];
+        } catch {
+          return [];
+        }
       });
   }
 
@@ -1274,7 +1329,7 @@ export class SqliteUniverseStore
   }
 
   saveLaunchReceipt(receipt: LaunchReceipt): void {
-    this.db
+    const updated = this.db
       .prepare(
         "UPDATE launch_receipts SET result_json = ?, recovery_json = ?, updated_at = ? WHERE request_id = ? AND intent_fingerprint = ?",
       )
@@ -1285,6 +1340,8 @@ export class SqliteUniverseStore
         receipt.requestId,
         receipt.intentFingerprint,
       );
+    if (updated.changes !== 1)
+      throw new Error("Launch receipt update did not match a reserved receipt.");
   }
 
   private initializeSchema(): void {
@@ -1302,7 +1359,9 @@ export class SqliteUniverseStore
         "This Observatory database uses an incompatible schema. Reset it before starting Observatory.",
       );
     }
-    this.db.exec(`
+    this.db
+      .transaction(() => {
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS systems (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -1471,8 +1530,20 @@ export class SqliteUniverseStore
       CREATE UNIQUE INDEX IF NOT EXISTS agents_live_execution_identity
         ON agents(host_instance_id, native_id)
         WHERE host_instance_id IS NOT NULL AND native_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS agents_primary_goal
+        ON agents(primary_goal_id)
+        WHERE primary_goal_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS goals_system
+        ON goals(system_id)
+        WHERE system_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS related_agent_dismissals_agent
+        ON related_agent_dismissals(agent_id);
+      CREATE INDEX IF NOT EXISTS launch_receipts_updated
+        ON launch_receipts(updated_at);
       PRAGMA user_version = ${SQLITE_SCHEMA_GENERATION};
     `);
+      })
+      .immediate();
   }
 }
 

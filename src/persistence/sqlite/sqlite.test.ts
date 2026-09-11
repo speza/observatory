@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -552,5 +552,174 @@ describe("SQLite persistence", () => {
     ).toThrow("injected SQL failure");
     expect(store.load()).toEqual(before);
     store.close();
+  });
+
+  test("creates foreign-key and ordering indexes and a busy timeout", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const indexNames = (table: string) =>
+        store.db
+          .query<{ name: string }, []>(`PRAGMA index_list(${table})`)
+          .all()
+          .map((index) => index.name);
+      expect(indexNames("agents")).toContain("agents_primary_goal");
+      expect(indexNames("goals")).toContain("goals_system");
+      expect(indexNames("related_agent_dismissals")).toContain("related_agent_dismissals_agent");
+      expect(indexNames("launch_receipts")).toContain("launch_receipts_updated");
+      expect(store.db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()?.timeout).toBe(
+        5000,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test("rolls back a failed schema bootstrap instead of leaving partial state", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-bootstrap-"));
+    const databasePath = join(directory, "universe.sqlite");
+    try {
+      const conflict = new Database(databasePath, { create: true });
+      conflict.exec("PRAGMA user_version = 3");
+      conflict.exec("CREATE TABLE agents_primary_goal (placeholder INTEGER)");
+      conflict.close();
+
+      expect(() => new SqliteUniverseStore(databasePath)).toThrow("already a table");
+
+      const inspection = new Database(databasePath);
+      const tables = inspection
+        .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name);
+      expect(tables).toEqual(["agents_primary_goal"]);
+      inspection.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("stale transition revisions are not retained as newer evidence", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const reference = {
+        harnessId: "codex",
+        continuityScopeId: "scope",
+        kind: "id",
+        value: "synthetic",
+      };
+      const capability = {
+        kinds: ["activity"] as const,
+        acquisition: "hook" as const,
+        delivery: "retained-events-and-snapshot" as const,
+        configured: true,
+        freshnessSeconds: { activity: 120 },
+      };
+      const claim = (revision: number, phase: "idle" | "responding") => ({
+        schemaVersion: 1 as const,
+        observationId: "activity-1",
+        nativeConversationRef: reference,
+        providerInstanceId: "test",
+        kind: "activity" as const,
+        revision,
+        observedAt: revision,
+        source: { mechanism: "hook" as const },
+        payload: { phase },
+      });
+      const reconcile = (item: ReturnType<typeof claim>, receivedAt: number) =>
+        store.reconcileAgentObservations(
+          {
+            schemaVersion: 1,
+            harnessId: "codex",
+            providerInstanceId: "test",
+            continuityScopeId: "scope",
+            capturedAt: 2,
+            complete: false,
+            current: [item],
+            transitions: [item],
+            health: { state: "healthy", diagnostics: [] },
+          },
+          capability,
+          receivedAt,
+          "test-plugin",
+        );
+      reconcile(claim(2, "idle"), 2);
+      const late = reconcile(claim(1, "responding"), 3);
+      expect(late.changedObservations).toEqual([]);
+      expect(store.currentAgentObservations()).toMatchObject([{ revision: 2 }]);
+      expect(store.agentObservationTransitions(0)).toMatchObject([
+        { sequence: 1, observation: { revision: 2, payload: { phase: "idle" } } },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("loads conversation aliases without a per-conversation query", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const insertConversation = store.db.prepare(
+        "INSERT INTO provider_conversations (handle, harness_id, continuity_scope_id, native_kind, native_value, provider_instance_id, resume_eligibility, provenance, observed_at) VALUES (?, 'codex', 'scope', 'id', ?, 'p', 'same-site', 'session-header', 1)",
+      );
+      const insertAlias = store.db.prepare(
+        "INSERT INTO provider_conversation_aliases (handle, harness_id, continuity_scope_id, native_kind, native_value) VALUES (?, 'codex', 'scope', 'alias', ?)",
+      );
+      for (let index = 0; index < 3; index += 1) {
+        insertConversation.run(`h${index}`, `v${index}`);
+        insertAlias.run(`h${index}`, `a${index}`);
+      }
+      const querySpy = spyOn(store.db, "query");
+      const conversations = store.conversations();
+      const aliasQueries = querySpy.mock.calls.filter(([sql]) =>
+        sql.includes("provider_conversation_aliases"),
+      ).length;
+      querySpy.mockRestore();
+      expect(conversations).toHaveLength(3);
+      expect(conversations[0]?.nativeConversationAliases).toHaveLength(1);
+      expect(aliasQueries).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("skips corrupt evidence and receipt rows instead of failing whole reads", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      store.db.exec(`
+        INSERT INTO agent_observation_sources (
+          harness_id, plugin_id, provider_instance_id, continuity_scope_id,
+          capability_json, health_json, cursor, captured_at
+        ) VALUES ('broken', 'plugin', 'instance', 'scope', '{not json', '{not json', NULL, 1);
+        INSERT INTO agent_observation_current (
+          harness_id, observation_id, revision, observation_json, received_at
+        ) VALUES ('broken', 'observation', 1, '{not json', 1);
+        INSERT INTO agent_observation_transitions (
+          harness_id, observation_id, revision, observation_json, received_at
+        ) VALUES ('broken', 'observation', 1, '{not json', 1);
+        INSERT INTO launch_receipts (
+          request_id, intent_fingerprint, result_json, recovery_json, updated_at
+        ) VALUES ('broken', 'fingerprint', '{not json', NULL, 1);
+      `);
+      expect(store.observationSource("broken")).toBeUndefined();
+      expect(store.agentObservationSources()).toEqual([]);
+      expect(store.currentAgentObservations()).toEqual([]);
+      expect(store.agentObservationTransitions(0)).toEqual([]);
+      expect(store.launchReceipts()).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("rejects a launch receipt update that matches no reservation", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      expect(() =>
+        store.saveLaunchReceipt({
+          requestId: "missing",
+          intentFingerprint: "fingerprint",
+          result: { status: "pending", requestId: "missing", message: "Synthetic" },
+        }),
+      ).toThrow("did not match a reserved receipt");
+    } finally {
+      store.close();
+    }
   });
 });
