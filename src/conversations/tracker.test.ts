@@ -322,6 +322,40 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
+  test("refuses to admit an unscoped discovery claimed by two provider scopes", () => {
+    const fixture = trackerFixture();
+    const other = {
+      ...conversation(),
+      nativeConversationRef: {
+        ...conversation().nativeConversationRef,
+        continuityScopeId: "scope-other",
+      },
+      nativeConversationAliases: conversation().nativeConversationAliases.map((alias) => ({
+        ...alias,
+        continuityScopeId: "scope-other",
+      })),
+      providerInstanceId: "codex-other-test",
+    };
+    fixture.store.reconcileProviderCatalogue(providerSnapshot());
+    fixture.store.reconcileProviderCatalogue({
+      ...providerSnapshot([other]),
+      providerInstanceId: "codex-other-test",
+      continuityScopeId: "scope-other",
+    });
+    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-ambiguous")]));
+
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = projection.discoveredExecutions?.[0];
+    expect(discovery?.admission.status).toBe("available");
+
+    expect(() => fixture.tracker.admitDiscovered(discovery!.handle)).toThrow(
+      "Admission identity is ambiguous; refresh the provider catalogue before adding this execution.",
+    );
+    expect(fixture.universe.snapshot().agents).toEqual([]);
+    fixture.store.close();
+  });
+
   test("converges a queued discovery admission with earlier History admission", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
