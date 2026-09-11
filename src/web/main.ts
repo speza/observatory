@@ -274,6 +274,12 @@ const program = Effect.scoped(
           { minimum: 100 },
         )
       : undefined;
+    const providerRefreshMs = positiveIntegerSetting(
+      "AO_PROVIDER_REFRESH_MS",
+      process.env.AO_PROVIDER_REFRESH_MS,
+      10_000,
+      { minimum: 1_000 },
+    );
     const observationTokenPath =
       process.env.AO_OBSERVATION_TOKEN_FILE ?? defaultProviderObservationTokenPath();
     const observationToken = yield* Effect.promise(async () => {
@@ -385,6 +391,15 @@ const program = Effect.scoped(
             },
             onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
           });
+    const providerLoop = runtime.useMockHost
+      ? undefined
+      : startSerializedRefreshLoop({
+          intervalMs: providerRefreshMs,
+          refresh: async () => {
+            await Effect.runPromise(conversations.refresh());
+          },
+          onError: (message) => console.error(`Provider catalogue refresh failed: ${message}`),
+        });
     console.log(
       `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
@@ -393,6 +408,7 @@ const program = Effect.scoped(
       Effect.promise(async () => {
         hostLoop.stop();
         observationLoop?.stop();
+        providerLoop?.stop();
         projectionPublisher.close();
         await api.close();
         void runningServer.stop(true);
