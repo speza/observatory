@@ -25,7 +25,7 @@ import { positiveIntegerSetting } from "../runtime/config.ts";
 import { pendingLaunchView } from "./launch.ts";
 import { projectPortfolio, type PortfolioLimits } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
-import { startSerializedRefreshLoop } from "./refresh-loop.ts";
+import { startObservatoryRefreshLoops } from "./refresh-loops.ts";
 import type { HostExecutionKey } from "../universe/universe.ts";
 
 const contentTypes = {
@@ -372,43 +372,40 @@ const program = Effect.scoped(
         },
       },
     });
-    const hostLoop = startSerializedRefreshLoop({
-      intervalMs: refreshMs,
-      refresh: async () => {
-        const snapshot = await Effect.runPromise(runtime.host.snapshot());
-        conversations.observeHost(snapshot);
-        await Effect.runPromise(startAgent.refreshPending());
+    const refreshLoops = startObservatoryRefreshLoops({
+      refreshMs,
+      observationRefreshMs,
+      providerRefreshMs,
+      useMockHost: runtime.useMockHost,
+      targets: {
+        refreshHost: async () => {
+          const snapshot = await Effect.runPromise(runtime.host.snapshot());
+          conversations.observeHost(snapshot);
+          await Effect.runPromise(startAgent.refreshPending());
+        },
+        refreshObservations: async () => {
+          await Effect.runPromise(agentObservations.refresh());
+        },
+        refreshProvider: async () => {
+          await Effect.runPromise(conversations.refresh());
+        },
       },
-      onError: (message) => console.error(`Observatory refresh failed: ${message}`),
+      onError: (message, scope) => {
+        const label = {
+          host: "Observatory refresh",
+          observations: "Agent-observation refresh",
+          provider: "Provider catalogue refresh",
+        }[scope];
+        console.error(`${label} failed: ${message}`);
+      },
     });
-    const observationLoop =
-      observationRefreshMs === undefined
-        ? undefined
-        : startSerializedRefreshLoop({
-            intervalMs: observationRefreshMs,
-            refresh: async () => {
-              await Effect.runPromise(agentObservations.refresh());
-            },
-            onError: (message) => console.error(`Agent-observation refresh failed: ${message}`),
-          });
-    const providerLoop = runtime.useMockHost
-      ? undefined
-      : startSerializedRefreshLoop({
-          intervalMs: providerRefreshMs,
-          refresh: async () => {
-            await Effect.runPromise(conversations.refresh());
-          },
-          onError: (message) => console.error(`Provider catalogue refresh failed: ${message}`),
-        });
     console.log(
       `${initialMessage} · ${providerRefresh.discoveredConversations} provider conversations discovered · ${observationRefresh.observedSources} observation sources\nObservatory web · http://${server.hostname}:${server.port}`,
     );
 
     yield* Effect.acquireRelease(Effect.succeed(server), (runningServer) =>
       Effect.promise(async () => {
-        hostLoop.stop();
-        observationLoop?.stop();
-        providerLoop?.stop();
+        refreshLoops.stop();
         projectionPublisher.close();
         await api.close();
         void runningServer.stop(true);
