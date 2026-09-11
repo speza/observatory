@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { projectPortfolio } from "../web/portfolio.ts";
+import { projectCommandCentre } from "./projection.ts";
+import type { Agent } from "../universe/types.ts";
 import {
   admitObservedConversationsAndReconcile,
   makeUniverse,
@@ -25,6 +27,25 @@ const observation = (
   provider: "fixture-provider",
   executionContainer,
   hostLocator: `opaque:${nativeId}`,
+});
+
+const bareAgent = (id: string, hostHealth: Agent["hostHealth"]): Agent => ({
+  id,
+  continuity: "proved",
+  providerContinuity: "confirmed",
+  executionPresence: "absent",
+  resumeCapability: "eligible",
+  observationHealth: "fresh",
+  executionHistory: [],
+  conflictingExecutions: [],
+  displayName: id,
+  displayNameSource: "fallback",
+  runtimeState: "idle",
+  runtimeStateSource: "fixture",
+  hostHealth,
+  lastSeenAt: 0,
+  lastObservedAt: 0,
+  lastChangedAt: 0,
 });
 
 describe("projections", () => {
@@ -396,7 +417,6 @@ describe("projections", () => {
     const projection = universe.project({
       kind: "search",
       query: "needle",
-      now: 1_000_000,
     });
     if (projection.kind !== "search") throw new Error("wrong projection");
     expect(projection.results.map((result) => result.label)).toEqual([
@@ -895,5 +915,153 @@ describe("projections", () => {
       "changed",
       "attention",
     ]);
+  });
+
+  test("orders non-live host health consistently and selects a stable host", () => {
+    const stale = bareAgent("stale-agent", "stale");
+    const unavailable = bareAgent("unavailable-agent", "unavailable");
+    const forward = projectCommandCentre({ goals: [], agents: [stale, unavailable], hosts: [] }, 0);
+    const reverse = projectCommandCentre({ goals: [], agents: [unavailable, stale], hosts: [] }, 0);
+    expect(forward.unassigned.map((agent) => agent.id)).toEqual([
+      "stale-agent",
+      "unavailable-agent",
+    ]);
+    expect(reverse.unassigned.map((agent) => agent.id)).toEqual([
+      "stale-agent",
+      "unavailable-agent",
+    ]);
+
+    const projected = projectCommandCentre(
+      {
+        goals: [],
+        agents: [],
+        hosts: [
+          { hostKind: "zeta", hostInstanceId: "b", status: "live", diagnosticCount: 0 },
+          { hostKind: "alpha", hostInstanceId: "b", status: "live", diagnosticCount: 0 },
+          { hostKind: "alpha", hostInstanceId: "a", status: "live", diagnosticCount: 0 },
+        ],
+      },
+      0,
+    );
+    expect(projected.host).toMatchObject({ hostKind: "alpha", hostInstanceId: "a" });
+  });
+
+  test("bounds oversized command centres while keeping the most actionable agents", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Bounded work" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("blocked", "blocked worker", "blocked"),
+        observation("working-a", "working a", "working"),
+        observation("working-b", "working b", "working"),
+      ]),
+    );
+    for (const agent of universe.snapshot().agents)
+      universe.execute({ type: "AssignAgent", agentId: agent.id, goalId: "goal-1" });
+
+    const projection = universe.project({
+      kind: "command-centre",
+      now: clock.now(),
+      maximumAgents: 1,
+    });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.truncated).toBe(true);
+    expect(projection.omittedAgentCount).toBe(2);
+    expect(projection.counts.agents).toBe(1);
+    expect(projection.counts.attention).toBe(1);
+    expect(projection.goals.flatMap((goal) => goal.agents).map((agent) => agent.id)).toEqual([
+      "agent-1",
+    ]);
+
+    const map = universe.project({
+      kind: "universe-map",
+      now: clock.now(),
+      maximumAgents: 1,
+    });
+    if (map.kind !== "universe-map") throw new Error("wrong projection");
+    expect(map.truncated).toBe(true);
+    expect(map.omittedAgentCount).toBe(2);
+    expect(map.counts.agents).toBe(1);
+  });
+
+  test("truncates catch-up to the oldest unread transitions without skipping acknowledgment", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "First" });
+    universe.execute({ type: "CreateGoal", title: "Second" });
+    universe.execute({ type: "CreateGoal", title: "Third" });
+    const allChanges = universe.snapshot().changes;
+    if (allChanges.length < 2) throw new Error("Expected multiple changes.");
+
+    const projection = universe.project({
+      kind: "catch-up",
+      now: clock.now(),
+      maximumTransitions: 1,
+    });
+    if (projection.kind !== "catch-up") throw new Error("wrong projection");
+    expect(projection.truncated).toBe(true);
+    expect(projection.transitionCount).toBe(1);
+    expect(projection.omittedTransitionCount).toBe(allChanges.length - 1);
+    expect(projection.throughSequence).toBe(allChanges[0]!.sequence);
+    expect(projection.pending).toBe(true);
+  });
+
+  test("bounds search results at the projection boundary", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Needle one" });
+    universe.execute({ type: "CreateGoal", title: "Needle two" });
+    const unbounded = universe.project({ kind: "search", query: "needle" });
+    const bounded = universe.project({ kind: "search", query: "needle", limit: 1 });
+    if (unbounded.kind !== "search" || bounded.kind !== "search")
+      throw new Error("wrong projection");
+    expect(unbounded.results).toHaveLength(2);
+    expect(bounded.results).toHaveLength(1);
+    expect(bounded.results[0]?.label).toBe("Needle one");
+  });
+
+  test("never exposes a UNC provider transcript path through the inspector", () => {
+    const { universe, clock } = makeUniverse();
+    const result = universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "fixture",
+      nativeConversationRef: {
+        harnessId: "fixture",
+        continuityScopeId: "fixture-local",
+        kind: "session-id",
+        value: "\\\\server\\share\\transcript.jsonl",
+      },
+      displayName: "Imported work",
+      observedAt: clock.now(),
+    });
+    expect(result.ok).toBe(true);
+
+    const inspector = universe.project({
+      kind: "inspector",
+      now: clock.now(),
+      target: { type: "agent", id: "agent-1" },
+    });
+    expect(JSON.stringify(inspector)).not.toContain("transcript.jsonl");
+    expect(inspector).not.toHaveProperty("conversation");
+  });
+
+  test("does not expose native execution identifiers or containers to renderers", () => {
+    const { universe, clock } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("pane-a", "worker", "working", "repo", "/tree", {
+          id: "container-secret",
+          label: "Visible label",
+        }),
+      ]),
+    );
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const serialized = JSON.stringify(projection);
+    expect(serialized).not.toContain("container-secret");
+    expect(serialized).not.toContain("pane-a");
+    expect(projection.unassigned[0]?.execution).toEqual({ hostKind: "test-host" });
   });
 });

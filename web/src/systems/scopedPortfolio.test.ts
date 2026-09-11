@@ -90,7 +90,7 @@ describe("scopePortfolio", () => {
           id: "agent-1",
           displayName: "Safety worker",
           goalTitle: "Archived context",
-          execution: { nativeId: "live" },
+          execution: { hostKind: "test-host" },
         });
       }
       expect(scopePortfolio(current, "system-2").commandCentre.counts).toMatchObject({

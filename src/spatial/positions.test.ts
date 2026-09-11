@@ -42,6 +42,44 @@ describe("spatial positions", () => {
     expect(second.get("agent-11")).toEqual(first.get("agent-11"));
   });
 
+  test("keeps existing satellites stable when an appended agent crosses the decimal boundary", () => {
+    const base = Array.from({ length: 9 }, (_, index) => `agent-${index + 1}`);
+    const first = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", base);
+    const second = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", [...base, "agent-10"]);
+    for (const id of base) expect(second.get(id)).toEqual(first.get(id));
+  });
+
+  test("assigns a unique satellite slot beyond the original fixed rings", () => {
+    const agentIds = Array.from({ length: 300 }, (_, index) => `agent-${index}`);
+    const positions = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", agentIds);
+    expect(positions.size).toBe(agentIds.length);
+    expect(
+      new Set([...positions.values()].map((position) => `${position.x}:${position.y}`)).size,
+    ).toBe(agentIds.length);
+  });
+
+  test("assigns a unique inbox slot when the neutral orbit overflows", () => {
+    const anchor = mapInboxAnchor([{ x: 0, y: 0 }]);
+    const agentIds = Array.from({ length: 300 }, (_, index) => `agent-${index}`);
+    const positions = unassignedAgentPositions(anchor, agentIds);
+    expect(positions.size).toBe(agentIds.length);
+    expect(
+      new Set([...positions.values()].map((position) => `${position.x}:${position.y}`)).size,
+    ).toBe(agentIds.length);
+  });
+
+  test("never reuses a placement once the compact goal grid is saturated", () => {
+    const occupied: { position: { x: number; y: number }; agentCount: number }[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < 200; index += 1) {
+      const position = initialGoalMapPosition(`goal-${index}`, occupied, 10);
+      const key = `${position.x}:${position.y}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+      occupied.push({ position, agentCount: 10 });
+    }
+  });
+
   test("keeps the first compact portfolio in one legible viewport row", () => {
     const first = initialGoalMapPosition("goal-a", []);
     const second = initialGoalMapPosition("goal-b", goalOccupancy(first));

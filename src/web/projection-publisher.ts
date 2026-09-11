@@ -1,5 +1,5 @@
 import type { ControlPlaneEvent, ControlPlaneEventSource } from "../control-plane-events/index.ts";
-import type { PortfolioResponse } from "./portfolio.ts";
+import type { PortfolioLimits, PortfolioResponse } from "./portfolio.ts";
 import type {
   BrowserProjectionEvent,
   BrowserProjectionSnapshot,
@@ -26,6 +26,7 @@ interface ProjectionSubscriber {
 export interface ProjectionPublisherOptions {
   readonly events: ControlPlaneEventSource;
   readonly projectPortfolio: () => PortfolioResponse;
+  readonly projectPortfolioWithinLimits?: (limits: PortfolioLimits) => PortfolioResponse;
   readonly pendingLaunches: () => readonly WebPendingLaunch[];
   readonly now: () => number;
   readonly allowedOrigin: string;
@@ -33,6 +34,17 @@ export interface ProjectionPublisherOptions {
   readonly timeRefreshMs?: number;
   readonly onError?: (message: string) => void;
 }
+
+const PORTFOLIO_PAYLOAD_HEADROOM_BYTES = 128 * 1024;
+const MINIMUM_AGENT_BUDGET = 1;
+const MINIMUM_TRANSITION_BUDGET = 10;
+const INITIAL_AGENT_BUDGET = 1_000;
+const INITIAL_TRANSITION_BUDGET = 500;
+const MAXIMUM_BUDGET_ATTEMPTS = 12;
+
+const portfolioFits = (portfolio: PortfolioResponse): boolean =>
+  textEncoder.encode(JSON.stringify(portfolio)).byteLength <=
+  MAX_SERIALIZED_EVENT_BYTES - PORTFOLIO_PAYLOAD_HEADROOM_BYTES;
 
 const encoded = (event: BrowserProjectionEvent): Uint8Array => {
   const payload = textEncoder.encode(
@@ -100,7 +112,7 @@ export class ProjectionPublisher {
     this.batchMs = Math.max(1, options.batchMs ?? DEFAULT_BATCH_MS);
     this.timeRefreshMs = Math.max(1_000, options.timeRefreshMs ?? DEFAULT_TIME_REFRESH_MS);
     this.generatedAt = options.now();
-    this.portfolio = options.projectPortfolio();
+    this.portfolio = this.boundedPortfolio();
     this.launches = options.pendingLaunches();
     this.unsubscribe = options.events.subscribe((events) => this.accept(events));
   }
@@ -116,6 +128,29 @@ export class ProjectionPublisher {
       affected: [],
       affectedAll: false,
     };
+  }
+
+  /**
+   * Prefer the complete portfolio. Oversized universes fall back to a bounded
+   * projection instead of disconnecting every subscriber with a 503.
+   */
+  private boundedPortfolio(): PortfolioResponse {
+    const full = this.options.projectPortfolio();
+    if (portfolioFits(full)) return full;
+    const bounded = this.options.projectPortfolioWithinLimits;
+    if (!bounded) return full;
+    let maximumAgents = INITIAL_AGENT_BUDGET;
+    let maximumTransitions = INITIAL_TRANSITION_BUDGET;
+    let candidate = bounded({ maximumAgents, maximumTransitions });
+    for (let attempt = 0; attempt < MAXIMUM_BUDGET_ATTEMPTS; attempt += 1) {
+      if (portfolioFits(candidate)) return candidate;
+      if (maximumAgents <= MINIMUM_AGENT_BUDGET && maximumTransitions <= MINIMUM_TRANSITION_BUDGET)
+        return candidate;
+      maximumAgents = Math.max(MINIMUM_AGENT_BUDGET, Math.floor(maximumAgents / 2));
+      maximumTransitions = Math.max(MINIMUM_TRANSITION_BUDGET, Math.floor(maximumTransitions / 2));
+      candidate = bounded({ maximumAgents, maximumTransitions });
+    }
+    return candidate;
   }
 
   /** HTTP reads and mutation replies publish one atomic, fully refreshed baseline. */
@@ -184,7 +219,7 @@ export class ProjectionPublisher {
   refreshTimeDerivedState(): void {
     if (this.closed) return;
     try {
-      const portfolio = this.options.projectPortfolio();
+      const portfolio = this.boundedPortfolio();
       const generatedAt = this.options.now();
       const revision = this.revision + 1;
       const event: BrowserProjectionEvent = {
@@ -275,7 +310,7 @@ export class ProjectionPublisher {
     const launchesChanged = this.pendingLaunches;
     const previousPortfolio = this.portfolio;
     try {
-      const portfolio = portfolioChanged ? this.options.projectPortfolio() : this.portfolio;
+      const portfolio = portfolioChanged ? this.boundedPortfolio() : this.portfolio;
       const launches = launchesChanged ? this.options.pendingLaunches() : this.launches;
       const generatedAt = this.options.now();
       const revision = this.revision + 1;

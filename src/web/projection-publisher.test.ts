@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import { FixedClock, makeUniverse } from "../universe/test-support.ts";
-import { projectPortfolio, type PortfolioResponse } from "./portfolio.ts";
+import { projectPortfolio, type PortfolioLimits, type PortfolioResponse } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { ObservatoryWebApi } from "./api.ts";
 import type { WebPortfolioResponse, WebCommandResponse } from "./protocol.ts";
@@ -102,6 +102,38 @@ describe("projection publisher", () => {
     fail = true;
     expect(() => publisher.capture()).toThrow("Projection capture failed");
     expect(publisher.current().revision).toBe(second.revision);
+    publisher.close();
+  });
+
+  test("falls back to a bounded portfolio when the complete event exceeds the delivery cap", async () => {
+    const { universe } = makeUniverse({ clock: new FixedClock(1) });
+    universe.execute({ type: "CreateGoal", title: "Large goal" });
+    const small = projectPortfolio(universe, 1);
+    if (!small) throw new Error("Expected a portfolio projection.");
+    const oversized: PortfolioResponse = {
+      ...small,
+      map: {
+        ...small.map,
+        goals: small.map.goals.map((goal) => ({ ...goal, title: "x".repeat(6 * 1024 * 1024) })),
+      },
+    };
+    const limits: PortfolioLimits[] = [];
+    const publisher = new ProjectionPublisher({
+      events: new ControlPlaneEventHub(),
+      projectPortfolio: () => oversized,
+      projectPortfolioWithinLimits: (requested) => {
+        limits.push(requested);
+        return small;
+      },
+      pendingLaunches: () => [],
+      now: () => 1,
+      allowedOrigin: "http://127.0.0.1:4310",
+    });
+    const reader = publisher.stream(request()).body!.getReader();
+    await reader.read();
+    expect(limits.length).toBeGreaterThan(0);
+    expect(publisher.current().portfolio).toEqual(small);
+    await reader.cancel();
     publisher.close();
   });
 

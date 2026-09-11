@@ -3,10 +3,6 @@ import { Option, Schema } from "effect";
 const Priority = Schema.Literal("P0", "P1", "P2", "P3");
 const RuntimeState = Schema.Literal("idle", "working", "waiting", "blocked", "done", "unknown");
 const MapPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
-const ExecutionContainer = Schema.Struct({
-  id: Schema.String,
-  label: Schema.optional(Schema.String),
-});
 const AttentionReason = Schema.Literal(
   "blocked",
   "waiting",
@@ -70,7 +66,6 @@ const AgentFields = {
   execution: Schema.optional(
     Schema.Struct({
       hostKind: Schema.String,
-      nativeId: Schema.String,
     }),
   ),
   harnessId: Schema.optional(Schema.String),
@@ -105,7 +100,6 @@ const AgentFields = {
   branch: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
-  executionContainer: Schema.optional(ExecutionContainer),
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
@@ -209,6 +203,8 @@ const CommandCentre = Schema.Struct({
   systems: Schema.Array(SystemView),
   goals: Schema.Array(GoalView),
   unassigned: Schema.Array(AgentView),
+  truncated: Schema.optional(Schema.Boolean),
+  omittedAgentCount: Schema.optional(Schema.Number),
   counts: PortfolioCounts,
 });
 const UniverseMap = Schema.Struct({
@@ -219,6 +215,8 @@ const UniverseMap = Schema.Struct({
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
   inboxPosition: MapPosition,
+  truncated: Schema.optional(Schema.Boolean),
+  omittedAgentCount: Schema.optional(Schema.Number),
   counts: PortfolioCounts,
 });
 const UniverseChange = Schema.Struct({
@@ -284,6 +282,8 @@ const CatchUp = Schema.Struct({
     key: Schema.Literal("new", "changed", "attention", "finished", "stale"),
     value: Schema.Number,
   }),
+  truncated: Schema.optional(Schema.Boolean),
+  omittedTransitionCount: Schema.optional(Schema.Number),
   evidenceTransitionCount: Schema.optional(Schema.Number),
 });
 export const PortfolioResponseSchema = Schema.Struct({
