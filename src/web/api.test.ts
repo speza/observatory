@@ -936,6 +936,7 @@ describe("ObservatoryWebApi", () => {
       start: () => Effect.die("not used"),
       resume: () => Effect.die("not used"),
       refreshPending: () => Effect.succeed([]),
+      pendingExecutionKeys: () => [],
       pendingLaunches: () => [
         {
           requestId: "pending-terminal-test",
@@ -1108,6 +1109,109 @@ describe("ObservatoryWebApi", () => {
     await api.close();
   });
 
+  test("rejects malformed admission requests without leaking schema details", async () => {
+    const fixture = makeUniverse();
+    const conversations: ConversationTrackerModule = {
+      refresh: () =>
+        Effect.succeed({ observedProviders: 0, discoveredConversations: 0, diagnostics: [] }),
+      history: () => [],
+      add: () => {
+        throw new Error("History admission must not run.");
+      },
+      admitDiscovered: () => {
+        throw new Error("Admission must not run for a malformed request.");
+      },
+      observeHost: (snapshot) => admitObservedConversationsAndReconcile(fixture.universe, snapshot),
+    };
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      conversations,
+    });
+    const post = (body: string) =>
+      api.fetch(
+        new Request("http://localhost/api/discoveries/admit", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            "x-ao-command": "1",
+          },
+          body,
+        }),
+      );
+
+    const malformed = await post("{oops");
+    expect(malformed.status).toBe(400);
+    const malformedBody = await malformed.json();
+    expect(malformedBody).toEqual({
+      error: "Admission request does not match the command contract.",
+    });
+
+    const oversized = await post(JSON.stringify({ handle: "x".repeat(20_000) }));
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "Admission request is too large." });
+    await api.close();
+  });
+
+  test("returns the admitted discovery with the refreshed portfolio", async () => {
+    const fixture = makeUniverse();
+    fixture.universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "admit-pane",
+          displayName: "Admit me",
+          runtimeState: "working",
+          runtimeStateSource: "test-host",
+          hostLocator: "test:admit-pane",
+          observedAt: fixture.clock.now(),
+        },
+      ]),
+    );
+    const conversations: ConversationTrackerModule = {
+      refresh: () =>
+        Effect.succeed({ observedProviders: 0, discoveredConversations: 0, diagnostics: [] }),
+      history: () => [],
+      add: () => {
+        throw new Error("History admission must not run.");
+      },
+      admitDiscovered: () => ({
+        agentId: "agent-9",
+        goalId: "goal-9",
+        message: "Execution added to Observatory and assigned to the Goal.",
+      }),
+      observeHost: (snapshot) => admitObservedConversationsAndReconcile(fixture.universe, snapshot),
+    };
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      conversations,
+    });
+
+    const response = await api.fetch(
+      new Request("http://localhost/api/discoveries/admit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({ handle: "discovery-1", goalId: "goal-9" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      agentId: "agent-9",
+      goalId: "goal-9",
+      message: "Execution added to Observatory and assigned to the Goal.",
+      portfolio: { map: { kind: "universe-map" } },
+    });
+    await api.close();
+  });
+
   test("streams a host-only discovered execution without conversation evidence", async () => {
     const fixture = makeUniverse();
     const scenario: MockScenario = {
@@ -1164,6 +1268,7 @@ describe("ObservatoryWebApi", () => {
     expect(opened.status).toBe(200);
     const body: WebTerminalOpenResponse = await opened.json();
     expect(body.message).toContain("mock terminal");
+    expect(JSON.stringify(body)).not.toContain("host-only-pane");
     await api.close();
   });
 

@@ -68,10 +68,11 @@ const DiscoveredRow = ({
   readonly onSelect: (selection: Selection) => void;
 }): React.JSX.Element => {
   const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+  const stateLabel = execution.presence === "live" ? state : "runtime unknown";
   return (
     <li>
       <button
-        aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+        aria-label={`${execution.displayName}, ${stateLabel}, discovered in ${execution.hostKind}`}
         onClick={() => onSelect({ type: "discovered-execution", id: execution.handle })}
         type="button"
       >
@@ -84,7 +85,7 @@ const DiscoveredRow = ({
             {execution.hostKind}
           </small>
         </span>
-        <em>{execution.presence === "live" ? state : "runtime unknown"}</em>
+        <em>{stateLabel}</em>
       </button>
     </li>
   );

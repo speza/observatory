@@ -13,6 +13,7 @@ import {
   DEFAULT_SYSTEM_ID,
   PRIORITIES,
   cloneUniverseState,
+  compareText,
   isCurrentAttentionState,
   safeConversationReference,
   type Clock,
@@ -1409,7 +1410,6 @@ export class Universe {
           branch: discovery.branch,
           worktree: discovery.worktree,
           provider: discovery.provider,
-          executionContainer: discovery.executionContainer,
           conversation,
           conversationIdentified: discovery.nativeConversationRef !== undefined,
           conversationTitle: catalogue?.title,
@@ -1420,8 +1420,8 @@ export class Universe {
       })
       .sort(
         (left, right) =>
-          left.displayName.localeCompare(right.displayName) ||
-          left.handle.localeCompare(right.handle),
+          compareText(left.displayName, right.displayName) ||
+          compareText(left.handle, right.handle),
       );
   }
 
@@ -1453,7 +1453,10 @@ export class Universe {
       return next;
     }
 
-    if (snapshot.agents.length > MAX_CURRENT_DISCOVERED_EXECUTIONS) {
+    const discoverableCount = snapshot.agents.filter(
+      (observation) => observation.discoverable !== false,
+    ).length;
+    if (discoverableCount > MAX_CURRENT_DISCOVERED_EXECUTIONS) {
       for (const [handle, record] of next)
         if (hostMatches(record)) next.set(handle, markUnknown(record));
       return next;
@@ -1493,6 +1496,10 @@ export class Universe {
       const existing = [...next.values()].find(
         (record) => bindingExecutionKey(record.binding) === identityKey,
       );
+      if (observation.discoverable === false) {
+        if (existing) next.delete(existing.handle);
+        continue;
+      }
       const observedConversation = nativeConversationFromObservation(observation);
       if (
         pending.has(identityKey) ||
@@ -1532,6 +1539,13 @@ export class Universe {
               nativeConversationKey(effectiveConversation)));
       const targetChanged =
         existing !== undefined && existing.binding.hostLocator !== observation.hostLocator;
+      const identityReplaced =
+        existing !== undefined &&
+        existing.nativeConversationRef !== undefined &&
+        effectiveConversation !== undefined &&
+        !scopeEnrichment &&
+        nativeConversationKey(existing.nativeConversationRef) !==
+          nativeConversationKey(effectiveConversation);
       const binding: AgentExecutionBinding = {
         hostKind: snapshot.hostKind,
         hostInstanceId: snapshot.hostInstanceId,
@@ -1540,14 +1554,14 @@ export class Universe {
         observedAt: observation.observedAt,
       };
       const handle =
-        existing && !conversationChanged && !targetChanged
+        existing && !identityReplaced && !targetChanged
           ? existing.handle
           : this.ids.next("discovery");
       if (existing && handle !== existing.handle) next.delete(existing.handle);
       next.set(handle, {
         handle,
         binding,
-        displayName: normalizeText(observation.displayName) ?? "Unnamed Herdr execution",
+        displayName: normalizeText(observation.displayName) ?? "Unnamed execution",
         runtimeState: observation.runtimeState,
         runtimeStateSource: observation.runtimeStateSource,
         repository: normalizeText(observation.repository),

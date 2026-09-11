@@ -2,6 +2,7 @@ import { evaluateAttention, formatAge, type AttentionItem } from "../attention/a
 import {
   priorityRank,
   safeConversationReference,
+  compareText,
   type Goal,
   type HostHealth,
   type Agent,
@@ -51,9 +52,6 @@ const byAttention = (attention: readonly AttentionItem[]): Map<string, Attention
   return result;
 };
 
-const textCollator = new Intl.Collator("en", { sensitivity: "variant" });
-const compareText = (left: string, right: string): number => textCollator.compare(left, right);
-
 const hostHealthRank = {
   live: 0,
   stale: 1,
@@ -75,9 +73,9 @@ const compareDiscoveredExecutions = (
   right: DiscoveredExecutionView,
 ): number =>
   (left.presence === right.presence ? 0 : left.presence === "live" ? -1 : 1) ||
-  left.displayName.localeCompare(right.displayName) ||
-  left.hostKind.localeCompare(right.hostKind) ||
-  left.handle.localeCompare(right.handle);
+  compareText(left.displayName, right.displayName) ||
+  compareText(left.hostKind, right.hostKind) ||
+  compareText(left.handle, right.handle);
 
 const hostFor = (hosts: readonly HostHealth[]): HostHealth | undefined => {
   if (hosts.length === 0) return undefined;
@@ -682,7 +680,7 @@ export const mapFromCommandCentre = (
     [...occupiedPositions, ...mapUnassigned.map((agent) => agent.mapPosition)],
     (commandCentre.discoveredExecutions ?? [])
       .map((execution) => execution.handle)
-      .sort((left, right) => left.localeCompare(right)),
+      .sort(compareText),
   );
   const mapDiscoveredExecutions: readonly MapDiscoveredExecutionView[] = (
     commandCentre.discoveredExecutions ?? []
@@ -769,6 +767,7 @@ const projectSearch = (
     }
   }
   for (const execution of state.discoveredExecutions ?? []) {
+    if (results.length >= maximum) break;
     const haystack = [
       execution.displayName,
       execution.hostKind,

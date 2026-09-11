@@ -169,7 +169,7 @@ describe("Mock host adapter", () => {
     });
     expect(await Effect.runPromise(opened.terminal!.release())).toEqual({
       ok: true,
-      message: "Released mock terminal mock-p01.",
+      message: "Released the mock terminal.",
     });
   });
 

@@ -311,12 +311,18 @@ export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number
 
 const DISCOVERED_DOCK_PADDING = 18;
 const DISCOVERED_DOCK_HEADING_HEIGHT = 40;
+const DISCOVERED_DOCK_GOAL_GAP = 48;
 
 export interface DiscoveredDockBounds {
   readonly left: number;
   readonly top: number;
   readonly width: number;
   readonly height: number;
+}
+
+export interface DiscoveredDockPlacement {
+  readonly bounds: DiscoveredDockBounds;
+  readonly translation: { readonly x: number; readonly y: number };
 }
 
 /** Bounds of the labelled discovery dock in logical (pre-camera) space. */
@@ -349,6 +355,31 @@ export const discoveredExecutionDockBounds = (
   return { left, top, width: right - left, height: bottom - top };
 };
 
+/**
+ * Place the dock below everything the Atlas actually renders. The projection
+ * cannot know rendered orbit and caption extents, so the renderer shifts the
+ * whole dock group down by the overflow. A scoped projection passes its
+ * filtered goals here, keeping the dock adjacent on System maps too.
+ */
+export const discoveredDockPlacement = (
+  projection: UniverseMapProjection,
+  scale: number,
+): DiscoveredDockPlacement | undefined => {
+  const bounds = discoveredExecutionDockBounds(projection.discoveredExecutions ?? [], scale);
+  if (!bounds) return undefined;
+  const renderedBottoms = [
+    ...projection.goals.map((goal) => goal.mapPosition.y * scale + goalLocalBounds(goal).bottom),
+    ...projection.unassigned.map((agent) => agent.mapPosition.y * scale + AGENT_CARD_HEIGHT / 2),
+  ];
+  const lowest = renderedBottoms.length > 0 ? Math.max(...renderedBottoms) : undefined;
+  const translationY =
+    lowest === undefined ? 0 : Math.max(0, lowest + DISCOVERED_DOCK_GOAL_GAP - bounds.top);
+  return {
+    bounds: { ...bounds, top: bounds.top + translationY },
+    translation: { x: 0, y: translationY },
+  };
+};
+
 /** Bounds of the visible goal bodies, captions, agent nodes, and the discovery dock. */
 export const atlasContentBounds = (
   projection: UniverseMapProjection,
@@ -365,16 +396,13 @@ export const atlasContentBounds = (
       maximumY: goalY + local.bottom,
     };
   });
-  const dock = discoveredExecutionDockBounds(
-    projection.discoveredExecutions ?? [],
-    goalSpacingScale,
-  );
+  const dock = discoveredDockPlacement(projection, goalSpacingScale);
   if (dock) {
     bounds.push({
-      minimumX: dock.left,
-      maximumX: dock.left + dock.width,
-      minimumY: dock.top,
-      maximumY: dock.top + dock.height,
+      minimumX: dock.bounds.left,
+      maximumX: dock.bounds.left + dock.bounds.width,
+      minimumY: dock.bounds.top,
+      maximumY: dock.bounds.top + dock.bounds.height,
     });
   }
 

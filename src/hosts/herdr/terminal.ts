@@ -207,7 +207,7 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     } finally {
       this.process.kill();
     }
-    return { ok: true, message: `Released Herdr terminal ${this.target}.` };
+    return { ok: true, message: "Released the Herdr terminal." };
   }
 
   private async *readEvents(): AsyncIterable<HostTerminalEvent> {

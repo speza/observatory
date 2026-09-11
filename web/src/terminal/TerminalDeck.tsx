@@ -22,6 +22,11 @@ export interface TerminalDeckProps {
   readonly onTerminalAppearanceChange: (appearance: TerminalAppearance) => void;
 }
 
+const isDiscoveredExecution = (
+  candidate: AgentView | DiscoveredExecutionView,
+): candidate is DiscoveredExecutionView =>
+  "type" in candidate && candidate.type === "discovered-execution";
+
 const primaryTab: TerminalTab = { id: "primary" };
 const terminalAppearances: readonly TerminalAppearance[] = ["application", "light", "dark"];
 const terminalAppearanceLabel = (appearance: TerminalAppearance): string =>
@@ -37,8 +42,8 @@ export const TerminalDeck = ({
   terminalAppearance,
   onTerminalAppearanceChange,
 }: TerminalDeckProps): React.JSX.Element => {
-  const discovery = "handle" in agent ? agent : undefined;
-  const selectedAgent = "handle" in agent ? undefined : agent;
+  const discovery = isDiscoveredExecution(agent) ? agent : undefined;
+  const selectedAgent = isDiscoveredExecution(agent) ? undefined : agent;
   const isDiscovery = discovery !== undefined;
   const subjectId = discovery?.handle ?? selectedAgent?.id;
   const availableAgents = agents ?? (selectedAgent ? [selectedAgent] : []);

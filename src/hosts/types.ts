@@ -21,6 +21,13 @@ export interface HostAgentObservation {
   readonly worktree?: string;
   readonly provider?: string;
   readonly harnessEvidence?: HostHarnessEvidence;
+  /**
+   * A current host-reported execution that is not an agent (for example a plain
+   * terminal pane). It still preserves execution presence during
+   * reconciliation, but it can never become a discovered execution. Hosts that
+   * cannot prove an agent identity should set this rather than omitting the row.
+   */
+  readonly discoverable?: boolean;
   /** Optional host-observed execution context; its identity is opaque to core. */
   readonly executionContainer?: ExecutionContainerRef;
   /** Serialized and opaque outside the agent-host adapter. */

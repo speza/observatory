@@ -17,6 +17,7 @@ import {
   type LaunchReceipt,
   type LaunchRecovery,
   type LaunchReceiptStore,
+  type PendingExecutionKey,
   type PendingLaunch,
   type ResumeAgentIntent,
   type StartAgentCoordinator,
@@ -449,6 +450,26 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         goalId: receipt.recovery.goalId,
         message: receipt.result.message,
       }));
+  }
+
+  pendingExecutionKeys(): readonly PendingExecutionKey[] {
+    return this.receipts.launchReceipts().flatMap((receipt) => {
+      const recovery = receipt.recovery;
+      if (
+        receipt.result.status !== "pending" ||
+        !recovery?.executionRef ||
+        !recovery.hostKind ||
+        !recovery.hostInstanceId
+      )
+        return [];
+      return [
+        {
+          hostKind: recovery.hostKind,
+          hostInstanceId: recovery.hostInstanceId,
+          nativeId: recovery.executionRef,
+        },
+      ];
+    });
   }
 
   refreshPending(): Effect.Effect<readonly StartAgentResult[], LaunchError> {

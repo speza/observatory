@@ -56,15 +56,43 @@ interface ErrorResponse {
 
 const MAXIMUM_SEARCH_QUERY_LENGTH = 200;
 const MAXIMUM_SEARCH_RESULTS = 50;
+const MAX_DISCOVERY_REQUEST_BYTES = 16_384;
+const DiscoveryHandle = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240));
 
 const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
 });
 const AdmitDiscoveredExecutionRequestSchema = Schema.Struct({
-  handle: Schema.String,
-  goalId: Schema.optional(Schema.String),
+  handle: DiscoveryHandle,
+  goalId: Schema.optional(DiscoveryHandle),
 });
+
+class WebDiscoveryAdmissionError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+const decodeAdmitDiscoveredExecutionRequest = (
+  encoded: string,
+): { readonly handle: string; readonly goalId?: string } => {
+  if (encoded.length > MAX_DISCOVERY_REQUEST_BYTES)
+    throw new WebDiscoveryAdmissionError("Admission request is too large.", 413);
+  try {
+    return Schema.decodeUnknownSync(Schema.parseJson(AdmitDiscoveredExecutionRequestSchema))(
+      encoded,
+    );
+  } catch {
+    throw new WebDiscoveryAdmissionError(
+      "Admission request does not match the command contract.",
+      400,
+    );
+  }
+};
 
 type WebResponse =
   | PortfolioResponse
@@ -205,9 +233,7 @@ export class ObservatoryWebApi {
       const rejected = this.rejectMutation(request);
       if (rejected) return rejected;
       try {
-        const values = Schema.decodeUnknownSync(
-          Schema.parseJson(AdmitDiscoveredExecutionRequestSchema),
-        )(await request.text());
+        const values = decodeAdmitDiscoveredExecutionRequest(await request.text());
         const handle = values.handle.trim();
         if (!handle) return json({ error: "A discovered execution handle is required." }, 400);
         if (
@@ -223,6 +249,8 @@ export class ObservatoryWebApi {
         if (portfolio instanceof Response) return portfolio;
         return json({ ...result, portfolio } satisfies WebAdmitDiscoveredExecutionResponse);
       } catch (error) {
+        if (error instanceof WebDiscoveryAdmissionError)
+          return json({ error: error.message }, error.status);
         return json(
           {
             error:

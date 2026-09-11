@@ -190,18 +190,7 @@ const program = Effect.scoped(
       events,
       now: () => runtime.clock.now(),
     });
-    pendingExecutionKeys = () =>
-      startAgent.pendingLaunches().flatMap((launch) =>
-        launch.hostKind && launch.hostInstanceId
-          ? [
-              {
-                hostKind: launch.hostKind,
-                hostInstanceId: launch.hostInstanceId,
-                nativeId: launch.executionRef,
-              },
-            ]
-          : [],
-      );
+    pendingExecutionKeys = () => startAgent.pendingExecutionKeys();
     const initialMessage = yield* initializeObservatoryRuntime(
       runtime,
       conversations.observeHost.bind(conversations),

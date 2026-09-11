@@ -128,8 +128,8 @@ memory. The layout therefore follows these rules:
 - Attention changes emphasis and navigation, not durable position.
 - Repositories, runtimes and hosts never become spatial parent nodes.
 - Discovered executions share one labelled, compact dock placed below the
-  occupied universe; it never relocates accepted Goals or implies System
-  membership.
+  rendered universe footprint; it never relocates accepted Goals or implies
+  System membership.
 
 Space must carry semantic value. If operators consistently choose Ledger or a
 host sidebar to orient, the Atlas hypothesis has failed regardless of visual
@@ -150,14 +150,15 @@ legibility for every card at every scale.
 
 Atlas also shows a labelled `Discovered in Herdr` dock for current
 host-reported agent executions that have no admitted Agent match. The dock is a
-single compact grid anchored below the occupied universe, drawn with its own
-bounded frame so it reads as one neutral staging area rather than scattered
-cards. These cards are visibly separate from Goal or System geography and carry
-safe host/runtime/workspace metadata, freshness and conversation-identification
-state. Selecting one opens the same inspector; terminal access is available
-through a freshly validated SessionHost capability. Exact catalogue evidence
-enables explicit admission, and promotion replaces the discovery card while
-retaining the selection.
+single compact grid anchored below the rendered universe footprint, orbit
+cards and Goal captions included, and drawn with its own bounded frame so it
+reads as one neutral staging area rather than scattered cards. These cards are
+visibly separate from Goal or System geography and carry safe host/runtime/
+workspace metadata, freshness and conversation-identification state. Selecting
+one opens the same inspector; terminal access is available through a freshly
+validated SessionHost capability. Exact catalogue evidence enables explicit
+admission, and promotion replaces the discovery card while retaining the
+selection.
 
 Geometric zoom changes camera scale. Presentation density changes labels and
 metadata while preserving positions. Selected and attention-bearing work retain

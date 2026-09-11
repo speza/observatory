@@ -504,6 +504,41 @@ describe("agent launch coordinator", () => {
     ).toBe(currentExecution);
   });
 
+  test("exposes pending resume identities for discovery suppression", async () => {
+    const clock = new FixedClock(91_000);
+    const { universe } = makeUniverse({ clock });
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
+    const coordinator = createStartAgentCoordinator({
+      universe,
+      host,
+      harnesses: { agentHarness: (id) => (id === "codex" ? codexHarness : undefined) },
+      workspace: new TestWorkspaceProvider(),
+      receipts: {
+        launchReceipts: () => [
+          {
+            requestId: "pending-resume",
+            intentFingerprint: "fingerprint",
+            result: { status: "pending", requestId: "pending-resume", message: "Waiting." },
+            recovery: {
+              kind: "resume",
+              harnessId: "codex",
+              executionRef: "mock-launch-7",
+              hostKind: "mock",
+              hostInstanceId: "mock:default",
+            },
+          },
+        ],
+        reserveLaunchReceipt: () => ({ kind: "reserved" }),
+        saveLaunchReceipt: () => undefined,
+      },
+    });
+
+    expect(coordinator.pendingLaunches()).toEqual([]);
+    expect(coordinator.pendingExecutionKeys()).toEqual([
+      { hostKind: "mock", hostInstanceId: "mock:default", nativeId: "mock-launch-7" },
+    ]);
+  });
+
   test("blocks resume when an unidentified live execution may already own the conversation", async () => {
     const clock = new FixedClock(90_000);
     const { universe } = makeUniverse({ clock });

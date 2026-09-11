@@ -189,10 +189,21 @@ export interface IdGenerator {
 
 export const priorityRank = (priority: Priority): number => PRIORITIES.indexOf(priority);
 
+const textCollator = new Intl.Collator("en", { sensitivity: "variant" });
+
+/** Locale-independent ordering for deterministic projections and views. */
+export const compareText = (left: string, right: string): number =>
+  textCollator.compare(left, right);
+
 /**
  * Reduce an opaque conversation reference to display-safe identity for browser
- * projections. Path-like values never leave the server.
+ * projections. Only a bounded opaque token may leave the server: path-like,
+ * drive-like, scheme-like or control-character values are rejected, never
+ * partially redacted.
  */
+const SAFE_CONVERSATION_KIND = /^[a-z][a-z0-9._-]{0,31}$/u;
+const SAFE_CONVERSATION_VALUE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+
 export const safeConversationReference = (
   reference: NativeConversationRef | undefined,
 ): { readonly kind: string; readonly id: string } | undefined => {
@@ -200,12 +211,9 @@ export const safeConversationReference = (
   const kind = reference.kind.trim();
   const value = reference.value.trim();
   if (
-    !kind ||
-    !value ||
-    kind.toLocaleLowerCase().includes("path") ||
-    value.startsWith("/") ||
-    value.startsWith("\\") ||
-    /^[A-Za-z]:[\\/]/u.test(value)
+    !SAFE_CONVERSATION_KIND.test(kind) ||
+    kind.includes("path") ||
+    !SAFE_CONVERSATION_VALUE.test(value)
   )
     return undefined;
   return { kind, id: value };

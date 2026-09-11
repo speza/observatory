@@ -202,7 +202,7 @@ const loadedHostInstanceId = (hostKind: string, value: string | null): string =>
   }
 };
 
-export const SQLITE_SCHEMA_GENERATION = 4;
+export const SQLITE_SCHEMA_GENERATION = 5;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {

@@ -104,10 +104,19 @@ export interface PendingLaunch {
   readonly message: string;
 }
 
+/** A pending launch identity used to suppress phantom discoveries. */
+export interface PendingExecutionKey {
+  readonly hostKind: string;
+  readonly hostInstanceId: string;
+  readonly nativeId: string;
+}
+
 export interface StartAgentCoordinator {
   start(intent: StartAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
   resume(intent: ResumeAgentIntent): Effect.Effect<StartAgentResult, LaunchError>;
   pendingLaunches(): readonly PendingLaunch[];
+  /** Includes resumes, which are pending launches but not open start intents. */
+  pendingExecutionKeys(): readonly PendingExecutionKey[];
   refreshPending(): Effect.Effect<readonly StartAgentResult[], LaunchError>;
 }
 

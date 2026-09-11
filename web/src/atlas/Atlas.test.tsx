@@ -20,6 +20,7 @@ import {
   DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
+  goalLocalBounds,
 } from "./atlasGeometry.ts";
 
 interface RenderedGoal {
@@ -205,7 +206,7 @@ describe("production web Atlas", () => {
     expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
     const staleMarkup = renderToStaticMarkup(
       createElement(Atlas, {
-        projection,
+        projection: mapProjection(universe.project({ kind: "universe-map", now: clock.now() })),
         reservedLeft: 0,
         reservedRight: 0,
         onSelect: () => undefined,
@@ -422,5 +423,54 @@ describe("production web Atlas", () => {
     expect(markup).toContain(
       `translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`,
     );
+  });
+
+  test("keeps the discovery dock below rendered goal extents", async () => {
+    const clock = new FixedClock(50_000);
+    const { universe } = makeUniverse({ clock });
+    universe.execute({ type: "CreateGoal", title: "Dense goal" });
+    const observations = Array.from({ length: 8 }, (_, index) => ({
+      nativeId: `pane-${index}`,
+      displayName: `Agent ${index}`,
+      runtimeState: "working" as const,
+      runtimeStateSource: "test",
+      hostLocator: `test:pane-${index}`,
+      observedAt: clock.now(),
+    }));
+    admitObservedConversationsAndReconcile(universe, hostSnapshot(observations));
+    universe.execute({
+      type: "AssignAgents",
+      agentIds: universe.snapshot().agents.map((agent) => agent.id),
+      goalId: "goal-1",
+    });
+    universe.reconcile(
+      hostSnapshot([
+        ...observations,
+        {
+          nativeId: "pane-discovery",
+          displayName: "Discovered",
+          runtimeState: "idle" as const,
+          runtimeStateSource: "test",
+          hostLocator: "test:pane-discovery",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const markup = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    const frame = markup.match(/class="discovered-dock__frame"[^>]*x="([-0-9.]+)" y="([-0-9.]+)"/u);
+    expect(frame).not.toBeNull();
+    const frameTop = Number(frame?.[2]);
+    const scale = atlasGoalSpacingScale(projection);
+    const goal = projection.goals[0]!;
+    const goalBottom = goal.mapPosition.y * scale + goalLocalBounds(goal).bottom;
+    expect(frameTop).toBeGreaterThanOrEqual(goalBottom + 48 - 0.01);
   });
 });

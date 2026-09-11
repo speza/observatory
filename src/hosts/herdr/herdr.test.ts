@@ -265,7 +265,7 @@ describe("Herdr adapter", () => {
     expect(snapshot.agents[0]?.displayName).toBe("Model override");
   });
 
-  test("ignores terminal panes without agent identity", () => {
+  test("keeps terminal panes as non-discoverable observations", () => {
     const snapshot = parseHerdrSnapshot(
       {
         result: {
@@ -289,8 +289,12 @@ describe("Herdr adapter", () => {
 
     expect(snapshot.available).toBe(true);
     expect(snapshot.complete).toBe(true);
-    expect(snapshot.agents).toHaveLength(0);
-    expect(snapshot.diagnostics.join(" ")).toContain("without agent identity");
+    expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0]).toMatchObject({
+      nativeId: "terminal",
+      discoverable: false,
+    });
+    expect(snapshot.agents[0]?.harnessEvidence).toBeUndefined();
   });
 
   test("translates native agent session evidence without interpreting its value", () => {
@@ -520,6 +524,7 @@ describe("Herdr adapter", () => {
       99,
     );
     expect(snapshot.agents).toHaveLength(2);
+    expect(snapshot.complete).toBe(false);
     expect(snapshot.diagnostics[0]).toContain("duplicate");
   });
 
@@ -603,7 +608,7 @@ describe("Herdr adapter", () => {
     expect(access.target?.token).toBe("fixture-w2:p1");
     expect(await Effect.runPromise(adapter.activate(access))).toEqual({
       ok: true,
-      message: "Attached to the real Herdr agent fixture-w2:p1.",
+      message: "Attached to the Herdr agent.",
     });
     expect(runner.calls.at(-1)).toEqual(["herdr", "agent", "attach", "fixture-w2:p1"]);
     expect(runner.options.at(-1)).toEqual({ interactive: true });
@@ -636,7 +641,7 @@ describe("Herdr adapter", () => {
 
     expect(await Effect.runPromise(adapter.closeAgent(access))).toEqual({
       ok: true,
-      message: "Closed Herdr agent fixture-w2:p1.",
+      message: "Closed the Herdr agent.",
     });
     expect(runner.calls).toContainEqual([
       "herdr",
@@ -664,7 +669,7 @@ describe("Herdr adapter", () => {
 
     expect(await Effect.runPromise(adapter.closeAgent(access))).toEqual({
       ok: false,
-      message: "Herdr accepted the close for fixture-w2:p1, but still reports that Agent as live.",
+      message: "Herdr accepted the close, but still reports that Agent as live.",
     });
   });
 

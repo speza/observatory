@@ -382,7 +382,7 @@ describe("SQLite persistence", () => {
     const store = new SqliteUniverseStore(":memory:");
     expect(
       store.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
-    ).toBe(4);
+    ).toBe(SQLITE_SCHEMA_GENERATION);
     expect(
       store.db
         .query<{ name: string }, []>(

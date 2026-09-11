@@ -274,8 +274,11 @@ export const parseHerdrSnapshot = (
 
   const observations: HostAgentObservation[] = [];
   const seen = new Set<string>();
+  let skippedRows = 0;
+  let duplicateRows = 0;
   for (const item of agentRecords) {
     if (!isRecord(item)) {
+      skippedRows += 1;
       diagnostics.push("Skipped a non-object Herdr agent record.");
       continue;
     }
@@ -285,11 +288,14 @@ export const parseHerdrSnapshot = (
     const tabId = stringValue(item, "tab_id") ?? stringValue(pane, "tab_id");
     const terminalId = stringValue(item, "terminal_id") ?? stringValue(pane, "terminal_id");
     if (!paneId || !workspaceId || !tabId || !terminalId) {
+      skippedRows += 1;
       diagnostics.push("Skipped a Herdr agent without its opaque pane identity fields.");
       continue;
     }
-    if (seen.has(paneId)) diagnostics.push(`Found duplicate Herdr agent pane ${paneId}.`);
-    else seen.add(paneId);
+    if (seen.has(paneId)) {
+      duplicateRows += 1;
+      diagnostics.push(`Found duplicate Herdr agent pane ${paneId}.`);
+    } else seen.add(paneId);
     const workspace = workspaceById.get(workspaceId) ?? {};
     const worktree = nonEmptyRecord(workspace.worktree);
     const displayName = stripWorkingMarker(
@@ -306,10 +312,6 @@ export const parseHerdrSnapshot = (
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const harnessEvidence = harnessEvidenceFor(item, observedAt);
-    if (!harnessEvidence) {
-      diagnostics.push(`Ignored Herdr pane ${paneId} without agent identity.`);
-      continue;
-    }
     const executionContainerLabel = stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
@@ -322,12 +324,12 @@ export const parseHerdrSnapshot = (
       executionContainer: executionContainerLabel
         ? { id: workspaceId, label: executionContainerLabel }
         : { id: workspaceId },
+      ...(harnessEvidence ? { harnessEvidence } : { discoverable: false as const }),
     };
     if (repository) Object.assign(observation, { repository });
     if (branch) Object.assign(observation, { branch });
     if (worktreePath) Object.assign(observation, { worktree: worktreePath });
     if (provider) Object.assign(observation, { provider });
-    Object.assign(observation, { harnessEvidence });
     observations.push(observation);
   }
   if (!Array.isArray(snapshot.workspaces))
@@ -336,7 +338,7 @@ export const parseHerdrSnapshot = (
     hostKind: "herdr",
     hostInstanceId: HERDR_HOST_INSTANCE_ID,
     available: true,
-    complete: diagnostics.every((diagnostic) => !diagnostic.startsWith("Skipped a ")),
+    complete: skippedRows === 0 && duplicateRows === 0,
     observedAt,
     agents: observations,
     diagnostics,
@@ -1095,9 +1097,9 @@ export class HerdrHostAdapter implements SessionHost {
         if (result.exitCode !== 0)
           return {
             ok: false,
-            message: commandFailureMessage(result, `Herdr could not attach to ${token}.`),
+            message: commandFailureMessage(result, "Herdr could not attach to the agent."),
           };
-        return { ok: true, message: `Attached to the real Herdr agent ${token}.` };
+        return { ok: true, message: "Attached to the Herdr agent." };
       },
       catch: () => hostError("host.activate", "Herdr could not attach to the agent."),
     });
@@ -1124,7 +1126,7 @@ export class HerdrHostAdapter implements SessionHost {
               "Herdr did not provide a complete Agent inventory; the lifecycle is uncertain.",
           };
         const current = live.targets.get(token);
-        if (!current) return { ok: true, message: `Herdr agent ${token} had already ended.` };
+        if (!current) return { ok: true, message: "The Herdr agent had already ended." };
         if (current.fingerprint !== access.target.fingerprint)
           return {
             ok: false,
@@ -1135,7 +1137,8 @@ export class HerdrHostAdapter implements SessionHost {
           if (!after.snapshot.available || !after.snapshot.complete)
             return {
               ok: false,
-              message: `Herdr accepted the close for ${token}, but Observatory could not verify that the Agent ended.`,
+              message:
+                "Herdr accepted the close, but Observatory could not verify that the Agent ended.",
             };
           const remaining = after.live.targets.get(token);
           if (remaining)
@@ -1143,10 +1146,10 @@ export class HerdrHostAdapter implements SessionHost {
               ok: false,
               message:
                 remaining.fingerprint === access.target?.fingerprint
-                  ? `Herdr accepted the close for ${token}, but still reports that Agent as live.`
-                  : `Herdr reused the target ${token} while close was being verified; Observatory did not archive the Agent.`,
+                  ? "Herdr accepted the close, but still reports that Agent as live."
+                  : "Herdr reused the target while close was being verified; Observatory did not archive the Agent.",
             };
-          return { ok: true, message: `Closed Herdr agent ${token}.` };
+          return { ok: true, message: "Closed the Herdr agent." };
         };
         const interrupted = await this.runner.run([
           "herdr",
@@ -1170,7 +1173,7 @@ export class HerdrHostAdapter implements SessionHost {
         if (result.exitCode !== 0)
           return {
             ok: false,
-            message: commandFailureMessage(result, `Herdr could not close ${token}.`),
+            message: commandFailureMessage(result, "Herdr could not close the agent."),
           };
         return verifyClosed();
       },
@@ -1225,7 +1228,7 @@ export class HerdrHostAdapter implements SessionHost {
           return {
             ok: true,
             terminal,
-            message: `Opened an embedded Herdr terminal for ${token}.`,
+            message: "Opened an embedded Herdr terminal.",
           } satisfies HostTerminalOpenResult;
         } catch (error) {
           return {
@@ -1378,7 +1381,7 @@ export class HerdrHostAdapter implements SessionHost {
           terminal,
           message: workingDirectory
             ? `Opened a Herdr linked terminal tab in ${workingDirectory}.`
-            : `Opened the existing Herdr linked terminal ${target}.`,
+            : "Opened the existing Herdr linked terminal.",
         } satisfies HostTerminalOpenResult;
       },
       catch: (error) =>

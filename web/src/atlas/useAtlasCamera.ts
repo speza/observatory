@@ -16,6 +16,7 @@ import {
   DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
+  discoveredDockPlacement,
   goalAgentPoints,
   goalLocalBounds,
   selectionBelongsToFocus,
@@ -177,7 +178,10 @@ export const useAtlasCamera = ({
       const execution = projection.discoveredExecutions?.find(
         (candidate) => candidate.handle === target.id,
       );
-      return execution ? screenPoint(execution.mapPosition) : undefined;
+      if (!execution) return undefined;
+      const point = screenPoint(execution.mapPosition);
+      const translation = discoveredDockPlacement(projection, layout.goalSpacingScale)?.translation;
+      return translation ? { x: point.x + translation.x, y: point.y + translation.y } : point;
     }
     for (const goal of projection.goals) {
       const agentIndex = goal.agents.findIndex((candidate) => candidate.id === target.id);

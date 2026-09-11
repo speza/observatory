@@ -3,7 +3,6 @@ import type { AgentObservationKind } from "../plugin-sdk/index.ts";
 import type {
   Goal,
   HostHealth,
-  ExecutionContainerRef,
   MapPosition,
   OperatorCheckpoint,
   RelatedAgentDismissal,
@@ -151,7 +150,6 @@ export interface DiscoveredExecutionView {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
-  readonly executionContainer?: ExecutionContainerRef;
   readonly conversation?: {
     readonly kind: string;
     readonly id: string;

@@ -1019,6 +1019,25 @@ describe("projections", () => {
     expect(bounded.results[0]?.label).toBe("Needle one");
   });
 
+  test("bounds discovered-execution search results at the projection boundary", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot(
+        Array.from({ length: 5 }, (_, index) => ({
+          nativeId: `pane-${index}`,
+          displayName: `Needle ${index}`,
+          runtimeState: "working" as const,
+          runtimeStateSource: "test-host",
+          hostLocator: `test:pane-${index}`,
+          observedAt: clock.now(),
+        })),
+      ),
+    );
+    const projection = universe.project({ kind: "search", query: "needle", limit: 3 });
+    if (projection.kind !== "search") throw new Error("wrong projection");
+    expect(projection.results).toHaveLength(3);
+  });
+
   test("never exposes a UNC provider transcript path through the inspector", () => {
     const { universe, clock } = makeUniverse();
     const result = universe.execute({

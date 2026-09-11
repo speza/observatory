@@ -100,7 +100,7 @@ class MockTerminalSession implements HostedTerminalSession {
       if (this.released) return { ok: true, message: "Mock terminal already released." };
       this.released = true;
       this.push({ kind: "closed", reason: "Released by Observatory." });
-      return { ok: true, message: `Released mock terminal ${this.agentName}.` };
+      return { ok: true, message: "Released the mock terminal." };
     });
   }
 
@@ -420,7 +420,7 @@ export class MockHostAdapter implements SessionHost {
         } satisfies HostTerminalOpenResult;
       return {
         ok: true,
-        message: `Opened an embedded mock terminal for ${access.terminalTarget.token}.`,
+        message: "Opened an embedded mock terminal.",
         terminal: new MockTerminalSession(access.terminalTarget.token, dimensions),
       } satisfies HostTerminalOpenResult;
     });

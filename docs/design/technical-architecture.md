@@ -404,9 +404,11 @@ current discovery inventory. An exact admitted execution suppresses its
 discovery entry, including for archived Agents and pending launches. Multiple
 executions claiming one exact conversation remain visible as separate
 discoveries until explicit admission, after which the existing Agent conflict
-model applies. Host inventory rows with no agent or native session identity
-are ordinary terminals: the Herdr adapter ignores them with a diagnostic
-rather than surfacing a terminal as a discovered execution.
+model applies. Host inventory rows with no agent or native session identity are
+ordinary terminals: an adapter reports them as non-discoverable observations,
+so execution presence is preserved while a plain terminal never surfaces as a
+discovered execution. A snapshot is complete only when no row was skipped and
+no duplicate identity was reported.
 
 ## Main flows
 

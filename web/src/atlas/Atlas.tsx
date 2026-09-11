@@ -18,7 +18,7 @@ import {
   AGENT_CARD_WIDTH,
   DISCOVERED_CARD_HEIGHT,
   DISCOVERED_CARD_WIDTH,
-  discoveredExecutionDockBounds,
+  discoveredDockPlacement,
   goalAgentPoints,
   goalRadius,
   hash,
@@ -163,10 +163,8 @@ export const Atlas = ({
   }>();
   const gridOrigin = screenPoint({ x: 0, y: 0 });
   const gridStep = GRID_LOGICAL_STEP * layout.goalSpacingScale;
-  const discoveryDock = discoveredExecutionDockBounds(
-    projection.discoveredExecutions ?? [],
-    layout.goalSpacingScale,
-  );
+  const discoveryDock = discoveredDockPlacement(projection, layout.goalSpacingScale);
+  const dockTranslation = discoveryDock?.translation ?? { x: 0, y: 0 };
 
   const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
     const drag = goalDrag.current;
@@ -745,23 +743,27 @@ export const Atlas = ({
                 <g aria-hidden="true" className="discovered-dock">
                   <rect
                     className="discovered-dock__frame"
-                    height={discoveryDock.height}
+                    height={discoveryDock.bounds.height}
                     rx="10"
-                    width={discoveryDock.width}
-                    x={discoveryDock.left}
-                    y={discoveryDock.top}
+                    width={discoveryDock.bounds.width}
+                    x={discoveryDock.bounds.left}
+                    y={discoveryDock.bounds.top}
                   />
                   <text
                     className="discovered-dock__heading"
-                    x={discoveryDock.left + 18}
-                    y={discoveryDock.top + 25}
+                    x={discoveryDock.bounds.left + 18}
+                    y={discoveryDock.bounds.top + 25}
                   >
                     DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
                   </text>
                 </g>
               ) : null}
               {projection.discoveredExecutions?.map((execution) => {
-                const centre = screenPoint(execution.mapPosition);
+                const base = screenPoint(execution.mapPosition);
+                const centre = {
+                  x: base.x + dockTranslation.x,
+                  y: base.y + dockTranslation.y,
+                };
                 const state = execution.presence === "live" ? execution.runtimeState : "unknown";
                 const selected =
                   selection?.type === "discovered-execution" && selection.id === execution.handle;
