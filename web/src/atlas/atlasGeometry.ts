@@ -357,9 +357,9 @@ export const discoveredExecutionDockBounds = (
 
 /**
  * Place the dock below everything the Atlas actually renders. The projection
- * cannot know rendered orbit and caption extents, so the renderer shifts the
- * whole dock group down by the overflow. A scoped projection passes its
- * filtered goals here, keeping the dock adjacent on System maps too.
+ * cannot know rendered orbit and caption extents, and a System-scoped map may
+ * carry a server anchor computed from goals outside the scope, so the renderer
+ * aligns the whole dock group to the lowest rendered card on the shown map.
  */
 export const discoveredDockPlacement = (
   projection: UniverseMapProjection,
@@ -372,8 +372,7 @@ export const discoveredDockPlacement = (
     ...projection.unassigned.map((agent) => agent.mapPosition.y * scale + AGENT_CARD_HEIGHT / 2),
   ];
   const lowest = renderedBottoms.length > 0 ? Math.max(...renderedBottoms) : undefined;
-  const translationY =
-    lowest === undefined ? 0 : Math.max(0, lowest + DISCOVERED_DOCK_GOAL_GAP - bounds.top);
+  const translationY = lowest === undefined ? 0 : lowest + DISCOVERED_DOCK_GOAL_GAP - bounds.top;
   return {
     bounds: { ...bounds, top: bounds.top + translationY },
     translation: { x: 0, y: translationY },

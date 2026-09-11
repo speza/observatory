@@ -20,8 +20,11 @@ import {
   DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
+  discoveredDockPlacement,
   goalLocalBounds,
 } from "./atlasGeometry.ts";
+import { projectPortfolio } from "../../../src/web/portfolio.ts";
+import { scopePortfolio } from "../systems/scopedPortfolio.ts";
 
 interface RenderedGoal {
   readonly id: string;
@@ -472,5 +475,44 @@ describe("production web Atlas", () => {
     const goal = projection.goals[0]!;
     const goalBottom = goal.mapPosition.y * scale + goalLocalBounds(goal).bottom;
     expect(frameTop).toBeGreaterThanOrEqual(goalBottom + 48 - 0.01);
+  });
+
+  test("keeps the discovery dock adjacent on System-scoped maps", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Alpha" });
+    universe.execute({ type: "CreateSystem", title: "Beta" });
+    universe.execute({ type: "CreateGoal", title: "Alpha goal", systemId: "system-1" });
+    universe.execute({ type: "CreateGoal", title: "Beta goal", systemId: "system-2" });
+    universe.execute({
+      type: "SetGoalMapPosition",
+      goalId: "goal-2",
+      position: { x: 0, y: 1_200 },
+    });
+    universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "pane-discovery",
+          displayName: "Discovered",
+          runtimeState: "idle",
+          runtimeStateSource: "test",
+          hostLocator: "test:pane-discovery",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    const portfolio = projectPortfolio(universe, clock.now());
+    if (!portfolio) throw new Error("Expected a portfolio.");
+    const scoped = scopePortfolio(portfolio, "system-1");
+    expect(scoped.map.discoveredExecutions).toHaveLength(1);
+
+    const scale = atlasGoalSpacingScale(scoped.map);
+    const placement = discoveredDockPlacement(scoped.map, scale);
+    if (!placement) throw new Error("Expected a dock placement.");
+    const goal = scoped.map.goals[0]!;
+    const goalBottom = goal.mapPosition.y * scale + goalLocalBounds(goal).bottom;
+    expect(placement.bounds.top).toBeGreaterThanOrEqual(goalBottom + 48 - 0.01);
+    expect(placement.bounds.top).toBeLessThan(goalBottom + 248);
+    const bounds = atlasContentBounds(scoped.map, scale);
+    expect(bounds.maximumY - bounds.minimumY).toBeLessThan(800);
   });
 });
