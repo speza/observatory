@@ -297,6 +297,43 @@ describe("Herdr adapter", () => {
     expect(snapshot.agents[0]?.harnessEvidence).toBeUndefined();
   });
 
+  test("requires a native session identity before a row can become discoverable", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            panes: [
+              { pane_id: "shell", terminal_id: "term", workspace_id: "w", tab_id: "t" },
+              { pane_id: "agent", terminal_id: "term2", workspace_id: "w", tab_id: "t" },
+            ],
+            agents: [
+              { pane_id: "shell", agent: "opencode", agent_status: "idle", name: "bun run web" },
+              {
+                pane_id: "agent",
+                agent: "opencode",
+                agent_status: "idle",
+                name: "OC | Real work",
+                agent_session: { agent: "opencode", kind: "id", value: "ses_real" },
+              },
+            ],
+            workspaces: [],
+          },
+        },
+      },
+      99,
+    );
+
+    const byId = new Map(snapshot.agents.map((agent) => [agent.nativeId, agent]));
+    expect(byId.get("shell")).toMatchObject({ discoverable: false });
+    expect(byId.get("shell")?.harnessEvidence?.detectedHarnessId).toBe("opencode");
+    expect(byId.get("agent")?.discoverable).toBeUndefined();
+    expect(byId.get("agent")?.harnessEvidence?.nativeConversationRef).toEqual({
+      harnessId: "opencode",
+      kind: "id",
+      value: "ses_real",
+    });
+  });
+
   test("translates native agent session evidence without interpreting its value", () => {
     const snapshot = parseHerdrSnapshot(
       {

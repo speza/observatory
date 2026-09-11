@@ -404,11 +404,13 @@ current discovery inventory. An exact admitted execution suppresses its
 discovery entry, including for archived Agents and pending launches. Multiple
 executions claiming one exact conversation remain visible as separate
 discoveries until explicit admission, after which the existing Agent conflict
-model applies. Host inventory rows with no agent or native session identity are
-ordinary terminals: an adapter reports them as non-discoverable observations,
-so execution presence is preserved while a plain terminal never surfaces as a
-discovered execution. A snapshot is complete only when no row was skipped and
-no duplicate identity was reported.
+model applies. A host execution becomes discoverable only when it carries a
+native session identity; attribute-less or session-less rows, including
+transient screen detections of an ordinary terminal, remain non-discoverable
+observations. Execution presence is preserved, so an admitted Agent is never
+detached by such a row and a plain terminal never surfaces as a discovered
+execution. A snapshot is complete only when no row was skipped and no duplicate
+identity was reported.
 
 ## Main flows
 

@@ -156,6 +156,9 @@ host evidence retains the item as `Runtime unknown`; only a fresh complete
 snapshot can prove its absence. Exact scoped catalogue evidence enables an
 explicit `Add to Observatory` or `Add and assign to Goal`. Terminal access is
 independent of admission and is revalidated against the current host target.
+A host execution becomes discoverable only once it carries a native session
+identity; transient detections without one are retained as presence evidence
+and never surface as discovered executions.
 
 ## Authorities
 

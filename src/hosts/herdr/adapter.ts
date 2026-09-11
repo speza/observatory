@@ -312,6 +312,7 @@ export const parseHerdrSnapshot = (
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const harnessEvidence = harnessEvidenceFor(item, observedAt);
+    const discoverable = harnessEvidence?.nativeConversationRef !== undefined;
     const executionContainerLabel = stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
@@ -324,8 +325,9 @@ export const parseHerdrSnapshot = (
       executionContainer: executionContainerLabel
         ? { id: workspaceId, label: executionContainerLabel }
         : { id: workspaceId },
-      ...(harnessEvidence ? { harnessEvidence } : { discoverable: false as const }),
     };
+    if (harnessEvidence) Object.assign(observation, { harnessEvidence });
+    if (!discoverable) Object.assign(observation, { discoverable: false });
     if (repository) Object.assign(observation, { repository });
     if (branch) Object.assign(observation, { branch });
     if (worktreePath) Object.assign(observation, { worktree: worktreePath });
