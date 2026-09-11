@@ -1,4 +1,5 @@
-import { Circle, Layers, CircleAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronRight, Circle, Layers, CircleAlert } from "lucide-react";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
 import type {
   AgentView,
@@ -11,6 +12,31 @@ import type { Selection } from "./selection.ts";
 export type NavigationView = "all" | "attention" | "unassigned";
 
 const needsHumanInput = (agent: AgentView): boolean => agent.attention?.requiresHumanInput === true;
+
+const systemKey = (id: string): string => `system:${id}`;
+const goalKey = (id: string): string => `goal:${id}`;
+
+const requiredExpansion = (
+  projection: CommandCentreProjection,
+  systemId: string | undefined,
+  selection: Selection | undefined,
+): readonly string[] => {
+  const required: string[] = [];
+  if (systemId) required.push(systemKey(systemId));
+  const goalId =
+    selection?.type === "goal"
+      ? selection.id
+      : selection?.type === "agent"
+        ? projection.goals.find((goal) => goal.agents.some((agent) => agent.id === selection.id))
+            ?.id
+        : undefined;
+  if (goalId) {
+    required.push(goalKey(goalId));
+    const goal = projection.goals.find((candidate) => candidate.id === goalId);
+    if (goal?.systemId) required.push(systemKey(goal.systemId));
+  }
+  return required;
+};
 
 export const WorkspaceNavigation = ({
   projection,
@@ -27,6 +53,49 @@ export const WorkspaceNavigation = ({
   readonly onSystem: (id?: string) => void;
   readonly onSelect: (selection: Selection) => void;
 }): React.JSX.Element => {
+  const projectionRef = useRef(projection);
+  projectionRef.current = projection;
+  const selectionKey = selection ? `${selection.type}:${selection.id}` : "";
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(requiredExpansion(projection, systemId, selection)),
+  );
+
+  useEffect(() => {
+    const required = requiredExpansion(projectionRef.current, systemId, selection);
+    if (required.length === 0) return;
+    setExpanded((existing) => {
+      if (required.every((key) => existing.has(key))) return existing;
+      const next = new Set(existing);
+      for (const key of required) next.add(key);
+      return next;
+    });
+  }, [selection, selectionKey, systemId]);
+
+  const toggleExpanded = (key: string): void => {
+    setExpanded((existing) => {
+      const next = new Set(existing);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggle = (key: string, label: string): React.JSX.Element => (
+    <button
+      aria-expanded={expanded.has(key)}
+      aria-label={`${expanded.has(key) ? "Collapse" : "Expand"} ${label}`}
+      className="workspace-tree__toggle"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleExpanded(key);
+      }}
+      type="button"
+    >
+      <ChevronRight aria-hidden="true" size={13} />
+    </button>
+  );
+
   const attentionGoalIds = new Set(
     projection.attention.items
       .filter((item) => item.requiresHumanInput && item.goalId)
@@ -80,12 +149,7 @@ export const WorkspaceNavigation = ({
     <details
       key={goal.id}
       className="workspace-tree__goal"
-      open={
-        view === "attention" ||
-        (selection?.type === "goal" && selection.id === goal.id) ||
-        (selection?.type === "agent" && goal.agents.some((agent) => agent.id === selection.id)) ||
-        undefined
-      }
+      open={view === "attention" || expanded.has(goalKey(goal.id)) || undefined}
     >
       <summary
         aria-current={selection?.type === "goal" && selection.id === goal.id ? "true" : undefined}
@@ -100,6 +164,7 @@ export const WorkspaceNavigation = ({
           onSelect({ type: "goal", id: goal.id });
         }}
       >
+        {view === "all" ? toggle(goalKey(goal.id), goal.title) : null}
         <Circle size={13} className="workspace-tree__goal-icon" />
         <span>{goal.title}</span>
         <small aria-label={`${goal.agents.length} agents`}>{goal.agents.length}</small>
@@ -164,7 +229,7 @@ export const WorkspaceNavigation = ({
         <details
           className="workspace-tree__system"
           key={system.id}
-          open={view === "attention" || systemId === system.id || undefined}
+          open={view === "attention" || expanded.has(systemKey(system.id)) || undefined}
         >
           <summary
             aria-current={systemId === system.id && !selection ? "true" : undefined}
@@ -175,6 +240,7 @@ export const WorkspaceNavigation = ({
               onSystem(system.id);
             }}
           >
+            {view === "all" ? toggle(systemKey(system.id), system.title) : null}
             <span>{system.title}</span>
             <small aria-label={`${system.goals.length} goals`}>{system.goals.length}</small>
           </summary>

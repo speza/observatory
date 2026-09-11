@@ -1,11 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { Window } from "happy-dom";
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   admitObservedConversationsAndReconcile,
   hostSnapshot,
   makeUniverse,
 } from "../../../src/universe/test-support.ts";
+import type { CommandCentreProjection } from "../../../src/projection/types.ts";
 import { WorkspaceNavigation, type NavigationView } from "./WorkspaceNavigation.tsx";
+import type { Selection } from "./selection.ts";
 
 const fixture = () => {
   const { universe, clock } = makeUniverse();
@@ -42,6 +47,29 @@ const fixture = () => {
   );
   universe.execute({ type: "AssignAgents", agentIds: ["agent-1", "agent-2"], goalId: "goal-1" });
   return { universe, clock };
+};
+
+const TogglingHarness = ({
+  projection,
+  onSelect,
+}: {
+  readonly projection: CommandCentreProjection;
+  readonly onSelect: (selection: Selection) => void;
+}) => {
+  const [selection, setSelection] = useState<Selection>();
+  return (
+    <WorkspaceNavigation
+      projection={projection}
+      systemId="system-1"
+      view="all"
+      selection={selection}
+      onSystem={() => {}}
+      onSelect={(next) => {
+        onSelect(next);
+        setSelection(next);
+      }}
+    />
+  );
 };
 
 describe("Workspace navigation views", () => {
@@ -113,7 +141,7 @@ describe("Workspace navigation views", () => {
     expect(markup).not.toContain("Unassigned decision");
   });
 
-  test("uses one selected row for disclosure and selection", () => {
+  test("separates disclosure toggles from row selection", () => {
     const { universe, clock } = fixture();
     const projection = universe.project({ kind: "command-centre", now: clock.now() });
     if (projection.kind !== "command-centre") throw new Error("Expected command centre");
@@ -126,7 +154,106 @@ describe("Workspace navigation views", () => {
         onSelect={() => {}}
       />,
     );
+    expect(markup).toContain('class="workspace-tree__toggle"');
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('aria-label="Collapse Example system"');
     expect(markup).toContain('<summary aria-current="true"');
-    expect(markup).not.toContain("<summary><button");
+    expect(markup).not.toContain("summary aria-expanded");
+  });
+});
+
+describe("Workspace navigation disclosure", () => {
+  let browser: Window;
+  let root: Root;
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+
+  beforeEach(() => {
+    browser = new Window();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    await browser.happyDOM.close();
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    saved.clear();
+  });
+
+  const renderProjection = () => {
+    const { universe, clock } = fixture();
+    universe.execute({ type: "CreateGoal", title: "Second goal", systemId: "system-1" });
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    return projection;
+  };
+
+  test("toggling a goal disclosure expands it without navigating", async () => {
+    const onSelect: unknown[] = [];
+    await act(async () =>
+      root.render(
+        <WorkspaceNavigation
+          projection={renderProjection()}
+          systemId="system-1"
+          view="all"
+          onSystem={() => {}}
+          onSelect={(selection) => onSelect.push(selection)}
+        />,
+      ),
+    );
+    const details = [
+      ...document.querySelectorAll<HTMLDetailsElement>(".workspace-tree__goal"),
+    ].find((candidate) => candidate.textContent?.includes("Second goal"));
+    if (!details) throw new Error("Expected the second goal.");
+    const toggle = details.querySelector<HTMLButtonElement>(".workspace-tree__toggle");
+    if (!toggle) throw new Error("Expected a disclosure toggle.");
+
+    await act(async () => toggle.click());
+
+    expect(onSelect).toEqual([]);
+    expect(details.open).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  test("navigating to a goal keeps another manually expanded goal open", async () => {
+    const onSelect: unknown[] = [];
+    await act(async () =>
+      root.render(
+        <TogglingHarness
+          projection={renderProjection()}
+          onSelect={(selection) => onSelect.push(selection)}
+        />,
+      ),
+    );
+    const goals = [...document.querySelectorAll<HTMLDetailsElement>(".workspace-tree__goal")];
+    const second = goals.find((candidate) => candidate.textContent?.includes("Second goal"));
+    const first = goals.find((candidate) => candidate.textContent?.includes("Example goal"));
+    if (!second || !first) throw new Error("Expected both goals.");
+    const secondToggle = second.querySelector<HTMLButtonElement>(".workspace-tree__toggle");
+    if (!secondToggle) throw new Error("Expected a disclosure toggle.");
+    await act(async () => secondToggle.click());
+    expect(second.open).toBe(true);
+
+    const firstTitle = [...first.querySelectorAll("span")].find(
+      (candidate) => candidate.textContent === "Example goal",
+    );
+    if (!firstTitle) throw new Error("Expected the first goal title.");
+    await act(async () => firstTitle.click());
+
+    expect(onSelect).toEqual([{ type: "goal", id: "goal-1" }]);
+    expect(second.open).toBe(true);
+    expect(first.open).toBe(true);
   });
 });
