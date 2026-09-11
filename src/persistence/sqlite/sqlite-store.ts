@@ -74,6 +74,7 @@ interface AgentRow {
   native_conversation_value: string | null;
   continuity: string;
   provider_continuity: string | null;
+  provider_resume_eligibility: string | null;
   execution_presence: string | null;
   resume_capability: string | null;
   observation_health: string | null;
@@ -185,7 +186,7 @@ interface ObservationTransitionRow extends ObservationRow {
   sequence: number;
 }
 
-export const SQLITE_SCHEMA_GENERATION = 3;
+export const SQLITE_SCHEMA_GENERATION = 4;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {
@@ -261,6 +262,13 @@ const asContinuity = (value: string): Agent["continuity"] =>
   value === "proved" || value === "interrupted" || value === "replaced" ? value : "unknown";
 const asProviderContinuity = (value: string | null): Agent["providerContinuity"] =>
   value === "confirmed" || value === "missing" ? value : "unknown";
+const asProviderResumeEligibility = (value: string | null): Agent["providerResumeEligibility"] =>
+  value === "same-site" ||
+  value === "provider-account" ||
+  value === "blocked" ||
+  value === "unknown"
+    ? value
+    : undefined;
 const asExecutionPresence = (value: string | null): Agent["executionPresence"] =>
   value === "live" || value === "absent" || value === "conflict" ? value : "unknown";
 const asResumeCapability = (value: string | null): Agent["resumeCapability"] =>
@@ -390,6 +398,7 @@ export class SqliteUniverseStore
           lastChangedAt: row.last_changed_at,
           continuity: asContinuity(row.continuity),
           providerContinuity: asProviderContinuity(row.provider_continuity),
+          providerResumeEligibility: asProviderResumeEligibility(row.provider_resume_eligibility),
           executionPresence: asExecutionPresence(row.execution_presence),
           resumeCapability: asResumeCapability(row.resume_capability),
           observationHealth: asObservationHealth(row.observation_health),
@@ -533,7 +542,7 @@ export class SqliteUniverseStore
       }
       const agent = this.prepareSnapshotTable(
         "agents",
-        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
+        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, provider_resume_eligibility, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
         ["id"],
       );
       for (const row of state.agents) {
@@ -550,6 +559,7 @@ export class SqliteUniverseStore
           row.nativeConversationRef?.value ?? null,
           row.continuity,
           row.providerContinuity,
+          row.providerResumeEligibility ?? null,
           row.executionPresence,
           row.resumeCapability,
           row.observationHealth,
@@ -1338,6 +1348,7 @@ export class SqliteUniverseStore
         native_conversation_value TEXT,
         continuity TEXT NOT NULL DEFAULT 'unknown',
         provider_continuity TEXT NOT NULL DEFAULT 'unknown',
+        provider_resume_eligibility TEXT,
         execution_presence TEXT NOT NULL DEFAULT 'unknown',
         resume_capability TEXT NOT NULL DEFAULT 'unknown',
         observation_health TEXT NOT NULL DEFAULT 'stale',

@@ -105,10 +105,16 @@ export interface Agent {
   readonly continuity: AgentContinuity;
   readonly providerContinuity: ProviderContinuity;
   readonly executionPresence: ExecutionPresence;
+  /** Raw provider-owned resume evidence; `resumeCapability` is derived from it. */
+  readonly providerResumeEligibility?: "same-site" | "provider-account" | "blocked" | "unknown";
   readonly resumeCapability: ResumeCapability;
   readonly observationHealth: ObservationHealth;
   readonly providerObservedAt?: number;
   readonly executionObservedAt?: number;
+  /**
+   * Durable execution evidence retained without automatic compaction. Bindings
+   * are small and support continuity review after panes, hosts or restarts.
+   */
   readonly executionHistory: readonly AgentExecutionBinding[];
   readonly conflictingExecutions: readonly AgentExecutionBinding[];
   readonly displayName: string;
@@ -171,6 +177,12 @@ export interface Clock {
   now(): number;
 }
 
+/** Outcome of discarding persisted runtime certainty before a fresh host observation. */
+export interface RuntimeInvalidationResult {
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
 export interface IdGenerator {
   next(kind: "system" | "goal" | "agent"): string;
 }
@@ -208,6 +220,7 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
       nativeConversationRef: agent.nativeConversationRef
         ? { ...agent.nativeConversationRef }
         : undefined,
+      executionContainer: agent.executionContainer ? { ...agent.executionContainer } : undefined,
     })),
     hosts: state.hosts.map((host) => ({ ...host })),
     relatedAgentDismissals: (state.relatedAgentDismissals ?? []).map((dismissal) => ({

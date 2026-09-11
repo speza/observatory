@@ -408,7 +408,7 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
-  test("rejects an ambiguous unscoped host identity instead of choosing a provider scope", () => {
+  test("ignores an ambiguous unscoped host identity instead of choosing a provider scope", () => {
     const fixture = trackerFixture();
     const other = {
       ...conversation(),
@@ -457,8 +457,8 @@ describe("conversation tracker", () => {
       hostSnapshot([liveProviderExecution("pane-live")], 1_001_000),
     );
 
-    expect(result.accepted).toBe(false);
-    expect(result.error).toContain("cannot replace its scoped conversation");
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.join(" ")).toContain("Ignored unscoped provider identity");
     expect(fixture.universe.snapshot().agents).toHaveLength(1);
     expect(fixture.universe.snapshot().agents[0]?.nativeConversationRef).toMatchObject({
       continuityScopeId: "scope-test",

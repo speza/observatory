@@ -87,6 +87,7 @@ export const admitObservedConversationsAndReconcile = (
   for (const observation of snapshot.agents) {
     const reference = observation.harnessEvidence?.nativeConversationRef;
     if (!reference) continue;
+    if (universe.resolveAgentId(reference) !== undefined) continue;
     const result = universe.execute({
       type: "AddConversation",
       admissionSource: "managed-launch",
