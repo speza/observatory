@@ -62,6 +62,11 @@ class MockTerminalSession implements HostedTerminalSession {
   send(input: HostTerminalInput): Effect.Effect<HostActionResult, HostError> {
     return Effect.sync(() => {
       if (this.released) return { ok: false, message: "The mock terminal has been released." };
+      if (
+        input.kind === "scroll" &&
+        (!Number.isInteger(input.lines) || input.lines < 1 || input.lines > 65_535)
+      )
+        return { ok: false, message: "Terminal scroll lines must be a positive 16-bit integer." };
       this.inputs.push(input);
       const value =
         input.kind === "text"
@@ -365,6 +370,8 @@ export class MockHostAdapter implements SessionHost {
       const failure = this.actionFailure();
       if (failure) return failure;
       if (!access.supported || !access.target) return { ok: false, message: access.explanation };
+      if (!access.capabilities.includes("close-agent"))
+        return { ok: false, message: "This mock agent does not expose a safe close capability." };
       const token = parseTarget(access.target);
       if (!token)
         return {

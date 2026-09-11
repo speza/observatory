@@ -14,6 +14,7 @@ import type {
   TerminalDimensions,
   TerminalOpenOptions,
   HostTerminalOpenResult,
+  HostedTerminalSession,
 } from "../types.ts";
 import { hostError, type HostError } from "../errors.ts";
 import { openHerdrTerminal, parseHerdrTerminalTarget } from "./terminal.ts";
@@ -37,8 +38,16 @@ type LaunchTraceFields = Readonly<Record<string, string | number | boolean | und
 type LaunchTrace = (event: string, fields?: LaunchTraceFields) => Promise<void>;
 
 const HERDR_HOST_INSTANCE_ID = "herdr:local";
+const MAX_HOST_MESSAGE_LENGTH = 240;
+const OPEN_CODE_PROCESS_CACHE_TTL_MS = 30_000;
+const OPEN_CODE_PROCESS_QUERY_CONCURRENCY = 4;
 
 const traceExcerpt = (value: string): string => value.trim().slice(0, 500);
+
+const boundedHostMessage = (value: string, fallback: string): string => {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.slice(0, MAX_HOST_MESSAGE_LENGTH) || fallback;
+};
 
 const commandErrorCode = (result: CommandResult): string | undefined => {
   const payload = parseJsonValue(result.stderr) ?? parseJsonValue(result.stdout);
@@ -56,7 +65,10 @@ const commandFailureMessage = (result: CommandResult, fallback: string): string 
   if (result.timedOut) return `${fallback} The Herdr command timed out.`;
   if (result.stdoutTruncated || result.stderrTruncated)
     return `${fallback} The Herdr response exceeded the safe output limit.`;
-  return commandErrorMessage(result) ?? (result.stderr.trim() || result.stdout.trim() || fallback);
+  const code = commandErrorCode(result);
+  const message = commandErrorMessage(result);
+  if (message) return boundedHostMessage(message, code ? `${fallback} (${code})` : fallback);
+  return code ? `${fallback} (${code})` : fallback;
 };
 
 const createLaunchTrace = (): LaunchTrace => {
@@ -207,6 +219,7 @@ const processEvidenceFor = (
 interface OpenCodeProcessCacheEntry {
   readonly fingerprint: string;
   readonly process: OpenCodeProcess;
+  readonly cachedAt: number;
 }
 
 export const parseHerdrSnapshot = (
@@ -298,7 +311,7 @@ export const parseHerdrSnapshot = (
       nativeId: paneId,
       displayName,
       runtimeState: observedState,
-      runtimeStateSource: "herdr.agent_status",
+      runtimeStateSource: "host.agent-status",
       observedAt,
       hostLocator: locator(workspaceId, tabId, paneId, terminalId),
       executionContainer: executionContainerLabel
@@ -560,27 +573,6 @@ const linkedExecutionsFor = (
   return linkedExecutions;
 };
 
-const launchPaneFor = (
-  payload: JsonValue | undefined,
-  workingDirectory: string,
-): string | undefined => {
-  const snapshot = unwrapSnapshot(payload);
-  if (!snapshot || !Array.isArray(snapshot.panes)) return undefined;
-  const agentPaneIds = new Set(
-    (Array.isArray(snapshot.agents) ? snapshot.agents : [])
-      .map((agent) => (isRecord(agent) ? stringValue(agent, "pane_id") : undefined))
-      .filter((paneId): paneId is string => Boolean(paneId)),
-  );
-  const wanted = normalizedPath(workingDirectory);
-  for (const item of snapshot.panes) {
-    const pane = nonEmptyRecord(item);
-    const paneId = stringValue(pane, "pane_id");
-    const cwd = paneWorkingDirectory(pane);
-    if (paneId && cwd && normalizedPath(cwd) === wanted && !agentPaneIds.has(paneId)) return paneId;
-  }
-  return undefined;
-};
-
 const createdRootPaneId = (payload: JsonValue | undefined): string | undefined => {
   if (!isRecord(payload)) return undefined;
   const result = nonEmptyRecord(payload.result);
@@ -588,6 +580,17 @@ const createdRootPaneId = (payload: JsonValue | undefined): string | undefined =
   if (Schema.is(Schema.String)(rootPane) && rootPane.trim()) return rootPane.trim();
   if (!isRecord(rootPane)) return stringValue(result, "root_pane_id");
   return stringValue(rootPane, "pane_id") ?? stringValue(rootPane, "id");
+};
+
+const createdWorkspaceId = (payload: JsonValue | undefined): string | undefined => {
+  if (!isRecord(payload)) return undefined;
+  const result = nonEmptyRecord(payload.result);
+  const workspace = nonEmptyRecord(result.workspace);
+  return (
+    stringValue(result, "workspace_id") ??
+    stringValue(workspace, "workspace_id") ??
+    stringValue(workspace, "id")
+  );
 };
 
 const shellArgument = (value: string): string => `'${value.replace(/'/gu, `'"'"'`)}'`;
@@ -612,16 +615,54 @@ const processCommand = (request: HostExecutionLaunchRequest): string | undefined
   ].join(" ");
 };
 
+interface LiveObservation {
+  readonly targets: ReadonlyMap<string, OpaqueAccessTarget>;
+  readonly linkedExecutions: ReadonlyMap<string, readonly LinkedExecution[]>;
+  readonly paneWorkingDirectories: ReadonlyMap<string, string>;
+  readonly paneWorkspaces: ReadonlyMap<string, string>;
+  readonly terminalFingerprints: ReadonlyMap<string, string>;
+  readonly agentFingerprints: ReadonlyMap<string, string>;
+  readonly agentWorktrees: ReadonlyMap<string, string>;
+}
+
+interface HostObservationResult {
+  readonly snapshot: HostSnapshot;
+  readonly live: LiveObservation;
+}
+
+const emptyLiveObservation = (): LiveObservation => ({
+  targets: new Map(),
+  linkedExecutions: new Map(),
+  paneWorkingDirectories: new Map(),
+  paneWorkspaces: new Map(),
+  terminalFingerprints: new Map(),
+  agentFingerprints: new Map(),
+  agentWorktrees: new Map(),
+});
+
+const mapBounded = async <A, B>(
+  items: readonly A[],
+  limit: number,
+  run: (item: A) => Promise<B>,
+): Promise<B[]> => {
+  const results: B[] = [];
+  const runBatch = async (start: number): Promise<void> => {
+    if (start >= items.length) return;
+    const batch = items.slice(start, start + limit);
+    results.push(...(await Promise.all(batch.map((item) => run(item)))));
+    await runBatch(start + limit);
+  };
+  await runBatch(0);
+  return results;
+};
+
 export class HerdrHostAdapter implements SessionHost {
   private readonly runner: CommandRunner;
   private readonly terminalRunner: TerminalCommandRunner | undefined;
   private readonly clock: Clock;
-  private readonly liveTargets = new Map<string, OpaqueAccessTarget>();
-  private readonly liveLinkedExecutions = new Map<string, readonly LinkedExecution[]>();
-  private readonly livePaneWorkingDirectories = new Map<string, string>();
-  private readonly livePaneWorkspaces = new Map<string, string>();
-  private readonly liveTerminalFingerprints = new Map<string, string>();
-  private readonly liveAgentFingerprints = new Map<string, string>();
+  private live: LiveObservation = emptyLiveObservation();
+  private refreshQueue: Promise<unknown> = Promise.resolve();
+  private readonly activeTerminals = new Map<string, HostedTerminalSession>();
   private readonly openCodeProcessCache = new Map<string, OpenCodeProcessCacheEntry>();
 
   constructor(options: {
@@ -641,6 +682,27 @@ export class HerdrHostAdapter implements SessionHost {
       try: () => this.snapshotInternal(),
       catch: () => hostError("host.snapshot", "Herdr snapshot failed unexpectedly."),
     });
+  }
+
+  private refreshHost(): Promise<HostObservationResult> {
+    const run = this.refreshQueue
+      .then(
+        () => this.observeHost(),
+        () => this.observeHost(),
+      )
+      .then((result) => {
+        this.live = result.live;
+        return result;
+      });
+    this.refreshQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async snapshotInternal(): Promise<HostSnapshot> {
+    return (await this.refreshHost()).snapshot;
   }
 
   launchExecution(request: HostExecutionLaunchRequest): Effect.Effect<HostLaunchResult, HostError> {
@@ -663,6 +725,7 @@ export class HerdrHostAdapter implements SessionHost {
         if (request.processPlan.harnessId !== harnessId || !command)
           return { ok: false, message: "The process plan is invalid." };
         const workspaceLabel = request.agentName?.trim() || `${harnessId} agent`;
+        const beforePaneIds = new Set(this.live.paneWorkingDirectories.keys());
         const workspace = await this.runner.run([
           "herdr",
           "workspace",
@@ -674,6 +737,7 @@ export class HerdrHostAdapter implements SessionHost {
           "--no-focus",
         ]);
         const workspaceRootPaneId = createdRootPaneId(parseJsonValue(workspace.stdout));
+        const workspaceId = createdWorkspaceId(parseJsonValue(workspace.stdout));
         await trace("workspace.create.result", {
           exitCode: workspace.exitCode,
           errorCode: commandErrorCode(workspace),
@@ -701,7 +765,13 @@ export class HerdrHostAdapter implements SessionHost {
                 "Herdr could not inspect the launch workspace.",
               ),
             };
-          paneId = launchPaneFor(parseJsonValue(workspaceSnapshot.stdout), workingDirectory);
+          if (workspaceId !== undefined || beforePaneIds.size > 0)
+            paneId = newPaneFor(
+              parseJsonValue(workspaceSnapshot.stdout),
+              beforePaneIds,
+              workingDirectory,
+              workspaceId,
+            );
         }
         if (!paneId) await trace("workspace.pane.missing", { workingDirectory });
         if (!paneId)
@@ -785,39 +855,33 @@ export class HerdrHostAdapter implements SessionHost {
     return this.waitForAgentObservation(paneId, remainingAttempts - 1);
   }
 
-  private async snapshotInternal(): Promise<HostSnapshot> {
-    this.liveTargets.clear();
-    this.liveLinkedExecutions.clear();
-    this.livePaneWorkingDirectories.clear();
-    this.livePaneWorkspaces.clear();
-    this.liveTerminalFingerprints.clear();
-    this.liveAgentFingerprints.clear();
+  private async observeHost(): Promise<HostObservationResult> {
+    const unavailable = (error: string): HostObservationResult => ({
+      snapshot: {
+        hostKind: "herdr",
+        hostInstanceId: HERDR_HOST_INSTANCE_ID,
+        available: false,
+        complete: false,
+        observedAt: this.clock.now(),
+        agents: [],
+        diagnostics: [],
+        error,
+      },
+      live: emptyLiveObservation(),
+    });
     let result;
     try {
       result = await this.runner.run(["herdr", "api", "snapshot"]);
     } catch (error) {
-      return {
-        hostKind: "herdr",
-        hostInstanceId: HERDR_HOST_INSTANCE_ID,
-        available: false,
-        complete: false,
-        observedAt: this.clock.now(),
-        agents: [],
-        diagnostics: [],
-        error: error instanceof Error ? error.message : String(error),
-      };
+      return unavailable(
+        boundedHostMessage(
+          error instanceof Error ? error.message : String(error),
+          "The Herdr snapshot command could not be run.",
+        ),
+      );
     }
     if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated) {
-      return {
-        hostKind: "herdr",
-        hostInstanceId: HERDR_HOST_INSTANCE_ID,
-        available: false,
-        complete: false,
-        observedAt: this.clock.now(),
-        agents: [],
-        diagnostics: [],
-        error: commandFailureMessage(result, `Herdr exited with ${result.exitCode}.`),
-      };
+      return unavailable(commandFailureMessage(result, `Herdr exited with ${result.exitCode}.`));
     }
     const parsedPayload = parseJsonValue(result.stdout);
     const parsedSnapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
@@ -825,45 +889,55 @@ export class HerdrHostAdapter implements SessionHost {
     const snapshot = parsedSnapshot.available
       ? await this.enrichOpenCodeProcessEvidence(parsedSnapshot, paneFingerprints)
       : parsedSnapshot;
-    if (!snapshot.available) return snapshot;
-    for (const [paneId, workingDirectory] of paneWorkingDirectoriesFor(parsedPayload))
-      this.livePaneWorkingDirectories.set(paneId, workingDirectory);
-    for (const [paneId, workspaceId] of paneWorkspaceIdsFor(parsedPayload))
-      this.livePaneWorkspaces.set(paneId, workspaceId);
-    for (const [paneId, fingerprint] of paneFingerprints)
-      this.liveTerminalFingerprints.set(paneId, fingerprint);
+    if (!snapshot.available) return { snapshot, live: emptyLiveObservation() };
+
+    const paneWorkingDirectories = paneWorkingDirectoriesFor(parsedPayload);
+    const paneWorkspaces = paneWorkspaceIdsFor(parsedPayload);
     const linkedExecutions = linkedExecutionsFor(parsedPayload, snapshot.agents);
-    this.liveTargets.clear();
-    const nativeIds = new Set<string>();
-    const ambiguous = snapshot.agents.some((agent) => {
-      if (nativeIds.has(agent.nativeId)) return true;
-      nativeIds.add(agent.nativeId);
-      return false;
-    });
-    if (!ambiguous)
-      for (const agent of snapshot.agents) {
-        const terminalFingerprint = this.liveTerminalFingerprints.get(agent.nativeId);
-        const fingerprint = terminalFingerprint
-          ? agentFingerprintForObservation(agent, terminalFingerprint)
-          : undefined;
-        if (fingerprint) this.liveAgentFingerprints.set(agent.nativeId, fingerprint);
-        this.liveTargets.set(
-          agent.nativeId,
-          herdrTarget("herdr-agent-attach", agent.nativeId, fingerprint),
-        );
-        const agentLinkedExecutions = linkedExecutions.get(agent.nativeId);
-        if (agentLinkedExecutions)
-          this.liveLinkedExecutions.set(agent.nativeId, agentLinkedExecutions);
-      }
-    return snapshot;
+    const targets = new Map<string, OpaqueAccessTarget>();
+    const linkedExecutionsByAgent = new Map<string, readonly LinkedExecution[]>();
+    const agentFingerprints = new Map<string, string>();
+    const agentWorktrees = new Map<string, string>();
+    const seenIds = new Set<string>();
+    const duplicateIds = new Set<string>();
+    for (const agent of snapshot.agents) {
+      if (seenIds.has(agent.nativeId)) duplicateIds.add(agent.nativeId);
+      else seenIds.add(agent.nativeId);
+    }
+    for (const agent of snapshot.agents) {
+      if (duplicateIds.has(agent.nativeId)) continue;
+      const terminalFingerprint = paneFingerprints.get(agent.nativeId);
+      const fingerprint = terminalFingerprint
+        ? agentFingerprintForObservation(agent, terminalFingerprint)
+        : undefined;
+      if (fingerprint) agentFingerprints.set(agent.nativeId, fingerprint);
+      targets.set(agent.nativeId, herdrTarget("herdr-agent-attach", agent.nativeId, fingerprint));
+      const agentLinkedExecutions = linkedExecutions.get(agent.nativeId);
+      if (agentLinkedExecutions) linkedExecutionsByAgent.set(agent.nativeId, agentLinkedExecutions);
+      if (agent.worktree) agentWorktrees.set(agent.nativeId, agent.worktree);
+    }
+    return {
+      snapshot,
+      live: {
+        targets,
+        linkedExecutions: linkedExecutionsByAgent,
+        paneWorkingDirectories,
+        paneWorkspaces,
+        terminalFingerprints: paneFingerprints,
+        agentFingerprints,
+        agentWorktrees,
+      },
+    };
   }
 
   private async enrichOpenCodeProcessEvidence(
     snapshot: HostSnapshot,
     fingerprints: ReadonlyMap<string, string>,
   ): Promise<HostSnapshot> {
-    const agents = await Promise.all(
-      snapshot.agents.map(async (observation): Promise<HostAgentObservation> => {
+    const agents = await mapBounded(
+      snapshot.agents,
+      OPEN_CODE_PROCESS_QUERY_CONCURRENCY,
+      async (observation): Promise<HostAgentObservation> => {
         const evidence = observation.harnessEvidence;
         if (
           !evidence ||
@@ -874,7 +948,10 @@ export class HerdrHostAdapter implements SessionHost {
           return observation;
         const fingerprint = fingerprints.get(observation.nativeId);
         const cached = this.openCodeProcessCache.get(observation.nativeId);
-        if (fingerprint !== undefined && cached?.fingerprint === fingerprint) {
+        const cacheFresh =
+          cached !== undefined &&
+          this.clock.now() - cached.cachedAt < OPEN_CODE_PROCESS_CACHE_TTL_MS;
+        if (fingerprint !== undefined && cached?.fingerprint === fingerprint && cacheFresh) {
           const cachedEvidence = processEvidenceFor(cached.process, observation.observedAt);
           return cachedEvidence ? { ...observation, harnessEvidence: cachedEvidence } : observation;
         }
@@ -891,7 +968,11 @@ export class HerdrHostAdapter implements SessionHost {
             evidence.detectedHarnessId,
           );
           if (process && fingerprint !== undefined)
-            this.openCodeProcessCache.set(observation.nativeId, { fingerprint, process });
+            this.openCodeProcessCache.set(observation.nativeId, {
+              fingerprint,
+              process,
+              cachedAt: this.clock.now(),
+            });
           const processEvidence = process
             ? processEvidenceFor(process, observation.observedAt)
             : undefined;
@@ -901,7 +982,7 @@ export class HerdrHostAdapter implements SessionHost {
         } catch {
           return observation;
         }
-      }),
+      },
     );
     const livePaneIds = new Set(snapshot.agents.map((agent) => agent.nativeId));
     for (const paneId of this.openCodeProcessCache.keys())
@@ -923,7 +1004,7 @@ export class HerdrHostAdapter implements SessionHost {
           linkedExecutions: [],
           explanation: "This agent belongs to an unsupported host.",
         } satisfies AgentAccess;
-      const target = this.liveTargets.get(agentRef.nativeId);
+      const target = this.live.targets.get(agentRef.nativeId);
       if (!target)
         return {
           supported: false,
@@ -931,15 +1012,14 @@ export class HerdrHostAdapter implements SessionHost {
           linkedExecutions: [],
           explanation: "The agent is not present in the latest Herdr snapshot.",
         } satisfies AgentAccess;
-      const linkedExecutions = this.liveLinkedExecutions.get(agentRef.nativeId) ?? [];
-      const agentFingerprint = this.liveAgentFingerprints.get(agentRef.nativeId);
-      const terminalFingerprint = this.liveTerminalFingerprints.get(agentRef.nativeId);
+      const linkedExecutions = this.live.linkedExecutions.get(agentRef.nativeId) ?? [];
+      const agentFingerprint = this.live.agentFingerprints.get(agentRef.nativeId);
+      const terminalFingerprint = this.live.terminalFingerprints.get(agentRef.nativeId);
       return {
         supported: true,
         capabilities: [
           ...(terminalFingerprint ? ["embedded-terminal" as const] : []),
-          "native-handoff",
-          ...(agentFingerprint ? ["close-agent" as const] : []),
+          ...(agentFingerprint ? ["native-handoff" as const, "close-agent" as const] : []),
           ...(linkedExecutions.some((linkedExecution) => linkedExecution.available)
             ? ["linked-terminal" as const]
             : []),
@@ -959,13 +1039,16 @@ export class HerdrHostAdapter implements SessionHost {
     });
   }
 
-  private currentLinkedExecution(execution: LinkedExecution): LinkedExecution | undefined {
+  private currentLinkedExecution(
+    execution: LinkedExecution,
+    live: LiveObservation,
+  ): LinkedExecution | undefined {
     const ownerToken = parseTarget(execution.owner);
     if (!ownerToken) return undefined;
     const desiredToken = execution.target
       ? openLinkedExecutionTerminalTarget(execution.target)
       : undefined;
-    return (this.liveLinkedExecutions.get(ownerToken) ?? []).find((candidate) => {
+    return (live.linkedExecutions.get(ownerToken) ?? []).find((candidate) => {
       const candidateToken = candidate.target
         ? openLinkedExecutionTerminalTarget(candidate.target)
         : undefined;
@@ -990,13 +1073,14 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr attachment target is invalid or unsupported.",
           };
-        const snapshot = await this.snapshotInternal();
-        if (
-          !snapshot.available ||
-          !this.liveTargets.has(token) ||
-          !access.target.fingerprint ||
-          this.liveAgentFingerprints.get(token) !== access.target.fingerprint
-        )
+        if (!access.target.fingerprint)
+          return {
+            ok: false,
+            message:
+              "This Herdr agent has no exact conversation identity to revalidate; native handoff is unavailable.",
+          };
+        const { snapshot, live } = await this.refreshHost();
+        if (!snapshot.available || live.agentFingerprints.get(token) !== access.target.fingerprint)
           return {
             ok: false,
             message: snapshot.error ?? "The Herdr agent target is no longer available.",
@@ -1007,7 +1091,7 @@ export class HerdrHostAdapter implements SessionHost {
         if (result.exitCode !== 0)
           return {
             ok: false,
-            message: result.stderr.trim() || `Herdr could not attach to ${token}.`,
+            message: commandFailureMessage(result, `Herdr could not attach to ${token}.`),
           };
         return { ok: true, message: `Attached to the real Herdr agent ${token}.` };
       },
@@ -1027,7 +1111,7 @@ export class HerdrHostAdapter implements SessionHost {
         const token = parseTarget(access.target);
         if (!token || !access.target.fingerprint)
           return { ok: false, message: "The Herdr close target is invalid or unsupported." };
-        const snapshot = await this.snapshotInternal();
+        const { snapshot, live } = await this.refreshHost();
         if (!snapshot.available || !snapshot.complete)
           return {
             ok: false,
@@ -1035,7 +1119,7 @@ export class HerdrHostAdapter implements SessionHost {
               snapshot.error ??
               "Herdr did not provide a complete Agent inventory; the lifecycle is uncertain.",
           };
-        const current = this.liveTargets.get(token);
+        const current = live.targets.get(token);
         if (!current) return { ok: true, message: `Herdr agent ${token} had already ended.` };
         if (current.fingerprint !== access.target.fingerprint)
           return {
@@ -1043,13 +1127,13 @@ export class HerdrHostAdapter implements SessionHost {
             message: "The Herdr Agent target changed before close; no process was stopped.",
           };
         const verifyClosed = async (): Promise<HostActionResult> => {
-          const after = await this.snapshotInternal();
-          if (!after.available || !after.complete)
+          const after = await this.refreshHost();
+          if (!after.snapshot.available || !after.snapshot.complete)
             return {
               ok: false,
               message: `Herdr accepted the close for ${token}, but Observatory could not verify that the Agent ended.`,
             };
-          const remaining = this.liveTargets.get(token);
+          const remaining = after.live.targets.get(token);
           if (remaining)
             return {
               ok: false,
@@ -1087,7 +1171,13 @@ export class HerdrHostAdapter implements SessionHost {
         return verifyClosed();
       },
       catch: (error) =>
-        hostError("host.closeAgent", error instanceof Error ? error.message : String(error)),
+        hostError(
+          "host.closeAgent",
+          boundedHostMessage(
+            error instanceof Error ? error.message : String(error),
+            "Herdr could not close the agent.",
+          ),
+        ),
     });
   }
 
@@ -1114,32 +1204,43 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr terminal target is invalid or unsupported.",
           } satisfies HostTerminalOpenResult;
-        const snapshot = await this.snapshotInternal();
+        const { snapshot, live } = await this.refreshHost();
         if (
           !snapshot.available ||
-          !this.liveTargets.has(token) ||
+          !live.targets.has(token) ||
           !access.terminalTarget.fingerprint ||
-          this.liveTerminalFingerprints.get(token) !== access.terminalTarget.fingerprint
+          live.terminalFingerprints.get(token) !== access.terminalTarget.fingerprint
         )
           return {
             ok: false,
             message: snapshot.error ?? "The Herdr terminal target is no longer available.",
           } satisfies HostTerminalOpenResult;
         try {
+          const terminal = openHerdrTerminal(this.terminalRunner, token, dimensions, options);
+          await this.replaceActiveTerminal(token, terminal);
           return {
             ok: true,
-            terminal: openHerdrTerminal(this.terminalRunner, token, dimensions, options),
+            terminal,
             message: `Opened an embedded Herdr terminal for ${token}.`,
           } satisfies HostTerminalOpenResult;
         } catch (error) {
           return {
             ok: false,
-            message: `Could not open the Herdr terminal: ${error instanceof Error ? error.message : String(error)}`,
+            message: boundedHostMessage(
+              error instanceof Error ? error.message : String(error),
+              "Could not open the Herdr terminal for the selected agent.",
+            ),
           } satisfies HostTerminalOpenResult;
         }
       },
       catch: (error) =>
-        hostError("host.openTerminal", error instanceof Error ? error.message : String(error)),
+        hostError(
+          "host.openTerminal",
+          boundedHostMessage(
+            error instanceof Error ? error.message : String(error),
+            "Herdr could not open the terminal.",
+          ),
+        ),
     });
   }
 
@@ -1161,7 +1262,7 @@ export class HerdrHostAdapter implements SessionHost {
             message: "The configured Herdr command runner cannot stream linked terminals.",
           } satisfies HostTerminalOpenResult;
 
-        const snapshot = await this.snapshotInternal();
+        const { snapshot, live } = await this.refreshHost();
         if (!snapshot.available)
           return {
             ok: false,
@@ -1174,7 +1275,7 @@ export class HerdrHostAdapter implements SessionHost {
             ok: false,
             message: "The Herdr linked execution owner is invalid or unsupported.",
           } satisfies HostTerminalOpenResult;
-        const ownerTarget = this.liveTargets.get(ownerToken);
+        const ownerTarget = live.targets.get(ownerToken);
         if (
           !ownerTarget ||
           (linkedExecution.owner.fingerprint !== undefined &&
@@ -1186,9 +1287,18 @@ export class HerdrHostAdapter implements SessionHost {
           } satisfies HostTerminalOpenResult;
 
         const workingDirectory = preparedShellWorkingDirectory(linkedExecution.target);
+        if (workingDirectory) {
+          const ownerWorktree = live.agentWorktrees.get(ownerToken);
+          if (!ownerWorktree || normalizedPath(ownerWorktree) !== normalizedPath(workingDirectory))
+            return {
+              ok: false,
+              message:
+                "The prepared linked terminal directory no longer matches the Agent worktree.",
+            } satisfies HostTerminalOpenResult;
+        }
         const currentExecution = workingDirectory
           ? undefined
-          : this.currentLinkedExecution(linkedExecution);
+          : this.currentLinkedExecution(linkedExecution, live);
         let target = currentExecution?.target
           ? openLinkedExecutionTerminalTarget(currentExecution.target)
           : undefined;
@@ -1196,13 +1306,13 @@ export class HerdrHostAdapter implements SessionHost {
         if (workingDirectory) {
           // A prepared companion is a contextual Herdr tab, not a new AO
           // workspace. Keep the parent workspace identity inside this adapter.
-          const ownerWorkspaceId = this.livePaneWorkspaces.get(ownerToken);
+          const ownerWorkspaceId = live.paneWorkspaces.get(ownerToken);
           if (!ownerWorkspaceId)
             return {
               ok: false,
               message: "Herdr could not identify the Agent workspace for a linked terminal tab.",
             } satisfies HostTerminalOpenResult;
-          const beforePaneIds = new Set(this.livePaneWorkingDirectories.keys());
+          const beforePaneIds = new Set(live.paneWorkingDirectories.keys());
           const created = await this.runner.run([
             "herdr",
             "tab",
@@ -1257,9 +1367,11 @@ export class HerdrHostAdapter implements SessionHost {
               ? "The Herdr linked terminal target is invalid or unsupported."
               : "The selected linked execution is no longer available.",
           } satisfies HostTerminalOpenResult;
+        const terminal = openHerdrTerminal(this.terminalRunner, target, dimensions, options);
+        await this.replaceActiveTerminal(target, terminal);
         return {
           ok: true,
-          terminal: openHerdrTerminal(this.terminalRunner, target, dimensions, options),
+          terminal,
           message: workingDirectory
             ? `Opened a Herdr linked terminal tab in ${workingDirectory}.`
             : `Opened the existing Herdr linked terminal ${target}.`,
@@ -1268,8 +1380,23 @@ export class HerdrHostAdapter implements SessionHost {
       catch: (error) =>
         hostError(
           "host.openLinkedExecutionTerminal",
-          error instanceof Error ? error.message : String(error),
+          boundedHostMessage(
+            error instanceof Error ? error.message : String(error),
+            "Herdr could not open the linked terminal.",
+          ),
         ),
     });
+  }
+
+  private async replaceActiveTerminal(
+    target: string,
+    terminal: HostedTerminalSession,
+  ): Promise<void> {
+    const previous = this.activeTerminals.get(target);
+    if (previous) {
+      this.activeTerminals.delete(target);
+      await Effect.runPromise(previous.release()).catch(() => undefined);
+    }
+    this.activeTerminals.set(target, terminal);
   }
 }
