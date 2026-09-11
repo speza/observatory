@@ -777,11 +777,20 @@ describe("Herdr adapter", () => {
   });
 
   test("executes a structured process plan without choosing a provider command", async () => {
-    const runner = new FakeRunner({
-      exitCode: 0,
-      stdout: JSON.stringify(fixture),
-      stderr: "",
-    });
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ result: { root_pane: { pane_id: "fixture-w1:p2" } } }),
+          stderr: "",
+        },
+      ],
+    );
     const adapter = new HerdrHostAdapter({
       runner,
       clock: new FixedClock(100),
@@ -817,6 +826,30 @@ describe("Herdr adapter", () => {
       "exec 'codex' '--model' 'o3'\"'\"'s model' 'start safely'",
     ]);
     expect(result.executionRef).toBe("fixture-w1:p2");
+  });
+
+  test("fails closed when a launch workspace cannot be uniquely identified", async () => {
+    const runner = new FakeRunner(
+      {
+        exitCode: 0,
+        stdout: JSON.stringify(fixture),
+        stderr: "",
+      },
+      [{ exitCode: 0, stdout: JSON.stringify({ result: {} }), stderr: "" }],
+    );
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+
+    const result = await Effect.runPromise(
+      adapter.launchExecution({
+        requestId: "launch-ambiguous",
+        workingDirectory: "/sandbox/alpha",
+        processPlan: { harnessId: "codex", executable: "codex", args: [] },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("no interactive shell pane");
+    expect(runner.calls.some((call) => call[1] === "pane" && call[2] === "run")).toBe(false);
   });
 
   test("reports a plan-known opaque conversation reference through Herdr", async () => {
@@ -1066,6 +1099,83 @@ describe("Herdr adapter", () => {
       (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })))
         .supported,
     ).toBe(false);
+  });
+
+  test("keeps the last published observation readable while a refresh is in flight", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let callCount = 0;
+    const runner: CommandRunner = {
+      async run() {
+        callCount += 1;
+        if (callCount === 1) return { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" };
+        await gate;
+        return { exitCode: 0, stdout: JSON.stringify(fixture), stderr: "" };
+      },
+    };
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+
+    const refresh = Effect.runPromise(adapter.snapshot());
+    const during = await Effect.runPromise(
+      adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" }),
+    );
+    expect(during.supported).toBe(true);
+    release?.();
+    await refresh;
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "fixture-w2:p1" })))
+        .supported,
+    ).toBe(true);
+  });
+
+  test("keeps unaffected targets when one duplicate pane identity appears", async () => {
+    const payload = {
+      result: {
+        snapshot: {
+          panes: [
+            { pane_id: "duplicate", terminal_id: "term-one", workspace_id: "w", tab_id: "t" },
+            { pane_id: "distinct", terminal_id: "term-two", workspace_id: "w", tab_id: "t" },
+          ],
+          agents: [
+            {
+              pane_id: "duplicate",
+              agent: "codex",
+              agent_session: { agent: "codex", kind: "id", value: "session-one" },
+            },
+            {
+              pane_id: "duplicate",
+              agent: "codex",
+              agent_session: { agent: "codex", kind: "id", value: "session-two" },
+            },
+            {
+              pane_id: "distinct",
+              agent: "codex",
+              agent_session: { agent: "codex", kind: "id", value: "session-three" },
+            },
+          ],
+          workspaces: [],
+        },
+      },
+    };
+    const runner = new FakeRunner({
+      exitCode: 0,
+      stdout: JSON.stringify(payload),
+      stderr: "",
+    });
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(100) });
+    await Effect.runPromise(adapter.snapshot());
+
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "duplicate" })))
+        .supported,
+    ).toBe(false);
+    expect(
+      (await Effect.runPromise(adapter.access({ hostKind: "herdr", nativeId: "distinct" })))
+        .supported,
+    ).toBe(true);
   });
 
   test("opens a host-owned terminal stream without leaking Herdr protocol details", async () => {
@@ -1504,6 +1614,26 @@ describe("Herdr adapter", () => {
     ).toHaveLength(2);
     expect(terminalRunner.calls[1]).toContain("prepared-shell:p2");
     await Effect.runPromise(reopened.terminal!.release());
+
+    const tabCreatesBefore = runner.calls.filter(
+      (call) => call[0] === "herdr" && call[1] === "tab" && call[2] === "create",
+    ).length;
+    const forged = await Effect.runPromise(
+      adapter.openLinkedExecutionTerminal(
+        {
+          ...linkedExecution!,
+          target: { kind: "herdr-prepared-shell", token: "/sandbox/elsewhere" },
+        },
+        { columns: 60, rows: 18 },
+      ),
+    );
+    expect(forged).toMatchObject({ ok: false });
+    expect(forged.message).toContain("no longer matches the Agent worktree");
+    expect(
+      runner.calls.filter(
+        (call) => call[0] === "herdr" && call[1] === "tab" && call[2] === "create",
+      ),
+    ).toHaveLength(tabCreatesBefore);
   });
 
   test("fails closed when linked terminal tab creation leaves multiple candidate panes", async () => {

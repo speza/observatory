@@ -36,6 +36,9 @@ const recordType = (record: RecordValue): string =>
 const recordReason = (record: RecordValue): string | undefined =>
   stringValue(record, "reason") ?? stringValue(record, "message") ?? stringValue(record, "error");
 
+const MAX_TERMINAL_LINE_LENGTH = 8 * 1024 * 1024;
+const MAX_TERMINAL_STDERR_LENGTH = 64 * 1024;
+
 const decodeBase64 = (value: string): Uint8Array | undefined => {
   try {
     const decoded = atob(value);
@@ -56,8 +59,10 @@ const encodeBase64 = (bytes: Uint8Array): string => {
 // Other binary frames must use an explicit *_base64 field so ordinary text
 // cannot be silently decoded.
 const bytesFromValue = (value: JsonValue | undefined, encoded = false): Uint8Array | undefined => {
-  if (Array.isArray(value) && value.every((item) => Schema.is(Schema.Number)(item)))
-    return Uint8Array.from(value.map((item) => item));
+  if (Array.isArray(value) && value.every((item) => Schema.is(Schema.Number)(item))) {
+    if (value.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) return undefined;
+    return Uint8Array.from(value);
+  }
   if (!Schema.is(Schema.String)(value)) return undefined;
   if (encoded) return decodeBase64(value);
   return new TextEncoder().encode(value);
@@ -110,7 +115,7 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     this.events = Stream.fromAsyncIterable(this.readEvents(), () =>
       hostError("terminal.events", `Herdr terminal stream failed for ${target}.`),
     );
-    void this.drainStderr();
+    void this.drainStderr().catch(() => undefined);
   }
 
   send(input: HostTerminalInput): Effect.Effect<HostActionResult, HostError> {
@@ -210,6 +215,8 @@ export class HerdrTerminalSession implements HostedTerminalSession {
     let pending = "";
     for await (const chunk of this.process.stdout) {
       pending += decoder.decode(chunk, { stream: true });
+      if (pending.length > MAX_TERMINAL_LINE_LENGTH)
+        throw new Error("Herdr terminal output exceeded the safe frame limit.");
       while (true) {
         const newline = pending.indexOf("\n");
         if (newline < 0) break;
@@ -261,8 +268,11 @@ export class HerdrTerminalSession implements HostedTerminalSession {
   }
 
   private async drainStderr(): Promise<void> {
-    for await (const chunk of this.process.stderr)
-      this.stderrText += new TextDecoder().decode(chunk);
+    for await (const chunk of this.process.stderr) {
+      if (this.stderrText.length >= MAX_TERMINAL_STDERR_LENGTH) continue;
+      const text = new TextDecoder().decode(chunk);
+      this.stderrText = (this.stderrText + text).slice(0, MAX_TERMINAL_STDERR_LENGTH);
+    }
   }
 }
 

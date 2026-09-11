@@ -48,9 +48,73 @@ export const defineSessionHostContractTests = (
         await Effect.runPromise(opened.terminal!.send({ kind: "text", value: "contract" })),
       ).toMatchObject({ ok: true });
       expect(
+        await Effect.runPromise(
+          opened.terminal!.send({ kind: "bytes", value: Uint8Array.of(0x1b, 0x5b, 0x41) }),
+        ),
+      ).toMatchObject({ ok: true });
+      expect(
+        await Effect.runPromise(
+          opened.terminal!.send({ kind: "scroll", direction: "up", lines: 5, source: "wheel" }),
+        ),
+      ).toMatchObject({ ok: true });
+      expect(
         await Effect.runPromise(opened.terminal!.resize({ columns: 90, rows: 30 })),
       ).toMatchObject({ ok: true });
+      expect(
+        await Effect.runPromise(opened.terminal!.resize({ columns: 0, rows: 0 })),
+      ).toMatchObject({ ok: false });
       expect(await Effect.runPromise(opened.terminal!.release())).toMatchObject({ ok: true });
+      expect(await Effect.runPromise(opened.terminal!.release())).toMatchObject({ ok: true });
+      expect(
+        await Effect.runPromise(opened.terminal!.send({ kind: "text", value: "after-release" })),
+      ).toMatchObject({ ok: false });
+    });
+
+    test("returns an explicit failure instead of opening an unsupported target", async () => {
+      const { host } = await createHarness();
+      const opened = await Effect.runPromise(
+        host.openTerminal(
+          {
+            supported: false,
+            capabilities: [],
+            linkedExecutions: [],
+            explanation: "Contract fixture has no accessible agent.",
+          },
+          { columns: 80, rows: 24 },
+        ),
+      );
+      expect(opened.ok).toBe(false);
+      expect(opened.terminal).toBeUndefined();
+      expect(opened.message.length).toBeGreaterThan(0);
+    });
+
+    test("honors every advertised capability through its action", async () => {
+      const { host, agent } = await createHarness();
+      await Effect.runPromise(host.snapshot());
+      const access = await Effect.runPromise(host.access(agent));
+
+      if (access.capabilities.includes("embedded-terminal")) {
+        const opened = await Effect.runPromise(
+          host.openTerminal(access, { columns: 80, rows: 24 }),
+        );
+        expect(opened.ok).toBe(true);
+        await Effect.runPromise(opened.terminal!.release());
+      }
+      if (access.capabilities.includes("linked-terminal")) {
+        const linkedExecution = access.linkedExecutions.find((candidate) => candidate.available);
+        expect(linkedExecution).toBeDefined();
+        const opened = await Effect.runPromise(
+          host.openLinkedExecutionTerminal(linkedExecution!, { columns: 60, rows: 18 }),
+        );
+        expect(opened.ok).toBe(true);
+        await Effect.runPromise(opened.terminal!.release());
+      }
+      if (access.capabilities.includes("native-handoff")) {
+        expect(await Effect.runPromise(host.activate(access))).toMatchObject({ ok: true });
+      }
+      if (access.capabilities.includes("close-agent")) {
+        expect(await Effect.runPromise(host.closeAgent(access))).toMatchObject({ ok: true });
+      }
     });
 
     test("supports native handoff through the same access capability", async () => {
