@@ -247,7 +247,14 @@ describe("Herdr adapter", () => {
                 tab_id: "t",
               },
             ],
-            agents: [{ pane_id: "working", name: "◑ Model override", agent_status: "working" }],
+            agents: [
+              {
+                pane_id: "working",
+                agent: "codex",
+                name: "◑ Model override",
+                agent_status: "working",
+              },
+            ],
             workspaces: [],
           },
         },
@@ -256,6 +263,34 @@ describe("Herdr adapter", () => {
     );
 
     expect(snapshot.agents[0]?.displayName).toBe("Model override");
+  });
+
+  test("ignores terminal panes without agent identity", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            panes: [
+              {
+                pane_id: "terminal",
+                terminal_id: "term",
+                workspace_id: "w",
+                tab_id: "t",
+                cwd: "/ordinary/workspace",
+              },
+            ],
+            agents: [{ pane_id: "terminal", name: "bun run web", agent_status: "idle" }],
+            workspaces: [],
+          },
+        },
+      },
+      99,
+    );
+
+    expect(snapshot.available).toBe(true);
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.agents).toHaveLength(0);
+    expect(snapshot.diagnostics.join(" ")).toContain("without agent identity");
   });
 
   test("translates native agent session evidence without interpreting its value", () => {

@@ -1,7 +1,7 @@
 import type {
   MapAgentView,
   MapGoalView,
-  DiscoveredExecutionView,
+  MapDiscoveredExecutionView,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
@@ -55,6 +55,13 @@ const wrappedLines = (
 };
 
 export const linesFor = (title: string): readonly string[] => wrappedLines(title, 16, 3);
+
+/** Clamp one rendered line to its card width without breaking SVG bounds. */
+export const truncateAtlasLine = (value: string, maximumCharacters: number): string => {
+  const normalized = value.trim();
+  if (normalized.length <= maximumCharacters) return normalized;
+  return `${normalized.slice(0, maximumCharacters - 1).trimEnd()}…`;
+};
 export const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
 
@@ -302,18 +309,47 @@ export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number
   return scale;
 };
 
-const discoveredExecutionBounds = (execution: DiscoveredExecutionView, scale: number) => {
-  const x = execution.mapPosition.x * scale;
-  const y = execution.mapPosition.y * scale;
-  return {
-    minimumX: x - DISCOVERED_CARD_WIDTH / 2 - 8,
-    maximumX: x + DISCOVERED_CARD_WIDTH / 2 + 8,
-    minimumY: y - DISCOVERED_CARD_HEIGHT / 2 - 28,
-    maximumY: y + DISCOVERED_CARD_HEIGHT / 2 + 28,
-  };
+const DISCOVERED_DOCK_PADDING = 18;
+const DISCOVERED_DOCK_HEADING_HEIGHT = 40;
+
+export interface DiscoveredDockBounds {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Bounds of the labelled discovery dock in logical (pre-camera) space. */
+export const discoveredExecutionDockBounds = (
+  executions: readonly MapDiscoveredExecutionView[],
+  scale: number,
+): DiscoveredDockBounds | undefined => {
+  if (executions.length === 0) return undefined;
+  const points = executions.map((execution) => ({
+    x: execution.mapPosition.x * scale,
+    y: execution.mapPosition.y * scale,
+  }));
+  const left =
+    Math.min(...points.map((point) => point.x)) -
+    DISCOVERED_CARD_WIDTH / 2 -
+    DISCOVERED_DOCK_PADDING;
+  const right =
+    Math.max(...points.map((point) => point.x)) +
+    DISCOVERED_CARD_WIDTH / 2 +
+    DISCOVERED_DOCK_PADDING;
+  const top =
+    Math.min(...points.map((point) => point.y)) -
+    DISCOVERED_CARD_HEIGHT / 2 -
+    DISCOVERED_DOCK_PADDING -
+    DISCOVERED_DOCK_HEADING_HEIGHT;
+  const bottom =
+    Math.max(...points.map((point) => point.y)) +
+    DISCOVERED_CARD_HEIGHT / 2 +
+    DISCOVERED_DOCK_PADDING;
+  return { left, top, width: right - left, height: bottom - top };
 };
 
-/** Bounds of the visible goal bodies, captions, agent nodes, and discoveries. */
+/** Bounds of the visible goal bodies, captions, agent nodes, and the discovery dock. */
 export const atlasContentBounds = (
   projection: UniverseMapProjection,
   goalSpacingScale = 1,
@@ -329,11 +365,18 @@ export const atlasContentBounds = (
       maximumY: goalY + local.bottom,
     };
   });
-  bounds.push(
-    ...(projection.discoveredExecutions ?? []).map((execution) =>
-      discoveredExecutionBounds(execution, goalSpacingScale),
-    ),
+  const dock = discoveredExecutionDockBounds(
+    projection.discoveredExecutions ?? [],
+    goalSpacingScale,
   );
+  if (dock) {
+    bounds.push({
+      minimumX: dock.left,
+      maximumX: dock.left + dock.width,
+      minimumY: dock.top,
+      maximumY: dock.top + dock.height,
+    });
+  }
 
   if (bounds.length === 0) return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
 

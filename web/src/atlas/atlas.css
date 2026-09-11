@@ -518,11 +518,27 @@
   width: 16px;
   height: 16px;
 }
+.discovered-dock {
+  pointer-events: none;
+}
+.discovered-dock__frame {
+  fill: color-mix(in srgb, var(--paper-panel) 45%, transparent);
+  stroke: var(--hairline);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+.discovered-dock__heading {
+  fill: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
 .discovered-execution__identity,
 .discovered-execution__state,
 .discovered-execution__context,
 .discovered-execution__conversation,
-.discovered-executions__heading {
+.discovered-dock__heading {
   font-family: "DM Mono", ui-monospace, monospace;
 }
 .discovered-execution__identity {
@@ -580,12 +596,6 @@
 .discovered-execution__quick-action:hover svg,
 .discovered-execution__quick-action:focus svg {
   color: var(--paper-panel);
-}
-.discovered-executions__heading {
-  fill: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
 }
 @media (hover: none) {
   .agent__quick-actions {

@@ -177,7 +177,7 @@ const SystemView = Schema.Struct({
   attentionCount: Schema.Number,
   staleCount: Schema.Number,
 });
-const DiscoveredExecution = Schema.Struct({
+const DiscoveredExecutionFields = {
   type: Schema.Literal("discovered-execution"),
   handle: Schema.String,
   displayName: Schema.String,
@@ -191,7 +191,6 @@ const DiscoveredExecution = Schema.Struct({
   branch: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
-  executionContainer: Schema.optional(ExecutionContainer),
   conversation: Schema.optional(Schema.Struct({ kind: Schema.String, id: Schema.String })),
   conversationIdentified: Schema.Boolean,
   conversationTitle: Schema.optional(Schema.String),
@@ -206,6 +205,10 @@ const DiscoveredExecution = Schema.Struct({
     Schema.Struct({ status: Schema.Literal("unavailable"), explanation: Schema.String }),
   ),
   conversationConflictCount: Schema.Number,
+};
+const DiscoveredExecution = Schema.Struct(DiscoveredExecutionFields);
+const MapDiscoveredExecution = Schema.Struct({
+  ...DiscoveredExecutionFields,
   mapPosition: MapPosition,
 });
 const MapGoalView = Schema.Struct({
@@ -247,7 +250,7 @@ const UniverseMap = Schema.Struct({
   attention: AttentionProjection,
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
-  discoveredExecutions: Schema.optional(Schema.Array(DiscoveredExecution)),
+  discoveredExecutions: Schema.optional(Schema.Array(MapDiscoveredExecution)),
   inboxPosition: MapPosition,
   truncated: Schema.optional(Schema.Boolean),
   omittedAgentCount: Schema.optional(Schema.Number),

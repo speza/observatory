@@ -30,7 +30,6 @@ import {
   type AgentExecutionBinding,
   type NativeConversationRef,
   type RuntimeInvalidationResult,
-  type MapPosition,
   type UniverseChange,
   type UniverseChangeOutcome,
   type UniverseState,
@@ -41,7 +40,6 @@ import {
   initialGoalMapPosition,
   isMapPosition,
   repairGoalMapPosition,
-  initialDiscoveredExecutionMapPosition,
   type GoalLayoutOccupancy,
 } from "../spatial/positions.ts";
 
@@ -226,7 +224,6 @@ interface DiscoveredExecutionRecord {
   readonly observationHealth: "fresh" | "unknown" | "unavailable";
   readonly lastObservedAt: number;
   readonly catalogue?: ProviderSessionFact;
-  readonly mapPosition: MapPosition;
 }
 
 const dismissalKey = (goalId: GoalId, agentId: AgentId): string => `${goalId}\u0000${agentId}`;
@@ -1419,7 +1416,6 @@ export class Universe {
           resumeEligibility: catalogue?.resumeEligibility,
           admission,
           conversationConflictCount,
-          mapPosition: discovery.mapPosition,
         };
       })
       .sort(
@@ -1548,12 +1544,6 @@ export class Universe {
           ? existing.handle
           : this.ids.next("discovery");
       if (existing && handle !== existing.handle) next.delete(existing.handle);
-      const mapPosition =
-        existing?.mapPosition ??
-        initialDiscoveredExecutionMapPosition(handle, [
-          ...[...next.values()].map((record) => record.mapPosition),
-          ...state.goals.flatMap((goal) => (goal.mapPosition ? [goal.mapPosition] : [])),
-        ]);
       next.set(handle, {
         handle,
         binding,
@@ -1579,7 +1569,6 @@ export class Universe {
             nativeConversationKey(effectiveConversation)
             ? existing.catalogue
             : undefined,
-        mapPosition,
       });
     }
     return next;

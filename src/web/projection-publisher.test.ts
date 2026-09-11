@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
 import { FixedClock, hostSnapshot, makeUniverse } from "../universe/test-support.ts";
-import {
-  projectPortfolio,
-  type PortfolioLimits,
-  type PortfolioResponse,
-} from "./portfolio.ts";
+import { projectPortfolio, type PortfolioLimits, type PortfolioResponse } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { ObservatoryWebApi } from "./api.ts";
 import type { WebPortfolioResponse, WebCommandResponse } from "./protocol.ts";

@@ -9,6 +9,7 @@ import {
   agentSatellitePositions,
   unassignedAgentPosition,
   unassignedAgentPositions,
+  discoveredExecutionDockPositions,
 } from "./positions.ts";
 
 const goalOccupancy = (...positions: readonly { x: number; y: number }[]) =>
@@ -141,5 +142,34 @@ describe("spatial positions", () => {
     const expanded = unassignedAgentPositions(anchor, [...ids, "agent-z"]);
     expect(expanded.get("agent-0")).toEqual(positions.get("agent-0"));
     expect(expanded.get("agent-19")).toEqual(positions.get("agent-19"));
+  });
+
+  test("lays discovered executions out as one compact dock below occupied work", () => {
+    const handles = ["discovery-d", "discovery-b", "discovery-a", "discovery-c"];
+    const occupied = [
+      { x: 0, y: 0 },
+      { x: 288, y: 0 },
+    ];
+    const positions = discoveredExecutionDockPositions(occupied, handles);
+    const points = handles.map((handle) => positions.get(handle));
+    expect(points.every((point) => point !== undefined)).toBe(true);
+    const xs = points.map((point) => point?.x ?? 0);
+    const ys = points.map((point) => point?.y ?? 0);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(144 - 302);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(302);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(156);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(200);
+    expect(discoveredExecutionDockPositions(occupied, handles)).toEqual(positions);
+  });
+
+  test("extends the discovery dock in stable rows without moving accepted goals", () => {
+    const handles = Array.from({ length: 7 }, (_, index) => `discovery-${index}`);
+    const positions = discoveredExecutionDockPositions([{ x: 0, y: 0 }], handles);
+    const columns = new Set(handles.map((handle) => positions.get(handle)?.x));
+    expect(columns.size).toBeGreaterThan(1);
+    expect(columns.size).toBeLessThanOrEqual(3);
+    const rows = new Set(handles.map((handle) => positions.get(handle)?.y));
+    expect(rows.size).toBe(Math.ceil(handles.length / columns.size));
+    expect(discoveredExecutionDockPositions([], [])).toEqual(new Map());
   });
 });

@@ -1308,7 +1308,7 @@ describe("Universe", () => {
     const map = universe.project({ kind: "universe-map", now: clock.now() });
     if (map.kind !== "universe-map") throw new Error("wrong projection");
     expect(map.discoveredExecutions).toHaveLength(1);
-    const search = universe.project({ kind: "search", now: clock.now(), query: "Host-only" });
+    const search = universe.project({ kind: "search", query: "Host-only" });
     if (search.kind !== "search") throw new Error("wrong projection");
     expect(search.results).toMatchObject([
       { type: "discovered-execution", label: "Host-only work" },

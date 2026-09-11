@@ -305,6 +305,11 @@ export const parseHerdrSnapshot = (
     const worktreePath = stringValue(worktree, "checkout_path") ?? paneWorkingDirectory(pane);
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
+    const harnessEvidence = harnessEvidenceFor(item, observedAt);
+    if (!harnessEvidence) {
+      diagnostics.push(`Ignored Herdr pane ${paneId} without agent identity.`);
+      continue;
+    }
     const executionContainerLabel = stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
@@ -322,8 +327,7 @@ export const parseHerdrSnapshot = (
     if (branch) Object.assign(observation, { branch });
     if (worktreePath) Object.assign(observation, { worktree: worktreePath });
     if (provider) Object.assign(observation, { provider });
-    const harnessEvidence = harnessEvidenceFor(item, observedAt);
-    if (harnessEvidence) Object.assign(observation, { harnessEvidence });
+    Object.assign(observation, { harnessEvidence });
     observations.push(observation);
   }
   if (!Array.isArray(snapshot.workspaces))

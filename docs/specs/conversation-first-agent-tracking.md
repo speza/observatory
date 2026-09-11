@@ -144,10 +144,11 @@ recency or current execution presence.
 
 A discovered execution is current `SessionHost` evidence that has not matched
 an admitted Agent. It is scoped by host kind, host instance and native
-execution identity, receives a deterministic transient map position, and is
-shown separately from durable Agents. A discovery handle is opaque and is
-resolved only at the server-side host seam. Browser projections contain safe
-display metadata, never host locators or native terminal targets.
+execution identity, is laid out by the map projection in the labelled,
+compact discovery dock below the occupied universe, and is shown separately
+from durable Agents. A discovery handle is opaque and is resolved only at the
+server-side host seam. Browser projections contain safe display metadata,
+never host locators or native terminal targets.
 
 Discovery is rebuilt from a fresh host snapshot after restart and does not write
 an Agent, assignment or semantic catch-up entry. Partial, stale or unavailable

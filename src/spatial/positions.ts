@@ -362,43 +362,51 @@ export const unassignedAgentPositions = (
 export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): MapPosition =>
   unassignedAgentPositions(anchor, [agentId]).get(agentId) ?? anchor;
 
-const DISCOVERY_ANCHOR: MapPosition = { x: 0, y: 240 };
-const DISCOVERY_HORIZONTAL_STEP = 302;
-const DISCOVERY_VERTICAL_STEP = 156;
-const DISCOVERY_OFFSETS: readonly MapPosition[] = (() => {
-  const offsets: MapPosition[] = [];
-  for (let ring = 0; ring <= 5; ring += 1) {
-    const width = Math.max(1, ring) * DISCOVERY_HORIZONTAL_STEP;
-    const height = Math.max(1, ring) * DISCOVERY_VERTICAL_STEP;
-    for (let x = -Math.max(1, ring); x <= Math.max(1, ring); x += 1)
-      offsets.push({ x: x * DISCOVERY_HORIZONTAL_STEP, y: -height });
-    for (let y = -Math.max(1, ring) + 1; y <= Math.max(1, ring); y += 1)
-      offsets.push({ x: width, y: y * DISCOVERY_VERTICAL_STEP });
-    for (let x = Math.max(1, ring) - 1; x >= -Math.max(1, ring); x -= 1)
-      offsets.push({ x: x * DISCOVERY_HORIZONTAL_STEP, y: height });
-    for (let y = Math.max(1, ring) - 1; y >= -Math.max(1, ring) + 1; y -= 1)
-      offsets.push({ x: -width, y: y * DISCOVERY_VERTICAL_STEP });
-  }
-  return offsets;
-})();
+// Grid metrics sized for the renderer's discovery card (278x132 logical
+// units) plus a small gap, so a compact dock never overlaps itself.
+const DISCOVERY_DOCK_HORIZONTAL_STEP = 302;
+const DISCOVERY_DOCK_VERTICAL_STEP = 156;
+const DISCOVERY_DOCK_CLEARANCE = 200;
+const DISCOVERY_DOCK_MAXIMUM_COLUMNS = 4;
 
-/** Assign a persistent-in-process slot in the global, non-goal discovery area. */
-export const initialDiscoveredExecutionMapPosition = (
-  handle: string,
+const discoveryDockColumns = (count: number): number => {
+  if (count <= 1) return 1;
+  if (count <= 4) return 2;
+  if (count <= 9) return 3;
+  return DISCOVERY_DOCK_MAXIMUM_COLUMNS;
+};
+
+/**
+ * Lay discovered executions out as one compact dock below the occupied
+ * universe. The dock is a labelled neutral area, never a set of scattered
+ * satellites: short rows keep its footprint small, and the anchor follows the
+ * occupied bounds so accepted Goals are never relocated to make room.
+ *
+ * Handles are placed in the order given; callers pass a deterministic order.
+ */
+export const discoveredExecutionDockPositions = (
   occupied: readonly MapPosition[],
-): MapPosition => {
-  const occupiedKeys = new Set(occupied.map(positionKey));
-  const start = hash(`discovered:${handle}`) % DISCOVERY_OFFSETS.length;
-  for (let offset = 0; offset < DISCOVERY_OFFSETS.length; offset += 1) {
-    const candidate = DISCOVERY_OFFSETS[(start + offset) % DISCOVERY_OFFSETS.length];
-    if (!candidate) continue;
-    const position = { x: DISCOVERY_ANCHOR.x + candidate.x, y: DISCOVERY_ANCHOR.y + candidate.y };
-    if (!occupiedKeys.has(positionKey(position))) return position;
-  }
-  return {
-    x: DISCOVERY_ANCHOR.x,
-    y: DISCOVERY_ANCHOR.y + DISCOVERY_OFFSETS.length * DISCOVERY_VERTICAL_STEP,
+  handles: readonly string[],
+): Map<string, MapPosition> => {
+  const uniqueHandles = [...new Set(handles)];
+  if (uniqueHandles.length === 0) return new Map();
+  const columns = discoveryDockColumns(uniqueHandles.length);
+  const minimumX = occupied.length > 0 ? Math.min(...occupied.map((point) => point.x)) : 0;
+  const maximumX = occupied.length > 0 ? Math.max(...occupied.map((point) => point.x)) : 0;
+  const baseY = occupied.length > 0 ? Math.max(...occupied.map((point) => point.y)) : 0;
+  const anchor: MapPosition = {
+    x: Math.round((minimumX + maximumX) / 2 - ((columns - 1) * DISCOVERY_DOCK_HORIZONTAL_STEP) / 2),
+    y: Math.round(baseY + DISCOVERY_DOCK_CLEARANCE),
   };
+  return new Map(
+    uniqueHandles.map((handle, index) => [
+      handle,
+      {
+        x: anchor.x + (index % columns) * DISCOVERY_DOCK_HORIZONTAL_STEP,
+        y: anchor.y + Math.floor(index / columns) * DISCOVERY_DOCK_VERTICAL_STEP,
+      },
+    ]),
+  );
 };
 
 export const isMapPosition = (value: MapPosition): boolean =>

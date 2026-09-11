@@ -169,6 +169,9 @@ export interface DiscoveredExecutionView {
         readonly explanation: string;
       };
   readonly conversationConflictCount: number;
+}
+
+export interface MapDiscoveredExecutionView extends DiscoveredExecutionView {
   readonly mapPosition: MapPosition;
 }
 
@@ -215,7 +218,7 @@ export interface UniverseMapProjection {
   readonly attention: AttentionProjection;
   readonly goals: readonly MapGoalView[];
   readonly unassigned: readonly MapAgentView[];
-  readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
+  readonly discoveredExecutions?: readonly MapDiscoveredExecutionView[];
   readonly inboxPosition: MapPosition;
   readonly truncated?: boolean;
   readonly omittedAgentCount?: number;

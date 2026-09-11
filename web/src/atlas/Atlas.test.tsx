@@ -16,6 +16,8 @@ import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
+  DISCOVERED_CARD_HEIGHT,
+  DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
 } from "./atlasGeometry.ts";
@@ -203,7 +205,7 @@ describe("production web Atlas", () => {
     expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
     const staleMarkup = renderToStaticMarkup(
       createElement(Atlas, {
-        projection: mapProjection(universe.project({ kind: "universe-map", now: clock.now() })),
+        projection,
         reservedLeft: 0,
         reservedRight: 0,
         onSelect: () => undefined,
@@ -369,5 +371,56 @@ describe("production web Atlas", () => {
     expect(snapToAtlasGrid({ x: 11, y: -13 })).toEqual({ x: 0, y: -24 });
     expect(snapToAtlasGrid({ x: 12, y: -12 })).toEqual({ x: 24, y: -24 });
     expect(snapToAtlasGrid({ x: 35, y: 37 })).toEqual({ x: 24, y: 48 });
+  });
+
+  test("renders discovered executions as one compact labelled dock", () => {
+    const { universe, clock } = makeUniverse();
+    const longWorkspace =
+      "/Users/operator/Documents/Projects/observatory/.worktrees/very-long-name";
+    universe.reconcile(
+      hostSnapshot(
+        ["Alpha", "Bravo", "Charlie"].map((displayName, index) => ({
+          nativeId: `pane-${index}`,
+          displayName,
+          runtimeState: "working" as const,
+          runtimeStateSource: "test",
+          hostLocator: `test:pane-${index}`,
+          worktree: `${longWorkspace}-${index}`,
+          observedAt: clock.now(),
+        })),
+      ),
+    );
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    expect(projection.discoveredExecutions).toHaveLength(3);
+    const markup = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onOpenDiscoveredTerminal: () => undefined,
+        onSelect: () => undefined,
+      }),
+    );
+    const cards = Array.from(
+      markup.matchAll(
+        /data-discovery-handle="[^"]+"[^>]*transform="translate\(([-0-9.]+) ([-0-9.]+)\)"/gu,
+      ),
+      (match) => ({ x: Number(match[1]), y: Number(match[2]) }),
+    );
+    expect(markup).toContain('class="discovered-dock__frame"');
+    expect(markup).toContain("DISCOVERED IN HERDR · 3");
+    expect(markup).toContain("…");
+    expect(markup).not.toContain(longWorkspace);
+    expect(cards).toHaveLength(3);
+    expect(new Set(cards.map((card) => `${card.x}:${card.y}`)).size).toBe(3);
+    expect(
+      Math.max(...cards.map((card) => card.x)) - Math.min(...cards.map((card) => card.x)),
+    ).toBeLessThanOrEqual(302);
+    expect(
+      Math.max(...cards.map((card) => card.y)) - Math.min(...cards.map((card) => card.y)),
+    ).toBeLessThanOrEqual(156);
+    expect(markup).toContain(
+      `translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`,
+    );
   });
 });

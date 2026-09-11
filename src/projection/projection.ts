@@ -14,6 +14,7 @@ import {
   initialGoalMapPosition,
   mapInboxAnchor,
   agentSatellitePositions,
+  discoveredExecutionDockPositions,
   unassignedAgentPositions,
 } from "../spatial/positions.ts";
 import type {
@@ -38,6 +39,7 @@ import type {
   SystemView,
   AgentView,
   DiscoveredExecutionView,
+  MapDiscoveredExecutionView,
   UniverseMapProjection,
 } from "./types.ts";
 
@@ -676,6 +678,18 @@ export const mapFromCommandCentre = (
     ...agent,
     mapPosition: unassignedPositions.get(agent.id) ?? inboxPosition,
   }));
+  const discoveryPositions = discoveredExecutionDockPositions(
+    [...occupiedPositions, ...mapUnassigned.map((agent) => agent.mapPosition)],
+    (commandCentre.discoveredExecutions ?? [])
+      .map((execution) => execution.handle)
+      .sort((left, right) => left.localeCompare(right)),
+  );
+  const mapDiscoveredExecutions: readonly MapDiscoveredExecutionView[] = (
+    commandCentre.discoveredExecutions ?? []
+  ).map((execution) => ({
+    ...execution,
+    mapPosition: discoveryPositions.get(execution.handle) ?? inboxPosition,
+  }));
   const projection: UniverseMapProjection = {
     kind: "universe-map",
     generatedAt: commandCentre.generatedAt,
@@ -683,7 +697,7 @@ export const mapFromCommandCentre = (
     attention: commandCentre.attention,
     goals: mapGoals,
     unassigned: mapUnassigned,
-    discoveredExecutions: commandCentre.discoveredExecutions,
+    discoveredExecutions: mapDiscoveredExecutions,
     inboxPosition,
     counts: commandCentre.counts,
   };

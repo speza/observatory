@@ -18,11 +18,13 @@ import {
   AGENT_CARD_WIDTH,
   DISCOVERED_CARD_HEIGHT,
   DISCOVERED_CARD_WIDTH,
+  discoveredExecutionDockBounds,
   goalAgentPoints,
   goalRadius,
   hash,
   linesFor,
   stateLabel,
+  truncateAtlasLine,
   type AtlasCameraCommand,
 } from "./atlasGeometry.ts";
 import { presentAgentCard } from "./agentCardPresentation.ts";
@@ -32,6 +34,9 @@ export type { AtlasCameraCommand } from "./atlasGeometry.ts";
 
 const GRID_LOGICAL_STEP = 24;
 const GRID_EXTENT = 100_000;
+const DISCOVERY_TITLE_LINE_LENGTH = 18;
+const DISCOVERY_CONTEXT_LENGTH = 42;
+const DISCOVERY_CONVERSATION_LENGTH = 36;
 
 const snapCoordinateToGrid = (value: number): number => {
   const magnitude = Math.round(Math.abs(value) / GRID_LOGICAL_STEP) * GRID_LOGICAL_STEP;
@@ -158,6 +163,10 @@ export const Atlas = ({
   }>();
   const gridOrigin = screenPoint({ x: 0, y: 0 });
   const gridStep = GRID_LOGICAL_STEP * layout.goalSpacingScale;
+  const discoveryDock = discoveredExecutionDockBounds(
+    projection.discoveredExecutions ?? [],
+    layout.goalSpacingScale,
+  );
 
   const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
     const drag = goalDrag.current;
@@ -732,7 +741,26 @@ export const Atlas = ({
           })}
           {(projection.discoveredExecutions ?? []).length > 0 ? (
             <g aria-label="Discovered in Herdr executions" className="discovered-executions">
-              {projection.discoveredExecutions?.map((execution, index) => {
+              {discoveryDock ? (
+                <g aria-hidden="true" className="discovered-dock">
+                  <rect
+                    className="discovered-dock__frame"
+                    height={discoveryDock.height}
+                    rx="10"
+                    width={discoveryDock.width}
+                    x={discoveryDock.left}
+                    y={discoveryDock.top}
+                  />
+                  <text
+                    className="discovered-dock__heading"
+                    x={discoveryDock.left + 18}
+                    y={discoveryDock.top + 25}
+                  >
+                    DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
+                  </text>
+                </g>
+              ) : null}
+              {projection.discoveredExecutions?.map((execution) => {
                 const centre = screenPoint(execution.mapPosition);
                 const state = execution.presence === "live" ? execution.runtimeState : "unknown";
                 const selected =
@@ -740,13 +768,21 @@ export const Atlas = ({
                 const focused =
                   focusedSelection?.type === "discovered-execution" &&
                   focusedSelection.id === execution.handle;
-                const title = linesFor(execution.displayName);
-                const workspace = execution.worktree ?? execution.repository ?? "Workspace unknown";
-                const conversation = execution.conversation
-                  ? `Conversation · ${execution.conversation.id}`
-                  : execution.conversationIdentified
-                    ? "Conversation · identified"
-                    : "Conversation not identified";
+                const title = linesFor(execution.displayName).map((line) =>
+                  truncateAtlasLine(line, DISCOVERY_TITLE_LINE_LENGTH),
+                );
+                const workspace = truncateAtlasLine(
+                  execution.worktree ?? execution.repository ?? "Workspace unknown",
+                  DISCOVERY_CONTEXT_LENGTH,
+                );
+                const conversation = truncateAtlasLine(
+                  execution.conversation
+                    ? `Conversation · ${execution.conversation.id}`
+                    : execution.conversationIdentified
+                      ? "Conversation · identified"
+                      : "Conversation not identified",
+                  DISCOVERY_CONVERSATION_LENGTH,
+                );
                 const terminalAvailable =
                   execution.presence === "live" && onOpenDiscoveredTerminal !== undefined;
                 const focusExecution = (): void =>
@@ -852,7 +888,7 @@ export const Atlas = ({
                         onPointerDown={(event) => event.stopPropagation()}
                         role="button"
                         tabIndex={0}
-                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 22} ${DISCOVERED_CARD_HEIGHT / 2 + 8})`}
+                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`}
                       >
                         <title>Open terminal</title>
                         <rect height="20" rx="3" width="22" x="0" y="0" />
@@ -865,15 +901,6 @@ export const Atlas = ({
                           y="3"
                         />
                       </g>
-                    ) : null}
-                    {index === 0 ? (
-                      <text
-                        className="discovered-executions__heading"
-                        x={-DISCOVERED_CARD_WIDTH / 2}
-                        y={-DISCOVERED_CARD_HEIGHT / 2 - 22}
-                      >
-                        DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
-                      </text>
                     ) : null}
                   </g>
                 );

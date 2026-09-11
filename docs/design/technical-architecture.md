@@ -269,8 +269,9 @@ observations.
 - Attention composes independent claims into one decision subject per Agent.
 - Projection builds Atlas, Ledger, the separate discovered-execution area,
   Inbox, Needs-you, Catch up, search and inspector views.
-- Spatial assigns deterministic Goal anchors and Agent satellites, repairs only
-  unpinned collisions and keeps viewport state outside persistence.
+- Spatial assigns deterministic Goal anchors and Agent satellites, lays out
+  the compact discovery dock, repairs only unpinned collisions and keeps
+  viewport state outside persistence.
 
 Renderers consume projections; they do not reproduce domain rules.
 
@@ -403,7 +404,9 @@ current discovery inventory. An exact admitted execution suppresses its
 discovery entry, including for archived Agents and pending launches. Multiple
 executions claiming one exact conversation remain visible as separate
 discoveries until explicit admission, after which the existing Agent conflict
-model applies.
+model applies. Host inventory rows with no agent or native session identity
+are ordinary terminals: the Herdr adapter ignores them with a diagnostic
+rather than surfacing a terminal as a discovered execution.
 
 ## Main flows
 
