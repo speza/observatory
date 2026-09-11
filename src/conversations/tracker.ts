@@ -176,7 +176,7 @@ export class ConversationTracker implements ConversationTrackerModule {
     }
     if (!discovery) throw new Error("Discovered execution is no longer visible.");
     const reference = discovery.nativeConversationRef;
-    if (!reference?.continuityScopeId)
+    if (!reference)
       throw new Error("Conversation identity is not identified; refresh the provider catalogue.");
     const matches = this.store
       .conversations()
@@ -184,7 +184,8 @@ export class ConversationTracker implements ConversationTrackerModule {
         [session.nativeConversationRef, ...session.nativeConversationAliases].some(
           (candidate) =>
             candidate.harnessId === reference.harnessId &&
-            candidate.continuityScopeId === reference.continuityScopeId &&
+            (!reference.continuityScopeId ||
+              candidate.continuityScopeId === reference.continuityScopeId) &&
             candidate.kind === reference.kind &&
             candidate.value === reference.value,
         ),

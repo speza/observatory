@@ -666,6 +666,23 @@ const providerFactMatches = (
     sameNativeConversation(reference, candidate),
   );
 
+/**
+ * An unscoped host identity has no provider scope of its own. It may only be
+ * matched to a catalogue session by exact primary identity, and only for an
+ * explicit human admission; reconciliation never promotes it automatically.
+ */
+const providerFactMatchesUnscoped = (
+  reference: NativeConversationRef,
+  session: ProviderSessionFact,
+): boolean =>
+  !reference.continuityScopeId &&
+  [session.nativeConversationRef, ...(session.nativeConversationAliases ?? [])].some(
+    (candidate) =>
+      candidate.harnessId === reference.harnessId &&
+      candidate.kind === reference.kind &&
+      candidate.value === reference.value,
+  );
+
 const discoveryRecordMatchesAgent = (record: DiscoveredExecutionRecord, agent: Agent): boolean =>
   (agent.execution &&
     bindingExecutionKey(agent.execution) === bindingExecutionKey(record.binding)) === true ||
@@ -1380,22 +1397,26 @@ export class Universe {
             0)
           : 0;
         const catalogue = discovery.catalogue;
-        const admission =
-          catalogue &&
-          discovery.nativeConversationRef?.continuityScopeId &&
-          providerFactMatches(discovery.nativeConversationRef, catalogue)
-            ? {
-                status: "available" as const,
-                resumeEligibility: catalogue.resumeEligibility,
-              }
-            : {
-                status: "unavailable" as const,
-                explanation: !discovery.nativeConversationRef
-                  ? "Conversation identity is not identified; refresh the provider catalogue before adding it."
-                  : !discovery.nativeConversationRef.continuityScopeId
-                    ? "Conversation identity is not scoped to a provider catalogue; exact evidence is required before adding it."
-                    : "Exact catalogue evidence is not available for this execution.",
-              };
+        const reference = discovery.nativeConversationRef;
+        const admissionEvidence =
+          catalogue !== undefined &&
+          reference !== undefined &&
+          (reference.continuityScopeId
+            ? providerFactMatches(reference, catalogue)
+            : providerFactMatchesUnscoped(reference, catalogue));
+        const admission = admissionEvidence
+          ? {
+              status: "available" as const,
+              resumeEligibility: catalogue.resumeEligibility,
+            }
+          : {
+              status: "unavailable" as const,
+              explanation: !reference
+                ? "Conversation identity is not identified; refresh the provider catalogue before adding it."
+                : !reference.continuityScopeId
+                  ? "Conversation identity is not scoped to a provider catalogue; exact evidence is required before adding it."
+                  : "Exact catalogue evidence is not available for this execution.",
+            };
         return {
           type: "discovered-execution",
           handle: discovery.handle,
@@ -1600,11 +1621,14 @@ export class Universe {
       if (
         !reference ||
         reference.harnessId !== options.harnessId ||
-        reference.continuityScopeId !== options.continuityScopeId
+        (reference.continuityScopeId !== undefined &&
+          reference.continuityScopeId !== options.continuityScopeId)
       )
         continue;
       const matching = options.sessions.filter((session) =>
-        providerFactMatches(reference, session),
+        reference.continuityScopeId
+          ? providerFactMatches(reference, session)
+          : providerFactMatchesUnscoped(reference, session),
       );
       if (matching.length === 1) {
         const session = matching[0]!;

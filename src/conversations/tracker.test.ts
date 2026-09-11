@@ -298,6 +298,30 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
+  test("admits an unscoped discovery through its unique scoped catalogue entry", async () => {
+    const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-unscoped")]));
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = projection.discoveredExecutions?.[0];
+    expect(discovery?.admission.status).toBe("available");
+
+    const admitted = fixture.tracker.admitDiscovered(discovery!.handle);
+
+    expect(admitted).toMatchObject({ message: "Execution added to Observatory." });
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "native-secret-id",
+      },
+      execution: { nativeId: "pane-unscoped" },
+    });
+    fixture.store.close();
+  });
+
   test("converges a queued discovery admission with earlier History admission", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
@@ -442,7 +466,7 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
-  test("does not promote an unscoped host identity into a lone scoped catalogue entry", () => {
+  test("does not automatically promote an unscoped host identity but offers exact admission", () => {
     const fixture = trackerFixture();
     fixture.store.reconcileProviderCatalogue(providerSnapshot());
 
@@ -455,9 +479,15 @@ describe("conversation tracker", () => {
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
     expect(projection.discoveredExecutions).toHaveLength(1);
     expect(projection.discoveredExecutions?.[0]).toMatchObject({
-      conversationTitle: undefined,
-      admission: { status: "unavailable" },
+      conversationTitle: "Regression work",
+      admission: { status: "available", resumeEligibility: "same-site" },
     });
+    expect(
+      fixture.universe.resolveDiscoveredExecution(
+        projection.discoveredExecutions?.[0]?.handle ?? "",
+      )?.nativeConversationRef,
+    ).toEqual({ harnessId: "codex", kind: "id", value: "native-secret-id" });
+    expect(fixture.universe.snapshot().agents).toEqual([]);
     fixture.store.close();
   });
 

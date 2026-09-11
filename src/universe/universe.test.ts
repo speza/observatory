@@ -1546,6 +1546,55 @@ describe("Universe", () => {
     expect(JSON.stringify(map)).not.toContain("container-secret");
   });
 
+  test("offers explicit admission for an unscoped discovery with one exact catalogue session", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("unscoped-primary", "Unscoped primary", "working", 1_000_000),
+          harnessEvidence: {
+            detectedHarnessId: "opencode",
+            nativeConversationRef: { harnessId: "opencode", kind: "id", value: "ses-unscoped" },
+            restoreState: "unknown" as const,
+            source: "process" as const,
+            observedAt: 1_000_000,
+          },
+        },
+      ]),
+    );
+    universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "opencode",
+      continuityScopeId: "scope-primary",
+      observedAt: 1_001_000,
+      complete: true,
+      sessions: [
+        {
+          nativeConversationRef: {
+            harnessId: "opencode",
+            continuityScopeId: "scope-primary",
+            kind: "id",
+            value: "ses-unscoped",
+          },
+          observedAt: 1_001_000,
+          resumeEligibility: "same-site",
+          title: "Scoped primary",
+        },
+      ],
+    });
+    const projection = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.discoveredExecutions?.[0]).toMatchObject({
+      conversationIdentified: true,
+      conversationTitle: "Scoped primary",
+      admission: { status: "available", resumeEligibility: "same-site" },
+    });
+    expect(
+      universe.resolveDiscoveredExecution(projection.discoveredExecutions?.[0]?.handle ?? "")
+        ?.nativeConversationRef?.continuityScopeId,
+    ).toBeUndefined();
+  });
+
   test("invalidates a discovery handle when its host target is reused", () => {
     const { universe } = makeUniverse();
     universe.reconcile(hostSnapshot([hostOnlyObservation("reused-pane")], 1_000_000));
