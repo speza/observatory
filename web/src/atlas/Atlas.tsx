@@ -11,6 +11,8 @@ import { AgentLogo } from "../shared/AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
+  DISCOVERED_CARD_HEIGHT,
+  DISCOVERED_CARD_WIDTH,
   discoveredDockPlacement,
   hash,
   stateLabel,
@@ -398,58 +400,146 @@ export const Atlas = ({
               )}
             </g>
           ) : null}
-          {(projection.discoveredExecutions ?? []).map((execution) => {
-            const point = camera.screenPoint(execution.mapPosition);
-            const translated = {
-              x: point.x + (discoveryDock?.translation.x ?? 0),
-              y: point.y + (discoveryDock?.translation.y ?? 0),
-            };
-            return (
-              <g
-                data-discovery-handle={execution.handle}
-                key={execution.handle}
-                transform={`translate(${translated.x} ${translated.y})`}
-              >
-                <rect
-                  className="discovered-execution__card"
-                  width="278"
-                  height="132"
-                  x="-139"
-                  y="-66"
-                  rx="5"
-                />
-                <text x="-120" y="-20">
-                  DISCOVERED · {execution.displayName}
-                </text>
-                {onOpenDiscoveredTerminal ? (
-                  <g
-                    aria-label={`Open ${execution.displayName} terminal`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onOpenDiscoveredTerminal(execution)}
+          {(projection.discoveredExecutions ?? []).length > 0 ? (
+            <g aria-label="Discovered in Herdr executions" className="discovered-executions">
+              {discoveryDock ? (
+                <g aria-hidden="true" className="discovered-dock">
+                  <rect
+                    className="discovered-dock__frame"
+                    height={discoveryDock.bounds.height}
+                    rx="10"
+                    width={discoveryDock.bounds.width}
+                    x={discoveryDock.bounds.left}
+                    y={discoveryDock.bounds.top}
+                  />
+                  <text
+                    className="discovered-dock__heading"
+                    x={discoveryDock.bounds.left + 18}
+                    y={discoveryDock.bounds.top + 25}
                   >
-                    <Terminal x="90" y="25" />
+                    DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
+                  </text>
+                </g>
+              ) : null}
+              {projection.discoveredExecutions?.map((execution) => {
+                const point = camera.screenPoint(execution.mapPosition);
+                const centre = {
+                  x: point.x + (discoveryDock?.translation.x ?? 0),
+                  y: point.y + (discoveryDock?.translation.y ?? 0),
+                };
+                const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+                const selected =
+                  selection?.type === "discovered-execution" && selection.id === execution.handle;
+                const focus = (): void =>
+                  (onFocusSelection ?? onSelect)({
+                    type: "discovered-execution",
+                    id: execution.handle,
+                  });
+                return (
+                  <g
+                    className={`discovered-execution discovered-execution--${state} ${selected ? "is-selected" : ""}`}
+                    data-discovery-handle={execution.handle}
+                    key={execution.handle}
+                    transform={`translate(${centre.x} ${centre.y})`}
+                  >
+                    <g
+                      aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+                      className="discovered-execution__card-target"
+                      onClick={() =>
+                        onSelect({ type: "discovered-execution", id: execution.handle })
+                      }
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        camera.focusPoint(centre, {
+                          type: "discovered-execution",
+                          id: execution.handle,
+                        });
+                      }}
+                      onFocus={focus}
+                      onKeyDown={(event) =>
+                        activate(event, () =>
+                          onSelect({ type: "discovered-execution", id: execution.handle }),
+                        )
+                      }
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <rect
+                        className="discovered-execution__card"
+                        height={DISCOVERED_CARD_HEIGHT}
+                        rx="5"
+                        width={DISCOVERED_CARD_WIDTH}
+                        x={-DISCOVERED_CARD_WIDTH / 2}
+                        y={-DISCOVERED_CARD_HEIGHT / 2}
+                      />
+                      <rect
+                        className="discovered-execution__selection"
+                        height={DISCOVERED_CARD_HEIGHT + 8}
+                        rx="7"
+                        width={DISCOVERED_CARD_WIDTH + 8}
+                        x={-DISCOVERED_CARD_WIDTH / 2 - 4}
+                        y={-DISCOVERED_CARD_HEIGHT / 2 - 4}
+                      />
+                      <line
+                        className="discovered-execution__rule"
+                        x1={-DISCOVERED_CARD_WIDTH / 2 + 14}
+                        x2={DISCOVERED_CARD_WIDTH / 2 - 14}
+                        y1="-38"
+                        y2="-38"
+                      />
+                      <g className="discovered-execution__provider" transform="translate(-124 -54)">
+                        <AgentLogo map provider={execution.provider} />
+                      </g>
+                      <text className="discovered-execution__identity" x="-108" y="-51">
+                        DISCOVERED / {execution.hostKind.toUpperCase()}
+                      </text>
+                      <g className="discovered-execution__state" transform="translate(122 -54)">
+                        <circle r="3" />
+                        <text x="-8" y="3">
+                          {state.toUpperCase()}
+                        </text>
+                      </g>
+                      <text className="discovered-execution__name" x="-124" y="-15">
+                        {truncateAtlasLine(execution.displayName, 29)}
+                      </text>
+                      <text className="discovered-execution__context" x="-124" y="17">
+                        {truncateAtlasLine(
+                          execution.worktree ?? execution.repository ?? "Workspace unknown",
+                          43,
+                        )}
+                      </text>
+                      <text className="discovered-execution__conversation" x="-124" y="38">
+                        {execution.conversation
+                          ? truncateAtlasLine(`Conversation · ${execution.conversation.id}`, 46)
+                          : execution.conversationIdentified
+                            ? "Conversation · identified"
+                            : "Conversation not identified"}
+                      </text>
+                    </g>
+                    {execution.presence === "live" && onOpenDiscoveredTerminal ? (
+                      <g
+                        aria-label={`Open ${execution.displayName} terminal`}
+                        className="discovered-execution__quick-action"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenDiscoveredTerminal(execution);
+                        }}
+                        onFocus={focus}
+                        onKeyDown={(event) =>
+                          activate(event, () => onOpenDiscoveredTerminal(execution))
+                        }
+                        role="button"
+                        tabIndex={0}
+                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`}
+                      >
+                        <title>Open terminal</title>
+                        <rect height="20" rx="3" width="22" />
+                        <Terminal height="14" strokeWidth="1.8" width="14" x="4" y="3" />
+                      </g>
+                    ) : null}
                   </g>
-                ) : null}
-              </g>
-            );
-          })}
-          {discoveryDock ? (
-            <g className="discovered-dock">
-              <rect
-                className="discovered-dock__frame"
-                height={discoveryDock.bounds.height}
-                width={discoveryDock.bounds.width}
-                x={discoveryDock.bounds.left}
-                y={discoveryDock.bounds.top}
-              />
-              <text
-                className="discovered-dock__label"
-                x={discoveryDock.bounds.left + 18}
-                y={discoveryDock.bounds.top + 25}
-              >
-                DISCOVERED EXECUTIONS · {projection.discoveredExecutions?.length ?? 0}
-              </text>
+                );
+              })}
             </g>
           ) : null}
         </g>

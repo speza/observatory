@@ -183,14 +183,16 @@ describe("production web Atlas", () => {
     const { universe, clock } = makeUniverse();
     universe.reconcile(
       hostSnapshot(
-        ["Alpha", "Bravo", "Charlie"].map((displayName, index) => ({
-          nativeId: `pane-${index}`,
-          displayName,
-          runtimeState: "working" as const,
-          runtimeStateSource: "test",
-          hostLocator: `test:pane-${index}`,
-          observedAt: clock.now(),
-        })),
+        ["Alpha", "A discovered execution title that cannot fit inside its card", "Charlie"].map(
+          (displayName, index) => ({
+            nativeId: `pane-${index}`,
+            displayName,
+            runtimeState: "working" as const,
+            runtimeStateSource: "test",
+            hostLocator: `test:pane-${index}`,
+            observedAt: clock.now(),
+          }),
+        ),
       ),
     );
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
@@ -200,6 +202,16 @@ describe("production web Atlas", () => {
 
     expect(placement).toBeDefined();
     expect(markup).toContain('class="discovered-dock__frame"');
+    expect(markup).toContain('class="discovered-dock__heading"');
+    expect(markup).toContain(
+      'class="discovered-execution__name" x="-124" y="-15">A discovered execution title…</text>',
+    );
+    expect(markup).toContain(
+      'aria-label="A discovered execution title that cannot fit inside its card, working, discovered in test-host"',
+    );
+    expect(markup.indexOf('class="discovered-dock__frame"')).toBeLessThan(
+      markup.indexOf('class="discovered-execution__card"'),
+    );
     expect(markup.match(/data-discovery-handle=/gu)).toHaveLength(3);
     expect(placement?.bounds.height).toBeGreaterThan(132);
   });
