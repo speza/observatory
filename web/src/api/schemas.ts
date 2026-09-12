@@ -248,6 +248,17 @@ const UniverseMap = Schema.Struct({
   generatedAt: Schema.Number,
   host: OptionalHostHealth,
   attention: AttentionProjection,
+  workspaces: Schema.Array(
+    Schema.Struct({
+      label: Schema.String,
+      mapPosition: MapPosition,
+      agents: Schema.Array(MapAgentView),
+      goalIds: Schema.Array(Schema.String),
+      attentionCount: Schema.Number,
+      uncertaintyCount: Schema.Number,
+    }),
+  ),
+  workspaceLess: Schema.Array(MapAgentView),
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
   discoveredExecutions: Schema.optional(Schema.Array(MapDiscoveredExecution)),

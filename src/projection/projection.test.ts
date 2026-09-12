@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { projectPortfolio } from "../web/portfolio.ts";
-import { projectCommandCentre } from "./projection.ts";
+import { mapFromCommandCentre, projectCommandCentre } from "./projection.ts";
 import type { Agent } from "../universe/types.ts";
 import {
   admitObservedConversationsAndReconcile,
@@ -606,7 +606,7 @@ describe("projections", () => {
     expect(projection.lines.join("\n")).toContain("worktree");
   });
 
-  test("projects a stable portfolio of goal bodies and direct satellites", () => {
+  test("preserves stable semantic Goal positions in the workspace-first map projection", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal", priority: "P0" });
     admitObservedConversationsAndReconcile(
@@ -639,6 +639,85 @@ describe("projections", () => {
     expect(first.goals[0]?.agents).toHaveLength(2);
     expect(first.goals[0]?.agents[0]?.mapPosition).toEqual(second.goals[0]?.agents[0]?.mapPosition);
     expect(first.goals[0]?.priority).toBe("P0");
+  });
+
+  test("groups fresh live Agents by qualified execution context across Goals", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Primary" });
+    universe.execute({ type: "CreateGoal", title: "Separate intent" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("pane-a", "one", "working", "repo", "/tree-a", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+        observation("pane-b", "two", "idle", "repo", "/tree-b", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+        observation("pane-c", "other goal", "working", "repo", "/tree-c", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+      ]),
+    );
+    universe.execute({
+      type: "AssignAgents",
+      agentIds: ["agent-1", "agent-2"],
+      goalId: "goal-1",
+    });
+    universe.execute({ type: "AssignAgent", agentId: "agent-3", goalId: "goal-2" });
+
+    const grouped = universe.project({ kind: "universe-map", now: 1_000_000 });
+    if (grouped.kind !== "universe-map") throw new Error("wrong projection");
+    expect(grouped.workspaces).toHaveLength(1);
+    expect(grouped.workspaces[0]).toMatchObject({
+      label: "API workspace",
+      goalIds: ["goal-1", "goal-2"],
+    });
+    expect(grouped.workspaces[0]?.agents.map((agent) => agent.id).sort()).toEqual([
+      "agent-1",
+      "agent-2",
+      "agent-3",
+    ]);
+    expect(JSON.stringify(grouped)).not.toContain("private-workspace-id");
+
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const differentlyScopedAgents = universe.snapshot().agents.map((agent) =>
+      agent.id === "agent-2" && agent.execution
+        ? {
+            ...agent,
+            execution: { ...agent.execution, hostInstanceId: "other-host-instance" },
+          }
+        : agent,
+    );
+    expect(mapFromCommandCentre(commandCentre, differentlyScopedAgents).workspaces).toHaveLength(2);
+
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot(
+        [
+          observation("pane-a", "one", "working", "repo", "/tree-a", {
+            id: "private-workspace-id",
+            label: "API workspace",
+          }),
+          observation("pane-c", "other goal", "working", "repo", "/tree-c", {
+            id: "private-workspace-id",
+            label: "API workspace",
+          }),
+        ],
+        1_001_000,
+      ),
+    );
+    const afterExit = universe.project({ kind: "universe-map", now: 1_001_000 });
+    if (afterExit.kind !== "universe-map") throw new Error("wrong projection");
+    expect(afterExit.workspaces[0]?.agents.map((agent) => agent.id)).toEqual([
+      "agent-1",
+      "agent-3",
+    ]);
+    expect(afterExit.workspaceLess.map((agent) => agent.id)).toContain("agent-2");
   });
 
   test("projects unassigned agents into a stable neutral inbox sector", () => {

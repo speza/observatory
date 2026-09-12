@@ -202,6 +202,16 @@ export interface MapAgentView extends AgentView {
   readonly mapPosition: MapPosition;
 }
 
+/** A map-only, host-neutral view of one fresh live execution context. */
+export interface MapWorkspaceView {
+  readonly label: string;
+  readonly mapPosition: MapPosition;
+  readonly agents: readonly MapAgentView[];
+  readonly goalIds: readonly string[];
+  readonly attentionCount: number;
+  readonly uncertaintyCount: number;
+}
+
 export interface MapGoalView extends GoalView {
   readonly mapPosition: MapPosition;
   readonly radiusX: number;
@@ -214,6 +224,10 @@ export interface UniverseMapProjection {
   readonly generatedAt: number;
   readonly host: HostHealth | undefined;
   readonly attention: AttentionProjection;
+  /** Fresh live execution contexts. Their opaque grouping identities never leave the server. */
+  readonly workspaces: readonly MapWorkspaceView[];
+  /** Agents for which fresh execution-context membership cannot be established. */
+  readonly workspaceLess: readonly MapAgentView[];
   readonly goals: readonly MapGoalView[];
   readonly unassigned: readonly MapAgentView[];
   readonly discoveredExecutions?: readonly MapDiscoveredExecutionView[];

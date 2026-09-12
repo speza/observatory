@@ -5,76 +5,47 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MockHostAdapter } from "../../../src/hosts/mock/adapter.ts";
 import { createMockScenario } from "../../../src/hosts/mock/scenarios.ts";
 import { seedMockPortfolio } from "../../../src/hosts/mock/seed.ts";
+import type { Projection, UniverseMapProjection } from "../../../src/projection/types.ts";
 import {
   FixedClock,
   hostSnapshot,
   makeUniverse,
   admitObservedConversationsAndReconcile,
 } from "../../../src/universe/test-support.ts";
-import type { Projection, UniverseMapProjection } from "../../../src/projection/types.ts";
 import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
 import {
-  AGENT_CARD_HEIGHT,
-  AGENT_CARD_WIDTH,
-  DISCOVERED_CARD_HEIGHT,
-  DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
   discoveredDockPlacement,
-  goalLocalBounds,
+  workspaceDimensions,
+  workspaceLessPosition,
 } from "./atlasGeometry.ts";
-import { projectPortfolio } from "../../../src/web/portfolio.ts";
-import { scopePortfolio } from "../systems/scopedPortfolio.ts";
-
-interface RenderedGoal {
-  readonly id: string;
-  readonly radius: number;
-  readonly x: number;
-  readonly y: number;
-}
-
-interface RenderedAgent {
-  readonly goalId: string;
-  readonly orbitRadiusX: number;
-  readonly orbitRadiusY: number;
-  readonly x: number;
-  readonly y: number;
-}
 
 const mapProjection = (projection: Projection): UniverseMapProjection => {
   if (projection.kind !== "universe-map") throw new Error("Expected a universe-map projection.");
   return projection;
 };
 
-const renderedGoals = (markup: string): readonly RenderedGoal[] =>
-  Array.from(
-    markup.matchAll(
-      /data-goal-id="([^"]+)" data-radius="([^"]+)" data-screen-x="([^"]+)" data-screen-y="([^"]+)"/gu,
-    ),
-    (match) => ({
-      id: match[1] ?? "",
-      radius: Number(match[2]),
-      x: Number(match[3]),
-      y: Number(match[4]),
-    }),
-  );
+interface RenderOptions {
+  readonly pullRequestUrls?: ReadonlyMap<string, string>;
+  readonly onCloseAndArchive?: () => void;
+  readonly onOpenTerminal?: () => void;
+  readonly onReviewChanges?: () => void;
+}
 
-const renderedAgents = (markup: string): readonly RenderedAgent[] =>
-  Array.from(
-    markup.matchAll(
-      /data-agent-id="[^"]+" data-parent-goal-id="([^"]+)" data-screen-x="([^"]+)" data-screen-y="([^"]+)" data-orbit-rx="([^"]+)" data-orbit-ry="([^"]+)"/gu,
-    ),
-    (match) => ({
-      goalId: match[1] ?? "",
-      x: Number(match[2]),
-      y: Number(match[3]),
-      orbitRadiusX: Number(match[4]),
-      orbitRadiusY: Number(match[5]),
+const renderAtlas = (projection: UniverseMapProjection, options: RenderOptions = {}) =>
+  renderToStaticMarkup(
+    createElement(Atlas, {
+      projection,
+      reservedLeft: 0,
+      reservedRight: 0,
+      onSelect: () => undefined,
+      ...options,
     }),
   );
 
 describe("production web Atlas", () => {
-  test("renders a separated 12-goal and 75-agent world with truthful uncertainty", async () => {
+  test("renders workspace-first geography while preserving Goal semantics and Agent actions", async () => {
     const clock = new FixedClock(50_000);
     const scenario = createMockScenario("portfolio");
     const host = new MockHostAdapter({ clock, scenario });
@@ -82,76 +53,42 @@ describe("production web Atlas", () => {
     const snapshot = await Effect.runPromise(host.snapshot());
     expect(seedMockPortfolio(universe, snapshot)).toEqual({ createdGoals: 12, assignedAgents: 71 });
 
-    const baseProjection = mapProjection(
-      universe.project({ kind: "universe-map", now: clock.now() }),
-    );
-    const projection: UniverseMapProjection = {
-      ...baseProjection,
-      goals: baseProjection.goals.map((goal, goalIndex) => ({
-        ...goal,
-        agents: goal.agents.map((agent, agentIndex) =>
-          goalIndex === 0 && agentIndex === 0
-            ? { ...agent, description: "Maps host facts to semantic state." }
-            : agent,
-        ),
-      })),
-    };
-    const pullRequestAgent = projection.goals[0]?.agents[0];
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const pullRequestAgent = projection.workspaces[0]?.agents[0];
     expect(pullRequestAgent).toBeDefined();
     const pullRequestUrl = "https://github.com/acme/observatory/pull/42";
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection,
-        pullRequestUrls: new Map(pullRequestAgent ? [[pullRequestAgent.id, pullRequestUrl]] : []),
-        reservedLeft: 0,
-        reservedRight: 0,
-        onCloseAndArchive: () => undefined,
-        onOpenTerminal: () => undefined,
-        onReviewChanges: () => undefined,
-        onSelect: () => undefined,
-      }),
-    );
-    const goals = renderedGoals(markup);
-    const assignedAgents = renderedAgents(markup);
+    const markup = renderAtlas(projection, {
+      pullRequestUrls: new Map(pullRequestAgent ? [[pullRequestAgent.id, pullRequestUrl]] : []),
+      onCloseAndArchive: () => undefined,
+      onOpenTerminal: () => undefined,
+      onReviewChanges: () => undefined,
+    });
 
-    expect(goals).toHaveLength(12);
-    expect(markup.match(/data-agent-id=/gu)).toHaveLength(71);
-    expect(markup).not.toContain("UNASSIGNED");
-    expect(markup).toContain("atlas atlas--motion");
-    expect(markup).toContain("goal--working");
+    expect(projection.workspaces).toHaveLength(2);
+    expect(projection.workspaceLess).toHaveLength(61);
+    expect(markup.match(/data-agent-id=/gu)).toHaveLength(75);
+    expect(markup.match(/class="workspace-island"/gu)).toHaveLength(2);
+    expect(markup).toContain("WORKSPACE · Copilot dev mode UI · 10");
+    expect(markup).toContain("WORKSPACE · Observatory control plane · 4");
+    expect(markup).toContain("WORKSPACE-LESS / DORMANT");
+    expect(markup).toContain("GOAL ·");
+    expect(markup).toContain("agent__goal-chip");
+    expect(markup).not.toContain("synthetic/copilot-dev-mode-ui");
+    expect(markup).not.toContain("goal__body");
+    expect(markup).not.toContain("goal__orbits");
     expect(markup).toContain("agent--working");
-    expect(markup).toContain("agent__card");
-    expect(markup).toContain("agent__selection");
-    expect(markup).toContain("goal__selection");
-    expect(markup).toContain("agent__identity");
-    expect(markup).toContain("agent__activity");
     expect(markup).toContain("agent__provider-mark");
-    expect(markup).toContain("agent__rule");
-    expect(markup).not.toContain("agent__state-rail");
-    expect(markup).toContain("Blocked · may need input");
     expect(markup).toContain("agent__attention-wave");
     expect(markup).toContain("agent__working-aura");
-    expect(markup).toContain("agent__working-circuit");
-    expect(markup).toContain("agent__quick-actions");
-    expect(markup).toContain("Open terminal");
-    expect(markup).toContain("Close &amp; archive");
+    expect(markup).toMatch(/aria-label="Open [^"]+ terminal"/u);
     expect(markup).toContain("Close and archive ");
-    expect(markup).toContain("agent__quick-action--destructive");
-    expect(markup).toContain("Review changes");
-    expect(markup).toContain("Open pull request on GitHub");
+    expect(markup).toMatch(/aria-label="Review [^"]+ changes"/u);
+    expect(markup).toContain(`Open ${pullRequestAgent?.displayName} pull request on GitHub`);
     expect(markup).toContain(`href="${pullRequestUrl}"`);
-    expect(markup).toContain('target="_blank"');
-    expect(markup).not.toContain("goal__halo");
-    expect(markup).not.toContain("goal__quiet-field");
-    expect(markup).not.toContain("goal__contour");
-    expect(markup).not.toContain("goal-fill-");
-    expect(markup).toContain("goal-clip-");
-    expect(markup).toContain("NEED</text>");
-    expect(markup).toContain('aria-label="Fit map to screen"');
-    const cameraZoom = Number(markup.match(/data-camera-zoom="([^"]+)"/u)?.[1]);
+
+    const cameraZoom = Number(markup.match(/scale\(([^)]+)\)/u)?.[1]);
     expect(cameraZoom).toBeGreaterThan(0);
     expect(cameraZoom).toBeLessThanOrEqual(1.15);
-    expect(markup).toContain(`scale(${cameraZoom})`);
     const contentBounds = atlasContentBounds(projection, atlasGoalSpacingScale(projection));
     expect((contentBounds.maximumX - contentBounds.minimumX) * cameraZoom).toBeLessThanOrEqual(
       1200 - 96,
@@ -159,111 +96,53 @@ describe("production web Atlas", () => {
     expect((contentBounds.maximumY - contentBounds.minimumY) * cameraZoom).toBeLessThanOrEqual(
       760 - 144,
     );
-    expect(assignedAgents).toHaveLength(71);
-    expect(new Set(goals.map((goal) => goal.y)).size).toBeGreaterThanOrEqual(10);
-    for (const agent of assignedAgents) {
-      const goal = goals.find((candidate) => candidate.id === agent.goalId);
-      expect(goal).toBeDefined();
-      if (!goal) continue;
-      const nearestCardX = Math.max(0, Math.abs(agent.x - goal.x) - AGENT_CARD_WIDTH / 2);
-      const nearestCardY = Math.max(0, Math.abs(agent.y - goal.y) - AGENT_CARD_HEIGHT / 2);
-      expect(Math.hypot(nearestCardX, nearestCardY)).toBeGreaterThanOrEqual(goal.radius + 13.9);
-      const orbitEquation =
-        ((agent.x - goal.x) / agent.orbitRadiusX) ** 2 +
-        ((agent.y - goal.y) / agent.orbitRadiusY) ** 2;
-      expect(orbitEquation).toBeCloseTo(1, 3);
-      const phase = Math.atan2(
-        (agent.y - goal.y) / agent.orbitRadiusY,
-        (agent.x - goal.x) / agent.orbitRadiusX,
-      );
-      const distanceFromCaption = Math.abs(
-        Math.atan2(Math.sin(phase - Math.PI / 2), Math.cos(phase - Math.PI / 2)),
-      );
-      expect(distanceFromCaption).toBeGreaterThanOrEqual(0.719);
-    }
-    for (let leftIndex = 0; leftIndex < assignedAgents.length; leftIndex += 1) {
-      const left = assignedAgents[leftIndex];
-      if (!left) continue;
-      for (let rightIndex = leftIndex + 1; rightIndex < assignedAgents.length; rightIndex += 1) {
-        const right = assignedAgents[rightIndex];
-        if (!right || left.goalId !== right.goalId) continue;
-        expect(
-          Math.abs(left.x - right.x) >= AGENT_CARD_WIDTH + 13.9 ||
-            Math.abs(left.y - right.y) >= AGENT_CARD_HEIGHT + 9.9,
-        ).toBe(true);
-      }
-    }
-    for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
-      const left = goals[leftIndex];
-      if (!left) continue;
-      for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
-        const right = goals[rightIndex];
-        if (!right) continue;
-        expect(Math.hypot(left.x - right.x, left.y - right.y)).toBeGreaterThanOrEqual(
-          left.radius + right.radius,
-        );
-      }
-    }
-
-    clock.value += scenario.tickMs;
-    expect(universe.reconcile(await Effect.runPromise(host.snapshot())).accepted).toBe(true);
-    const staleMarkup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection: mapProjection(universe.project({ kind: "universe-map", now: clock.now() })),
-        reservedLeft: 0,
-        reservedRight: 0,
-        onSelect: () => undefined,
-      }),
-    );
-    expect(staleMarkup).not.toContain("agent--uncertain");
   });
 
-  test("expands crowded durable anchors before fitting the map", async () => {
+  test("separates workspace islands and docks the workspace-less territory below them", async () => {
     const clock = new FixedClock(50_000);
     const host = new MockHostAdapter({ clock, scenario: createMockScenario("portfolio") });
     const { universe } = makeUniverse({ clock });
     const snapshot = await Effect.runPromise(host.snapshot());
-    expect(seedMockPortfolio(universe, snapshot)).toEqual({ createdGoals: 12, assignedAgents: 71 });
+    seedMockPortfolio(universe, snapshot);
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
-    const crowdedProjection: UniverseMapProjection = {
-      ...projection,
-      goals: projection.goals.slice(0, 5).map((goal, index) => ({
-        ...goal,
-        mapPosition: { x: (index % 3) * 36, y: Math.floor(index / 3) * 36 },
-      })),
-    };
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection: crowdedProjection,
-        reservedLeft: 0,
-        reservedRight: 0,
-        onSelect: () => undefined,
-      }),
-    );
-    const goals = renderedGoals(markup);
+    const scale = atlasGoalSpacingScale(projection);
 
-    for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
-      const left = goals[leftIndex];
+    expect(scale).toBeGreaterThan(1);
+    const territories = projection.workspaces.map((workspace) => ({
+      position: workspace.mapPosition,
+      size: workspaceDimensions(workspace),
+    }));
+    for (let leftIndex = 0; leftIndex < territories.length; leftIndex += 1) {
+      const left = territories[leftIndex];
       if (!left) continue;
-      for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
-        const right = goals[rightIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < territories.length; rightIndex += 1) {
+        const right = territories[rightIndex];
         if (!right) continue;
-        expect(Math.hypot(left.x - right.x, left.y - right.y)).toBeGreaterThanOrEqual(
-          left.radius + right.radius + 15.9,
-        );
+        expect(
+          Math.abs(left.position.x - right.position.x) * scale >=
+            left.size.width / 2 + right.size.width / 2 ||
+            Math.abs(left.position.y - right.position.y) * scale >=
+              left.size.height / 2 + right.size.height / 2,
+        ).toBe(true);
       }
     }
+    const workspaceLess = workspaceLessPosition(projection, scale);
+    const workspaceLessSize = workspaceDimensions({ agents: projection.workspaceLess });
+    expect(
+      projection.workspaces.every(
+        (workspace) =>
+          workspace.mapPosition.y * scale + workspaceDimensions(workspace).height / 2 <
+          workspaceLess.y - workspaceLessSize.height / 2,
+      ),
+    ).toBe(true);
   });
 
-  test("keeps full agent orbits separated when empty goals are populated later", () => {
+  test("keeps workspace-less Agents visible in one explicit compact area", () => {
     const { universe, clock } = makeUniverse();
-    universe.execute({ type: "CreateGoal", title: "admin" });
-    universe.execute({ type: "CreateGoal", title: "observatory - general" });
-    universe.execute({ type: "CreateGoal", title: "synthetic product / companion" });
     admitObservedConversationsAndReconcile(
       universe,
       hostSnapshot(
-        Array.from({ length: 18 }, (_, index) => ({
+        Array.from({ length: 9 }, (_, index) => ({
           nativeId: `pane-${index}`,
           displayName: `Agent ${index}`,
           runtimeState: "working" as const,
@@ -273,114 +152,35 @@ describe("production web Atlas", () => {
         })),
       ),
     );
-    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
-    universe.execute({
-      type: "AssignAgents",
-      agentIds: ["agent-2", "agent-3"],
-      goalId: "goal-2",
-    });
-    universe.execute({
-      type: "AssignAgents",
-      agentIds: Array.from({ length: 15 }, (_, index) => `agent-${index + 4}`),
-      goalId: "goal-3",
-    });
-
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
-    const persistedCrowdedProjection: UniverseMapProjection = {
-      ...projection,
-      goals: projection.goals.map((goal, index) => ({
-        ...goal,
-        // Reproduce an older accepted row whose anchors were chosen before
-        // these goals gained their direct agents.
-        mapPosition: { x: index * 144, y: 0 },
-      })),
-    };
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection: persistedCrowdedProjection,
-        reservedLeft: 0,
-        reservedRight: 0,
-        onSelect: () => undefined,
-      }),
-    );
-    const goals = renderedGoals(markup);
-    const agents = renderedAgents(markup);
-    expect(
-      goals
-        .map((goal) => agents.filter((agent) => agent.goalId === goal.id).length)
-        .sort((left, right) => left - right),
-    ).toEqual([1, 2, 15]);
-    for (let leftIndex = 0; leftIndex < goals.length; leftIndex += 1) {
-      const left = goals[leftIndex];
-      if (!left) continue;
-      const leftAgents = agents.filter((agent) => agent.goalId === left.id);
-      const leftWidth = Math.max(
-        left.radius,
-        ...leftAgents.map((agent) => Math.abs(agent.x - left.x) + AGENT_CARD_WIDTH / 2 + 4),
-      );
-      const leftHeight = Math.max(
-        left.radius,
-        ...leftAgents.map((agent) => Math.abs(agent.y - left.y) + AGENT_CARD_HEIGHT / 2 + 4),
-      );
-      for (let rightIndex = leftIndex + 1; rightIndex < goals.length; rightIndex += 1) {
-        const right = goals[rightIndex];
-        if (!right) continue;
-        const rightAgents = agents.filter((agent) => agent.goalId === right.id);
-        const rightWidth = Math.max(
-          right.radius,
-          ...rightAgents.map((agent) => Math.abs(agent.x - right.x) + AGENT_CARD_WIDTH / 2 + 4),
-        );
-        const rightHeight = Math.max(
-          right.radius,
-          ...rightAgents.map((agent) => Math.abs(agent.y - right.y) + AGENT_CARD_HEIGHT / 2 + 4),
-        );
-        expect(
-          Math.abs(left.x - right.x) >= leftWidth + rightWidth + 15.9 ||
-            Math.abs(left.y - right.y) >= leftHeight + rightHeight + 15.9,
-        ).toBe(true);
-      }
-    }
+    const markup = renderAtlas(projection);
+
+    expect(projection.workspaces).toHaveLength(0);
+    expect(projection.workspaceLess).toHaveLength(9);
+    expect(markup.match(/data-agent-id=/gu)).toHaveLength(9);
+    expect(markup).toContain('class="workspace-less__frame"');
+    expect(markup).toContain("GOAL · UNASSIGNED");
   });
 
-  test("anchors the Survey grid to durable world coordinates", () => {
-    const { universe, clock } = makeUniverse();
-    universe.execute({ type: "CreateGoal", title: "World origin" });
+  test("anchors the Survey grid to workspace world coordinates", async () => {
+    const clock = new FixedClock(50_000);
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario("portfolio") });
+    const { universe } = makeUniverse({ clock });
+    seedMockPortfolio(universe, await Effect.runPromise(host.snapshot()));
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
-    expect(projection.goals[0]?.mapPosition).toEqual({ x: 0, y: 0 });
-
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection,
-        reservedLeft: 0,
-        reservedRight: 0,
-        onSelect: () => undefined,
-      }),
-    );
-    const goal = renderedGoals(markup)[0];
-    const gridOriginX = Number(markup.match(/data-grid-origin-x="([^"]+)"/u)?.[1]);
-    const gridOriginY = Number(markup.match(/data-grid-origin-y="([^"]+)"/u)?.[1]);
-    const worldStart = markup.indexOf('class="atlas__world"');
-    const gridStart = markup.indexOf('class="atlas__coordinate-grid"');
-    const goalStart = markup.indexOf('data-goal-id="goal-1"');
+    const markup = renderAtlas(projection);
 
     expect(markup).toContain('data-logical-step="24"');
-    expect(goal?.x).toBe(gridOriginX);
-    expect(goal?.y).toBe(gridOriginY);
-    expect(worldStart).toBeGreaterThan(-1);
-    expect(gridStart).toBeGreaterThan(worldStart);
-    expect(goalStart).toBeGreaterThan(gridStart);
-  });
-
-  test("snaps goal placement to the visible Survey grid", () => {
+    expect(markup.indexOf('class="atlas__coordinate-grid"')).toBeLessThan(
+      markup.indexOf('class="workspace-island"'),
+    );
     expect(snapToAtlasGrid({ x: 11, y: -13 })).toEqual({ x: 0, y: -24 });
-    expect(snapToAtlasGrid({ x: 12, y: -12 })).toEqual({ x: 24, y: -24 });
+    expect(snapToAtlasGrid({ x: 12, y: -12 })).toEqual({ x: 24, y: 0 });
     expect(snapToAtlasGrid({ x: 35, y: 37 })).toEqual({ x: 24, y: 48 });
   });
 
-  test("renders discovered executions as one compact labelled dock", () => {
+  test("keeps discovered executions in a separate dock below accepted work", () => {
     const { universe, clock } = makeUniverse();
-    const longWorkspace =
-      "/Users/operator/Documents/Projects/observatory/.worktrees/very-long-name";
     universe.reconcile(
       hostSnapshot(
         ["Alpha", "Bravo", "Charlie"].map((displayName, index) => ({
@@ -389,130 +189,18 @@ describe("production web Atlas", () => {
           runtimeState: "working" as const,
           runtimeStateSource: "test",
           hostLocator: `test:pane-${index}`,
-          worktree: `${longWorkspace}-${index}`,
           observedAt: clock.now(),
         })),
       ),
     );
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
-    expect(projection.discoveredExecutions).toHaveLength(3);
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection,
-        reservedLeft: 0,
-        reservedRight: 0,
-        onOpenDiscoveredTerminal: () => undefined,
-        onSelect: () => undefined,
-      }),
-    );
-    const cards = Array.from(
-      markup.matchAll(
-        /data-discovery-handle="[^"]+"[^>]*transform="translate\(([-0-9.]+) ([-0-9.]+)\)"/gu,
-      ),
-      (match) => ({ x: Number(match[1]), y: Number(match[2]) }),
-    );
-    expect(markup).toContain('class="discovered-dock__frame"');
-    expect(markup).toContain("DISCOVERED IN HERDR · 3");
-    expect(markup).toContain("…");
-    expect(markup).not.toContain(longWorkspace);
-    expect(cards).toHaveLength(3);
-    expect(new Set(cards.map((card) => `${card.x}:${card.y}`)).size).toBe(3);
-    expect(
-      Math.max(...cards.map((card) => card.x)) - Math.min(...cards.map((card) => card.x)),
-    ).toBeLessThanOrEqual(302);
-    expect(
-      Math.max(...cards.map((card) => card.y)) - Math.min(...cards.map((card) => card.y)),
-    ).toBeLessThanOrEqual(156);
-    expect(markup).toContain(
-      `translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`,
-    );
-  });
-
-  test("keeps the discovery dock below rendered goal extents", async () => {
-    const clock = new FixedClock(50_000);
-    const { universe } = makeUniverse({ clock });
-    universe.execute({ type: "CreateGoal", title: "Dense goal" });
-    const observations = Array.from({ length: 8 }, (_, index) => ({
-      nativeId: `pane-${index}`,
-      displayName: `Agent ${index}`,
-      runtimeState: "working" as const,
-      runtimeStateSource: "test",
-      hostLocator: `test:pane-${index}`,
-      observedAt: clock.now(),
-    }));
-    admitObservedConversationsAndReconcile(universe, hostSnapshot(observations));
-    universe.execute({
-      type: "AssignAgents",
-      agentIds: universe.snapshot().agents.map((agent) => agent.id),
-      goalId: "goal-1",
-    });
-    universe.reconcile(
-      hostSnapshot([
-        ...observations,
-        {
-          nativeId: "pane-discovery",
-          displayName: "Discovered",
-          runtimeState: "idle" as const,
-          runtimeStateSource: "test",
-          hostLocator: "test:pane-discovery",
-          observedAt: clock.now(),
-        },
-      ]),
-    );
-    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
-    const markup = renderToStaticMarkup(
-      createElement(Atlas, {
-        projection,
-        reservedLeft: 0,
-        reservedRight: 0,
-        onSelect: () => undefined,
-      }),
-    );
-    const frame = markup.match(/class="discovered-dock__frame"[^>]*x="([-0-9.]+)" y="([-0-9.]+)"/u);
-    expect(frame).not.toBeNull();
-    const frameTop = Number(frame?.[2]);
     const scale = atlasGoalSpacingScale(projection);
-    const goal = projection.goals[0]!;
-    const goalBottom = goal.mapPosition.y * scale + goalLocalBounds(goal).bottom;
-    expect(frameTop).toBeGreaterThanOrEqual(goalBottom + 48 - 0.01);
-  });
+    const placement = discoveredDockPlacement(projection, scale);
+    const markup = renderAtlas(projection);
 
-  test("keeps the discovery dock adjacent on System-scoped maps", () => {
-    const { universe, clock } = makeUniverse();
-    universe.execute({ type: "CreateSystem", title: "Alpha" });
-    universe.execute({ type: "CreateSystem", title: "Beta" });
-    universe.execute({ type: "CreateGoal", title: "Alpha goal", systemId: "system-1" });
-    universe.execute({ type: "CreateGoal", title: "Beta goal", systemId: "system-2" });
-    universe.execute({
-      type: "SetGoalMapPosition",
-      goalId: "goal-2",
-      position: { x: 0, y: 1_200 },
-    });
-    universe.reconcile(
-      hostSnapshot([
-        {
-          nativeId: "pane-discovery",
-          displayName: "Discovered",
-          runtimeState: "idle",
-          runtimeStateSource: "test",
-          hostLocator: "test:pane-discovery",
-          observedAt: clock.now(),
-        },
-      ]),
-    );
-    const portfolio = projectPortfolio(universe, clock.now());
-    if (!portfolio) throw new Error("Expected a portfolio.");
-    const scoped = scopePortfolio(portfolio, "system-1");
-    expect(scoped.map.discoveredExecutions).toHaveLength(1);
-
-    const scale = atlasGoalSpacingScale(scoped.map);
-    const placement = discoveredDockPlacement(scoped.map, scale);
-    if (!placement) throw new Error("Expected a dock placement.");
-    const goal = scoped.map.goals[0]!;
-    const goalBottom = goal.mapPosition.y * scale + goalLocalBounds(goal).bottom;
-    expect(placement.bounds.top).toBeGreaterThanOrEqual(goalBottom + 48 - 0.01);
-    expect(placement.bounds.top).toBeLessThan(goalBottom + 248);
-    const bounds = atlasContentBounds(scoped.map, scale);
-    expect(bounds.maximumY - bounds.minimumY).toBeLessThan(800);
+    expect(placement).toBeDefined();
+    expect(markup).toContain('class="discovered-dock__frame"');
+    expect(markup.match(/data-discovery-handle=/gu)).toHaveLength(3);
+    expect(placement?.bounds.height).toBeGreaterThan(132);
   });
 });

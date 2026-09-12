@@ -269,9 +269,13 @@ observations.
 - Attention composes independent claims into one decision subject per Agent.
 - Projection builds Atlas, Ledger, the separate discovered-execution area,
   Inbox, Needs-you, Catch up, search and inspector views.
-- Spatial assigns deterministic Goal anchors and Agent satellites, lays out
-  the compact discovery dock, repairs only unpinned collisions and keeps
-  viewport state outside persistence.
+- Spatial retains deterministic semantic Goal positions for accepted state. The
+  Atlas projection separately derives workspace-first geography from fresh live
+  execution containers across Goal boundaries. It qualifies opaque equality by
+  host instance, exposes only safe labels, Agent views and derived positions,
+  and keeps Agents without trustworthy workspace evidence explicit. The
+  renderer lays out workspace card grids and the compact discovery dock while
+  keeping viewport state outside persistence.
 
 Renderers consume projections; they do not reproduce domain rules.
 
@@ -533,6 +537,13 @@ storage, but they do not become trusted Observatory state.
 - Live Herdr smoke paths use disposable Agents only.
 
 ## Dependency rule
+
+The browser map projection derives workspace geography at the server boundary
+from the qualified `(host kind, host instance, execution container)` identity.
+It emits only stable coordinates, a safe label, public Agent views, Goal
+references and aggregate attention/uncertainty; opaque grouping keys and native
+host identifiers never cross that boundary. This derived geography does not
+alter the durable `System -> Goal -> Agent` authority.
 
 The intended dependency direction is:
 

@@ -7,12 +7,12 @@ import {
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
-  goalAgentPoints,
-  goalLocalBounds,
+  workspaceAgentPoints,
+  workspaceDimensions,
 } from "./atlasGeometry.ts";
 import { fitAtlasBounds } from "./useAtlasCamera.ts";
 
-const goalWithAgents = (count: number) => {
+const workspaceWithAgents = (count: number) => {
   const { universe, clock } = makeUniverse();
   universe.execute({ type: "CreateGoal", title: "Understand Concurrent Agent Work" });
   admitObservedConversationsAndReconcile(
@@ -37,22 +37,26 @@ const goalWithAgents = (count: number) => {
   const projection = universe.project({ kind: "universe-map", now: clock.now() });
   if (projection.kind !== "universe-map" || !projection.goals[0])
     throw new Error("Expected a Goal projection");
-  return projection.goals[0];
+  const agents = projection.goals[0].agents;
+  return {
+    label: "Test workspace",
+    mapPosition: { x: 0, y: 0 },
+    agents,
+    goalIds: ["goal-1"],
+    attentionCount: 0,
+    uncertaintyCount: 0,
+  };
 };
 
 describe("Atlas camera bounds", () => {
-  test.each([1, 2, 10])("includes full orbit ellipses and %s Agent cards", (count) => {
-    const goal = goalWithAgents(count);
-    const bounds = goalLocalBounds(goal);
-    for (const orbit of goalAgentPoints(goal, { x: 0, y: 0 })) {
-      expect(bounds.left).toBeGreaterThanOrEqual(orbit.radiusX);
-      expect(bounds.right).toBeGreaterThanOrEqual(orbit.radiusX);
-      expect(bounds.top).toBeGreaterThanOrEqual(orbit.radiusY);
-      expect(bounds.bottom).toBeGreaterThanOrEqual(orbit.radiusY);
-      expect(bounds.left).toBeGreaterThanOrEqual(-orbit.x + AGENT_CARD_WIDTH / 2);
-      expect(bounds.right).toBeGreaterThanOrEqual(orbit.x + AGENT_CARD_WIDTH / 2);
-      expect(bounds.top).toBeGreaterThanOrEqual(-orbit.y + AGENT_CARD_HEIGHT / 2);
-      expect(bounds.bottom).toBeGreaterThanOrEqual(orbit.y + AGENT_CARD_HEIGHT / 2);
+  test.each([1, 2, 10])("includes all %s Agent cards in the workspace island", (count) => {
+    const workspace = workspaceWithAgents(count);
+    const size = workspaceDimensions(workspace);
+    for (const point of workspaceAgentPoints(workspace, { x: 0, y: 0 })) {
+      expect(point.x - AGENT_CARD_WIDTH / 2).toBeGreaterThanOrEqual(-size.width / 2);
+      expect(point.x + AGENT_CARD_WIDTH / 2).toBeLessThanOrEqual(size.width / 2);
+      expect(point.y - AGENT_CARD_HEIGHT / 2).toBeGreaterThanOrEqual(-size.height / 2);
+      expect(point.y + AGENT_CARD_HEIGHT / 2).toBeLessThanOrEqual(size.height / 2);
     }
   });
 
@@ -61,13 +65,13 @@ describe("Atlas camera bounds", () => {
     { width: 1024, height: 668, left: 0, right: 428 },
     { width: 1440, height: 900, left: 430, right: 0 },
     { width: 1440, height: 900, left: 0, right: 0 },
-  ])("fits a complete Goal within viewport and panel reservations %j", (size) => {
-    const local = goalLocalBounds(goalWithAgents(10));
+  ])("fits a complete workspace within viewport and panel reservations %j", (size) => {
+    const workspace = workspaceDimensions(workspaceWithAgents(10));
     const bounds = {
-      minimumX: 9000 - local.left,
-      maximumX: 9000 + local.right,
-      minimumY: -9000 - local.top,
-      maximumY: -9000 + local.bottom,
+      minimumX: 9000 - workspace.width / 2,
+      maximumX: 9000 + workspace.width / 2,
+      minimumY: -9000 - workspace.height / 2,
+      maximumY: -9000 + workspace.height / 2,
     };
     const camera = fitAtlasBounds(bounds, size, size.left, size.right, 1.45);
     expect(bounds.minimumX * camera.zoom + camera.panX).toBeGreaterThanOrEqual(size.left + 47.99);

@@ -27,6 +27,41 @@ export const scopePortfolio = (
     ? {
         ...portfolio.map,
         goals: portfolio.map.goals.filter((goal) => goal.systemId === selectedSystemId),
+        workspaces: portfolio.map.workspaces.flatMap((workspace) => {
+          const goalIds = new Set(commandCentre.goals.map((goal) => goal.id));
+          const agents = workspace.agents.filter((agent) =>
+            agent.primaryGoalId
+              ? goalIds.has(agent.primaryGoalId)
+              : selectedSystemId === "system-default",
+          );
+          return agents.length === 0
+            ? []
+            : [
+                {
+                  ...workspace,
+                  agents,
+                  goalIds: [...new Set(agents.flatMap((agent) => agent.primaryGoalId ?? []))],
+                  attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput)
+                    .length,
+                  uncertaintyCount: agents.filter(
+                    (agent) =>
+                      agent.observationHealth !== "fresh" ||
+                      agent.executionPresence === "unknown" ||
+                      agent.executionPresence === "conflict",
+                  ).length,
+                },
+              ];
+        }),
+        workspaceLess: portfolio.map.workspaceLess.filter((agent) =>
+          agent.primaryGoalId
+            ? commandCentre.goals.some((goal) => goal.id === agent.primaryGoalId)
+            : selectedSystemId === "system-default",
+        ),
+        unassigned: portfolio.map.unassigned.filter((agent) =>
+          agent.primaryGoalId
+            ? commandCentre.goals.some((goal) => goal.id === agent.primaryGoalId)
+            : selectedSystemId === "system-default",
+        ),
         counts: commandCentre.counts,
       }
     : portfolio.map;

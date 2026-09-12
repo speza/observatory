@@ -780,3 +780,42 @@
     bottom: 20px;
   }
 }
+.workspace-island__surface {
+  fill: color-mix(in srgb, var(--surface-raised) 88%, var(--accent) 12%);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.workspace-island__label {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.workspace-island,
+.workspace-less .agent {
+  transition:
+    opacity 260ms ease,
+    filter 260ms ease;
+}
+
+.agent__goal-chip {
+  fill: color-mix(in srgb, var(--goal-color) 12%, transparent);
+  stroke: color-mix(in srgb, var(--goal-color) 55%, var(--hairline));
+  stroke-width: 0.7;
+}
+
+.workspace-less .agent__card {
+  stroke-dasharray: 5 4;
+}
+
+.workspace-less__frame {
+  fill: color-mix(in srgb, var(--surface-raised) 50%, transparent);
+  stroke: var(--hairline);
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}

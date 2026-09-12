@@ -17,9 +17,9 @@ import {
   atlasContentBounds,
   atlasGoalSpacingScale,
   discoveredDockPlacement,
-  goalAgentPoints,
-  goalLocalBounds,
   selectionBelongsToFocus,
+  workspaceAgentPoints,
+  workspaceLessAgentPoints,
   type AtlasCameraCommand,
   type AtlasContentBounds,
 } from "./atlasGeometry.ts";
@@ -171,8 +171,24 @@ export const useAtlasCamera = ({
   const pointForSelection = (target: Selection | undefined) => {
     if (!target) return undefined;
     if (target.type === "goal") {
-      const goal = projection.goals.find((candidate) => candidate.id === target.id);
-      return goal ? screenPoint(goal.mapPosition) : undefined;
+      const agents: { x: number; y: number }[] = projection.workspaces.flatMap((workspace) =>
+        workspace.agents.flatMap((agent, index) =>
+          agent.primaryGoalId === target.id
+            ? [workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition))[index]!]
+            : [],
+        ),
+      );
+      agents.push(
+        ...workspaceLessAgentPoints(projection, layout.goalSpacingScale).filter(
+          (_, index) => projection.workspaceLess[index]?.primaryGoalId === target.id,
+        ),
+      );
+      return agents.length
+        ? {
+            x: agents.reduce((sum, point) => sum + point.x, 0) / agents.length,
+            y: agents.reduce((sum, point) => sum + point.y, 0) / agents.length,
+          }
+        : undefined;
     }
     if (target.type === "discovered-execution") {
       const execution = projection.discoveredExecutions?.find(
@@ -183,13 +199,17 @@ export const useAtlasCamera = ({
       const translation = discoveredDockPlacement(projection, layout.goalSpacingScale)?.translation;
       return translation ? { x: point.x + translation.x, y: point.y + translation.y } : point;
     }
-    for (const goal of projection.goals) {
-      const agentIndex = goal.agents.findIndex((candidate) => candidate.id === target.id);
+    for (const workspace of projection.workspaces) {
+      const agentIndex = workspace.agents.findIndex((candidate) => candidate.id === target.id);
       if (agentIndex >= 0) {
-        const centre = screenPoint(goal.mapPosition);
-        return goalAgentPoints(goal, centre)[agentIndex];
+        return workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition))[agentIndex];
       }
     }
+    const workspaceLessIndex = projection.workspaceLess.findIndex(
+      (candidate) => candidate.id === target.id,
+    );
+    if (workspaceLessIndex >= 0)
+      return workspaceLessAgentPoints(projection, layout.goalSpacingScale)[workspaceLessIndex];
     return undefined;
   };
 
@@ -201,16 +221,44 @@ export const useAtlasCamera = ({
     autoFocus.current = true;
     const next = target ?? selection;
     setFocusedSelection(next);
-    const goal =
+    const goalAgentPoints =
       next?.type === "goal"
-        ? projection.goals.find((candidate) => candidate.id === next.id)
-        : undefined;
+        ? [
+            ...projection.workspaces.flatMap((workspace) =>
+              workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition)).filter(
+                (_, index) => workspace.agents[index]?.primaryGoalId === next.id,
+              ),
+            ),
+            ...projection.workspaceLess.flatMap((agent, index) =>
+              agent.primaryGoalId === next.id
+                ? [workspaceLessAgentPoints(projection, layout.goalSpacingScale)[index]!]
+                : [],
+            ),
+          ]
+        : [];
     const discovered =
       next?.type === "discovered-execution"
         ? projection.discoveredExecutions?.find((candidate) => candidate.handle === next.id)
         : undefined;
-    const bounds = goal
-      ? goalLocalBounds(goal)
+    const bounds = goalAgentPoints.length
+      ? {
+          left:
+            point.x -
+            Math.min(...goalAgentPoints.map((candidate) => candidate.x)) +
+            AGENT_CARD_WIDTH / 2,
+          right:
+            Math.max(...goalAgentPoints.map((candidate) => candidate.x)) -
+            point.x +
+            AGENT_CARD_WIDTH / 2,
+          top:
+            point.y -
+            Math.min(...goalAgentPoints.map((candidate) => candidate.y)) +
+            AGENT_CARD_HEIGHT / 2,
+          bottom:
+            Math.max(...goalAgentPoints.map((candidate) => candidate.y)) -
+            point.y +
+            AGENT_CARD_HEIGHT / 2,
+        }
       : discovered
         ? {
             left: DISCOVERED_CARD_WIDTH / 2 + 8,

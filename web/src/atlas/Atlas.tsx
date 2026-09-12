@@ -1,14 +1,9 @@
-import {
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArchiveX, GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
 import type {
   AgentView,
   DiscoveredExecutionView,
+  MapAgentView,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
@@ -16,36 +11,23 @@ import { AgentLogo } from "../shared/AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
-  DISCOVERED_CARD_HEIGHT,
-  DISCOVERED_CARD_WIDTH,
   discoveredDockPlacement,
-  goalAgentPoints,
-  goalRadius,
   hash,
-  linesFor,
   stateLabel,
   truncateAtlasLine,
+  workspaceAgentPoints,
+  workspaceDimensions,
+  workspaceLessAgentPoints,
+  workspaceLessPosition,
   type AtlasCameraCommand,
 } from "./atlasGeometry.ts";
 import { presentAgentCard } from "./agentCardPresentation.ts";
 import { useAtlasCamera } from "./useAtlasCamera.ts";
 
 export type { AtlasCameraCommand } from "./atlasGeometry.ts";
-
-const GRID_LOGICAL_STEP = 24;
-const GRID_EXTENT = 100_000;
-const DISCOVERY_TITLE_LINE_LENGTH = 18;
-const DISCOVERY_CONTEXT_LENGTH = 42;
-const DISCOVERY_CONVERSATION_LENGTH = 36;
-
-const snapCoordinateToGrid = (value: number): number => {
-  const magnitude = Math.round(Math.abs(value) / GRID_LOGICAL_STEP) * GRID_LOGICAL_STEP;
-  return value < 0 ? -magnitude : magnitude;
-};
-
 export const snapToAtlasGrid = (position: { readonly x: number; readonly y: number }) => ({
-  x: snapCoordinateToGrid(position.x),
-  y: snapCoordinateToGrid(position.y),
+  x: Math.round(position.x / 24) * 24 || 0,
+  y: Math.round(position.y / 24) * 24 || 0,
 });
 
 interface AgentStyle extends CSSProperties {
@@ -53,9 +35,10 @@ interface AgentStyle extends CSSProperties {
   readonly "--agent-phase": string;
 }
 
-interface GoalStyle extends CSSProperties {
-  readonly "--goal-color": string;
-}
+const palettes = {
+  light: ["#1e5b50", "#756521", "#24656a", "#8c4d36", "#405f78", "#66516f"],
+  dark: ["#81b7a9", "#c6b974", "#78b6bd", "#d19070", "#8aaac1", "#af98b5"],
+} as const;
 
 interface AtlasProps {
   readonly additionalControls?: React.ReactNode;
@@ -80,34 +63,14 @@ interface AtlasProps {
   readonly onSelect: (selection: Selection) => void;
 }
 
-const runQuickAction = (event: ReactKeyboardEvent<SVGGElement>, action: () => void): void => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  event.stopPropagation();
-  action();
+const activate = (event: ReactKeyboardEvent<SVGGElement>, action: () => void): void => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    action();
+  }
 };
 
-const palettes = {
-  light: [
-    { body: "#b9c7b7", mark: "#1e5b50" },
-    { body: "#c8c2a5", mark: "#756521" },
-    { body: "#a9c5c4", mark: "#24656a" },
-    { body: "#c9b5a5", mark: "#8c4d36" },
-    { body: "#b3bec9", mark: "#405f78" },
-    { body: "#beb7c4", mark: "#66516f" },
-  ],
-  dark: [
-    { body: "#294a42", mark: "#81b7a9" },
-    { body: "#504a2e", mark: "#c6b974" },
-    { body: "#27474c", mark: "#78b6bd" },
-    { body: "#513b31", mark: "#d19070" },
-    { body: "#304658", mark: "#8aaac1" },
-    { body: "#44394c", mark: "#af98b5" },
-  ],
-} as const;
-
 export const Atlas = ({
-  additionalControls,
   projection,
   selection,
   reservedLeft,
@@ -115,9 +78,9 @@ export const Atlas = ({
   theme = "light",
   motion = true,
   cameraCommand,
+  additionalControls,
   onClearSelection,
   onFocusSelection,
-  onMoveGoal,
   onCloseAndArchive,
   onOpenTerminal,
   onOpenDiscoveredTerminal,
@@ -125,108 +88,186 @@ export const Atlas = ({
   pullRequestUrls,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
-  const {
-    beginPan,
-    camera,
-    containerRef,
-    continuePan,
-    endPan,
-    focusedSelection,
-    focusPoint,
-    isPanning,
-    layout,
-    reset,
-    resetCamera,
-    screenPoint,
-    size,
-    worldTransform,
-    zoom,
-    zoomIn,
-    zoomOut,
-  } = useAtlasCamera({ cameraCommand, projection, reservedLeft, reservedRight, selection });
-  const goalDrag = useRef<
-    | {
-        readonly goalId: string;
-        readonly pointerId: number;
-        readonly startClientX: number;
-        readonly startClientY: number;
-        readonly startPosition: { readonly x: number; readonly y: number };
-        position: { readonly x: number; readonly y: number };
-        moved: boolean;
-      }
-    | undefined
-  >(undefined);
-  const suppressGoalClick = useRef<string | undefined>(undefined);
-  const [draggedGoal, setDraggedGoal] = useState<{
-    readonly goalId: string;
-    readonly position: { readonly x: number; readonly y: number };
-  }>();
-  const gridOrigin = screenPoint({ x: 0, y: 0 });
-  const gridStep = GRID_LOGICAL_STEP * layout.goalSpacingScale;
-  const discoveryDock = discoveredDockPlacement(projection, layout.goalSpacingScale);
-  const dockTranslation = discoveryDock?.translation ?? { x: 0, y: 0 };
-
-  const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
-    const drag = goalDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const svg = event.currentTarget.ownerSVGElement;
-    if (!svg) return;
-    const bounds = svg.getBoundingClientRect();
-    const deltaX =
-      ((event.clientX - drag.startClientX) * size.width) /
-      Math.max(1, bounds.width) /
-      camera.zoom /
-      layout.goalSpacingScale;
-    const deltaY =
-      ((event.clientY - drag.startClientY) * size.height) /
-      Math.max(1, bounds.height) /
-      camera.zoom /
-      layout.goalSpacingScale;
-    if (Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) >= 4) {
-      drag.moved = true;
-    }
-    const position = drag.moved
-      ? snapToAtlasGrid({
-          x: drag.startPosition.x + deltaX,
-          y: drag.startPosition.y + deltaY,
-        })
-      : drag.startPosition;
-    drag.position = position;
-    setDraggedGoal({
-      goalId: drag.goalId,
-      position,
-    });
+  const camera = useAtlasCamera({
+    cameraCommand,
+    projection,
+    reservedLeft,
+    reservedRight,
+    selection,
+  });
+  const goalFocused =
+    camera.focusedSelection?.type === "goal"
+      ? camera.focusedSelection.id
+      : selection?.type === "goal"
+        ? selection.id
+        : undefined;
+  const discoveryDock = discoveredDockPlacement(projection, camera.layout.goalSpacingScale);
+  const workspaceLessPoints = workspaceLessAgentPoints(projection, camera.layout.goalSpacingScale);
+  const workspaceLessCentre = workspaceLessPosition(projection, camera.layout.goalSpacingScale);
+  const gridStep = 24 * camera.layout.goalSpacingScale;
+  const gridOrigin = camera.screenPoint({ x: 0, y: 0 });
+  const renderAgent = (agent: MapAgentView, point: { x: number; y: number }) => {
+    const selected = selection?.type === "agent" && selection.id === agent.id;
+    const dimmed = goalFocused !== undefined && agent.primaryGoalId !== goalFocused;
+    const attention = agent.attention?.requiresHumanInput === true;
+    const uncertain = ["runtime-unknown", "conversation-unavailable", "conflict"].includes(
+      agent.lifecycleState,
+    );
+    const state = stateLabel(agent);
+    const card = presentAgentCard(agent);
+    const goalColor =
+      palettes[theme][hash(agent.primaryGoalId ?? "unassigned") % palettes[theme].length] ??
+      palettes[theme][0];
+    const style: AgentStyle = {
+      "--goal-color": goalColor,
+      "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
+    };
+    const focus = (): void => (onFocusSelection ?? onSelect)({ type: "agent", id: agent.id });
+    return (
+      <g
+        className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${selected ? "is-selected" : ""} ${dimmed ? "goal--spotlight-dimmed" : "goal--spotlight-focus"}`}
+        data-agent-id={agent.id}
+        data-parent-goal-id={agent.primaryGoalId}
+        data-screen-x={point.x.toFixed(2)}
+        data-screen-y={point.y.toFixed(2)}
+        key={agent.id}
+        style={style}
+        transform={`translate(${point.x} ${point.y})`}
+      >
+        <g
+          aria-label={`${agent.displayName}, ${state}, goal ${agent.goalTitle ?? "unassigned"}`}
+          className="agent__card-target"
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect({ type: "agent", id: agent.id })}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onSelect({ type: "agent", id: agent.id });
+            camera.focusPoint(point, { type: "agent", id: agent.id });
+          }}
+          onFocus={focus}
+          onKeyDown={(event) => activate(event, focus)}
+        >
+          {attention ? (
+            <rect
+              className="agent__attention-wave"
+              height={AGENT_CARD_HEIGHT + 8}
+              rx="7"
+              width={AGENT_CARD_WIDTH + 8}
+              x={-AGENT_CARD_WIDTH / 2 - 4}
+              y={-AGENT_CARD_HEIGHT / 2 - 4}
+            />
+          ) : null}
+          <rect
+            className="agent__working-aura"
+            height={AGENT_CARD_HEIGHT + 8}
+            rx="8"
+            width={AGENT_CARD_WIDTH + 8}
+            x={-AGENT_CARD_WIDTH / 2 - 4}
+            y={-AGENT_CARD_HEIGHT / 2 - 4}
+          />
+          <rect
+            className="agent__card"
+            height={AGENT_CARD_HEIGHT}
+            rx="5"
+            width={AGENT_CARD_WIDTH}
+            x={-AGENT_CARD_WIDTH / 2}
+            y={-AGENT_CARD_HEIGHT / 2}
+          />
+          <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
+          <g className="agent__provider-mark" transform="translate(-91 -35)">
+            <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
+          </g>
+          <text className="agent__identity" x="-77" y="-32">
+            {card.identity}
+          </text>
+          <g className="agent__state" transform="translate(98 -35)">
+            <circle className="agent__state-pulse" r="3" />
+            <circle className="agent__state-dot" r="3" />
+            <text x="-8" y="3">
+              {state.toUpperCase()}
+            </text>
+          </g>
+          {attention ? (
+            <g className="agent__review-badge" transform="translate(88 -50)">
+              <circle r="8" />
+              <text y="3">!</text>
+            </g>
+          ) : null}
+          <text className="agent__name" x="-96" y="-5">
+            {card.titleLines.map((line, index) => (
+              <tspan dy={index === 0 ? 0 : 15} key={`${line}-${index}`} x="-96">
+                {line}
+              </tspan>
+            ))}
+          </text>
+          {card.detail ? (
+            <text className="agent__activity" x="-96" y={card.titleLines.length > 1 ? 25 : 11}>
+              {card.detail}
+            </text>
+          ) : null}
+          <rect className="agent__goal-chip" height="16" rx="3" width="192" x="-96" y="28" />
+          <text className="agent__context" x="-90" y="40">
+            GOAL · {truncateAtlasLine(agent.goalTitle ?? "UNASSIGNED", 25)}
+          </text>
+          <rect
+            className="agent__selection"
+            height={AGENT_CARD_HEIGHT + 8}
+            rx="7"
+            width={AGENT_CARD_WIDTH + 8}
+            x={-AGENT_CARD_WIDTH / 2 - 4}
+            y={-AGENT_CARD_HEIGHT / 2 - 4}
+          />
+        </g>
+        <g className="agent__quick-actions">
+          {onReviewChanges && agent.attention?.action === "review" ? (
+            <g
+              aria-label={`Review ${agent.displayName} changes`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onReviewChanges(agent)}
+            >
+              <GitCompareArrows x="30" y="28" />
+            </g>
+          ) : null}
+          {pullRequestUrls?.get(agent.id) ? (
+            <a
+              aria-label={`Open ${agent.displayName} pull request on GitHub`}
+              href={pullRequestUrls.get(agent.id)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <GitPullRequest x="52" y="28" />
+            </a>
+          ) : null}
+          {onCloseAndArchive && agent.executionPresence === "live" ? (
+            <g
+              aria-label={`Close and archive ${agent.displayName}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onCloseAndArchive(agent)}
+            >
+              <ArchiveX x="72" y="28" />
+            </g>
+          ) : null}
+          {onOpenTerminal && agent.executionPresence === "live" ? (
+            <g
+              aria-label={`Open ${agent.displayName} terminal`}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenTerminal(agent)}
+            >
+              <Terminal x="94" y="28" />
+            </g>
+          ) : null}
+        </g>
+      </g>
+    );
   };
-
-  const endGoalDrag = (event: ReactPointerEvent<SVGGElement>, commit: boolean): void => {
-    const drag = goalDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (commit && drag.moved) {
-      suppressGoalClick.current = drag.goalId;
-      const committedPosition = snapToAtlasGrid(drag.position);
-      setDraggedGoal({ goalId: drag.goalId, position: committedPosition });
-      void Promise.resolve(onMoveGoal?.(drag.goalId, committedPosition)).finally(() => {
-        setDraggedGoal((current) =>
-          current?.goalId === drag.goalId &&
-          current.position.x === committedPosition.x &&
-          current.position.y === committedPosition.y
-            ? undefined
-            : current,
-        );
-      });
-    } else {
-      setDraggedGoal(undefined);
-    }
-    goalDrag.current = undefined;
-  };
-
   return (
     <div
-      className={`atlas ${motion ? "atlas--motion" : "atlas--still"} ${focusedSelection ? "atlas--spotlight" : ""}`}
-      ref={containerRef}
+      className={`atlas ${motion ? "atlas--motion" : "atlas--still"} ${camera.focusedSelection ? "atlas--spotlight" : ""}`}
+      ref={camera.containerRef}
     >
       <div aria-label="Agent state key" className="atlas__status-key">
         <span>
@@ -238,30 +279,26 @@ export const Atlas = ({
           Idle
         </span>
         <span>
-          <i className="atlas__status-swatch atlas__status-swatch--review">!</i>
-          Needs review
+          <i className="atlas__status-swatch atlas__status-swatch--review">!</i>Needs review
         </span>
       </div>
       <svg
-        aria-label={`${projection.counts.goals} goals and ${projection.counts.agents} agents${(projection.counts.discovered ?? 0) > 0 ? `, ${projection.counts.discovered} discovered executions` : ""}`}
-        className={isPanning ? "is-panning" : ""}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClearSelection?.();
-        }}
-        onDoubleClick={reset}
-        onPointerCancel={endPan}
-        onPointerDown={beginPan}
-        onPointerMove={continuePan}
-        onPointerUp={endPan}
-        onWheel={zoom}
+        aria-label={`${projection.workspaces.length} workspaces and ${projection.counts.agents} agents`}
+        className={camera.isPanning ? "is-panning" : ""}
+        onPointerDown={camera.beginPan}
+        onPointerMove={camera.continuePan}
+        onPointerUp={camera.endPan}
+        onPointerCancel={camera.endPan}
+        onWheel={camera.zoom}
+        onDoubleClick={camera.reset}
         role="group"
         tabIndex={0}
-        viewBox={`0 0 ${size.width} ${size.height}`}
+        viewBox={`0 0 ${camera.size.width} ${camera.size.height}`}
       >
-        <title>Observatory goal and agent atlas</title>
+        <title>Observatory workspace and agent atlas</title>
         <defs>
           <pattern
-            data-logical-step={GRID_LOGICAL_STEP}
+            data-logical-step="24"
             height={gridStep}
             id="atlas-coordinate-grid"
             patternUnits="userSpaceOnUse"
@@ -271,664 +308,157 @@ export const Atlas = ({
           >
             <path className="atlas__grid-major" d={`M ${gridStep} 0 L 0 0 0 ${gridStep}`} />
           </pattern>
-          {projection.goals.map((goal) => (
-            <clipPath id={`goal-clip-${hash(goal.id)}`} key={goal.id}>
-              <circle r={goalRadius(goal)} />
-            </clipPath>
-          ))}
         </defs>
         <rect
-          aria-hidden="true"
           className="atlas__hit-area"
-          height={size.height}
-          onClick={() => onClearSelection?.()}
-          width={size.width}
-          x="0"
-          y="0"
+          width={camera.size.width}
+          height={camera.size.height}
+          onClick={onClearSelection}
         />
-        <g
-          className="atlas__world"
-          data-camera-zoom={camera.zoom}
-          data-focus-target={focusedSelection?.id}
-          transform={worldTransform}
-        >
+        <g className="atlas__world" transform={camera.worldTransform}>
           <rect
             aria-hidden="true"
             className="atlas__coordinate-grid"
             data-grid-origin-x={gridOrigin.x}
             data-grid-origin-y={gridOrigin.y}
             fill="url(#atlas-coordinate-grid)"
-            height={GRID_EXTENT * 2}
-            width={GRID_EXTENT * 2}
-            x={-GRID_EXTENT}
-            y={-GRID_EXTENT}
+            height="200000"
+            width="200000"
+            x="-100000"
+            y="-100000"
           />
-          {projection.goals.map((goal) => {
-            const displayedPosition =
-              draggedGoal?.goalId === goal.id ? draggedGoal.position : goal.mapPosition;
-            const centre = screenPoint(displayedPosition);
-            const radius = goalRadius(goal);
-            const token = hash(goal.id);
-            const palette = palettes[theme][token % palettes[theme].length] ?? palettes[theme][0];
-            const title = linesFor(goal.title);
-            const selected = selection?.type === "goal" && selection.id === goal.id;
-            const focusedGoal =
-              focusedSelection?.type === "goal"
-                ? focusedSelection.id === goal.id
-                : focusedSelection?.type === "agent" &&
-                  goal.agents.some((agent) => agent.id === focusedSelection.id);
-            const spotlightActive = focusedSelection !== undefined;
-            const hasWorkingAgent = goal.agents.some(
-              (agent) => agent.hostHealth === "live" && agent.runtimeState === "working",
-            );
-            const hasUncertainAgent = goal.agents.some((agent) =>
-              ["runtime-unknown", "conversation-unavailable", "conflict"].includes(
-                agent.lifecycleState,
-              ),
-            );
-            const agentPoints = goalAgentPoints(goal, centre);
-            const orbitBands = [
-              ...new Map(agentPoints.map((point) => [point.band, point])).values(),
-            ];
-            const goalStyle: GoalStyle = { "--goal-color": palette.mark };
+          {projection.workspaces.map((workspace, workspaceIndex) => {
+            const centre = camera.screenPoint(workspace.mapPosition);
+            const size = workspaceDimensions(workspace);
+            const points = workspaceAgentPoints(workspace, centre);
             return (
               <g
-                className={`goal ${goal.status !== "active" ? `goal--${goal.status}` : ""} ${hasWorkingAgent ? "goal--working" : ""} ${goal.attentionCount > 0 ? "goal--attention" : ""} ${hasUncertainAgent ? "goal--uncertain" : ""} ${spotlightActive && focusedGoal ? "goal--spotlight-focus" : ""} ${spotlightActive && !focusedGoal ? "goal--spotlight-dimmed" : ""}`}
-                key={goal.id}
-                style={goalStyle}
+                className="workspace-island"
+                data-screen-x={centre.x.toFixed(2)}
+                data-screen-y={centre.y.toFixed(2)}
+                data-workspace-height={size.height}
+                data-workspace-index={workspaceIndex}
+                data-workspace-width={size.width}
+                key={`${workspace.label}-${workspaceIndex}`}
               >
-                <g
-                  aria-hidden="true"
-                  className="goal__datum"
-                  transform={`translate(${centre.x} ${centre.y})`}
-                >
-                  <circle r={radius + 12} />
-                  <path
-                    d={`M${-radius - 20} 0 H${radius + 20} M0 ${-radius - 20} V${radius + 20}`}
-                  />
-                </g>
-                <g className="goal__orbits" aria-hidden="true">
-                  {orbitBands.map((orbit) => (
-                    <ellipse
-                      cx={centre.x}
-                      cy={centre.y}
-                      key={orbit.band}
-                      rx={orbit.radiusX}
-                      ry={orbit.radiusY}
-                    />
-                  ))}
-                </g>
-                <g
-                  aria-label={`${goal.title}, ${goal.agents.length} agents, priority ${goal.priority}, ${goal.attentionCount} need you, ${goal.staleCount} monitor`}
-                  className={`goal__body ${selected ? "is-selected" : ""}`}
-                  data-goal-id={goal.id}
-                  data-radius={radius}
-                  data-screen-x={centre.x.toFixed(2)}
-                  data-screen-y={centre.y.toFixed(2)}
-                  onClick={() => {
-                    if (suppressGoalClick.current === goal.id) {
-                      suppressGoalClick.current = undefined;
-                      return;
-                    }
-                    const next = { type: "goal" as const, id: goal.id };
-                    onSelect(next);
-                    focusPoint(centre, next);
-                  }}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation();
-                    onSelect({ type: "goal", id: goal.id });
-                    focusPoint(centre, { type: "goal", id: goal.id });
-                  }}
-                  onFocus={() => onSelect({ type: "goal", id: goal.id })}
-                  onPointerCancel={(event) => endGoalDrag(event, false)}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0 || !onMoveGoal) return;
-                    event.stopPropagation();
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    goalDrag.current = {
-                      goalId: goal.id,
-                      pointerId: event.pointerId,
-                      startClientX: event.clientX,
-                      startClientY: event.clientY,
-                      startPosition: goal.mapPosition,
-                      position: goal.mapPosition,
-                      moved: false,
-                    };
-                    setDraggedGoal({ goalId: goal.id, position: goal.mapPosition });
-                  }}
-                  onPointerMove={continueGoalDrag}
-                  onPointerUp={(event) => endGoalDrag(event, true)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelect({ type: "goal", id: goal.id });
-                    }
-                  }}
-                  role="button"
-                  style={{ cursor: onMoveGoal ? "grab" : "pointer" }}
-                  tabIndex={0}
-                  transform={`translate(${centre.x} ${centre.y})`}
-                >
-                  <circle className="goal__surface" fill={palette.body} r={radius} />
-                  <g aria-hidden="true" className="goal__range-rings">
-                    <circle cx={radius * -0.12} cy={radius * -0.08} r={radius * 0.72} />
-                    <circle cx={radius * -0.12} cy={radius * -0.08} r={radius * 0.52} />
-                  </g>
-                  <g clipPath={`url(#goal-clip-${token})`}>
-                    <path
-                      className="goal__land goal__land--upper"
-                      d={`M${-radius} 2 Q${-radius * 0.35} ${-radius * 0.45} 8 ${-radius * 0.16} T${radius} ${-radius * 0.38} V${radius * 0.06} Q${radius * 0.16} ${radius * 0.26} ${-radius} ${radius * 0.14}Z`}
-                      fill={palette.mark}
-                    />
-                    <path
-                      className="goal__land goal__land--lower"
-                      d={`M${-radius} ${radius * 0.5} Q${-radius * 0.18} ${radius * 0.16} ${radius} ${radius * 0.36} V${radius} H${-radius}Z`}
-                    />
-                  </g>
-                  <circle className="goal__outline" r={radius + 2} stroke={palette.mark} />
-                  <circle className="goal__selection" r={radius + 7} />
-                  <text className="goal__priority" y="-14">
-                    GOAL / {goal.priority}
-                  </text>
-                  <text className="goal__count" y="15">
-                    {String(goal.agents.length).padStart(2, "0")}
-                  </text>
-                  <text className="goal__unit" y="33">
-                    AGENTS
-                  </text>
-                  {goal.attentionCount > 0 ? (
-                    <g
-                      className="goal__attention"
-                      transform={`translate(${radius * 0.46} ${-radius * 0.58})`}
-                    >
-                      <rect height="22" rx="11" width="48" x="-24" y="-11" />
-                      <text y="3">{goal.attentionCount} NEED</text>
-                    </g>
-                  ) : null}
-                </g>
-                <line
-                  className="goal__leader"
-                  x1={centre.x}
-                  x2={centre.x}
-                  y1={centre.y + radius + 3}
-                  y2={centre.y + radius + 18}
+                <rect
+                  className="workspace-island__surface"
+                  x={centre.x - size.width / 2}
+                  y={centre.y - size.height / 2}
+                  width={size.width}
+                  height={size.height}
+                  rx="14"
                 />
-                <text className="goal__title" textAnchor="middle">
-                  {title.map((line, index) => (
-                    <tspan
-                      key={`${line}-${index}`}
-                      x={centre.x}
-                      y={centre.y + radius + 38 + index * 18}
-                    >
-                      {line}
-                    </tspan>
-                  ))}
+                <text
+                  className="workspace-island__label"
+                  x={centre.x - size.width / 2 + 18}
+                  y={centre.y - size.height / 2 + 26}
+                >
+                  WORKSPACE · {workspace.label} · {workspace.agents.length}
                 </text>
-                {goal.agents.map((agent, agentIndex) => {
-                  const point = agentPoints[agentIndex];
-                  if (!point) return null;
-                  const attention = agent.attention?.requiresHumanInput === true;
-                  const uncertain = [
-                    "runtime-unknown",
-                    "conversation-unavailable",
-                    "conflict",
-                  ].includes(agent.lifecycleState);
-                  const agentSelected = selection?.type === "agent" && selection.id === agent.id;
-                  const canOpenTerminal =
-                    agent.executionPresence === "live" && onOpenTerminal !== undefined;
-                  const canCloseAndArchive =
-                    agent.executionPresence === "live" && onCloseAndArchive !== undefined;
-                  const canReview =
-                    agent.attention?.action === "review" && onReviewChanges !== undefined;
-                  const pullRequestUrl = pullRequestUrls?.get(agent.id);
-                  const reviewActionX = canOpenTerminal ? 48 : 74;
-                  const pullRequestActionX = 74 - (canOpenTerminal ? 26 : 0) - (canReview ? 26 : 0);
-                  const closeActionX = pullRequestActionX - (pullRequestUrl === undefined ? 0 : 26);
-                  const state = stateLabel(agent);
-                  const card = presentAgentCard(agent);
-                  const style: AgentStyle = {
-                    "--goal-color": palette.mark,
-                    "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
-                  };
-                  const focusAgent = (): void =>
-                    (onFocusSelection ?? onSelect)({ type: "agent", id: agent.id });
-                  return (
-                    <g
-                      className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
-                      data-agent-id={agent.id}
-                      data-parent-goal-id={goal.id}
-                      data-screen-x={point.x.toFixed(2)}
-                      data-screen-y={point.y.toFixed(2)}
-                      data-orbit-rx={point.radiusX}
-                      data-orbit-ry={point.radiusY}
-                      key={agent.id}
-                      style={style}
-                      transform={`translate(${point.x} ${point.y})`}
-                    >
-                      <g
-                        aria-label={`${agent.displayName}, ${state}${card.detail ? `, ${card.detail}` : ""}${card.context ? `, ${card.context}` : ""}${agent.attention ? `, ${agent.attention.explanation}` : ""}`}
-                        className="agent__card-target"
-                        onClick={() => {
-                          onSelect({ type: "agent", id: agent.id });
-                        }}
-                        onDoubleClick={(event) => {
-                          event.stopPropagation();
-                          onSelect({ type: "agent", id: agent.id });
-                          focusPoint(point, { type: "agent", id: agent.id });
-                        }}
-                        onFocus={focusAgent}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            onSelect({ type: "agent", id: agent.id });
-                          }
-                        }}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        <g className="agent__presence">
-                          {attention ? (
-                            <rect
-                              className="agent__attention-wave"
-                              height={AGENT_CARD_HEIGHT + 8}
-                              rx="7"
-                              width={AGENT_CARD_WIDTH + 8}
-                              x={-AGENT_CARD_WIDTH / 2 - 4}
-                              y={-AGENT_CARD_HEIGHT / 2 - 4}
-                            />
-                          ) : null}
-                          <rect
-                            className="agent__working-aura"
-                            height={AGENT_CARD_HEIGHT + 8}
-                            rx="8"
-                            width={AGENT_CARD_WIDTH + 8}
-                            x={-AGENT_CARD_WIDTH / 2 - 4}
-                            y={-AGENT_CARD_HEIGHT / 2 - 4}
-                          />
-                          <rect
-                            className="agent__card"
-                            height={AGENT_CARD_HEIGHT}
-                            rx="4"
-                            width={AGENT_CARD_WIDTH}
-                            x={-AGENT_CARD_WIDTH / 2}
-                            y={-AGENT_CARD_HEIGHT / 2}
-                          />
-                          <rect
-                            className="agent__working-circuit"
-                            height={AGENT_CARD_HEIGHT}
-                            rx="4"
-                            width={AGENT_CARD_WIDTH}
-                            x={-AGENT_CARD_WIDTH / 2}
-                            y={-AGENT_CARD_HEIGHT / 2}
-                          />
-                          <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
-                          <g className="agent__provider-mark" transform="translate(-91 -35)">
-                            <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
-                          </g>
-                          <text className="agent__identity" x="-77" y="-32">
-                            {card.identity}
-                          </text>
-                          <g className="agent__state" transform="translate(98 -35)">
-                            <circle className="agent__state-pulse" r="3" />
-                            <circle className="agent__state-dot" r="3" />
-                            <text x="-8" y="3">
-                              {state.toUpperCase()}
-                            </text>
-                          </g>
-                          {attention ? (
-                            <g className="agent__review-badge" transform="translate(88 -50)">
-                              <circle r="8" />
-                              <text y="3">!</text>
-                            </g>
-                          ) : null}
-                          <text className="agent__name" x="-96" y="-5">
-                            {card.titleLines.map((line, lineIndex) => (
-                              <tspan
-                                dy={lineIndex === 0 ? 0 : 15}
-                                key={`${line}-${lineIndex}`}
-                                x="-96"
-                              >
-                                {line}
-                              </tspan>
-                            ))}
-                          </text>
-                          {card.detail ? (
-                            <text
-                              className="agent__activity"
-                              x="-96"
-                              y={card.titleLines.length > 1 ? "25" : "11"}
-                            >
-                              {card.detail}
-                            </text>
-                          ) : null}
-                          {card.context ? (
-                            <text className="agent__context" x="-96" y="42">
-                              {card.context}
-                            </text>
-                          ) : null}
-                        </g>
-                        <rect
-                          className="agent__selection"
-                          height={AGENT_CARD_HEIGHT + 8}
-                          rx="7"
-                          width={AGENT_CARD_WIDTH + 8}
-                          x={-AGENT_CARD_WIDTH / 2 - 4}
-                          y={-AGENT_CARD_HEIGHT / 2 - 4}
-                        />
-                      </g>
-                      {canOpenTerminal || canCloseAndArchive || canReview || pullRequestUrl ? (
-                        <g className="agent__quick-actions">
-                          {pullRequestUrl ? (
-                            <a
-                              aria-label={`Open ${agent.displayName} pull request on GitHub`}
-                              className="agent__quick-action"
-                              href={pullRequestUrl}
-                              onClick={(event) => event.stopPropagation()}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              onFocus={focusAgent}
-                              onPointerDown={(event) => event.stopPropagation()}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              <title>Open pull request on GitHub</title>
-                              <rect height="20" rx="3" width="22" x={pullRequestActionX} y="27" />
-                              <GitPullRequest
-                                aria-hidden="true"
-                                height="14"
-                                strokeWidth="1.8"
-                                width="14"
-                                x={pullRequestActionX + 4}
-                                y="30"
-                              />
-                            </a>
-                          ) : null}
-                          {canReview ? (
-                            <g
-                              aria-label={`Review ${agent.displayName} changes`}
-                              className="agent__quick-action"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onReviewChanges?.(agent);
-                              }}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              onFocus={focusAgent}
-                              onKeyDown={(event) =>
-                                runQuickAction(event, () => onReviewChanges?.(agent))
-                              }
-                              onPointerDown={(event) => event.stopPropagation()}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <title>Review changes</title>
-                              <rect height="20" rx="3" width="22" x={reviewActionX} y="27" />
-                              <GitCompareArrows
-                                aria-hidden="true"
-                                height="14"
-                                strokeWidth="1.8"
-                                width="14"
-                                x={reviewActionX + 4}
-                                y="30"
-                              />
-                            </g>
-                          ) : null}
-                          {canCloseAndArchive ? (
-                            <g
-                              aria-label={`Close and archive ${agent.displayName}`}
-                              className="agent__quick-action agent__quick-action--destructive"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onCloseAndArchive?.(agent);
-                              }}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              onFocus={focusAgent}
-                              onKeyDown={(event) =>
-                                runQuickAction(event, () => onCloseAndArchive?.(agent))
-                              }
-                              onPointerDown={(event) => event.stopPropagation()}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <title>Close &amp; archive</title>
-                              <rect height="20" rx="3" width="22" x={closeActionX} y="27" />
-                              <ArchiveX
-                                aria-hidden="true"
-                                height="14"
-                                strokeWidth="1.8"
-                                width="14"
-                                x={closeActionX + 4}
-                                y="30"
-                              />
-                            </g>
-                          ) : null}
-                          {canOpenTerminal ? (
-                            <g
-                              aria-label={`Open ${agent.displayName} terminal`}
-                              className="agent__quick-action"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onOpenTerminal?.(agent);
-                              }}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              onFocus={focusAgent}
-                              onKeyDown={(event) =>
-                                runQuickAction(event, () => onOpenTerminal?.(agent))
-                              }
-                              onPointerDown={(event) => event.stopPropagation()}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <title>Open terminal</title>
-                              <rect height="20" rx="3" width="22" x="74" y="27" />
-                              <Terminal
-                                aria-hidden="true"
-                                height="14"
-                                strokeWidth="1.8"
-                                width="14"
-                                x="78"
-                                y="30"
-                              />
-                            </g>
-                          ) : null}
-                        </g>
-                      ) : null}
-                    </g>
-                  );
-                })}
+                {workspace.agents.map((agent, index) =>
+                  renderAgent(agent, points[index] ?? centre),
+                )}
               </g>
             );
           })}
-          {(projection.discoveredExecutions ?? []).length > 0 ? (
-            <g aria-label="Discovered in Herdr executions" className="discovered-executions">
-              {discoveryDock ? (
-                <g aria-hidden="true" className="discovered-dock">
-                  <rect
-                    className="discovered-dock__frame"
-                    height={discoveryDock.bounds.height}
-                    rx="10"
-                    width={discoveryDock.bounds.width}
-                    x={discoveryDock.bounds.left}
-                    y={discoveryDock.bounds.top}
-                  />
-                  <text
-                    className="discovered-dock__heading"
-                    x={discoveryDock.bounds.left + 18}
-                    y={discoveryDock.bounds.top + 25}
-                  >
-                    DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
-                  </text>
-                </g>
-              ) : null}
-              {projection.discoveredExecutions?.map((execution) => {
-                const base = screenPoint(execution.mapPosition);
-                const centre = {
-                  x: base.x + dockTranslation.x,
-                  y: base.y + dockTranslation.y,
-                };
-                const state = execution.presence === "live" ? execution.runtimeState : "unknown";
-                const selected =
-                  selection?.type === "discovered-execution" && selection.id === execution.handle;
-                const focused =
-                  focusedSelection?.type === "discovered-execution" &&
-                  focusedSelection.id === execution.handle;
-                const title = linesFor(execution.displayName).map((line) =>
-                  truncateAtlasLine(line, DISCOVERY_TITLE_LINE_LENGTH),
-                );
-                const workspace = truncateAtlasLine(
-                  execution.worktree ?? execution.repository ?? "Workspace unknown",
-                  DISCOVERY_CONTEXT_LENGTH,
-                );
-                const conversation = truncateAtlasLine(
-                  execution.conversation
-                    ? `Conversation · ${execution.conversation.id}`
-                    : execution.conversationIdentified
-                      ? "Conversation · identified"
-                      : "Conversation not identified",
-                  DISCOVERY_CONVERSATION_LENGTH,
-                );
-                const terminalAvailable =
-                  execution.presence === "live" && onOpenDiscoveredTerminal !== undefined;
-                const focusExecution = (): void =>
-                  (onFocusSelection ?? onSelect)({
-                    type: "discovered-execution",
-                    id: execution.handle,
-                  });
-                return (
+          {projection.workspaceLess.length ? (
+            <g aria-label="Workspace-less and dormant agents" className="workspace-less">
+              <rect
+                className="workspace-less__frame"
+                height={workspaceDimensions({ agents: projection.workspaceLess }).height}
+                rx="14"
+                width={workspaceDimensions({ agents: projection.workspaceLess }).width}
+                x={
+                  workspaceLessCentre.x -
+                  workspaceDimensions({ agents: projection.workspaceLess }).width / 2
+                }
+                y={
+                  workspaceLessCentre.y -
+                  workspaceDimensions({ agents: projection.workspaceLess }).height / 2
+                }
+              />
+              <text
+                className="workspace-island__label"
+                x={
+                  workspaceLessCentre.x -
+                  workspaceDimensions({ agents: projection.workspaceLess }).width / 2 +
+                  18
+                }
+                y={
+                  workspaceLessCentre.y -
+                  workspaceDimensions({ agents: projection.workspaceLess }).height / 2 +
+                  26
+                }
+              >
+                WORKSPACE-LESS / DORMANT
+              </text>
+              {projection.workspaceLess.map((agent, index) =>
+                renderAgent(agent, workspaceLessPoints[index] ?? workspaceLessCentre),
+              )}
+            </g>
+          ) : null}
+          {(projection.discoveredExecutions ?? []).map((execution) => {
+            const point = camera.screenPoint(execution.mapPosition);
+            const translated = {
+              x: point.x + (discoveryDock?.translation.x ?? 0),
+              y: point.y + (discoveryDock?.translation.y ?? 0),
+            };
+            return (
+              <g
+                data-discovery-handle={execution.handle}
+                key={execution.handle}
+                transform={`translate(${translated.x} ${translated.y})`}
+              >
+                <rect
+                  className="discovered-execution__card"
+                  width="278"
+                  height="132"
+                  x="-139"
+                  y="-66"
+                  rx="5"
+                />
+                <text x="-120" y="-20">
+                  DISCOVERED · {execution.displayName}
+                </text>
+                {onOpenDiscoveredTerminal ? (
                   <g
-                    className={`discovered-execution discovered-execution--${state} ${selected ? "is-selected" : ""} ${focused ? "is-focused" : ""}`}
-                    data-discovery-handle={execution.handle}
-                    key={execution.handle}
-                    transform={`translate(${centre.x} ${centre.y})`}
+                    aria-label={`Open ${execution.displayName} terminal`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onOpenDiscoveredTerminal(execution)}
                   >
-                    <g
-                      aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
-                      className="discovered-execution__card-target"
-                      onClick={() =>
-                        onSelect({ type: "discovered-execution", id: execution.handle })
-                      }
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        focusPoint(centre, {
-                          type: "discovered-execution",
-                          id: execution.handle,
-                        });
-                      }}
-                      onFocus={focusExecution}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== " ") return;
-                        event.preventDefault();
-                        onSelect({ type: "discovered-execution", id: execution.handle });
-                      }}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <rect
-                        className="discovered-execution__card"
-                        height={DISCOVERED_CARD_HEIGHT}
-                        rx="5"
-                        width={DISCOVERED_CARD_WIDTH}
-                        x={-DISCOVERED_CARD_WIDTH / 2}
-                        y={-DISCOVERED_CARD_HEIGHT / 2}
-                      />
-                      <rect
-                        className="discovered-execution__selection"
-                        height={DISCOVERED_CARD_HEIGHT + 8}
-                        rx="7"
-                        width={DISCOVERED_CARD_WIDTH + 8}
-                        x={-DISCOVERED_CARD_WIDTH / 2 - 4}
-                        y={-DISCOVERED_CARD_HEIGHT / 2 - 4}
-                      />
-                      <line
-                        className="discovered-execution__rule"
-                        x1={-DISCOVERED_CARD_WIDTH / 2 + 14}
-                        x2={DISCOVERED_CARD_WIDTH / 2 - 14}
-                        y1="-38"
-                        y2="-38"
-                      />
-                      <g className="discovered-execution__provider" transform="translate(-124 -54)">
-                        <AgentLogo map provider={execution.provider} />
-                      </g>
-                      <text className="discovered-execution__identity" x="-108" y="-51">
-                        DISCOVERED / {execution.hostKind.toUpperCase()}
-                      </text>
-                      <g className="discovered-execution__state" transform="translate(122 -54)">
-                        <circle r="3" />
-                        <text x="-8" y="3">
-                          {state.toUpperCase()}
-                        </text>
-                      </g>
-                      <text className="discovered-execution__name" x="-124" y="-15">
-                        {title.map((line, lineIndex) => (
-                          <tspan
-                            dy={lineIndex === 0 ? 0 : 15}
-                            key={`${line}-${lineIndex}`}
-                            x="-124"
-                          >
-                            {line}
-                          </tspan>
-                        ))}
-                      </text>
-                      <text className="discovered-execution__context" x="-124" y="34">
-                        {workspace}
-                      </text>
-                      <text className="discovered-execution__conversation" x="-124" y="51">
-                        {conversation}
-                      </text>
-                    </g>
-                    {terminalAvailable ? (
-                      <g
-                        aria-label={`Open ${execution.displayName} terminal`}
-                        className="discovered-execution__quick-action"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenDiscoveredTerminal?.(execution);
-                        }}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                        onFocus={focusExecution}
-                        onKeyDown={(event) =>
-                          runQuickAction(event, () => onOpenDiscoveredTerminal?.(execution))
-                        }
-                        onPointerDown={(event) => event.stopPropagation()}
-                        role="button"
-                        tabIndex={0}
-                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`}
-                      >
-                        <title>Open terminal</title>
-                        <rect height="20" rx="3" width="22" x="0" y="0" />
-                        <Terminal
-                          aria-hidden="true"
-                          height="14"
-                          strokeWidth="1.8"
-                          width="14"
-                          x="4"
-                          y="3"
-                        />
-                      </g>
-                    ) : null}
+                    <Terminal x="90" y="25" />
                   </g>
-                );
-              })}
+                ) : null}
+              </g>
+            );
+          })}
+          {discoveryDock ? (
+            <g className="discovered-dock">
+              <rect
+                className="discovered-dock__frame"
+                height={discoveryDock.bounds.height}
+                width={discoveryDock.bounds.width}
+                x={discoveryDock.bounds.left}
+                y={discoveryDock.bounds.top}
+              />
+              <text
+                className="discovered-dock__label"
+                x={discoveryDock.bounds.left + 18}
+                y={discoveryDock.bounds.top + 25}
+              >
+                DISCOVERED EXECUTIONS · {projection.discoveredExecutions?.length ?? 0}
+              </text>
             </g>
           ) : null}
         </g>
       </svg>
       <div className="zoom-control" aria-label="Map zoom controls">
-        <button aria-label="Zoom out" onClick={zoomOut} type="button">
-          −
-        </button>
-        <button
-          aria-label="Reset map zoom"
-          className="zoom-control__level"
-          onClick={resetCamera}
-          type="button"
-        >
-          {Math.round(camera.zoom * 100)}%
-        </button>
-        <button aria-label="Zoom in" onClick={zoomIn} type="button">
-          +
-        </button>
-        <button aria-label="Fit map to screen" onClick={reset} type="button">
-          Fit
-        </button>
+        <button onClick={camera.zoomOut}>−</button>
+        <button onClick={camera.resetCamera}>{Math.round(camera.camera.zoom * 100)}%</button>
+        <button onClick={camera.zoomIn}>+</button>
+        <button onClick={camera.reset}>Fit</button>
         {additionalControls}
       </div>
     </div>

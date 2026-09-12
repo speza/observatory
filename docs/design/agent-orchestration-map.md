@@ -119,14 +119,18 @@ must not silently transfer a Goal or join two conversations.
 Stable geography should reduce the amount of work the operator reconstructs in
 memory. The layout therefore follows these rules:
 
-- Systems provide broad portfolio scope.
-- Goals are stable bodies in world space.
-- Direct Agents occupy deterministic satellite positions around their Goal.
-- Manual Goal movement pins the accepted position.
-- Adding unrelated work does not globally reflow existing geography.
-- An unpinned Goal may move locally when its own expanded footprint collides.
+- Systems provide broad portfolio scope rather than map bodies.
+- Fresh live execution workspaces are stable map territories, qualified by host
+  instance and laid out from their opaque identity without exposing it.
+- Agents inhabit their observed workspace; a workspace can contain multiple
+  Goals and one Goal can span multiple workspaces.
+- Goals remain human-authored semantic overlays on Agent cards and selections,
+  not inferred runtime containers.
+- Agents without fresh workspace evidence remain visible in one explicit
+  workspace-less area.
+- Adding unrelated work does not globally reflow existing workspace geography.
 - Attention changes emphasis and navigation, not durable position.
-- Repositories, runtimes and hosts never become spatial parent nodes.
+- Repositories and hosts never become spatial parent nodes.
 - Discovered executions share one labelled, compact dock placed below the
   rendered universe footprint; it never relocates accepted Goals or implies
   System membership.
@@ -144,14 +148,23 @@ Needs-you count. Entering a System reveals its Atlas or Ledger.
 
 ### Atlas
 
-Atlas shows Goal bodies and their direct Agent satellites. It is designed for
-orientation, relationship memory and navigation rather than full text
-legibility for every card at every scale.
+Atlas shows fresh live execution workspaces as its primary territories, with
+their Agents in compact card grids. The projection groups workspaces across
+Goal boundaries, includes single-Agent workspaces, qualifies opaque container
+equality by host instance and emits only safe labels, public Agent views and
+derived positions. Tabs and panes remain host-owned placement details rather
+than map grouping levels.
+
+Each Agent card carries its Goal as a coloured semantic tag. Selecting a Goal
+highlights and fits all of its Agents across workspace territories. This keeps
+human intent visible without claiming a false Workspace-to-Goal 1:1 invariant.
+Agents whose workspace evidence is missing, stale or unavailable appear in a
+separate labelled area rather than being assigned by inference or omitted.
 
 Atlas also shows a labelled `Discovered in Herdr` dock for current
 host-reported agent executions that have no admitted Agent match. The dock is a
-single compact grid anchored below the rendered universe footprint, orbit
-cards and Goal captions included, and drawn with its own bounded frame so it
+single compact grid anchored below the rendered universe footprint, workspace
+territories and workspace-less cards included, and drawn with its own bounded frame so it
 reads as one neutral staging area rather than scattered cards. These cards are
 visibly separate from Goal or System geography and carry safe host/runtime/
 workspace metadata, freshness and conversation-identification state. Selecting
@@ -162,36 +175,21 @@ selection.
 
 Geometric zoom changes camera scale. Presentation density changes labels and
 metadata while preserving positions. Selected and attention-bearing work retain
-identity at low density. Focus mode shows one complete Goal orbit when the full
-portfolio is too dense.
-
-Goal focus fits its body, caption, orbit ellipses and Agent cards within the
-viewport left after reserving the Inspector or another side panel. This is a
-geometric fit, not a guarantee that every label is readable: use individual
-Agent focus or Ledger for detailed reading. Individual Agent focus retains the
+identity at low density. Goal focus fits all matching Agent cards across their
+workspace territories within the viewport left after reserving the Inspector
+or another side panel. Individual Agent focus retains the
 1.45 zoom cap. The camera uses an absolute world origin; projection refreshes do
 not refit the overview. Active focus adapts to viewport and panel changes until
 the operator manually pans or zooms. Terminal entry, switching and return retain
 background panel context rather than reframing the map; explicit System changes
 start a new fitted view.
 
-The full spatial-memory hypothesis is not yet met. Renderer peer redistribution
-and portfolio-dependent spacing still permit reflow, and sorted-ID collision
-probing in projected satellite slots can change ownership after membership edits.
-A fixed-scale canonical-band alternative was not integrated because it materially
-reduced overview and focused-Goal readability. A compact, legible placement policy
-needs separate design work; no browser slot cache or schema change substitutes for
-that decision.
-
-Pending approval: strict membership- and reload-stable satellites would require
-Universe-owned `{goalId, agentId, slot}` reservations, unique per identity and per
-Goal slot, persisted atomically with assignment. Reservations would survive
-archive, unassignment and reassignment, restoring the previous slot on return,
-without automatic reuse or compaction. Initial allocation would be deterministic;
-footprints would use the highest active reserved slot band, including expansion
-beyond the current slot table. This needs an explicit migration decision and
-restart, rollback, assignment and arbitrary-membership regression coverage. It is
-not implemented.
+Workspace positions are currently deterministic projections of qualified live
+container identity, not durable accepted coordinates. Membership changes resize
+an island and can alter portfolio fit without changing its anchor. Persisted,
+operator-arranged workspace geography would require a safe durable Observatory
+identity for a host container and an explicit lifecycle policy; it is not
+inferred from labels or added in this version.
 
 ### Ledger
 
@@ -322,6 +320,14 @@ Every visual property needs a supervisory meaning.
 - Delight must improve orientation or judgment rather than decorate activity.
 
 ## Success criteria
+
+Atlas geography is workspace-first. Each fresh live execution context is a
+labelled island containing a compact Agent grid, including contexts with only
+one Agent. Goals are semantic overlays shown on Agent cards and used to
+spotlight matching Agents across any number of islands; they are not spatial
+bodies. Agents without fresh context evidence remain visible in a separately
+labelled workspace-less/dormant area, and discovered executions remain a
+separate dock. Systems only filter this geography.
 
 The spatial product is useful when operators can:
 

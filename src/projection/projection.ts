@@ -9,6 +9,7 @@ import {
   type System,
   type UniverseChange,
   type OperatorCheckpoint,
+  type MapPosition,
 } from "../universe/types.ts";
 import {
   defaultGoalMapPosition,
@@ -41,6 +42,7 @@ import type {
   AgentView,
   DiscoveredExecutionView,
   MapDiscoveredExecutionView,
+  MapWorkspaceView,
   UniverseMapProjection,
 } from "./types.ts";
 
@@ -637,12 +639,17 @@ const projectUniverseMap = (
   includeArchived = false,
   maximumAgents?: number,
 ): UniverseMapProjection => {
-  return mapFromCommandCentre(projectCommandCentre(state, now, includeArchived, maximumAgents));
+  return mapFromCommandCentre(
+    projectCommandCentre(state, now, includeArchived, maximumAgents),
+    state.agents,
+  );
 };
 
 export const mapFromCommandCentre = (
   commandCentre: CommandCentreProjection,
+  sourceAgents: readonly Agent[] = [],
 ): UniverseMapProjection => {
+  const sourceAgentsById = new Map(sourceAgents.map((agent) => [agent.id, agent]));
   const mapGoals = commandCentre.goals.map((goal) => {
     const mapPosition = goal.mapPosition ?? defaultGoalMapPosition(goal.id);
     const satellitePositions = agentSatellitePositions(
@@ -663,21 +670,73 @@ export const mapFromCommandCentre = (
       agents,
     };
   });
-  const occupiedPositions = mapGoals.flatMap((goal) => [
-    goal.mapPosition,
-    ...goal.agents.map((agent) => agent.mapPosition),
-  ]);
+  const allAgents = [...mapGoals.flatMap((goal) => goal.agents), ...commandCentre.unassigned];
+  const grouped = new Map<string, { label: string; agents: typeof allAgents }>();
+  const workspaceLessAgents: typeof allAgents = [];
+  for (const agent of allAgents) {
+    const source = sourceAgentsById.get(agent.id);
+    const containerId = opaqueContextValue(source?.executionContainer?.id);
+    if (
+      !source?.execution ||
+      !containerId ||
+      source.executionPresence !== "live" ||
+      source.observationHealth !== "fresh" ||
+      source.hostHealth !== "live"
+    ) {
+      workspaceLessAgents.push(agent);
+      continue;
+    }
+    const key = `${source.execution.hostKind}\u0000${source.execution.hostInstanceId}\u0000${containerId}`;
+    const existing = grouped.get(key);
+    if (existing) existing.agents.push(agent);
+    else
+      grouped.set(key, {
+        label: source.executionContainer?.label?.trim() || "Live workspace",
+        agents: [agent],
+      });
+  }
+  const occupied: { position: MapPosition; agentCount: number }[] = [];
+  const workspaces: MapWorkspaceView[] = [];
+  for (const [key, workspace] of [...grouped].sort(([left], [right]) => compareText(left, right))) {
+    const mapPosition = initialGoalMapPosition(
+      `execution-context:${key}`,
+      occupied,
+      workspace.agents.length,
+    );
+    const ids = workspace.agents.map((agent) => agent.id).sort(compareText);
+    const cardPositions = agentSatellitePositions(mapPosition, `execution-context:${key}`, ids);
+    const agents = workspace.agents
+      .sort(compareAgents)
+      .map((agent) => ({ ...agent, mapPosition: cardPositions.get(agent.id) ?? mapPosition }));
+    workspaces.push({
+      label: workspace.label,
+      mapPosition,
+      agents,
+      goalIds: [...new Set(agents.flatMap((agent) => agent.primaryGoalId ?? []))].sort(compareText),
+      attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
+      uncertaintyCount: agents.filter(agentIsUncertain).length,
+    });
+    occupied.push({ position: mapPosition, agentCount: agents.length });
+  }
+  const occupiedPositions = workspaces.map((workspace) => workspace.mapPosition);
   const inboxPosition = mapInboxAnchor(occupiedPositions);
   const unassignedPositions = unassignedAgentPositions(
     inboxPosition,
-    commandCentre.unassigned.map((agent) => agent.id),
+    workspaceLessAgents.map((agent) => agent.id),
   );
-  const mapUnassigned = commandCentre.unassigned.map((agent) => ({
+  const workspaceLess = workspaceLessAgents.map((agent) => ({
     ...agent,
     mapPosition: unassignedPositions.get(agent.id) ?? inboxPosition,
   }));
+  const mapUnassigned = commandCentre.unassigned.map(
+    (agent) =>
+      workspaceLess.find((candidate) => candidate.id === agent.id) ?? {
+        ...agent,
+        mapPosition: inboxPosition,
+      },
+  );
   const discoveryPositions = discoveredExecutionDockPositions(
-    [...occupiedPositions, ...mapUnassigned.map((agent) => agent.mapPosition)],
+    [...occupiedPositions, ...workspaceLess.map((agent) => agent.mapPosition)],
     (commandCentre.discoveredExecutions ?? [])
       .map((execution) => execution.handle)
       .sort(compareText),
@@ -693,6 +752,8 @@ export const mapFromCommandCentre = (
     generatedAt: commandCentre.generatedAt,
     host: commandCentre.host,
     attention: commandCentre.attention,
+    workspaces,
+    workspaceLess,
     goals: mapGoals,
     unassigned: mapUnassigned,
     discoveredExecutions: mapDiscoveredExecutions,

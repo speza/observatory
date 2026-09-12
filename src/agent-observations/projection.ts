@@ -368,6 +368,11 @@ export const enrichMap = (
   });
   return {
     ...projection,
+    workspaces: projection.workspaces.map((workspace) => ({
+      ...workspace,
+      agents: workspace.agents.map(enrich),
+    })),
+    workspaceLess: projection.workspaceLess.map(enrich),
     goals: projection.goals.map((goal) => {
       const agents = goal.agents.map(enrich);
       return {
