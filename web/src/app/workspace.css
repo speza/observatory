@@ -225,11 +225,32 @@
 .workspace-tree__goal-icon {
   color: var(--muted);
 }
-.workspace-tree .workspace-tree__agent {
-  margin-left: 12px;
-  width: calc(100% - 12px);
-  padding-left: 14px;
+.workspace-tree .workspace-tree__toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.workspace-tree__agent-branch {
+  display: flex;
+  align-items: center;
+  margin-left: calc(12px + var(--tree-depth, 0) * 14px);
+  width: calc(100% - 12px - var(--tree-depth, 0) * 14px);
+}
+.workspace-tree__agent-branch .workspace-tree__agent {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding-left: 7px;
   color: var(--muted);
+}
+.workspace-tree .workspace-tree__agent--child {
+  border-left: 1px solid var(--faint);
+}
+.workspace-tree__toggle-spacer {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+.workspace-tree small.is-attention {
+  color: var(--accent);
 }
 .workspace-tree :is(button, summary) > svg {
   width: 14px;
@@ -375,10 +396,9 @@
 .workspace-tree__unassigned {
   margin-top: 16px;
 }
-.workspace-tree__unassigned .workspace-tree__agent {
-  margin-left: 0;
-  width: 100%;
-  padding-left: 8px;
+.workspace-tree__unassigned .workspace-tree__agent-branch {
+  margin-left: calc(var(--tree-depth, 0) * 14px);
+  width: calc(100% - var(--tree-depth, 0) * 14px);
 }
 .workspace-tree__discovered-section {
   margin-top: 18px;

@@ -7,6 +7,8 @@ import {
   type Goal,
   type HostHealth,
   type Agent,
+  type AgentSpawnLink,
+  type SpawnLinkSource,
   type System,
   type UniverseState,
   type UniverseStore,
@@ -106,6 +108,23 @@ interface RelatedAgentDismissalRow {
   goal_id: string;
   agent_id: string;
   dismissed_at: number;
+}
+
+interface AgentSpawnLinkRow {
+  child_agent_id: string;
+  parent_agent_id: string;
+  source: string;
+  declared_at: number | null;
+  established_at: number;
+}
+
+interface AgentSpawnDeclarationRow {
+  child_agent_id: string;
+  host_kind: string;
+  host_instance_id: string;
+  native_id: string;
+  source: string;
+  declared_at: number;
 }
 
 interface HostRow {
@@ -301,6 +320,19 @@ const executionBindings = (value: string | null): Agent["executionHistory"] => {
     return [];
   }
 };
+const asSpawnLinkSource = (value: string): SpawnLinkSource => {
+  if (value === "declared" || value === "managed-launch" || value === "human") return value;
+  // Legacy rows stored the host-specific channel name; the concept is a declaration.
+  if (value === "herdr-token") return "declared";
+  return "unknown";
+};
+
+const asSpawnDeclarationSource = (value: string): Exclude<SpawnLinkSource, "human"> => {
+  if (value === "declared" || value === "managed-launch") return value;
+  if (value === "herdr-token") return "declared";
+  return "unknown";
+};
+
 const asChangeOutcome = (value: string): UniverseChange["outcome"] =>
   value === "new" ||
   value === "changed" ||
@@ -490,6 +522,34 @@ export class SqliteUniverseStore
         agentId: row.agent_id,
         dismissedAt: row.dismissed_at,
       }));
+    const agentSpawnLinks = this.db
+      .query<AgentSpawnLinkRow, []>(
+        "SELECT child_agent_id, parent_agent_id, source, declared_at, established_at FROM agent_spawn_links ORDER BY child_agent_id",
+      )
+      .all()
+      .map((row) => {
+        const link: AgentSpawnLink = {
+          childAgentId: row.child_agent_id,
+          parentAgentId: row.parent_agent_id,
+          source: asSpawnLinkSource(row.source),
+          establishedAt: row.established_at,
+        };
+        if (row.declared_at !== null) Object.assign(link, { declaredAt: row.declared_at });
+        return link;
+      });
+    const agentSpawnDeclarations = this.db
+      .query<AgentSpawnDeclarationRow, []>(
+        "SELECT child_agent_id, host_kind, host_instance_id, native_id, source, declared_at FROM agent_spawn_declarations ORDER BY child_agent_id",
+      )
+      .all()
+      .map((row) => ({
+        childAgentId: row.child_agent_id,
+        hostKind: row.host_kind,
+        hostInstanceId: row.host_instance_id,
+        nativeId: row.native_id,
+        source: asSpawnDeclarationSource(row.source),
+        declaredAt: row.declared_at,
+      }));
     const changes = this.db
       .query<UniverseChangeRow, []>("SELECT * FROM universe_changes ORDER BY sequence")
       .all()
@@ -517,6 +577,8 @@ export class SqliteUniverseStore
       agents,
       hosts,
       relatedAgentDismissals,
+      agentSpawnLinks,
+      agentSpawnDeclarations,
       changes,
       operatorCheckpoint: checkpoint
         ? { lastSequence: checkpoint.last_sequence, acknowledgedAt: checkpoint.acknowledged_at }
@@ -626,6 +688,33 @@ export class SqliteUniverseStore
       );
       for (const row of state.relatedAgentDismissals ?? [])
         dismissal.run(row.goalId, row.agentId, row.dismissedAt);
+      const spawnLink = this.prepareSnapshotTable(
+        "agent_spawn_links",
+        "child_agent_id, parent_agent_id, source, declared_at, established_at",
+        ["child_agent_id"],
+      );
+      for (const row of state.agentSpawnLinks ?? [])
+        spawnLink.run(
+          row.childAgentId,
+          row.parentAgentId,
+          row.source,
+          row.declaredAt ?? null,
+          row.establishedAt,
+        );
+      const spawnDeclaration = this.prepareSnapshotTable(
+        "agent_spawn_declarations",
+        "child_agent_id, host_kind, host_instance_id, native_id, source, declared_at",
+        ["child_agent_id"],
+      );
+      for (const row of state.agentSpawnDeclarations ?? [])
+        spawnDeclaration.run(
+          row.childAgentId,
+          row.hostKind,
+          row.hostInstanceId,
+          row.nativeId,
+          row.source,
+          row.declaredAt,
+        );
       const change = this.prepareSnapshotTable(
         "universe_changes",
         "sequence, occurred_at, outcome, target_type, target_id, goal_id, summary",
@@ -652,7 +741,17 @@ export class SqliteUniverseStore
           state.operatorCheckpoint.lastSequence,
           state.operatorCheckpoint.acknowledgedAt,
         );
-      const tables = [system, goal, agent, host, dismissal, change, checkpoint];
+      const tables = [
+        system,
+        goal,
+        agent,
+        host,
+        dismissal,
+        spawnLink,
+        spawnDeclaration,
+        change,
+        checkpoint,
+      ];
       for (const table of tables) table.finish();
       if (this.db.query("PRAGMA foreign_key_check").get())
         throw new Error("FOREIGN KEY constraint failed");
@@ -1222,6 +1321,8 @@ export class SqliteUniverseStore
     const counts = this.db.transaction(() => {
       const summary = this.resetCounts();
       this.db.exec(`
+        DELETE FROM agent_spawn_links;
+        DELETE FROM agent_spawn_declarations;
         DELETE FROM related_agent_dismissals;
         UPDATE agents
         SET primary_goal_id = NULL,
@@ -1261,6 +1362,8 @@ export class SqliteUniverseStore
     const counts = this.db.transaction(() => {
       const summary = this.resetCounts();
       this.db.exec(`
+        DELETE FROM agent_spawn_links;
+        DELETE FROM agent_spawn_declarations;
         DELETE FROM related_agent_dismissals;
         DELETE FROM agents;
         DELETE FROM goals;
@@ -1467,6 +1570,24 @@ export class SqliteUniverseStore
         FOREIGN KEY(goal_id) REFERENCES goals(id),
         FOREIGN KEY(agent_id) REFERENCES agents(id)
       );
+      CREATE TABLE IF NOT EXISTS agent_spawn_links (
+        child_agent_id TEXT PRIMARY KEY,
+        parent_agent_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        declared_at INTEGER,
+        established_at INTEGER NOT NULL,
+        FOREIGN KEY(child_agent_id) REFERENCES agents(id),
+        FOREIGN KEY(parent_agent_id) REFERENCES agents(id)
+      );
+      CREATE TABLE IF NOT EXISTS agent_spawn_declarations (
+        child_agent_id TEXT PRIMARY KEY,
+        host_kind TEXT NOT NULL,
+        host_instance_id TEXT NOT NULL,
+        native_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        declared_at INTEGER NOT NULL,
+        FOREIGN KEY(child_agent_id) REFERENCES agents(id)
+      );
       CREATE TABLE IF NOT EXISTS universe_changes (
         sequence INTEGER PRIMARY KEY,
         occurred_at INTEGER NOT NULL,
@@ -1567,6 +1688,10 @@ export class SqliteUniverseStore
         WHERE system_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS related_agent_dismissals_agent
         ON related_agent_dismissals(agent_id);
+      CREATE INDEX IF NOT EXISTS agent_spawn_links_parent
+        ON agent_spawn_links(parent_agent_id);
+      CREATE INDEX IF NOT EXISTS agent_spawn_declarations_parent
+        ON agent_spawn_declarations(host_kind, host_instance_id, native_id);
       CREATE INDEX IF NOT EXISTS launch_receipts_updated
         ON launch_receipts(updated_at);
       PRAGMA user_version = ${SQLITE_SCHEMA_GENERATION};

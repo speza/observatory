@@ -150,6 +150,34 @@ const openCodeProcessPayload = (paneId: string, argv: readonly string[]): JsonRe
   },
 });
 
+const spawnSnapshotPayload = (options: {
+  readonly paneTokens?: Record<string, string>;
+  readonly workspaceTokens?: Record<string, string>;
+}): JsonRecord => {
+  const pane = {
+    pane_id: "spawn-pane",
+    terminal_id: "term",
+    workspace_id: "spawn-workspace",
+    tab_id: "t",
+    cwd: "/ordinary/workspace",
+  };
+  const workspace = {
+    workspace_id: "spawn-workspace",
+    label: "spawn-workspace",
+  };
+  return {
+    result: {
+      snapshot: {
+        panes: [options.paneTokens ? { ...pane, tokens: options.paneTokens } : pane],
+        agents: [{ pane_id: "spawn-pane", agent: "codex", agent_status: "idle", name: "Child" }],
+        workspaces: [
+          options.workspaceTokens ? { ...workspace, tokens: options.workspaceTokens } : workspace,
+        ],
+      },
+    },
+  };
+};
+
 const processQueryCount = (runner: ProcessInfoRunner): number =>
   runner.calls.filter(([, command]) => command === "pane").length;
 
@@ -232,6 +260,67 @@ describe("Herdr adapter", () => {
     expect(snapshot.agents[0]?.hostLocator).toContain("paneId");
     expect(snapshot.agents[0]?.hostLocator).not.toContain("terminal output");
     expect(snapshot.agents.some((agent) => agent.nativeId === "fixture-w1:p2")).toBe(false);
+  });
+
+  test("reads a pane spawn token as a declared parent", () => {
+    const snapshot = parseHerdrSnapshot(
+      spawnSnapshotPayload({ paneTokens: { "ao-spawned-by": "w1:p1" } }),
+      10,
+    );
+    expect(snapshot.agents[0]?.spawnDeclaration).toEqual({
+      parentNativeId: "w1:p1",
+      source: "pane-token",
+      declaredAt: 10,
+    });
+  });
+
+  test("falls back to a workspace spawn token when the pane has none", () => {
+    const snapshot = parseHerdrSnapshot(
+      spawnSnapshotPayload({ workspaceTokens: { "ao-spawned-by": "w9:p3" } }),
+      10,
+    );
+    expect(snapshot.agents[0]?.spawnDeclaration).toEqual({
+      parentNativeId: "w9:p3",
+      source: "workspace-token",
+      declaredAt: 10,
+    });
+  });
+
+  test("retains a conflicting declaration as evidence without linking", () => {
+    const snapshot = parseHerdrSnapshot(
+      spawnSnapshotPayload({
+        paneTokens: { "ao-spawned-by": "w1:p1" },
+        workspaceTokens: { "ao-spawned-by": "w9:p3" },
+      }),
+      10,
+    );
+    expect(snapshot.agents[0]?.spawnDeclaration).toEqual({
+      parentNativeId: "w1:p1",
+      source: "pane-token",
+      declaredAt: 10,
+      conflict: true,
+    });
+    expect(
+      snapshot.diagnostics.some((diagnostic) =>
+        diagnostic.includes("conflicting spawn declaration"),
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects path-like and control-character spawn tokens", () => {
+    const path = parseHerdrSnapshot(
+      spawnSnapshotPayload({ paneTokens: { "ao-spawned-by": "/tmp/other-pane" } }),
+      10,
+    );
+    expect(path.agents[0]?.spawnDeclaration).toBeUndefined();
+    expect(
+      path.diagnostics.some((diagnostic) => diagnostic.includes("invalid ao-spawned-by")),
+    ).toBe(true);
+    const control = parseHerdrSnapshot(
+      spawnSnapshotPayload({ paneTokens: { "ao-spawned-by": "bad\nvalue" } }),
+      10,
+    );
+    expect(control.agents[0]?.spawnDeclaration).toBeUndefined();
   });
 
   test("removes Herdr's animated working marker from the display name", () => {

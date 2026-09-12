@@ -6,6 +6,7 @@ import type {
   HostExecutionLaunchRequest,
   HostLaunchResult,
   HostAgentObservation,
+  HostSpawnDeclaration,
   HostSnapshot,
   OpaqueAccessTarget,
   LinkedExecution,
@@ -141,6 +142,70 @@ const harnessEvidenceFor = (
     source: source === "hook" ? "hook" : kind && value ? "native-integration" : "process",
     observedAt,
   };
+};
+
+const SPAWN_TOKEN_NAME = "ao-spawned-by";
+const SPAWN_PARENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+
+interface SpawnTokenRead {
+  readonly value?: string;
+  readonly invalid: boolean;
+}
+
+const spawnParentFromTokens = (record: RecordValue): SpawnTokenRead => {
+  const tokens = record.tokens;
+  if (!isRecord(tokens) || tokens[SPAWN_TOKEN_NAME] === undefined) return { invalid: false };
+  const value = stringValue(tokens, SPAWN_TOKEN_NAME);
+  if (!value || !SPAWN_PARENT_PATTERN.test(value)) return { invalid: true };
+  return { value, invalid: false };
+};
+
+interface SpawnDeclarationRead {
+  readonly declaration?: HostSpawnDeclaration;
+  readonly conflict: boolean;
+  readonly invalid: boolean;
+}
+
+/**
+ * Reads the reserved spawn token from the pane, then the workspace. A pane
+ * token wins; disagreement is a conflict retained as evidence, never a link.
+ */
+const spawnDeclarationFor = (
+  pane: RecordValue,
+  workspace: RecordValue,
+  observedAt: number,
+): SpawnDeclarationRead => {
+  const paneRead = spawnParentFromTokens(pane);
+  const workspaceRead = spawnParentFromTokens(workspace);
+  const invalid = paneRead.invalid || workspaceRead.invalid;
+  if (paneRead.value && workspaceRead.value && paneRead.value !== workspaceRead.value)
+    return {
+      conflict: true,
+      invalid,
+      declaration: {
+        parentNativeId: paneRead.value,
+        source: "pane-token",
+        declaredAt: observedAt,
+        conflict: true,
+      },
+    };
+  if (paneRead.value)
+    return {
+      declaration: { parentNativeId: paneRead.value, source: "pane-token", declaredAt: observedAt },
+      conflict: false,
+      invalid,
+    };
+  if (workspaceRead.value)
+    return {
+      declaration: {
+        parentNativeId: workspaceRead.value,
+        source: "workspace-token",
+        declaredAt: observedAt,
+      },
+      conflict: false,
+      invalid,
+    };
+  return { conflict: false, invalid };
 };
 
 const OPEN_CODE_HARNESSES = new Set(["opencode"]);
@@ -312,6 +377,13 @@ export const parseHerdrSnapshot = (
     const branch = stringValue(worktree, "branch");
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const harnessEvidence = harnessEvidenceFor(item, observedAt);
+    const spawn = spawnDeclarationFor(pane, workspace, observedAt);
+    if (spawn.invalid)
+      diagnostics.push(`Ignored an invalid ${SPAWN_TOKEN_NAME} token on ${paneId}.`);
+    if (spawn.conflict)
+      diagnostics.push(
+        `Found a conflicting spawn declaration on ${paneId}: pane and workspace tokens disagree.`,
+      );
     const discoverable = harnessEvidence?.nativeConversationRef !== undefined;
     const executionContainerLabel = stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
@@ -327,6 +399,7 @@ export const parseHerdrSnapshot = (
         : { id: workspaceId },
     };
     if (harnessEvidence) Object.assign(observation, { harnessEvidence });
+    if (spawn.declaration) Object.assign(observation, { spawnDeclaration: spawn.declaration });
     if (!discoverable) Object.assign(observation, { discoverable: false });
     if (repository) Object.assign(observation, { repository });
     if (branch) Object.assign(observation, { branch });

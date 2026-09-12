@@ -113,12 +113,14 @@ interface AtlasCameraState {
 
 export const useAtlasCamera = ({
   cameraCommand,
+  lineageAnchorAgentId,
   projection,
   reservedLeft,
   reservedRight,
   selection,
 }: {
   readonly cameraCommand?: AtlasCameraCommand;
+  readonly lineageAnchorAgentId?: string;
   readonly projection: UniverseMapProjection;
   readonly reservedLeft: number;
   readonly reservedRight: number;
@@ -187,7 +189,12 @@ export const useAtlasCamera = ({
       const agentIndex = goal.agents.findIndex((candidate) => candidate.id === target.id);
       if (agentIndex >= 0) {
         const centre = screenPoint(goal.mapPosition);
-        return goalAgentPoints(goal, centre)[agentIndex];
+        const anchor =
+          lineageAnchorAgentId &&
+          goal.agents.some((candidate) => candidate.id === lineageAnchorAgentId)
+            ? lineageAnchorAgentId
+            : undefined;
+        return goalAgentPoints(goal, centre, anchor)[agentIndex];
       }
     }
     return undefined;
@@ -244,7 +251,7 @@ export const useAtlasCamera = ({
     if (!autoFocus.current || !focusedSelection) return;
     const point = pointForSelection(focusedSelection);
     if (point) focusPoint(point, focusedSelection);
-  }, [size, reservedLeft, reservedRight, projection, focusedSelection]);
+  }, [size, reservedLeft, reservedRight, projection, focusedSelection, lineageAnchorAgentId]);
 
   const resetCamera = (): void => {
     cameraAdjusted.current = false;
@@ -303,7 +310,7 @@ export const useAtlasCamera = ({
         return;
       }
     }
-  }, [cameraCommand, layout, projection]);
+  }, [cameraCommand, layout, projection, lineageAnchorAgentId]);
 
   const beginPan = (event: ReactPointerEvent<SVGSVGElement>): void => {
     if (event.button !== 0) return;

@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ArchiveX, GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
+import { ArchiveX, GitCompareArrows, GitPullRequest, Network, Terminal } from "lucide-react";
 import type {
   AgentView,
   DiscoveredExecutionView,
@@ -125,6 +125,52 @@ export const Atlas = ({
   pullRequestUrls,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
+  const parentByAgentId = new Map<string, string>();
+  const childrenByAgentId = new Map<string, string[]>();
+  const agentById = new Map<string, AgentView>();
+  for (const goal of projection.goals) {
+    for (const agent of goal.agents) {
+      agentById.set(agent.id, agent);
+      const parentAgentId = agent.spawnedBy?.parentAgentId;
+      if (!parentAgentId) continue;
+      parentByAgentId.set(agent.id, parentAgentId);
+      const children = childrenByAgentId.get(parentAgentId);
+      if (children) children.push(agent.id);
+      else childrenByAgentId.set(parentAgentId, [agent.id]);
+    }
+  }
+  const selectedAgentId = selection?.type === "agent" ? selection.id : undefined;
+  const selectedGoal = selectedAgentId
+    ? projection.goals.find((goal) => goal.agents.some((agent) => agent.id === selectedAgentId))
+    : undefined;
+  // Anchor the expanded family at its local root so selecting any member keeps
+  // the same cluster on the map instead of collapsing it under the pointer.
+  const lineageAnchorAgentId = (() => {
+    if (!selectedAgentId || !selectedGoal) return undefined;
+    const localIds = new Set(selectedGoal.agents.map((agent) => agent.id));
+    let root = selectedAgentId;
+    const seen = new Set([root]);
+    while (true) {
+      const parentAgentId = parentByAgentId.get(root);
+      if (!parentAgentId || !localIds.has(parentAgentId) || seen.has(parentAgentId)) break;
+      seen.add(parentAgentId);
+      root = parentAgentId;
+    }
+    return (childrenByAgentId.get(root)?.length ?? 0) > 0 ? root : undefined;
+  })();
+  const expandedDescendantIds = new Set<string>();
+  if (lineageAnchorAgentId && selectedGoal) {
+    const localIds = new Set(selectedGoal.agents.map((agent) => agent.id));
+    const queue = [...(childrenByAgentId.get(lineageAnchorAgentId) ?? [])];
+    while (queue.length > 0) {
+      const agentId = queue.shift();
+      if (!agentId || expandedDescendantIds.has(agentId) || !localIds.has(agentId)) continue;
+      expandedDescendantIds.add(agentId);
+      queue.push(...(childrenByAgentId.get(agentId) ?? []));
+    }
+  }
+  const expandedIds = new Set(expandedDescendantIds);
+  if (lineageAnchorAgentId) expandedIds.add(lineageAnchorAgentId);
   const {
     beginPan,
     camera,
@@ -143,7 +189,14 @@ export const Atlas = ({
     zoom,
     zoomIn,
     zoomOut,
-  } = useAtlasCamera({ cameraCommand, projection, reservedLeft, reservedRight, selection });
+  } = useAtlasCamera({
+    cameraCommand,
+    lineageAnchorAgentId,
+    projection,
+    reservedLeft,
+    reservedRight,
+    selection,
+  });
   const goalDrag = useRef<
     | {
         readonly goalId: string;
@@ -165,6 +218,34 @@ export const Atlas = ({
   const gridStep = GRID_LOGICAL_STEP * layout.goalSpacingScale;
   const discoveryDock = discoveredDockPlacement(projection, layout.goalSpacingScale);
   const dockTranslation = discoveryDock?.translation ?? { x: 0, y: 0 };
+  const isAgentVisible = (goalId: string, agentId: string): boolean => {
+    const parentAgentId = parentByAgentId.get(agentId);
+    if (!parentAgentId) return true;
+    const goal = projection.goals.find((candidate) => candidate.id === goalId);
+    if (!goal?.agents.some((agent) => agent.id === parentAgentId)) return true;
+    return expandedIds.has(agentId);
+  };
+  const agentPointById = new Map<string, { readonly x: number; readonly y: number }>();
+  for (const goal of projection.goals) {
+    const displayedPosition =
+      draggedGoal?.goalId === goal.id ? draggedGoal.position : goal.mapPosition;
+    const points = goalAgentPoints(
+      goal,
+      screenPoint(displayedPosition),
+      selectedGoal?.id === goal.id ? lineageAnchorAgentId : undefined,
+    );
+    goal.agents.forEach((agent, index) => {
+      const point = points[index];
+      if (point) agentPointById.set(agent.id, { x: point.x, y: point.y });
+    });
+  }
+  const lineageTethers = [...expandedIds].flatMap((agentId) => {
+    const parentAgentId = parentByAgentId.get(agentId);
+    if (!parentAgentId || !expandedIds.has(parentAgentId)) return [];
+    const from = agentPointById.get(parentAgentId);
+    const to = agentPointById.get(agentId);
+    return from && to ? [{ key: `${parentAgentId}:${agentId}`, from, to }] : [];
+  });
 
   const continueGoalDrag = (event: ReactPointerEvent<SVGGElement>): void => {
     const drag = goalDrag.current;
@@ -303,6 +384,17 @@ export const Atlas = ({
             x={-GRID_EXTENT}
             y={-GRID_EXTENT}
           />
+          {lineageTethers.length > 0 ? (
+            <g aria-hidden="true" className="atlas__lineage">
+              {lineageTethers.map((tether) => (
+                <path
+                  className="atlas__lineage-tether"
+                  d={`M ${tether.from.x} ${tether.from.y} L ${tether.to.x} ${tether.to.y}`}
+                  key={tether.key}
+                />
+              ))}
+            </g>
+          ) : null}
           {projection.goals.map((goal) => {
             const displayedPosition =
               draggedGoal?.goalId === goal.id ? draggedGoal.position : goal.mapPosition;
@@ -326,7 +418,11 @@ export const Atlas = ({
                 agent.lifecycleState,
               ),
             );
-            const agentPoints = goalAgentPoints(goal, centre);
+            const agentPoints = goalAgentPoints(
+              goal,
+              centre,
+              selectedGoal?.id === goal.id ? lineageAnchorAgentId : undefined,
+            );
             const orbitBands = [
               ...new Map(agentPoints.map((point) => [point.band, point])).values(),
             ];
@@ -467,6 +563,7 @@ export const Atlas = ({
                 {goal.agents.map((agent, agentIndex) => {
                   const point = agentPoints[agentIndex];
                   if (!point) return null;
+                  if (!isAgentVisible(goal.id, agent.id)) return null;
                   const attention = agent.attention?.requiresHumanInput === true;
                   const uncertain = [
                     "runtime-unknown",
@@ -486,6 +583,19 @@ export const Atlas = ({
                   const closeActionX = pullRequestActionX - (pullRequestUrl === undefined ? 0 : 26);
                   const state = stateLabel(agent);
                   const card = presentAgentCard(agent);
+                  const directChildren = childrenByAgentId.get(agent.id) ?? [];
+                  const childCount = directChildren.length;
+                  const childAttention = directChildren.some(
+                    (childId) => agentById.get(childId)?.attention,
+                  );
+                  const childBadgeLabel = `${childCount} spawned`;
+                  const childBadgeWidth = Math.round(30 + childBadgeLabel.length * 5.6);
+                  const lineageRelated = expandedIds.has(agent.id);
+                  const lineageDimmed =
+                    selectedAgentId !== undefined &&
+                    selectedGoal?.id === goal.id &&
+                    expandedIds.size > 1 &&
+                    !expandedIds.has(agent.id);
                   const style: AgentStyle = {
                     "--goal-color": palette.mark,
                     "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
@@ -494,7 +604,7 @@ export const Atlas = ({
                     (onFocusSelection ?? onSelect)({ type: "agent", id: agent.id });
                   return (
                     <g
-                      className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""}`}
+                      className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${agentSelected ? "is-selected" : ""} ${lineageRelated ? "is-lineage-related" : ""} ${lineageDimmed ? "is-lineage-dimmed" : ""}`}
                       data-agent-id={agent.id}
                       data-parent-goal-id={goal.id}
                       data-screen-x={point.x.toFixed(2)}
@@ -579,6 +689,26 @@ export const Atlas = ({
                             <g className="agent__review-badge" transform="translate(88 -50)">
                               <circle r="8" />
                               <text y="3">!</text>
+                            </g>
+                          ) : null}
+                          {childCount > 0 ? (
+                            <g
+                              className={`agent__lineage-badge ${childAttention ? "agent__lineage-badge--attention" : ""}`}
+                              transform="translate(-96 -50)"
+                            >
+                              <rect height="18" rx="9" width={childBadgeWidth} x="0" y="-14" />
+                              <Network
+                                aria-hidden="true"
+                                height="12"
+                                strokeWidth="2.2"
+                                width="12"
+                                x="9"
+                                y="-10"
+                              />
+                              <text textAnchor="start" x="25" y="-1">
+                                {childBadgeLabel}
+                              </text>
+                              <title>{`${childCount} session${childCount === 1 ? "" : "s"} spawned by this Agent`}</title>
                             </g>
                           ) : null}
                           <text className="agent__name" x="-96" y="-5">

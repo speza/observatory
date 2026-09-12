@@ -61,6 +61,19 @@ const OptionalHostHealth = Schema.optionalToRequired(HostHealth, Schema.Undefine
   decode: Option.getOrUndefined,
   encode: Option.fromNullable,
 });
+const SpawnLineage = Schema.Struct({
+  state: Schema.Literal("resolved", "unresolved", "conflict"),
+  parentAgentId: Schema.optional(Schema.String),
+  parentDisplayName: Schema.optional(Schema.String),
+  parentArchived: Schema.optional(Schema.Boolean),
+  suggestedGoal: Schema.optional(Schema.Struct({ goalId: Schema.String, title: Schema.String })),
+  explanation: Schema.String,
+});
+const SpawnChild = Schema.Struct({
+  agentId: Schema.String,
+  displayName: Schema.String,
+  archived: Schema.Boolean,
+});
 const AgentFields = {
   id: Schema.String,
   execution: Schema.optional(
@@ -103,6 +116,7 @@ const AgentFields = {
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
+  spawnedBy: Schema.optional(SpawnLineage),
   providerEvidence: Schema.optional(
     Schema.Struct({
       providerLabel: Schema.String,
@@ -205,6 +219,7 @@ const DiscoveredExecutionFields = {
     Schema.Struct({ status: Schema.Literal("unavailable"), explanation: Schema.String }),
   ),
   conversationConflictCount: Schema.Number,
+  spawnedBy: Schema.optional(SpawnLineage),
 };
 const DiscoveredExecution = Schema.Struct(DiscoveredExecutionFields);
 const MapDiscoveredExecution = Schema.Struct({
@@ -387,6 +402,7 @@ export const InspectorProjectionSchema = Schema.Union(
         id: Schema.String,
       }),
     ),
+    children: Schema.Array(SpawnChild),
     lines: Schema.Array(Schema.String),
   }),
   Schema.Struct({

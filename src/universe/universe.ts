@@ -2,12 +2,13 @@ import type {
   ControlPlaneEventSink,
   UnsequencedControlPlaneEvent,
 } from "../control-plane-events/index.ts";
-import type { HostSnapshot, HostAgentObservation } from "../hosts/types.ts";
+import type { HostSnapshot, HostAgentObservation, HostSpawnDeclaration } from "../hosts/types.ts";
 import type {
   DiscoveredExecutionView,
   Projection,
   ProjectionModule,
   ProjectionQuery,
+  SpawnLineageView,
 } from "../projection/types.ts";
 import {
   DEFAULT_SYSTEM_ID,
@@ -29,6 +30,8 @@ import {
   type AgentId,
   type Agent,
   type AgentExecutionBinding,
+  type AgentSpawnDeclaration,
+  type AgentSpawnLink,
   type NativeConversationRef,
   type RuntimeInvalidationResult,
   type UniverseChange,
@@ -114,6 +117,12 @@ export type UniverseCommand =
     }
   | { readonly type: "UnassignAgent"; readonly agentId: AgentId }
   | {
+      readonly type: "SetAgentSpawnParent";
+      readonly childAgentId: AgentId;
+      readonly parentAgentId: AgentId;
+    }
+  | { readonly type: "ClearAgentSpawnParent"; readonly childAgentId: AgentId }
+  | {
       readonly type: "RenameAgent";
       readonly agentId: AgentId;
       readonly displayName: string;
@@ -133,6 +142,12 @@ export type UniverseCommand =
       readonly workspaceRef?: string;
       readonly observedAt: number;
       readonly goalId?: GoalId;
+      /** Declared spawn provenance captured at admission; resolved exactly or retained. */
+      readonly spawn?: {
+        readonly source: "declared" | "managed-launch";
+        readonly declaredAt: number;
+        readonly parentExecution: SpawnParentExecutionRef;
+      };
     }
   | { readonly type: "ArchiveAgent"; readonly agentId: AgentId }
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly AgentId[] }
@@ -196,6 +211,172 @@ const uniqueAgentIds = (agentIds: readonly AgentId[]): AgentId[] => [
   ...new Set(agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
 ];
 
+const agentExecutionBindings = (agent: Agent): readonly AgentExecutionBinding[] => [
+  ...(agent.execution ? [agent.execution] : []),
+  ...agent.executionHistory,
+  ...agent.conflictingExecutions,
+];
+
+interface SpawnParentExecutionRef {
+  readonly hostKind: string;
+  readonly hostInstanceId: string;
+  readonly nativeId: string;
+}
+
+const agentBindsParentExecution = (agent: Agent, parent: SpawnParentExecutionRef): boolean =>
+  agentExecutionBindings(agent).some(
+    (binding) =>
+      binding.hostKind === parent.hostKind &&
+      binding.hostInstanceId === parent.hostInstanceId &&
+      binding.nativeId === parent.nativeId,
+  );
+
+const resolveSpawnParentAgent = (
+  state: { readonly agents: readonly Agent[] },
+  parent: SpawnParentExecutionRef,
+): Agent | undefined => {
+  const matches = state.agents.filter((agent) => agentBindsParentExecution(agent, parent));
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+/** True when candidateAgentId is startAgentId or an ancestor of it. */
+const spawnParentChainIncludes = (
+  state: UniverseState,
+  startAgentId: AgentId,
+  candidateAgentId: AgentId,
+): boolean => {
+  const seen = new Set<AgentId>();
+  let current: AgentId | undefined = startAgentId;
+  while (current !== undefined && !seen.has(current)) {
+    if (current === candidateAgentId) return true;
+    seen.add(current);
+    current = state.agentSpawnLinks.find((link) => link.childAgentId === current)?.parentAgentId;
+  }
+  return false;
+};
+
+const spawnLinkFor = (state: UniverseState, childAgentId: AgentId): AgentSpawnLink | undefined =>
+  state.agentSpawnLinks.find((link) => link.childAgentId === childAgentId);
+
+const removeSpawnDeclaration = (state: UniverseState, childAgentId: AgentId): void => {
+  state.agentSpawnDeclarations = state.agentSpawnDeclarations.filter(
+    (declaration) => declaration.childAgentId !== childAgentId,
+  );
+};
+
+const setSpawnLink = (state: UniverseState, link: AgentSpawnLink): void => {
+  removeSpawnDeclaration(state, link.childAgentId);
+  state.agentSpawnLinks = state.agentSpawnLinks
+    .filter((candidate) => candidate.childAgentId !== link.childAgentId)
+    .concat(link);
+};
+
+const setSpawnDeclaration = (state: UniverseState, declaration: AgentSpawnDeclaration): void => {
+  state.agentSpawnDeclarations = state.agentSpawnDeclarations
+    .filter((candidate) => candidate.childAgentId !== declaration.childAgentId)
+    .concat(declaration);
+};
+
+/** Move declared lineage from a removed duplicate Agent onto its keeper. */
+const repointSpawnReferences = (
+  state: UniverseState,
+  fromAgentId: AgentId,
+  toAgentId: AgentId,
+): void => {
+  if (fromAgentId === toAgentId) return;
+  const links = new Map<AgentId, AgentSpawnLink>();
+  for (const link of state.agentSpawnLinks) {
+    const next: AgentSpawnLink = {
+      ...link,
+      childAgentId: link.childAgentId === fromAgentId ? toAgentId : link.childAgentId,
+      parentAgentId: link.parentAgentId === fromAgentId ? toAgentId : link.parentAgentId,
+    };
+    if (next.childAgentId === next.parentAgentId) continue;
+    const previous = links.get(next.childAgentId);
+    if (!previous || next.establishedAt < previous.establishedAt)
+      links.set(next.childAgentId, next);
+  }
+  state.agentSpawnLinks = [...links.values()];
+  const declarations = new Map<AgentId, AgentSpawnDeclaration>();
+  for (const declaration of state.agentSpawnDeclarations) {
+    const childAgentId =
+      declaration.childAgentId === fromAgentId ? toAgentId : declaration.childAgentId;
+    declarations.set(childAgentId, { ...declaration, childAgentId });
+  }
+  state.agentSpawnDeclarations = [...declarations.values()];
+};
+
+/** Establish every declaration that now resolves to exactly one Agent. */
+const resolveSpawnDeclarations = (state: UniverseState, at: number): AgentId[] => {
+  const affected: AgentId[] = [];
+  for (const declaration of state.agentSpawnDeclarations) {
+    const child = state.agents.find((agent) => agent.id === declaration.childAgentId);
+    if (!child) {
+      removeSpawnDeclaration(state, declaration.childAgentId);
+      continue;
+    }
+    const parent = resolveSpawnParentAgent(state, declaration);
+    if (!parent || parent.id === child.id || spawnParentChainIncludes(state, parent.id, child.id))
+      continue;
+    setSpawnLink(state, {
+      childAgentId: child.id,
+      parentAgentId: parent.id,
+      source: declaration.source,
+      declaredAt: declaration.declaredAt,
+      establishedAt: at,
+    });
+    affected.push(child.id, parent.id);
+  }
+  return affected;
+};
+
+const spawnLineageViewForParent = (
+  state: Pick<UniverseState, "agents" | "goals">,
+  parent: Agent | undefined,
+  unresolvedExplanation: string,
+): SpawnLineageView => {
+  if (!parent)
+    return {
+      state: "unresolved",
+      explanation: unresolvedExplanation,
+    };
+  const lineage: SpawnLineageView = {
+    state: "resolved",
+    parentAgentId: parent.id,
+    parentDisplayName: parent.displayName,
+    explanation: "Declared by the spawning session.",
+  };
+  if (parent.archivedAt !== undefined) Object.assign(lineage, { parentArchived: true });
+  const goal = parent.primaryGoalId
+    ? state.goals.find((candidate) => candidate.id === parent.primaryGoalId)
+    : undefined;
+  if (goal) Object.assign(lineage, { suggestedGoal: { goalId: goal.id, title: goal.title } });
+  return lineage;
+};
+
+const spawnLineageViewForDiscovery = (
+  state: Pick<UniverseState, "agents" | "goals">,
+  binding: { readonly hostKind: string; readonly hostInstanceId: string },
+  declaration: HostSpawnDeclaration | undefined,
+): SpawnLineageView | undefined => {
+  if (!declaration) return undefined;
+  if (declaration.conflict)
+    return {
+      state: "conflict",
+      explanation:
+        "Conflicting spawn declarations were observed for this execution; no parent link was established.",
+    };
+  return spawnLineageViewForParent(
+    state,
+    resolveSpawnParentAgent(state, {
+      hostKind: binding.hostKind,
+      hostInstanceId: binding.hostInstanceId,
+      nativeId: declaration.parentNativeId,
+    }),
+    "A spawning session was declared, but it is not an Observatory Agent.",
+  );
+};
+
 export interface HostExecutionKey {
   readonly hostKind: string;
   readonly hostInstanceId: string;
@@ -207,6 +388,7 @@ export interface DiscoveredExecutionAccess {
   readonly handle: string;
   readonly binding: AgentExecutionBinding;
   readonly nativeConversationRef?: NativeConversationRef;
+  readonly spawnDeclaration?: HostSpawnDeclaration;
 }
 
 interface DiscoveredExecutionRecord {
@@ -221,6 +403,7 @@ interface DiscoveredExecutionRecord {
   readonly provider?: string;
   readonly executionContainer?: ExecutionContainerRef;
   readonly nativeConversationRef?: NativeConversationRef;
+  readonly spawnDeclaration?: HostSpawnDeclaration;
   readonly presence: "live" | "unknown";
   readonly observationHealth: "fresh" | "unknown" | "unavailable";
   readonly lastObservedAt: number;
@@ -978,6 +1161,7 @@ const mergeConversationAgents = (
         dismissals.set(key, normalized);
     }
     state.relatedAgentDismissals = [...dismissals.values()];
+    repointSpawnReferences(state, duplicate.id, merged.id);
     diagnostics.push(`Consolidated duplicate Agent ${duplicate.id} into ${merged.id}.`);
   }
   replaceAgent(state, merged);
@@ -1324,6 +1508,7 @@ export class Universe {
       nativeConversationRef: discovery.nativeConversationRef
         ? { ...discovery.nativeConversationRef }
         : undefined,
+      spawnDeclaration: discovery.spawnDeclaration ? { ...discovery.spawnDeclaration } : undefined,
     };
   }
 
@@ -1437,6 +1622,11 @@ export class Universe {
           resumeEligibility: catalogue?.resumeEligibility,
           admission,
           conversationConflictCount,
+          spawnedBy: spawnLineageViewForDiscovery(
+            this.state,
+            discovery.binding,
+            discovery.spawnDeclaration,
+          ),
         };
       })
       .sort(
@@ -1591,6 +1781,9 @@ export class Universe {
         provider: normalizeText(observation.provider),
         executionContainer: copyExecutionContainer(observation.executionContainer),
         nativeConversationRef: effectiveConversation,
+        spawnDeclaration: observation.spawnDeclaration
+          ? { ...observation.spawnDeclaration }
+          : undefined,
         presence: "live",
         observationHealth: "fresh",
         lastObservedAt: observation.observedAt,
@@ -2161,6 +2354,38 @@ export class Universe {
         result = { ok: true, agentId: agent.id };
         break;
       }
+      case "SetAgentSpawnParent": {
+        const child = findAgent(next, command.childAgentId);
+        const parent = findAgent(next, command.parentAgentId);
+        if (!child) return { ok: false, error: "Agent not found." };
+        if (!parent) return { ok: false, error: "Parent Agent not found." };
+        if (child.id === parent.id)
+          return { ok: false, error: "An Agent cannot be its own spawn parent." };
+        if (spawnParentChainIncludes(next, parent.id, child.id))
+          return { ok: false, error: "That link would create a spawn cycle." };
+        setSpawnLink(next, {
+          childAgentId: child.id,
+          parentAgentId: parent.id,
+          source: "human",
+          establishedAt: now,
+        });
+        result = {
+          ok: true,
+          agentId: child.id,
+          affectedAgentIds: uniqueAgentIds([child.id, parent.id]),
+        };
+        break;
+      }
+      case "ClearAgentSpawnParent": {
+        const child = findAgent(next, command.childAgentId);
+        if (!child) return { ok: false, error: "Agent not found." };
+        next.agentSpawnLinks = next.agentSpawnLinks.filter(
+          (link) => link.childAgentId !== child.id,
+        );
+        removeSpawnDeclaration(next, child.id);
+        result = { ok: true, agentId: child.id };
+        break;
+      }
       case "RenameAgent": {
         const displayName = normalizeText(command.displayName);
         const agent = findAgent(next, command.agentId);
@@ -2220,6 +2445,7 @@ export class Universe {
           command.resumeEligibility === "same-site" ||
           command.resumeEligibility === "provider-account";
         const existing = resolveConversationAgent(next.agents, normalizedReference);
+        let admittedAgentId: AgentId;
         if (existing) {
           if (existing.archivedAt !== undefined)
             return { ok: false, error: "Archived agents cannot be added." };
@@ -2255,40 +2481,78 @@ export class Universe {
             primaryGoalId: goal?.id ?? existing.primaryGoalId,
             worktree: normalizeText(command.workspaceRef) ?? existing.worktree,
           });
-          result = { ok: true, agentId: existing.id, goalId: goal?.id };
-          break;
+          admittedAgentId = existing.id;
+        } else {
+          const agentId = this.ids.next("agent");
+          next.agents.push({
+            id: agentId,
+            harnessId,
+            nativeConversationRef: normalizedReference,
+            continuity: "proved",
+            providerContinuity: providerAdmission ? "confirmed" : "unknown",
+            providerResumeEligibility: providerAdmission ? command.resumeEligibility : undefined,
+            executionPresence: "unknown",
+            resumeCapability: providerAdmission
+              ? resumeEligible
+                ? "eligible"
+                : "blocked"
+              : "unknown",
+            observationHealth: "fresh",
+            providerObservedAt: providerAdmission ? command.observedAt : undefined,
+            executionHistory: [],
+            conflictingExecutions: [],
+            displayName,
+            displayNameSource: providerAdmission ? "provider" : "fallback",
+            primaryGoalId: goal?.id,
+            runtimeState: "unknown",
+            runtimeStateSource: `${harnessId}.${command.admissionSource}`,
+            hostHealth: "stale",
+            lastSeenAt: command.observedAt,
+            lastObservedAt: command.observedAt,
+            lastChangedAt: now,
+            worktree: normalizeText(command.workspaceRef),
+          });
+          if (goal) repairUnpinnedGoalPosition(next, goal.id);
+          admittedAgentId = agentId;
         }
-        const agentId = this.ids.next("agent");
-        next.agents.push({
-          id: agentId,
-          harnessId,
-          nativeConversationRef: normalizedReference,
-          continuity: "proved",
-          providerContinuity: providerAdmission ? "confirmed" : "unknown",
-          providerResumeEligibility: providerAdmission ? command.resumeEligibility : undefined,
-          executionPresence: "unknown",
-          resumeCapability: providerAdmission
-            ? resumeEligible
-              ? "eligible"
-              : "blocked"
-            : "unknown",
-          observationHealth: "fresh",
-          providerObservedAt: providerAdmission ? command.observedAt : undefined,
-          executionHistory: [],
-          conflictingExecutions: [],
-          displayName,
-          displayNameSource: providerAdmission ? "provider" : "fallback",
-          primaryGoalId: goal?.id,
-          runtimeState: "unknown",
-          runtimeStateSource: `${harnessId}.${command.admissionSource}`,
-          hostHealth: "stale",
-          lastSeenAt: command.observedAt,
-          lastObservedAt: command.observedAt,
-          lastChangedAt: now,
-          worktree: normalizeText(command.workspaceRef),
-        });
-        if (goal) repairUnpinnedGoalPosition(next, goal.id);
-        result = { ok: true, agentId, goalId: goal?.id };
+        if (command.spawn && !spawnLinkFor(next, admittedAgentId)) {
+          const parentRef = command.spawn.parentExecution;
+          const declaredAt = Number.isFinite(command.spawn.declaredAt)
+            ? command.spawn.declaredAt
+            : now;
+          const parent = resolveSpawnParentAgent(next, parentRef);
+          if (
+            parent &&
+            parent.id !== admittedAgentId &&
+            !spawnParentChainIncludes(next, parent.id, admittedAgentId)
+          ) {
+            setSpawnLink(next, {
+              childAgentId: admittedAgentId,
+              parentAgentId: parent.id,
+              source: command.spawn.source,
+              declaredAt,
+              establishedAt: now,
+            });
+            result = {
+              ok: true,
+              agentId: admittedAgentId,
+              goalId: goal?.id,
+              affectedAgentIds: uniqueAgentIds([admittedAgentId, parent.id]),
+            };
+          } else {
+            setSpawnDeclaration(next, {
+              childAgentId: admittedAgentId,
+              hostKind: parentRef.hostKind,
+              hostInstanceId: parentRef.hostInstanceId,
+              nativeId: parentRef.nativeId,
+              source: command.spawn.source,
+              declaredAt,
+            });
+            result = { ok: true, agentId: admittedAgentId, goalId: goal?.id };
+          }
+        } else {
+          result = { ok: true, agentId: admittedAgentId, goalId: goal?.id };
+        }
         break;
       }
       case "ArchiveAgent": {
@@ -2359,6 +2623,16 @@ export class Universe {
       }
     }
 
+    const spawnResolvedAgentIds = resolveSpawnDeclarations(next, now);
+    if (spawnResolvedAgentIds.length > 0)
+      result = {
+        ...result,
+        affectedAgentIds: uniqueAgentIds([
+          ...(result.affectedAgentIds ?? (result.agentId ? [result.agentId] : [])),
+          ...spawnResolvedAgentIds,
+        ]),
+      };
+
     if (command.type !== "AcknowledgeCatchUp") appendChanges(this.state, next, now);
 
     try {
@@ -2399,6 +2673,9 @@ export class Universe {
     }
 
     appendChanges(this.state, planned.state, snapshot.observedAt);
+    const spawnResolvedAgentIds = resolveSpawnDeclarations(planned.state, snapshot.observedAt);
+    for (const agentId of spawnResolvedAgentIds)
+      if (!planned.updatedAgentIds.includes(agentId)) planned.updatedAgentIds.push(agentId);
     const previousDiscoveries = this.discoveries;
     const nextDiscoveries = this.planDiscoveredExecutions(
       planned.state,
@@ -2437,8 +2714,34 @@ export class Universe {
   private publishSemanticChanges(previous: UniverseState, next: UniverseState, at: number): void {
     const semanticSequence = next.changes.at(-1)?.sequence;
     const systemIds = changedRecordIds(previous.systems, next.systems);
-    const agentIds = changedRecordIds(previous.agents, next.agents);
+    const agentIds = new Set(changedRecordIds(previous.agents, next.agents));
+    for (const link of [...previous.agentSpawnLinks, ...next.agentSpawnLinks]) {
+      const before = previous.agentSpawnLinks.find(
+        (candidate) => candidate.childAgentId === link.childAgentId,
+      );
+      const after = next.agentSpawnLinks.find(
+        (candidate) => candidate.childAgentId === link.childAgentId,
+      );
+      if (JSON.stringify(before) === JSON.stringify(after)) continue;
+      agentIds.add(link.childAgentId);
+      agentIds.add(link.parentAgentId);
+      const beforeParent = before?.parentAgentId;
+      if (beforeParent) agentIds.add(beforeParent);
+    }
+    for (const childId of new Set([
+      ...previous.agentSpawnDeclarations.map((declaration) => declaration.childAgentId),
+      ...next.agentSpawnDeclarations.map((declaration) => declaration.childAgentId),
+    ])) {
+      const before = previous.agentSpawnDeclarations.find(
+        (declaration) => declaration.childAgentId === childId,
+      );
+      const after = next.agentSpawnDeclarations.find(
+        (declaration) => declaration.childAgentId === childId,
+      );
+      if (JSON.stringify(before) !== JSON.stringify(after)) agentIds.add(childId);
+    }
     const goalIds = new Set(changedRecordIds(previous.goals, next.goals));
+    const changedAgentIdList = [...agentIds];
     for (const agentId of agentIds) {
       const before = previous.agents.find((agent) => agent.id === agentId);
       const after = next.agents.find((agent) => agent.id === agentId);
@@ -2468,12 +2771,12 @@ export class Universe {
         goalIds: [...goalIds],
         semanticSequence,
       });
-    if (agentIds.length > 0)
+    if (changedAgentIdList.length > 0)
       events.push({
         type: "agent-changed",
         cause: "human-command",
         occurredAt: at,
-        agentIds,
+        agentIds: changedAgentIdList,
         semanticSequence,
       });
     if (JSON.stringify(previous.operatorCheckpoint) !== JSON.stringify(next.operatorCheckpoint))

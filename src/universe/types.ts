@@ -56,6 +56,33 @@ export interface RelatedAgentDismissal {
   readonly dismissedAt: number;
 }
 
+/**
+ * Provenance of an established spawn link. `declared` covers any host or
+ * harness declaration channel; `unknown` only ever appears when a persisted
+ * source cannot be recognised on load, so uncertainty is retained.
+ */
+export type SpawnLinkSource = "declared" | "managed-launch" | "human" | "unknown";
+
+/** Durable declared provenance: the exact Agent that started this Agent. */
+export interface AgentSpawnLink {
+  readonly childAgentId: AgentId;
+  readonly parentAgentId: AgentId;
+  readonly source: SpawnLinkSource;
+  /** When the spawning action was declared; absent for a manual link. */
+  readonly declaredAt?: number;
+  readonly establishedAt: number;
+}
+
+/** A declared parent execution retained until an exact Agent match exists. */
+export interface AgentSpawnDeclaration {
+  readonly childAgentId: AgentId;
+  readonly hostKind: string;
+  readonly hostInstanceId: string;
+  readonly nativeId: string;
+  readonly source: Exclude<SpawnLinkSource, "human">;
+  readonly declaredAt: number;
+}
+
 export type UniverseChangeOutcome = "new" | "changed" | "attention" | "finished" | "stale";
 
 export interface UniverseChange {
@@ -163,6 +190,8 @@ export interface UniverseState {
   agents: Agent[];
   hosts: HostHealth[];
   relatedAgentDismissals: RelatedAgentDismissal[];
+  agentSpawnLinks: AgentSpawnLink[];
+  agentSpawnDeclarations: AgentSpawnDeclaration[];
   changes: UniverseChange[];
   operatorCheckpoint?: OperatorCheckpoint;
 }
@@ -229,6 +258,8 @@ export const emptyUniverseState = (): UniverseState => ({
   agents: [],
   hosts: [],
   relatedAgentDismissals: [],
+  agentSpawnLinks: [],
+  agentSpawnDeclarations: [],
   changes: [],
 });
 
@@ -255,6 +286,10 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
     hosts: state.hosts.map((host) => ({ ...host })),
     relatedAgentDismissals: (state.relatedAgentDismissals ?? []).map((dismissal) => ({
       ...dismissal,
+    })),
+    agentSpawnLinks: (state.agentSpawnLinks ?? []).map((link) => ({ ...link })),
+    agentSpawnDeclarations: (state.agentSpawnDeclarations ?? []).map((declaration) => ({
+      ...declaration,
     })),
     changes: (state.changes ?? []).map((change) => ({ ...change })),
     operatorCheckpoint: state.operatorCheckpoint ? { ...state.operatorCheckpoint } : undefined,

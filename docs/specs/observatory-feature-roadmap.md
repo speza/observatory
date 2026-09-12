@@ -100,7 +100,8 @@ sustained use against disposable real Agents.
 5. Add the Related-Agent review/adopt/dismiss workflow over the existing
    projection; never auto-assign from weak similarity.
 6. Introduce only the typed delegation, result, dependency or integration
-   relationships that improve concrete supervision tasks.
+   relationships that improve concrete supervision tasks. Spawn lineage is the
+   first candidate; see [Spawned Agent lineage](spawned-agent-lineage.md).
 7. Surface cross-Agent workspace overlap and integration risk as evidence, not
    new organisational nodes.
 8. Add explicit semantic-density controls only if focus and Ledger do not solve

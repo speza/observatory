@@ -163,6 +163,19 @@
   cursor: pointer;
   outline: none;
 }
+.agent {
+  transition:
+    opacity 220ms ease,
+    filter 220ms ease;
+}
+.agent.is-lineage-dimmed {
+  opacity: 0.22;
+  filter: saturate(0.35);
+}
+.agent.is-lineage-related .agent__card {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
 .goal__body:active {
   cursor: grabbing !important;
 }
@@ -344,6 +357,38 @@
   font-family: "DM Mono", ui-monospace, monospace;
   font-size: 8px;
   font-weight: 700;
+}
+.agent__lineage-badge > rect {
+  fill: color-mix(in srgb, var(--ink) 82%, transparent);
+  stroke: var(--paper);
+  stroke-width: 1.2;
+}
+.agent__lineage-badge {
+  color: var(--paper);
+}
+.agent__lineage-badge svg {
+  overflow: visible;
+  pointer-events: none;
+}
+.agent__lineage-badge text {
+  fill: currentColor;
+  text-anchor: start;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+}
+.agent__lineage-badge--attention {
+  color: #fff8ec;
+}
+.agent__lineage-badge--attention > rect {
+  fill: var(--accent);
+}
+.atlas__lineage-tether {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 65%, transparent);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
 }
 .agent--uncertain {
   opacity: 0.78;

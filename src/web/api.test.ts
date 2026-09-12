@@ -671,6 +671,75 @@ describe("ObservatoryWebApi", () => {
     expect(fixture.universe.snapshot().goals[0]?.status).toBe("archived");
   });
 
+  test("sets and clears an Agent spawn parent through the command endpoint", async () => {
+    const fixture = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      fixture.universe,
+      hostSnapshot([
+        {
+          nativeId: "native-parent",
+          displayName: "Parent",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:native-parent",
+          observedAt: fixture.clock.now(),
+        },
+        {
+          nativeId: "native-child",
+          displayName: "Child",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:native-child",
+          observedAt: fixture.clock.now(),
+        },
+      ]),
+    );
+    const [parent, child] = fixture.universe.snapshot().agents;
+    if (!parent || !child) throw new Error("Expected reconciled agents.");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+    });
+    const command = async (body: WebCommand): Promise<Response> =>
+      api.fetch(
+        new Request("http://localhost/api/commands", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            "x-ao-command": "1",
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const linked = await command({
+      type: "SetAgentSpawnParent",
+      childAgentId: child.id,
+      parentAgentId: parent.id,
+    });
+    expect(linked.status).toBe(200);
+    expect(fixture.universe.snapshot().agentSpawnLinks).toMatchObject([
+      {
+        childAgentId: child.id,
+        parentAgentId: parent.id,
+        source: "human",
+      },
+    ]);
+
+    const cycle = await command({
+      type: "SetAgentSpawnParent",
+      childAgentId: parent.id,
+      parentAgentId: child.id,
+    });
+    expect(cycle.status).toBe(409);
+
+    const cleared = await command({ type: "ClearAgentSpawnParent", childAgentId: child.id });
+    expect(cleared.status).toBe(200);
+    expect(fixture.universe.snapshot().agentSpawnLinks).toHaveLength(0);
+  });
+
   test("acknowledges the displayed semantic boundary, not newer changes", async () => {
     const fixture = makeUniverse();
     const api = new ObservatoryWebApi({

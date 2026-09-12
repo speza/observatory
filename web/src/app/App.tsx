@@ -884,6 +884,7 @@ export const App = (): React.JSX.Element => {
                 onRetry={refreshInspector}
                 onReviewChanges={openWorkspaceReview}
                 onResume={resumeAgent}
+                onSelectAgent={(agentId) => selectAndFocus({ type: "agent", id: agentId })}
               />
             ) : null}
 

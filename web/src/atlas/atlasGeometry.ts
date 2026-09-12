@@ -131,9 +131,73 @@ const orbitPlacement = ({
   };
 };
 
+interface BandPeer {
+  readonly index: number;
+  readonly placement: OrbitPlacement;
+}
+
+const byOrbitPhase = (left: BandPeer, right: BandPeer): number =>
+  left.placement.phase - right.placement.phase || left.index - right.index;
+
+const inBandFamilyOrder = (
+  peers: readonly BandPeer[],
+  parentsByIndex: ReadonlyMap<number, number> | undefined,
+): readonly BandPeer[] => {
+  if (!parentsByIndex || peers.length < 2) return [...peers].sort(byOrbitPhase);
+
+  const peerByIndex = new Map(peers.map((peer) => [peer.index, peer]));
+  const childrenByParent = new Map<number, BandPeer[]>();
+  for (const peer of peers) {
+    const parentIndex = parentsByIndex.get(peer.index);
+    if (parentIndex === undefined || !peerByIndex.has(parentIndex)) continue;
+    const children = childrenByParent.get(parentIndex);
+    if (children) children.push(peer);
+    else childrenByParent.set(parentIndex, [peer]);
+  }
+  const ordered: BandPeer[] = [];
+  const visited = new Set<number>();
+  const visit = (peer: BandPeer): void => {
+    if (visited.has(peer.index)) return;
+    visited.add(peer.index);
+    ordered.push(peer);
+    for (const child of [...(childrenByParent.get(peer.index) ?? [])].sort(byOrbitPhase))
+      visit(child);
+  };
+  const roots = peers.filter((peer) => {
+    const parentIndex = parentsByIndex.get(peer.index);
+    return parentIndex === undefined || !peerByIndex.has(parentIndex);
+  });
+  for (const root of [...roots].sort(byOrbitPhase)) visit(root);
+  for (const peer of [...peers].sort(byOrbitPhase)) visit(peer);
+
+  const groupKey = (peer: BandPeer): number => {
+    let current = peer.index;
+    const seen = new Set<number>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const parentIndex = parentsByIndex.get(current);
+      if (parentIndex === undefined || !peerByIndex.has(parentIndex)) break;
+      current = parentIndex;
+    }
+    return current;
+  };
+  // Rotate to a family boundary so no group spans the ring seam.
+  let boundary = -1;
+  for (let index = 1; index < ordered.length; index += 1) {
+    const peer = ordered[index];
+    const previous = ordered[index - 1];
+    if (peer && previous && groupKey(peer) !== groupKey(previous)) {
+      boundary = index;
+      break;
+    }
+  }
+  return boundary > 0 ? [...ordered.slice(boundary), ...ordered.slice(0, boundary)] : ordered;
+};
+
 const distributeAgentCards = (
   placements: readonly OrbitPlacement[],
   goalBodyRadius: number,
+  parentsByIndex?: ReadonlyMap<number, number>,
 ): readonly OrbitPlacement[] => {
   const result: Array<OrbitPlacement | undefined> = Array.from({ length: placements.length });
   const bands = [...new Set(placements.map((placement) => placement.band))].sort(
@@ -145,12 +209,12 @@ const distributeAgentCards = (
   let previousRadiusX = minimumRadius - AGENT_CARD_WIDTH - AGENT_CARD_COLUMN_GAP;
   let previousRadiusY = minimumRadius - AGENT_CARD_HEIGHT - AGENT_CARD_ROW_GAP;
   for (const band of bands) {
-    const peers = placements
-      .map((placement, index) => ({ index, placement }))
-      .filter((entry) => entry.placement.band === band)
-      .sort(
-        (left, right) => left.placement.phase - right.placement.phase || left.index - right.index,
-      );
+    const peers = inBandFamilyOrder(
+      placements
+        .map((placement, index) => ({ index, placement }))
+        .filter((entry) => entry.placement.band === band),
+      parentsByIndex,
+    );
     const phaseStep = availableArc / peers.length;
     const separation = Math.sin(Math.min(phaseStep, Math.PI / 2));
     let radiusX = Math.max(
@@ -219,27 +283,132 @@ const distributeAgentCards = (
   return placements.map((placement, index) => result[index] ?? placement);
 };
 
+const FAMILY_FAN_COLUMNS = 3;
+const FAMILY_FAN_MAXIMUM_ROWS = 24;
+const FAMILY_FAN_PARENT_CLEARANCE = 30;
+
+/**
+ * Fan the descendants of one focused Agent around it, outside the Goal ring.
+ * Only the expanded subtree leaves the ring; collapsed children keep their
+ * deterministic ring placements and are simply not rendered by the Atlas.
+ */
+const fanOutAgentPoints = (
+  placements: readonly OrbitPlacement[],
+  parentsByIndex: ReadonlyMap<number, number>,
+  centre: { readonly x: number; readonly y: number },
+  focusIndex: number,
+): readonly OrbitPlacement[] => {
+  const result = placements.map((placement) => ({ ...placement }));
+  const childrenByParent = new Map<number, number[]>();
+  for (const [childIndex, parentIndex] of parentsByIndex) {
+    const children = childrenByParent.get(parentIndex);
+    if (children) children.push(childIndex);
+    else childrenByParent.set(parentIndex, [childIndex]);
+  }
+  const focusPlacement = result[focusIndex];
+  if (!focusPlacement) return result;
+  const descendants: number[] = [];
+  const visitedDescendants = new Set<number>([focusIndex]);
+  const queue = [...(childrenByParent.get(focusIndex) ?? [])].sort((left, right) => left - right);
+  while (queue.length > 0) {
+    const index = queue.shift();
+    if (index === undefined || visitedDescendants.has(index)) continue;
+    visitedDescendants.add(index);
+    descendants.push(index);
+    for (const child of [...(childrenByParent.get(index) ?? [])].sort(
+      (left, right) => left - right,
+    ))
+      queue.push(child);
+  }
+  if (descendants.length === 0) return result;
+  const overlaps = (
+    candidate: { readonly x: number; readonly y: number },
+    existing: { readonly x: number; readonly y: number },
+  ): boolean =>
+    Math.abs(candidate.x - existing.x) < AGENT_CARD_WIDTH + AGENT_CARD_GAP &&
+    Math.abs(candidate.y - existing.y) < AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP;
+  const radialX = focusPlacement.x - centre.x;
+  const radialY = focusPlacement.y - centre.y;
+  const length = Math.hypot(radialX, radialY) || 1;
+  const outwardX = radialX / length;
+  const outwardY = radialY / length;
+  const tangentX = -outwardY;
+  const tangentY = outwardX;
+  const familyPositions = (step: number): { readonly x: number; readonly y: number }[] =>
+    descendants.map((_, rank) => {
+      const row = Math.floor(rank / FAMILY_FAN_COLUMNS);
+      const column = rank % FAMILY_FAN_COLUMNS;
+      const columnsInRow = Math.min(
+        FAMILY_FAN_COLUMNS,
+        descendants.length - row * FAMILY_FAN_COLUMNS,
+      );
+      const tangentOffset = (column - (columnsInRow - 1) / 2) * (AGENT_CARD_WIDTH + AGENT_CARD_GAP);
+      const outwardOffset =
+        (row + step) * (AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP) +
+        (row === 0 ? FAMILY_FAN_PARENT_CLEARANCE : 0);
+      return {
+        x: focusPlacement.x + outwardX * outwardOffset + tangentX * tangentOffset,
+        y: focusPlacement.y + outwardY * outwardOffset + tangentY * tangentOffset,
+      };
+    });
+  const descendantSet = new Set(descendants);
+  const staticOthers = result.filter(
+    (_, index) => index !== focusIndex && !descendantSet.has(index),
+  );
+  let outwardStep = 1;
+  let positions = familyPositions(outwardStep);
+  while (outwardStep < FAMILY_FAN_MAXIMUM_ROWS) {
+    const collides = positions.some(
+      (position, index) =>
+        staticOthers.some((existing) => overlaps(position, existing)) ||
+        positions.some((other, otherIndex) => otherIndex !== index && overlaps(position, other)),
+    );
+    if (!collides) break;
+    outwardStep += 1;
+    positions = familyPositions(outwardStep);
+  }
+  descendants.forEach((index, rank) => {
+    const position = positions[rank];
+    const placement = result[index];
+    if (!position || !placement) return;
+    result[index] = { ...placement, x: position.x, y: position.y };
+  });
+  return result;
+};
+
 export const goalAgentPoints = (
   goal: MapGoalView,
   centre: { readonly x: number; readonly y: number },
-): readonly OrbitPlacement[] =>
-  distributeAgentCards(
-    goal.agents.map((agent) =>
-      orbitPlacement({
-        id: agent.id,
-        point: agent.mapPosition,
-        anchor: goal.mapPosition,
-        centre,
-        radiusX: goalRadius(goal) + 45,
-        radiusY: goalRadius(goal) + 32,
-        ringUnitX: 32,
-        ringUnitY: 24,
-        bandStepX: 28,
-        bandStepY: 24,
-      }),
-    ),
-    goalRadius(goal),
+  expandedFocusAgentId?: string,
+): readonly OrbitPlacement[] => {
+  const placements = goal.agents.map((agent) =>
+    orbitPlacement({
+      id: agent.id,
+      point: agent.mapPosition,
+      anchor: goal.mapPosition,
+      centre,
+      radiusX: goalRadius(goal) + 45,
+      radiusY: goalRadius(goal) + 32,
+      ringUnitX: 32,
+      ringUnitY: 24,
+      bandStepX: 28,
+      bandStepY: 24,
+    }),
   );
+  const indexById = new Map(goal.agents.map((agent, index) => [agent.id, index] as const));
+  const parentsByIndex = new Map<number, number>();
+  for (const [index, agent] of goal.agents.entries()) {
+    const parentId = agent.spawnedBy?.parentAgentId;
+    const parentIndex = parentId === undefined ? undefined : indexById.get(parentId);
+    if (parentIndex !== undefined && parentIndex !== index) parentsByIndex.set(index, parentIndex);
+  }
+  const arranged = distributeAgentCards(placements, goalRadius(goal), parentsByIndex);
+  const focusIndex =
+    expandedFocusAgentId === undefined ? undefined : indexById.get(expandedFocusAgentId);
+  return focusIndex === undefined
+    ? arranged
+    : fanOutAgentPoints(arranged, parentsByIndex, centre, focusIndex);
+};
 
 export interface AtlasContentBounds {
   readonly minimumX: number;

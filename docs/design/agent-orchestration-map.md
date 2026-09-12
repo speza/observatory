@@ -122,6 +122,11 @@ memory. The layout therefore follows these rules:
 - Systems provide broad portfolio scope.
 - Goals are stable bodies in world space.
 - Direct Agents occupy deterministic satellite positions around their Goal.
+- Declared children stay collapsed on the ring by default; a parent card carries
+  a child-count badge, and selecting an Agent expands its declared subtree in a
+  compact local fan with tethers. Unrelated Agents keep their identity-derived
+  slots, and a hidden child with attention marks its parent while remaining in
+  Needs you.
 - Manual Goal movement pins the accepted position.
 - Adding unrelated work does not globally reflow existing geography.
 - An unpinned Goal may move locally when its own expanded footprint collides.

@@ -43,6 +43,34 @@ describe("spatial positions", () => {
     expect(second.get("agent-11")).toEqual(first.get("agent-11"));
   });
 
+  test("places declared children in the nearest free slots beside their parent", () => {
+    const agentIds = ["agent-1", "agent-2", "agent-3", "agent-4"];
+    const parentByAgentId = new Map([
+      ["agent-2", "agent-1"],
+      ["agent-3", "agent-1"],
+      ["agent-4", "agent-2"],
+    ]);
+    const positions = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", agentIds, parentByAgentId);
+    const positionFor = (id: string) => {
+      const position = positions.get(id);
+      if (!position) throw new Error(`Missing position for ${id}`);
+      return position;
+    };
+    const distance = (leftId: string, rightId: string): number => {
+      const left = positionFor(leftId);
+      const right = positionFor(rightId);
+      return Math.hypot(left.x - right.x, left.y - right.y);
+    };
+    expect(distance("agent-1", "agent-2")).toBeLessThanOrEqual(40);
+    expect(distance("agent-1", "agent-3")).toBeLessThanOrEqual(40);
+    expect(distance("agent-2", "agent-4")).toBeLessThanOrEqual(40);
+    const repeated = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", agentIds, parentByAgentId);
+    expect([...positions.entries()]).toEqual([...repeated.entries()]);
+    expect(
+      new Set([...positions.values()].map((position) => `${position.x}:${position.y}`)).size,
+    ).toBe(agentIds.length);
+  });
+
   test("keeps existing satellites stable when an appended agent crosses the decimal boundary", () => {
     const base = Array.from({ length: 9 }, (_, index) => `agent-${index + 1}`);
     const first = agentSatellitePositions({ x: 0, y: 0 }, "goal-a", base);

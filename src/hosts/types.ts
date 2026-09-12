@@ -28,10 +28,26 @@ export interface HostAgentObservation {
    * cannot prove an agent identity should set this rather than omitting the row.
    */
   readonly discoverable?: boolean;
+  /** Optional declared spawn provenance; it never establishes lineage alone. */
+  readonly spawnDeclaration?: HostSpawnDeclaration;
   /** Optional host-observed execution context; its identity is opaque to core. */
   readonly executionContainer?: ExecutionContainerRef;
   /** Serialized and opaque outside the agent-host adapter. */
   readonly hostLocator: string;
+}
+
+/**
+ * A bounded, provenance-bearing claim that this execution was spawned by
+ * another execution. It is a declaration, never proof of parentage.
+ */
+export interface HostSpawnDeclaration {
+  /** Opaque to core; only the owning host adapter may interpret it. */
+  readonly parentNativeId: string;
+  /** Bounded reporter channel label, for explanation only. */
+  readonly source: "pane-token" | "workspace-token" | "launch-receipt";
+  readonly declaredAt: number;
+  /** True when channels disagreed; the value is evidence only, never a link. */
+  readonly conflict?: boolean;
 }
 
 export interface HostHarnessEvidence {

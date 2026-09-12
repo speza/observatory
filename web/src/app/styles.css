@@ -922,6 +922,52 @@ button {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
+.inspector__lineage {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.inspector__lineage p {
+  margin: 0;
+}
+.inspector__lineage ul {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.inspector__lineage button {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.inspector__lineage button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.inspector__lineage label {
+  display: grid;
+  gap: 4px;
+}
+.inspector__lineage select {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
 .inspector__status-line {
   display: flex;
   align-items: center;

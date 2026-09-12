@@ -56,6 +56,7 @@ describe("Inspector", () => {
         onRetry={() => {}}
         onReviewChanges={() => {}}
         onResume={async () => {}}
+        onSelectAgent={() => {}}
       />,
     );
     expect(markup).toContain(
@@ -120,6 +121,7 @@ describe("Inspector", () => {
         onRetry={() => {}}
         onReviewChanges={() => {}}
         onResume={async () => {}}
+        onSelectAgent={() => {}}
         projection={{
           ...projection,
           agent: {
@@ -192,5 +194,58 @@ describe("Inspector", () => {
     expect(markup).not.toContain("<dt>Branch</dt>");
     expect(markup).toContain("Technical details");
     expect(markup).toContain("Agent lifecycle");
+  });
+
+  test("shows an unresolved spawn declaration with a clearable parent", () => {
+    const { universe, clock } = makeUniverse();
+    const admitted = universe.execute({
+      type: "AddConversation",
+      admissionSource: "managed-launch",
+      harnessId: "test-harness",
+      nativeConversationRef: {
+        harnessId: "test-harness",
+        kind: "conversation-id",
+        value: "child",
+      },
+      displayName: "Child worker",
+      observedAt: clock.now(),
+      spawn: {
+        source: "declared",
+        declaredAt: clock.now(),
+        parentExecution: {
+          hostKind: "test-host",
+          hostInstanceId: "test-host:default",
+          nativeId: "missing-parent",
+        },
+      },
+    });
+    if (!admitted.agentId) throw new Error("Expected an admitted Agent.");
+    const projection = universe.project({
+      kind: "inspector",
+      now: clock.now(),
+      target: { type: "agent", id: admitted.agentId },
+    });
+    const commandCentre = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "agent-inspector" || commandCentre.kind !== "command-centre")
+      throw new Error("Wrong projection");
+    const markup = renderToStaticMarkup(
+      <Inspector
+        commandCentre={commandCentre}
+        commandPending={false}
+        onClose={() => {}}
+        onCloseAndArchive={async () => true}
+        onCommand={async () => undefined}
+        onOpenTerminal={() => {}}
+        onOpenDiscoveredTerminal={() => {}}
+        onAdmitDiscovered={async () => undefined}
+        onRetry={() => {}}
+        onReviewChanges={() => {}}
+        onResume={async () => {}}
+        onSelectAgent={() => {}}
+        projection={projection}
+      />,
+    );
+    expect(markup).toContain("Unidentified spawner");
+    expect(markup).toContain('value="__unresolved__"');
   });
 });

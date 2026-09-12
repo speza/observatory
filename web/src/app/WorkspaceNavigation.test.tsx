@@ -92,6 +92,7 @@ describe("Workspace navigation views", () => {
     expect(attention).toContain("Needs a response");
     expect(attention).toContain("Unassigned decision");
     expect(attention).not.toContain("Quiet worker");
+    expect(attention).not.toContain("Expand Needs a response");
     const unassigned = render("unassigned");
     expect(unassigned).toContain("Unassigned decision");
     expect(unassigned).not.toContain("Example goal");
@@ -255,5 +256,132 @@ describe("Workspace navigation disclosure", () => {
     expect(onSelect).toEqual([{ type: "goal", id: "goal-1" }]);
     expect(second.open).toBe(true);
     expect(first.open).toBe(true);
+  });
+
+  test("nests declared child sessions under their parent", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Fan-out goal" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          nativeId: "parent",
+          displayName: "Parent session",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:parent",
+          observedAt: clock.now(),
+        },
+        {
+          nativeId: "child",
+          displayName: "Child session",
+          runtimeState: "blocked",
+          runtimeStateSource: "test",
+          hostLocator: "test:child",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    universe.execute({ type: "AssignAgents", agentIds: ["agent-1", "agent-2"], goalId: "goal-1" });
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-2",
+        parentAgentId: "agent-1",
+      }).ok,
+    ).toBe(true);
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    const collapsed = renderToStaticMarkup(
+      <WorkspaceNavigation
+        projection={projection}
+        view="all"
+        onSystem={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(collapsed).toContain("Parent session");
+    expect(collapsed).not.toContain("Child session");
+
+    const expanded = renderToStaticMarkup(
+      <WorkspaceNavigation
+        projection={projection}
+        view="all"
+        selection={{ type: "agent", id: "agent-2" }}
+        onSystem={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    const parentIndex = expanded.indexOf("Parent session");
+    const childIndex = expanded.indexOf("Child session");
+    expect(parentIndex).toBeGreaterThanOrEqual(0);
+    expect(childIndex).toBeGreaterThan(parentIndex);
+    expect(expanded).toContain("workspace-tree__agent--child");
+    expect(expanded).toContain('style="--tree-depth:1"');
+    expect(expanded).toContain('aria-expanded="true"');
+    expect(collapsed).toContain('aria-label="1 spawned session"');
+    expect(expanded).toContain('aria-label="1 spawned session"');
+    expect(expanded).toMatch(
+      /<small class="is-attention" aria-label="1 spawned session">1<\/small>/,
+    );
+  });
+
+  test("toggling a parent agent reveals and hides its children", async () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Fan-out goal" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          nativeId: "parent",
+          displayName: "Parent session",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:parent",
+          observedAt: clock.now(),
+        },
+        {
+          nativeId: "child",
+          displayName: "Child session",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:child",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    universe.execute({ type: "AssignAgents", agentIds: ["agent-1", "agent-2"], goalId: "goal-1" });
+    universe.execute({
+      type: "SetAgentSpawnParent",
+      childAgentId: "agent-2",
+      parentAgentId: "agent-1",
+    });
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    await act(async () =>
+      root.render(
+        <WorkspaceNavigation
+          projection={projection}
+          view="all"
+          onSystem={() => {}}
+          onSelect={() => {}}
+        />,
+      ),
+    );
+    expect(document.body.textContent).not.toContain("Child session");
+
+    const expand = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Expand Parent session"]',
+    );
+    if (!expand) throw new Error("Expected a parent expand toggle.");
+    await act(async () => expand.click());
+    expect(document.body.textContent).toContain("Child session");
+
+    const collapse = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Collapse Parent session"]',
+    );
+    if (!collapse) throw new Error("Expected a parent collapse toggle.");
+    await act(async () => collapse.click());
+    expect(document.body.textContent).not.toContain("Child session");
   });
 });

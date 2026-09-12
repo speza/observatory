@@ -7,6 +7,10 @@ import type {
   OperatorCheckpoint,
   RelatedAgentDismissal,
   Agent,
+  AgentId,
+  AgentSpawnDeclaration,
+  AgentSpawnLink,
+  GoalId,
   System,
   UniverseChange,
   RuntimeState,
@@ -79,7 +83,24 @@ export interface AgentView extends Omit<
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;
   readonly executionConflictCount: number;
+  readonly spawnedBy?: SpawnLineageView;
   readonly providerEvidence?: ProviderEvidenceView;
+}
+
+/** Declared spawn provenance for an Agent or discovered execution. */
+export interface SpawnLineageView {
+  readonly state: "resolved" | "unresolved" | "conflict";
+  readonly parentAgentId?: AgentId;
+  readonly parentDisplayName?: string;
+  readonly parentArchived?: boolean;
+  readonly suggestedGoal?: { readonly goalId: GoalId; readonly title: string };
+  readonly explanation: string;
+}
+
+export interface SpawnChildView {
+  readonly agentId: AgentId;
+  readonly displayName: string;
+  readonly archived: boolean;
 }
 
 export interface ProviderEvidenceView {
@@ -167,6 +188,7 @@ export interface DiscoveredExecutionView {
         readonly explanation: string;
       };
   readonly conversationConflictCount: number;
+  readonly spawnedBy?: SpawnLineageView;
 }
 
 export interface MapDiscoveredExecutionView extends DiscoveredExecutionView {
@@ -390,6 +412,7 @@ export type InspectorProjection =
         readonly kind: string;
         readonly id: string;
       };
+      readonly children: readonly SpawnChildView[];
       readonly lines: readonly string[];
     }
   | {
@@ -421,6 +444,8 @@ export interface ProjectionModule {
       readonly hosts: readonly HostHealth[];
       readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
       readonly relatedAgentDismissals?: readonly RelatedAgentDismissal[];
+      readonly agentSpawnLinks?: readonly AgentSpawnLink[];
+      readonly agentSpawnDeclarations?: readonly AgentSpawnDeclaration[];
       readonly changes: readonly UniverseChange[];
       readonly operatorCheckpoint?: OperatorCheckpoint;
     },

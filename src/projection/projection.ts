@@ -6,6 +6,8 @@ import {
   type Goal,
   type HostHealth,
   type Agent,
+  type AgentSpawnDeclaration,
+  type AgentSpawnLink,
   type System,
   type UniverseChange,
   type OperatorCheckpoint,
@@ -42,6 +44,8 @@ import type {
   DiscoveredExecutionView,
   MapDiscoveredExecutionView,
   UniverseMapProjection,
+  SpawnChildView,
+  SpawnLineageView,
 } from "./types.ts";
 
 const byAttention = (attention: readonly AttentionItem[]): Map<string, AttentionItem> => {
@@ -134,6 +138,114 @@ const publicAgent = (agent: Agent) => {
   };
 };
 
+interface SpawnLineageState {
+  readonly goals: readonly Goal[];
+  readonly agents: readonly Agent[];
+  readonly agentSpawnLinks?: readonly AgentSpawnLink[];
+  readonly agentSpawnDeclarations?: readonly AgentSpawnDeclaration[];
+}
+
+const resolvedSpawnLineage = (state: SpawnLineageState, parent: Agent): SpawnLineageView => {
+  const lineage: SpawnLineageView = {
+    state: "resolved",
+    parentAgentId: parent.id,
+    parentDisplayName: parent.displayName,
+    explanation: "Declared by the spawning session.",
+  };
+  if (parent.archivedAt !== undefined) Object.assign(lineage, { parentArchived: true });
+  const goal = parent.primaryGoalId
+    ? state.goals.find((candidate) => candidate.id === parent.primaryGoalId)
+    : undefined;
+  if (goal) Object.assign(lineage, { suggestedGoal: { goalId: goal.id, title: goal.title } });
+  return lineage;
+};
+
+const resolveDeclarationParentAgent = (
+  state: SpawnLineageState,
+  declaration: AgentSpawnDeclaration,
+): Agent | undefined => {
+  const matches = state.agents.filter((agent) =>
+    [
+      ...(agent.execution ? [agent.execution] : []),
+      ...agent.executionHistory,
+      ...agent.conflictingExecutions,
+    ].some(
+      (binding) =>
+        binding.hostKind === declaration.hostKind &&
+        binding.hostInstanceId === declaration.hostInstanceId &&
+        binding.nativeId === declaration.nativeId,
+    ),
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+/** True when candidateAgentId is startAgentId or an established ancestor of it. */
+const spawnChainIncludes = (
+  state: SpawnLineageState,
+  startAgentId: string,
+  candidateAgentId: string,
+): boolean => {
+  const seen = new Set<string>();
+  let current: string | undefined = startAgentId;
+  while (current !== undefined && !seen.has(current)) {
+    if (current === candidateAgentId) return true;
+    seen.add(current);
+    current = state.agentSpawnLinks?.find((link) => link.childAgentId === current)?.parentAgentId;
+  }
+  return false;
+};
+
+const spawnLineageForChild = (
+  state: SpawnLineageState,
+  childAgentId: string,
+): SpawnLineageView | undefined => {
+  const link = state.agentSpawnLinks?.find((candidate) => candidate.childAgentId === childAgentId);
+  if (link) {
+    const parent = state.agents.find((candidate) => candidate.id === link.parentAgentId);
+    return parent
+      ? resolvedSpawnLineage(state, parent)
+      : {
+          state: "unresolved",
+          explanation: "The declared spawning session is no longer an Observatory Agent.",
+        };
+  }
+  const declaration = state.agentSpawnDeclarations?.find(
+    (candidate) => candidate.childAgentId === childAgentId,
+  );
+  if (!declaration) return undefined;
+  const parent = resolveDeclarationParentAgent(state, declaration);
+  if (!parent) {
+    return {
+      state: "unresolved",
+      explanation: "A spawning session was declared, but it is not an Observatory Agent.",
+    };
+  }
+  if (parent.id === childAgentId || spawnChainIncludes(state, parent.id, childAgentId)) {
+    return {
+      state: "unresolved",
+      explanation: "The declared spawning session cannot be linked without creating a cycle.",
+    };
+  }
+  return resolvedSpawnLineage(state, parent);
+};
+
+const spawnChildrenFor = (state: SpawnLineageState, parentAgentId: string): SpawnChildView[] =>
+  (state.agentSpawnLinks ?? [])
+    .filter((link) => link.parentAgentId === parentAgentId)
+    .flatMap((link) => {
+      const child = state.agents.find((candidate) => candidate.id === link.childAgentId);
+      return child
+        ? [
+            {
+              agentId: child.id,
+              displayName: child.displayName,
+              archived: child.archivedAt !== undefined,
+            },
+          ]
+        : [];
+    })
+    .sort((left, right) => compareText(left.displayName, right.displayName));
+
 const projectCommandCentre = (
   state: {
     readonly systems?: readonly System[];
@@ -141,6 +253,8 @@ const projectCommandCentre = (
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
     readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
+    readonly agentSpawnLinks?: readonly AgentSpawnLink[];
+    readonly agentSpawnDeclarations?: readonly AgentSpawnDeclaration[];
   },
   now: number,
   includeArchived = false,
@@ -157,11 +271,13 @@ const projectCommandCentre = (
   const attention = evaluateAttention(now, state.goals, projectedAgents, state.hosts);
   const attentionByAgent = byAttention(attention.items);
   const allViews = projectedAgents.map((agent): AgentView => {
-    return {
+    const spawnedBy = spawnLineageForChild(state, agent.id);
+    const view: AgentView = {
       ...publicAgent(agent),
       goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
       attention: attentionByAgent.get(agent.id),
     };
+    return spawnedBy ? { ...view, spawnedBy } : view;
   });
 
   const maximum = maximumAgents === undefined ? undefined : Math.max(0, Math.floor(maximumAgents));
@@ -643,12 +759,21 @@ const projectUniverseMap = (
 export const mapFromCommandCentre = (
   commandCentre: CommandCentreProjection,
 ): UniverseMapProjection => {
+  const parentByAgentId = new Map<string, string>();
+  for (const agent of [
+    ...commandCentre.goals.flatMap((goal) => goal.agents),
+    ...commandCentre.unassigned,
+  ]) {
+    if (agent.spawnedBy?.parentAgentId)
+      parentByAgentId.set(agent.id, agent.spawnedBy.parentAgentId);
+  }
   const mapGoals = commandCentre.goals.map((goal) => {
     const mapPosition = goal.mapPosition ?? defaultGoalMapPosition(goal.id);
     const satellitePositions = agentSatellitePositions(
       mapPosition,
       goal.id,
       goal.agents.map((agent) => agent.id),
+      parentByAgentId,
     );
     const radius = goalRadius(goal.agents.length);
     const agents = goal.agents.map((agent) => ({
@@ -671,6 +796,7 @@ export const mapFromCommandCentre = (
   const unassignedPositions = unassignedAgentPositions(
     inboxPosition,
     commandCentre.unassigned.map((agent) => agent.id),
+    parentByAgentId,
   );
   const mapUnassigned = commandCentre.unassigned.map((agent) => ({
     ...agent,
@@ -1059,12 +1185,14 @@ const agentView = (
   agent: Agent,
   goals: readonly Goal[],
   attention: readonly AttentionItem[],
+  spawnedBy?: SpawnLineageView,
 ): AgentView => {
-  return {
+  const view: AgentView = {
     ...publicAgent(agent),
     goalTitle: goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
     attention: attention.find((item) => item.agentId === agent.id),
   };
+  return spawnedBy ? { ...view, spawnedBy } : view;
 };
 
 const projectInspector = (
@@ -1073,6 +1201,8 @@ const projectInspector = (
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
     readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
+    readonly agentSpawnLinks?: readonly AgentSpawnLink[];
+    readonly agentSpawnDeclarations?: readonly AgentSpawnDeclaration[];
   },
   now: number,
   target: { readonly type: "goal" | "agent" | "discovered-execution"; readonly id: string },
@@ -1112,7 +1242,9 @@ const projectInspector = (
     if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
     const agents = activeAgents
       .filter((agent) => agent.primaryGoalId === goal.id)
-      .map((agent) => agentView(agent, state.goals, attention.items))
+      .map((agent) =>
+        agentView(agent, state.goals, attention.items, spawnLineageForChild(state, agent.id)),
+      )
       .sort(compareAgents);
     const view: GoalView = {
       ...goal,
@@ -1135,7 +1267,13 @@ const projectInspector = (
 
   const agent = state.agents.find((candidate) => candidate.id === target.id);
   if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
-  const view = agentView(agent, state.goals, attention.items);
+  const view = agentView(
+    agent,
+    state.goals,
+    attention.items,
+    spawnLineageForChild(state, agent.id),
+  );
+  const children = spawnChildrenFor(state, agent.id);
   const conversation = safeConversationReference(agent.nativeConversationRef);
   const lines = [
     `state   ${view.lifecycleState} · ${agent.runtimeState}`,
@@ -1156,8 +1294,8 @@ const projectInspector = (
     ...(agent.description ? [agent.description] : []),
   ];
   return conversation
-    ? { kind: "agent-inspector", agent: view, conversation, lines }
-    : { kind: "agent-inspector", agent: view, lines };
+    ? { kind: "agent-inspector", agent: view, conversation, children, lines }
+    : { kind: "agent-inspector", agent: view, children, lines };
 };
 
 export const createProjectionModule = (): ProjectionModule => ({

@@ -101,7 +101,7 @@ observations.
 new semantic events are appended without touching their prefix, but explicit
 record edits (including an existing sequence), omitted records and cleared
 optional values must also persist. The adapter compares normalized SQL bindings
-for all seven semantic tables and replaces only changed rows (delete + insert),
+for all nine semantic tables and replaces only changed rows (delete + insert),
 inserting new rows and deleting actual omissions. Unchanged rows have no SQLite
 mutations. There is no implicit history retention or compaction policy.
 
@@ -493,8 +493,8 @@ decision; the current clean-break store does not yet bound that table.
 ## Persistence
 
 Persisted semantic state includes Systems, Goals, Agents, assignments, accepted
-Goal positions, identity evidence, host observations, semantic changes and the
-operator checkpoint.
+Goal positions, identity evidence, host observations, declared spawn links and
+unresolved spawn declarations, semantic changes and the operator checkpoint.
 
 Renderer-local selection, hover, viewport, zoom, open dialogs and terminal tabs
 are not persisted in SQLite. Versioned browser preferences may use local

@@ -66,6 +66,12 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
     goalId: Id,
   }),
   Schema.Struct({ type: Schema.Literal("UnassignAgent"), agentId: Id }),
+  Schema.Struct({
+    type: Schema.Literal("SetAgentSpawnParent"),
+    childAgentId: Id,
+    parentAgentId: Id,
+  }),
+  Schema.Struct({ type: Schema.Literal("ClearAgentSpawnParent"), childAgentId: Id }),
   Schema.Struct({ type: Schema.Literal("ArchiveAgent"), agentId: Id }),
   Schema.Struct({
     type: Schema.Literal("ArchiveAgents"),

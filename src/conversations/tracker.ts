@@ -200,16 +200,38 @@ export class ConversationTracker implements ConversationTrackerModule {
     const label =
       this.harnesses.agentHarness(session.nativeConversationRef.harnessId)?.describe().label ??
       session.nativeConversationRef.harnessId;
-    const admitted = this.universe.execute({
-      type: "AddConversation",
-      admissionSource: "provider-catalogue",
+    const declaration = discovery.spawnDeclaration;
+    const admission = {
+      type: "AddConversation" as const,
+      admissionSource: "provider-catalogue" as const,
       resumeEligibility: session.resumeEligibility,
       harnessId: session.nativeConversationRef.harnessId,
       nativeConversationRef: session.nativeConversationRef,
       displayName: boundedText(session.title, `${label} conversation`),
       workspaceRef: session.workspaceRef,
       observedAt: session.observedAt,
-    });
+    };
+    const spawn =
+      declaration && !declaration.conflict
+        ? {
+            source:
+              declaration.source === "launch-receipt"
+                ? ("managed-launch" as const)
+                : ("declared" as const),
+            declaredAt: declaration.declaredAt,
+            parentExecution: {
+              hostKind: discovery.binding.hostKind,
+              hostInstanceId: discovery.binding.hostInstanceId,
+              nativeId: declaration.parentNativeId,
+            },
+          }
+        : undefined;
+    const admitted = spawn
+      ? this.universe.execute({
+          ...admission,
+          spawn,
+        })
+      : this.universe.execute(admission);
     if (!admitted.ok || !admitted.agentId)
       throw new Error(admitted.error ?? "Discovered execution could not be added.");
 

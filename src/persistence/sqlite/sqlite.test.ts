@@ -431,6 +431,14 @@ describe("SQLite persistence", () => {
     expect(
       store.db
         .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('agent_spawn_links', 'agent_spawn_declarations') ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name),
+    ).toEqual(["agent_spawn_declarations", "agent_spawn_links"]);
+    expect(
+      store.db
+        .query<{ name: string }, []>(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('universe_changes', 'operator_checkpoint') ORDER BY name",
         )
         .all()
@@ -751,6 +759,116 @@ describe("SQLite persistence", () => {
           result: { status: "pending", requestId: "missing", message: "Synthetic" },
         }),
       ).toThrow("did not match a reserved receipt");
+    } finally {
+      store.close();
+    }
+  });
+
+  test("round-trips spawn links and unresolved declarations", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const setup = makeUniverse({ store });
+      admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
+      const state = store.load();
+      state.agents.push({
+        ...state.agents[0]!,
+        id: "agent-2",
+        execution: { ...state.agents[0]!.execution!, nativeId: "pane-2" },
+      });
+      state.agentSpawnLinks = [
+        {
+          childAgentId: "agent-2",
+          parentAgentId: "agent-1",
+          source: "human",
+          establishedAt: 1_000_100,
+        },
+      ];
+      state.agentSpawnDeclarations = [
+        {
+          childAgentId: "agent-1",
+          hostKind: "herdr",
+          hostInstanceId: "herdr:local",
+          nativeId: "missing-parent",
+          source: "declared",
+          declaredAt: 1_000_050,
+        },
+      ];
+      store.save(state);
+      expect(store.load().agentSpawnLinks).toEqual(state.agentSpawnLinks);
+      const declaration = store.load().agentSpawnDeclarations[0];
+      expect(declaration).toMatchObject({
+        childAgentId: "agent-1",
+        hostKind: "herdr",
+        nativeId: "missing-parent",
+        source: "declared",
+      });
+      expect(declaration?.declaredAt).toBe(1_000_050);
+
+      const cleared = structuredClone(store.load());
+      cleared.agentSpawnLinks = [];
+      cleared.agentSpawnDeclarations = [];
+      store.save(cleared);
+      expect(store.load().agentSpawnLinks).toEqual([]);
+      expect(store.load().agentSpawnDeclarations).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("consolidating a legacy duplicate Agent repoints lineage instead of failing foreign keys", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const first = makeUniverse({ store });
+      admitObservedConversationsAndReconcile(first.universe, hostSnapshot([observation]));
+      const state = store.load();
+      const survivor = state.agents[0];
+      if (!survivor) throw new Error("Expected a persisted Agent.");
+      state.agents.push({
+        ...survivor,
+        id: "agent-duplicate",
+        execution: survivor.execution
+          ? { ...survivor.execution, nativeId: "pane-duplicate" }
+          : undefined,
+      });
+      state.agentSpawnLinks = [
+        {
+          childAgentId: "agent-duplicate",
+          parentAgentId: survivor.id,
+          source: "declared",
+          establishedAt: 1_000_100,
+        },
+      ];
+      store.save(state);
+
+      const reopened = makeUniverse({ store });
+      const reconciled = reopened.universe.reconcile(hostSnapshot([observation]));
+      expect(reconciled.accepted).toBe(true);
+      expect(store.load().agentSpawnLinks).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("loads an unrecognised persisted spawn source as unknown", () => {
+    const store = new SqliteUniverseStore(":memory:");
+    try {
+      const setup = makeUniverse({ store });
+      admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
+      const state = store.load();
+      const survivor = state.agents[0];
+      if (!survivor) throw new Error("Expected a persisted Agent.");
+      state.agents.push({
+        ...survivor,
+        id: "agent-2",
+        execution: survivor.execution ? { ...survivor.execution, nativeId: "pane-2" } : undefined,
+      });
+      store.save(state);
+      store.db.exec(
+        "INSERT INTO agent_spawn_links (child_agent_id, parent_agent_id, source, declared_at, established_at) VALUES ('agent-2', 'agent-1', 'mystery', NULL, 1000)",
+      );
+      expect(store.load().agentSpawnLinks).toMatchObject([
+        { childAgentId: "agent-2", parentAgentId: "agent-1", source: "unknown" },
+      ]);
     } finally {
       store.close();
     }

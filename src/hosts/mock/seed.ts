@@ -242,5 +242,19 @@ export const seedMockPortfolio = (
       assignedAgents += 1;
     }
   }
+
+  const fanOutParentId = agentsByNativeId.get("mock-p01");
+  if (fanOutParentId) {
+    for (const nativeId of ["mock-p02", "mock-p03", "mock-p04"]) {
+      const childAgentId = agentsByNativeId.get(nativeId);
+      if (!childAgentId) continue;
+      const linked = universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId,
+        parentAgentId: fanOutParentId,
+      });
+      if (!linked.ok) throw new Error(linked.error ?? "Could not seed mock spawn lineage.");
+    }
+  }
   return { createdGoals, assignedAgents };
 };

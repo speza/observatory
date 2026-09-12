@@ -67,40 +67,98 @@ const compareIdentity = (left: string, right: string): number => {
   return 0;
 };
 
-const stableSlotPositions = (
+const candidateSlotsByProximity = (
+  offsets: readonly MapPosition[],
+  parentIndex: number,
+): readonly number[] => {
+  const parent = offsets[parentIndex];
+  if (!parent) return offsets.map((_, index) => index);
+  return offsets
+    .map((offset, index) => ({ offset, index }))
+    .sort((left, right) => {
+      const leftDistance = (left.offset.x - parent.x) ** 2 + (left.offset.y - parent.y) ** 2;
+      const rightDistance = (right.offset.x - parent.x) ** 2 + (right.offset.y - parent.y) ** 2;
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      return left.index - right.index;
+    })
+    .map((entry) => entry.index);
+};
+
+/**
+ * Stable slot assignment with lineage clustering. An Agent with no parent in
+ * this set keeps its identity-hashed slot; each child takes the nearest free
+ * slot to its parent's slot, so a fan-out reads as one local group without
+ * moving unrelated Agents or the Goal anchor. Depth extends outward through
+ * the same rule, and collision handling stays deterministic.
+ */
+const groupedSlotPositions = (
   anchor: MapPosition,
   ids: readonly string[],
   offsets: readonly MapPosition[],
   namespace: string,
   preferredSlotCount: number,
+  parentByAgentId: ReadonlyMap<string, string>,
 ): Map<string, MapPosition> => {
-  const result = new Map<string, MapPosition>();
-  const occupied = new Set<string>();
   const uniqueIds = [...new Set(ids)].sort(compareIdentity);
+  const idSet = new Set(uniqueIds);
+  const childrenByParent = new Map<string, string[]>();
   for (const id of uniqueIds) {
-    const preferredCount = Math.max(1, Math.min(offsets.length, preferredSlotCount));
-    const start = hash(`${namespace}:${id}`) % preferredCount;
-    const candidateIndexes = [
-      ...Array.from({ length: preferredCount }, (_, offset) => (start + offset) % preferredCount),
-      ...Array.from(
-        { length: offsets.length - preferredCount },
-        (_, offset) => preferredCount + offset,
-      ),
-    ];
-    for (const index of candidateIndexes) {
-      const candidate = offsets[index];
-      if (!candidate) continue;
-      const position = {
-        x: anchor.x + candidate.x,
-        y: anchor.y + candidate.y,
-      };
-      const key = positionKey(position);
-      if (occupied.has(key)) continue;
-      occupied.add(key);
-      result.set(id, position);
-      break;
-    }
+    const parent = parentByAgentId.get(id);
+    if (!parent || !idSet.has(parent)) continue;
+    const children = childrenByParent.get(parent);
+    if (children) children.push(id);
+    else childrenByParent.set(parent, [id]);
   }
+  const occupied = new Set<string>();
+  const result = new Map<string, MapPosition>();
+  const positionFor = (index: number): MapPosition | undefined => {
+    const offset = offsets[index];
+    return offset ? { x: anchor.x + offset.x, y: anchor.y + offset.y } : undefined;
+  };
+  const findIndex = (id: string, parentIndex: number | undefined): number | undefined => {
+    const preferredCount = Math.max(1, Math.min(offsets.length, preferredSlotCount));
+    const hashStart = hash(`${namespace}:${id}`) % preferredCount;
+    const order =
+      parentIndex === undefined
+        ? [
+            ...Array.from(
+              { length: preferredCount },
+              (_, offset) => (hashStart + offset) % preferredCount,
+            ),
+            ...Array.from(
+              { length: offsets.length - preferredCount },
+              (_, offset) => preferredCount + offset,
+            ),
+          ]
+        : candidateSlotsByProximity(offsets, parentIndex);
+    for (const index of order) {
+      const position = positionFor(index);
+      if (!position || occupied.has(positionKey(position))) continue;
+      return index;
+    }
+    return undefined;
+  };
+  const placeTree = (rootId: string): void => {
+    const queue: { readonly id: string; readonly parentIndex?: number }[] = [{ id: rootId }];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || result.has(current.id)) continue;
+      const index = findIndex(current.id, current.parentIndex);
+      if (index === undefined) continue;
+      const position = positionFor(index);
+      if (!position) continue;
+      occupied.add(positionKey(position));
+      result.set(current.id, position);
+      for (const child of childrenByParent.get(current.id) ?? [])
+        queue.push({ id: child, parentIndex: index });
+    }
+  };
+  const roots = uniqueIds.filter((id) => {
+    const parent = parentByAgentId.get(id);
+    return !parent || !idSet.has(parent);
+  });
+  for (const root of roots) placeTree(root);
+  for (const id of uniqueIds) if (!result.has(id)) placeTree(id);
   return result;
 };
 
@@ -321,8 +379,16 @@ export const agentSatellitePositions = (
   goal: MapPosition,
   goalId: string,
   agentIds: readonly string[],
+  parentByAgentId: ReadonlyMap<string, string> = new Map(),
 ): Map<string, MapPosition> =>
-  stableSlotPositions(goal, agentIds, satelliteOffsets(agentIds.length), `satellite:${goalId}`, 8);
+  groupedSlotPositions(
+    goal,
+    agentIds,
+    satelliteOffsets(agentIds.length),
+    `satellite:${goalId}`,
+    8,
+    parentByAgentId,
+  );
 
 /** Keep the original single-agent helper for callers and unit fixtures. */
 export const agentSatellitePosition = (
@@ -355,8 +421,16 @@ export const mapInboxAnchor = (goals: readonly MapPosition[]): MapPosition => {
 export const unassignedAgentPositions = (
   anchor: MapPosition,
   agentIds: readonly string[],
+  parentByAgentId: ReadonlyMap<string, string> = new Map(),
 ): Map<string, MapPosition> =>
-  stableSlotPositions(anchor, agentIds, inboxOffsets(agentIds.length), "unassigned", 12);
+  groupedSlotPositions(
+    anchor,
+    agentIds,
+    inboxOffsets(agentIds.length),
+    "unassigned",
+    12,
+    parentByAgentId,
+  );
 
 /** Keep the original single-agent helper for callers and unit fixtures. */
 export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): MapPosition =>

@@ -53,6 +53,12 @@ export type WebCommand =
   | { readonly type: "AssignAgent"; readonly agentId: string; readonly goalId: string }
   | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
+  | {
+      readonly type: "SetAgentSpawnParent";
+      readonly childAgentId: string;
+      readonly parentAgentId: string;
+    }
+  | { readonly type: "ClearAgentSpawnParent"; readonly childAgentId: string }
   | { readonly type: "ArchiveAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly string[] }
   | { readonly type: "CompleteGoal"; readonly goalId: string }

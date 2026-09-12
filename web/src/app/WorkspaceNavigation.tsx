@@ -15,6 +15,7 @@ const needsHumanInput = (agent: AgentView): boolean => agent.attention?.requires
 
 const systemKey = (id: string): string => `system:${id}`;
 const goalKey = (id: string): string => `goal:${id}`;
+const agentKey = (id: string): string => `agent:${id}`;
 
 const requiredExpansion = (
   projection: CommandCentreProjection,
@@ -34,6 +35,20 @@ const requiredExpansion = (
     required.push(goalKey(goalId));
     const goal = projection.goals.find((candidate) => candidate.id === goalId);
     if (goal?.systemId) required.push(systemKey(goal.systemId));
+  }
+  if (selection?.type === "agent") {
+    const agents = new Map(
+      [...projection.goals.flatMap((goal) => goal.agents), ...projection.unassigned].map(
+        (agent) => [agent.id, agent] as const,
+      ),
+    );
+    let current = agents.get(selection.id)?.spawnedBy?.parentAgentId;
+    const seen = new Set<string>();
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      required.push(agentKey(current));
+      current = agents.get(current)?.spawnedBy?.parentAgentId;
+    }
   }
   return required;
 };
@@ -101,34 +116,106 @@ export const WorkspaceNavigation = ({
       .filter((item) => item.requiresHumanInput && item.goalId)
       .map((item) => item.goalId!),
   );
-  const agentRow = (agent: AgentView): React.JSX.Element => (
-    <button
-      type="button"
-      className="workspace-tree__agent"
-      key={agent.id}
-      aria-current={selection?.type === "agent" && selection.id === agent.id ? "true" : undefined}
-      title={`${agent.displayName} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
-      onClick={() => onSelect({ type: "agent", id: agent.id })}
-    >
-      <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-      <span>{agent.displayName}</span>
-      <span
-        className="workspace-tree__status"
-        role="img"
-        aria-label={
-          agent.attention
-            ? `${agent.runtimeState} · ${agent.attention.explanation}`
-            : agent.runtimeState
-        }
+  const agentRow = (
+    agent: AgentView,
+    depth: number,
+    childCount: number,
+    childAttention: boolean,
+  ): React.JSX.Element => {
+    // SAFETY: React accepts CSS custom properties on style objects; this one carries the tree depth.
+    const rowStyle = { "--tree-depth": String(depth) } as React.CSSProperties;
+    return (
+      <div
+        className={`workspace-tree__agent-branch ${depth > 0 ? "workspace-tree__agent--child" : ""}`}
+        key={agent.id}
+        style={rowStyle}
       >
-        {agent.attention ? (
-          <CircleAlert size={13} className="is-attention" />
+        {childCount > 0 && view === "all" ? (
+          toggle(agentKey(agent.id), agent.displayName)
         ) : (
-          <i className={`workspace-tree__dot is-${agent.runtimeState}`} />
+          <span aria-hidden="true" className="workspace-tree__toggle-spacer" />
         )}
-      </span>
-    </button>
-  );
+        <button
+          type="button"
+          className="workspace-tree__agent"
+          aria-current={
+            selection?.type === "agent" && selection.id === agent.id ? "true" : undefined
+          }
+          title={`${agent.displayName} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
+          onClick={() => onSelect({ type: "agent", id: agent.id })}
+        >
+          <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
+          <span>{agent.displayName}</span>
+          {childCount > 0 ? (
+            <small
+              className={childAttention ? "is-attention" : undefined}
+              aria-label={`${childCount} spawned session${childCount === 1 ? "" : "s"}`}
+            >
+              {childCount}
+            </small>
+          ) : null}
+          <span
+            className="workspace-tree__status"
+            role="img"
+            aria-label={
+              agent.attention
+                ? `${agent.runtimeState} · ${agent.attention.explanation}`
+                : agent.runtimeState
+            }
+          >
+            {agent.attention ? (
+              <CircleAlert size={13} className="is-attention" />
+            ) : (
+              <i className={`workspace-tree__dot is-${agent.runtimeState}`} />
+            )}
+          </span>
+        </button>
+      </div>
+    );
+  };
+  const nestedAgentRows = (agents: readonly AgentView[]): React.JSX.Element[] => {
+    const agentIds = new Set(agents.map((agent) => agent.id));
+    const childrenByParent = new Map<string, AgentView[]>();
+    const roots: AgentView[] = [];
+    for (const agent of agents) {
+      const parentAgentId = agent.spawnedBy?.parentAgentId;
+      if (!parentAgentId || !agentIds.has(parentAgentId)) {
+        roots.push(agent);
+        continue;
+      }
+      const children = childrenByParent.get(parentAgentId);
+      if (children) children.push(agent);
+      else childrenByParent.set(parentAgentId, [agent]);
+    }
+    const rows: React.JSX.Element[] = [];
+    const visited = new Set<string>();
+    const attentionMemo = new Map<string, boolean>();
+    const hasAttentionDescendant = (agentId: string, seen: Set<string>): boolean => {
+      const memo = attentionMemo.get(agentId);
+      if (memo !== undefined) return memo;
+      if (seen.has(agentId)) return false;
+      seen.add(agentId);
+      const result = (childrenByParent.get(agentId) ?? []).some(
+        (child) => child.attention !== undefined || hasAttentionDescendant(child.id, seen),
+      );
+      attentionMemo.set(agentId, result);
+      return result;
+    };
+    const visit = (agent: AgentView, depth: number, visible: boolean): void => {
+      if (visited.has(agent.id)) return;
+      visited.add(agent.id);
+      const children = childrenByParent.get(agent.id) ?? [];
+      const childAttention = children.some(
+        (child) => child.attention !== undefined || hasAttentionDescendant(child.id, new Set()),
+      );
+      if (visible) rows.push(agentRow(agent, depth, children.length, childAttention));
+      const open = visible && (view === "attention" || expanded.has(agentKey(agent.id)));
+      for (const child of children) visit(child, depth + 1, open);
+    };
+    for (const root of roots) visit(root, 0, true);
+    for (const agent of agents) visit(agent, 0, true);
+    return rows;
+  };
   const goals =
     view === "unassigned"
       ? []
@@ -169,7 +256,7 @@ export const WorkspaceNavigation = ({
         <span>{goal.title}</span>
         <small aria-label={`${goal.agents.length} agents`}>{goal.agents.length}</small>
       </summary>
-      {goal.agents.map(agentRow)}
+      {nestedAgentRows(goal.agents)}
       {goal.agents.length === 0 ? (
         <p className="workspace-tree__empty">
           {view === "attention" ? "Goal needs attention." : "No agents yet"}
@@ -250,7 +337,7 @@ export const WorkspaceNavigation = ({
       {unassigned.length ? (
         <section className="workspace-tree__unassigned" aria-label="Unassigned agents">
           {view !== "unassigned" ? <p className="overline">Unassigned</p> : null}
-          {unassigned.map(agentRow)}
+          {nestedAgentRows(unassigned)}
         </section>
       ) : null}
       {discoveredExecutions.length ? (

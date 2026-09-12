@@ -4,6 +4,8 @@ import type {
   CommandCentreProjection,
   DiscoveredExecutionView,
   InspectorProjection,
+  SpawnChildView,
+  SpawnLineageView,
 } from "../../../src/projection/types.ts";
 import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol.ts";
@@ -36,6 +38,7 @@ interface InspectorProps {
   readonly onRetry: () => void;
   readonly onReviewChanges: (agent: AgentView) => void;
   readonly onResume: (agent: AgentView) => Promise<void>;
+  readonly onSelectAgent: (agentId: string) => void;
 }
 
 const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
@@ -46,6 +49,106 @@ const decisionTitle = {
   resolve: "Resolve lifecycle",
   monitor: "Monitor uncertainty",
 } as const;
+
+interface SpawnLineageSectionProps {
+  readonly agentId: string;
+  readonly spawnedBy?: SpawnLineageView;
+  readonly children: readonly SpawnChildView[];
+  readonly candidateParents: readonly { readonly id: string; readonly displayName: string }[];
+  readonly commandPending: boolean;
+  readonly onCommand: (command: WebCommand) => Promise<WebCommandResponse | undefined>;
+  readonly onSelectAgent: (agentId: string) => void;
+}
+
+const SpawnLineageSection = ({
+  agentId,
+  spawnedBy,
+  children,
+  candidateParents,
+  commandPending,
+  onCommand,
+  onSelectAgent,
+}: SpawnLineageSectionProps) => {
+  const parentAgentId = spawnedBy?.parentAgentId;
+  const suggestedGoal = spawnedBy?.suggestedGoal;
+  return (
+    <section className="inspector__lineage" aria-label="Spawn lineage">
+      {spawnedBy?.state === "resolved" && parentAgentId ? (
+        <p>
+          Started by{" "}
+          <button onClick={() => onSelectAgent(parentAgentId)} type="button">
+            {spawnedBy.parentDisplayName ?? parentAgentId}
+          </button>
+          {spawnedBy.parentArchived ? " · archived" : ""}
+          {suggestedGoal ? (
+            <>
+              {" · "}
+              <button
+                disabled={commandPending}
+                onClick={() =>
+                  void onCommand({ type: "AssignAgent", agentId, goalId: suggestedGoal.goalId })
+                }
+                type="button"
+              >
+                Assign to {suggestedGoal.title}
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : spawnedBy ? (
+        <p>{spawnedBy.explanation}</p>
+      ) : null}
+      <label>
+        <span>Spawn parent</span>
+        <select
+          disabled={commandPending}
+          onChange={(event) => {
+            const nextParentAgentId = event.target.value;
+            void onCommand(
+              nextParentAgentId
+                ? {
+                    type: "SetAgentSpawnParent",
+                    childAgentId: agentId,
+                    parentAgentId: nextParentAgentId,
+                  }
+                : { type: "ClearAgentSpawnParent", childAgentId: agentId },
+            );
+          }}
+          value={parentAgentId ?? (spawnedBy?.state === "unresolved" ? "__unresolved__" : "")}
+        >
+          {spawnedBy?.state === "unresolved" ? (
+            <option disabled value="__unresolved__">
+              Unidentified spawner
+            </option>
+          ) : null}
+          <option value="">None</option>
+          {candidateParents.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.displayName}
+            </option>
+          ))}
+        </select>
+      </label>
+      {children.length > 0 ? (
+        <div>
+          <p className="overline">
+            Started {children.length} {children.length === 1 ? "session" : "sessions"}
+          </p>
+          <ul>
+            {children.map((child) => (
+              <li key={child.agentId}>
+                <button onClick={() => onSelectAgent(child.agentId)} type="button">
+                  {child.displayName}
+                  {child.archived ? " · archived" : ""}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+};
 
 const copyIdentifier = (value: string): void => {
   void navigator.clipboard.writeText(value);
@@ -67,6 +170,7 @@ export const Inspector = ({
   onRetry,
   onReviewChanges,
   onResume,
+  onSelectAgent,
 }: InspectorProps): React.JSX.Element => {
   const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
@@ -74,6 +178,19 @@ export const Inspector = ({
     projection?.kind === "discovered-execution-inspector" ? projection.execution : undefined;
   const conversationId =
     projection?.kind === "agent-inspector" ? projection.conversation?.id : undefined;
+  const spawnParentCandidates = (() => {
+    const candidates = new Map<string, { id: string; displayName: string }>();
+    for (const candidateGoal of commandCentre.goals)
+      for (const candidate of candidateGoal.agents)
+        if (candidate.id !== agent?.id)
+          candidates.set(candidate.id, { id: candidate.id, displayName: candidate.displayName });
+    for (const candidate of commandCentre.unassigned)
+      if (candidate.id !== agent?.id)
+        candidates.set(candidate.id, { id: candidate.id, displayName: candidate.displayName });
+    return [...candidates.values()].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName),
+    );
+  })();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
@@ -274,6 +391,13 @@ export const Inspector = ({
               conversation. Admission preserves the existing execution conflict.
             </p>
           ) : null}
+          {discovery.spawnedBy ? (
+            <p className="inspector__discovered-note">
+              {discovery.spawnedBy.state === "resolved"
+                ? `Started by ${discovery.spawnedBy.parentDisplayName ?? "an Observatory Agent"}${discovery.spawnedBy.parentArchived ? " (archived)" : ""}.`
+                : discovery.spawnedBy.explanation}
+            </p>
+          ) : null}
           <label className="inspector__assignment">
             <span>Optional Goal</span>
             <select
@@ -300,6 +424,21 @@ export const Inspector = ({
             >
               {discoveryGoalId ? "Add and assign to Goal" : "Add to Observatory"}
             </button>
+            {discovery.spawnedBy?.suggestedGoal ? (
+              <button
+                disabled={commandPending || discovery.admission.status !== "available"}
+                onClick={() =>
+                  void onAdmitDiscovered(
+                    discovery.handle,
+                    discovery.spawnedBy?.suggestedGoal?.goalId,
+                  )
+                }
+                title={`Assign to ${discovery.spawnedBy.suggestedGoal.title}`}
+                type="button"
+              >
+                Add to parent Goal
+              </button>
+            ) : null}
             {discovery.presence === "live" ? (
               <button onClick={() => onOpenDiscoveredTerminal(discovery)} type="button">
                 Open terminal
@@ -412,6 +551,15 @@ export const Inspector = ({
               </button>
             </nav>
           </section>
+          <SpawnLineageSection
+            agentId={projection.agent.id}
+            candidateParents={spawnParentCandidates}
+            children={projection.children}
+            commandPending={commandPending}
+            onCommand={onCommand}
+            onSelectAgent={onSelectAgent}
+            spawnedBy={projection.agent.spawnedBy}
+          />
           <RepositoryStatus
             agent={projection.agent}
             key={projection.agent.id}

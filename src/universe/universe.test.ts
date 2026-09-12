@@ -2352,3 +2352,277 @@ describe("Universe", () => {
     expect(universe.snapshot().goals[0]?.updatedAt).toBe(updatedAt);
   });
 });
+
+const declaredBy = (parentNativeId: string) => ({
+  parentNativeId,
+  source: "pane-token" as const,
+  declaredAt: 1_000_000,
+});
+
+const childAdmission = (
+  value: string,
+  options?: {
+    readonly spawn?: {
+      readonly source: "declared" | "managed-launch";
+      readonly parentNativeId: string;
+    };
+  },
+) => {
+  const command = {
+    type: "AddConversation" as const,
+    admissionSource: "managed-launch" as const,
+    harnessId: "test-harness",
+    nativeConversationRef: { harnessId: "test-harness", kind: "conversation-id", value },
+    displayName: `Child ${value}`,
+    observedAt: 1_000_000,
+  };
+  if (!options?.spawn) return command;
+  return {
+    ...command,
+    spawn: {
+      source: options.spawn.source,
+      declaredAt: 1_000_000,
+      parentExecution: {
+        hostKind: "test-host",
+        hostInstanceId: "test-host:default",
+        nativeId: options.spawn.parentNativeId,
+      },
+    },
+  };
+};
+
+describe("spawn lineage", () => {
+  test("discovers a declared child with resolved lineage and a suggested Goal", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Parent goal" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("parent-pane", "Parent worker")]),
+    );
+    expect(universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" }).ok).toBe(
+      true,
+    );
+
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("child-pane", "Child worker"),
+          spawnDeclaration: declaredBy("parent-pane"),
+        },
+      ]),
+    );
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const discovery = commandCentre.discoveredExecutions?.[0];
+    expect(discovery?.spawnedBy).toMatchObject({
+      state: "resolved",
+      parentAgentId: "agent-1",
+      parentDisplayName: "Parent worker",
+      suggestedGoal: { goalId: "goal-1", title: "Parent goal" },
+    });
+  });
+
+  test("admits a child with an exact parent link and fan-out children", () => {
+    const { universe } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("parent-pane", "Parent worker")]),
+    );
+    const admitted = universe.execute(
+      childAdmission("child-session", {
+        spawn: { source: "declared", parentNativeId: "parent-pane" },
+      }),
+    );
+    expect(admitted.ok).toBe(true);
+    const childAgentId = admitted.agentId!;
+    expect(childAgentId).toBeDefined();
+    expect(universe.snapshot().agentSpawnLinks).toMatchObject([
+      {
+        childAgentId,
+        parentAgentId: "agent-1",
+        source: "declared",
+        declaredAt: 1_000_000,
+      },
+    ]);
+    expect(universe.snapshot().agentSpawnDeclarations).toHaveLength(0);
+
+    const childInspector = universe.project({
+      kind: "inspector",
+      now: 1_000_000,
+      target: { type: "agent", id: childAgentId },
+    });
+    if (childInspector.kind !== "agent-inspector") throw new Error("wrong inspector");
+    expect(childInspector.agent.spawnedBy).toMatchObject({
+      state: "resolved",
+      parentAgentId: "agent-1",
+    });
+
+    const parentInspector = universe.project({
+      kind: "inspector",
+      now: 1_000_000,
+      target: { type: "agent", id: "agent-1" },
+    });
+    if (parentInspector.kind !== "agent-inspector") throw new Error("wrong inspector");
+    expect(parentInspector.children).toEqual([
+      { agentId: childAgentId, displayName: "Child child-session", archived: false },
+    ]);
+  });
+
+  test("retains an unresolved declaration until the declared parent appears", () => {
+    const { universe } = makeUniverse();
+    const admitted = universe.execute(
+      childAdmission("child-session", {
+        spawn: { source: "declared", parentNativeId: "late-parent" },
+      }),
+    );
+    expect(admitted.ok).toBe(true);
+    expect(universe.snapshot().agentSpawnLinks).toHaveLength(0);
+    expect(universe.snapshot().agentSpawnDeclarations).toMatchObject([
+      {
+        childAgentId: admitted.agentId,
+        hostKind: "test-host",
+        hostInstanceId: "test-host:default",
+        nativeId: "late-parent",
+        source: "declared",
+      },
+    ]);
+
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("late-parent", "Late parent")]),
+    );
+    expect(universe.snapshot().agentSpawnDeclarations).toHaveLength(0);
+    expect(universe.snapshot().agentSpawnLinks).toMatchObject([
+      { childAgentId: admitted.agentId, parentAgentId: "agent-2", source: "declared" },
+    ]);
+  });
+
+  test("manual links are authoritative and cycles are rejected", () => {
+    const { universe } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("first-pane"), observation("second-pane")]),
+    );
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-1",
+        parentAgentId: "agent-1",
+      }).ok,
+    ).toBe(false);
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-2",
+        parentAgentId: "agent-1",
+      }).ok,
+    ).toBe(true);
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-1",
+        parentAgentId: "agent-2",
+      }).ok,
+    ).toBe(false);
+    expect(universe.snapshot().agentSpawnLinks).toMatchObject([
+      { childAgentId: "agent-2", parentAgentId: "agent-1", source: "human" },
+    ]);
+    expect(universe.execute({ type: "ClearAgentSpawnParent", childAgentId: "agent-2" }).ok).toBe(
+      true,
+    );
+    expect(universe.snapshot().agentSpawnLinks).toHaveLength(0);
+  });
+
+  test("shows a conflict state for disagreeing declarations", () => {
+    const { universe } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([
+        {
+          ...observation("child-pane"),
+          spawnDeclaration: {
+            parentNativeId: "w1:p1",
+            source: "pane-token",
+            declaredAt: 1_000_000,
+            conflict: true,
+          },
+        },
+      ]),
+    );
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    expect(commandCentre.discoveredExecutions?.[0]?.spawnedBy).toMatchObject({
+      state: "conflict",
+    });
+  });
+
+  test("re-admission cannot create a spawn cycle through a descendant", () => {
+    const { universe } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("first-pane"),
+        observation("second-pane"),
+        observation("third-pane"),
+      ]),
+    );
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-2",
+        parentAgentId: "agent-1",
+      }).ok,
+    ).toBe(true);
+    expect(
+      universe.execute({
+        type: "SetAgentSpawnParent",
+        childAgentId: "agent-3",
+        parentAgentId: "agent-2",
+      }).ok,
+    ).toBe(true);
+    const readmitted = universe.execute({
+      type: "AddConversation",
+      admissionSource: "provider-catalogue",
+      resumeEligibility: "same-site",
+      harnessId: "test-harness",
+      nativeConversationRef: {
+        harnessId: "test-harness",
+        continuityScopeId: "test-scope",
+        kind: "conversation-id",
+        value: "first-pane",
+      },
+      displayName: "First worker",
+      observedAt: 1_000_000,
+      spawn: {
+        source: "declared",
+        declaredAt: 1_000_000,
+        parentExecution: {
+          hostKind: "test-host",
+          hostInstanceId: "test-host:default",
+          nativeId: "third-pane",
+        },
+      },
+    });
+    expect(readmitted.agentId).toBe("agent-1");
+    const links = universe.snapshot().agentSpawnLinks;
+    expect(links).toHaveLength(2);
+    expect(links.some((link) => link.childAgentId === "agent-1")).toBe(false);
+    const parentOf = new Map(links.map((link) => [link.childAgentId, link.parentAgentId]));
+    for (const start of parentOf.keys()) {
+      const seen = new Set<string>();
+      let current: string | undefined = start;
+      while (current !== undefined) {
+        expect(seen.has(current)).toBe(false);
+        seen.add(current);
+        current = parentOf.get(current);
+      }
+    }
+    const inspector = universe.project({
+      kind: "inspector",
+      now: 1_000_000,
+      target: { type: "agent", id: "agent-1" },
+    });
+    if (inspector.kind !== "agent-inspector") throw new Error("wrong inspector");
+    expect(inspector.agent.spawnedBy?.state).toBe("unresolved");
+    expect(inspector.agent.spawnedBy?.parentAgentId).toBeUndefined();
+  });
+});

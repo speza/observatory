@@ -34,6 +34,7 @@ interface RenderedGoal {
 }
 
 interface RenderedAgent {
+  readonly agentId: string;
   readonly goalId: string;
   readonly orbitRadiusX: number;
   readonly orbitRadiusY: number;
@@ -62,14 +63,15 @@ const renderedGoals = (markup: string): readonly RenderedGoal[] =>
 const renderedAgents = (markup: string): readonly RenderedAgent[] =>
   Array.from(
     markup.matchAll(
-      /data-agent-id="[^"]+" data-parent-goal-id="([^"]+)" data-screen-x="([^"]+)" data-screen-y="([^"]+)" data-orbit-rx="([^"]+)" data-orbit-ry="([^"]+)"/gu,
+      /data-agent-id="([^"]+)" data-parent-goal-id="([^"]+)" data-screen-x="([^"]+)" data-screen-y="([^"]+)" data-orbit-rx="([^"]+)" data-orbit-ry="([^"]+)"/gu,
     ),
     (match) => ({
-      goalId: match[1] ?? "",
-      x: Number(match[2]),
-      y: Number(match[3]),
-      orbitRadiusX: Number(match[4]),
-      orbitRadiusY: Number(match[5]),
+      agentId: match[1] ?? "",
+      goalId: match[2] ?? "",
+      x: Number(match[3]),
+      y: Number(match[4]),
+      orbitRadiusX: Number(match[5]),
+      orbitRadiusY: Number(match[6]),
     }),
   );
 
@@ -115,7 +117,7 @@ describe("production web Atlas", () => {
     const assignedAgents = renderedAgents(markup);
 
     expect(goals).toHaveLength(12);
-    expect(markup.match(/data-agent-id=/gu)).toHaveLength(71);
+    expect(markup.match(/data-agent-id=/gu)).toHaveLength(68);
     expect(markup).not.toContain("UNASSIGNED");
     expect(markup).toContain("atlas atlas--motion");
     expect(markup).toContain("goal--working");
@@ -159,7 +161,7 @@ describe("production web Atlas", () => {
     expect((contentBounds.maximumY - contentBounds.minimumY) * cameraZoom).toBeLessThanOrEqual(
       760 - 144,
     );
-    expect(assignedAgents).toHaveLength(71);
+    expect(assignedAgents).toHaveLength(68);
     expect(new Set(goals.map((goal) => goal.y)).size).toBeGreaterThanOrEqual(10);
     for (const agent of assignedAgents) {
       const goal = goals.find((candidate) => candidate.id === agent.goalId);
@@ -514,5 +516,81 @@ describe("production web Atlas", () => {
     expect(placement.bounds.top).toBeLessThan(goalBottom + 248);
     const bounds = atlasContentBounds(scoped.map, scale);
     expect(bounds.maximumY - bounds.minimumY).toBeLessThan(800);
+  });
+
+  test("collapses lineage by default and expands the focused family", async () => {
+    const clock = new FixedClock(50_000);
+    const scenario = createMockScenario("portfolio");
+    const host = new MockHostAdapter({ clock, scenario });
+    const { universe } = makeUniverse({ clock });
+    const snapshot = await Effect.runPromise(host.snapshot());
+    seedMockPortfolio(universe, snapshot);
+    const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
+    const agents = projection.goals.flatMap((goal) => goal.agents);
+    const child = agents.find((agent) => agent.spawnedBy?.parentAgentId);
+    const parentAgentId = child?.spawnedBy?.parentAgentId;
+    if (!parentAgentId) throw new Error("Expected seeded spawn lineage.");
+    const childIds = agents
+      .filter((agent) => agent.spawnedBy?.parentAgentId === parentAgentId)
+      .map((agent) => agent.id);
+    expect(childIds.length).toBeGreaterThan(0);
+
+    const collapsed = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    for (const childId of childIds) expect(collapsed).not.toContain(`data-agent-id="${childId}"`);
+    expect(collapsed).toContain("agent__lineage-badge");
+    expect(collapsed).toContain(`${childIds.length} spawned`);
+    expect(collapsed).toContain("spawned by this Agent");
+    const expanded = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        selection: { type: "agent" as const, id: parentAgentId },
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    for (const childId of childIds) expect(expanded).toContain(`data-agent-id="${childId}"`);
+    expect(expanded).toContain("atlas__lineage-tether");
+
+    const rendered = renderedAgents(expanded);
+    const parentPoint = rendered.find((agent) => agent.agentId === parentAgentId);
+    if (!parentPoint) throw new Error("Missing rendered parent card.");
+    for (const childId of childIds) {
+      const childPoint = rendered.find((agent) => agent.agentId === childId);
+      if (!childPoint) throw new Error(`Missing rendered child ${childId}.`);
+      expect(
+        Math.hypot(childPoint.x - parentPoint.x, childPoint.y - parentPoint.y),
+      ).toBeLessThanOrEqual(620);
+    }
+
+    const selectedChildId = childIds[0];
+    if (!selectedChildId) throw new Error("Missing child Agent id.");
+    const childSelection = renderToStaticMarkup(
+      createElement(Atlas, {
+        projection,
+        selection: { type: "agent" as const, id: selectedChildId },
+        reservedLeft: 0,
+        reservedRight: 0,
+        onSelect: () => undefined,
+      }),
+    );
+    for (const childId of childIds) expect(childSelection).toContain(`data-agent-id="${childId}"`);
+    const childRendered = renderedAgents(childSelection);
+    const childParentPoint = childRendered.find((agent) => agent.agentId === parentAgentId);
+    if (!childParentPoint) throw new Error("Missing rendered parent for child selection.");
+    for (const childId of childIds) {
+      const childPoint = childRendered.find((agent) => agent.agentId === childId);
+      if (!childPoint) throw new Error(`Missing rendered child ${childId}.`);
+      expect(
+        Math.hypot(childPoint.x - childParentPoint.x, childPoint.y - childParentPoint.y),
+      ).toBeLessThanOrEqual(620);
+    }
   });
 });
