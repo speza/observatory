@@ -550,9 +550,20 @@ class CliAgentHarness implements AgentHarness {
   availability(): Effect.Effect<HarnessAvailability, HarnessError> {
     return Effect.tryPromise({
       try: async () => {
-        const result = await this.process.run([this.definition.executable, "--version"], {
-          maxOutputBytes: 4_096,
-        });
+        let result;
+        try {
+          result = await this.process.run([this.definition.executable, "--version"], {
+            maxOutputBytes: 4_096,
+          });
+        } catch {
+          // A missing or unspawnable executable is an expected condition, not
+          // a launch-fatal error: report the harness as unavailable so launch
+          // options keep working for the remaining harnesses.
+          return {
+            available: false,
+            message: `${this.definition.descriptor.label} is unavailable.`,
+          };
+        }
         if (result.exitCode !== 0)
           return {
             available: false,

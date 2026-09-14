@@ -23,6 +23,12 @@ const runner = (exitCode = 0): BoundedProcessRunner => ({
   }),
 });
 
+const throwingRunner = (): BoundedProcessRunner => ({
+  run: async () => {
+    throw new Error("spawn ENOENT");
+  },
+});
+
 const processResult = (stdout: string, exitCode = 0): ProcessResult => ({
   exitCode,
   stdout,
@@ -192,6 +198,14 @@ describe("agent harness plugins", () => {
     expect(await Effect.runPromise(unavailable[1]!.availability())).toEqual({
       available: false,
       message: "Codex is unavailable.",
+    });
+  });
+
+  test("reports unavailable when the harness executable cannot be spawned", async () => {
+    const harnesses = await loadHarnesses(throwingRunner());
+    expect(await Effect.runPromise(harnesses[0]!.availability())).toEqual({
+      available: false,
+      message: "Claude Code is unavailable.",
     });
   });
 
