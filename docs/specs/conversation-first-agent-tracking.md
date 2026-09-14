@@ -299,8 +299,11 @@ creates an unassigned Inbox Agent with fallback naming and unknown provider
 continuity until catalogue evidence arrives. It never assigns a Goal or System,
 copies a workspace into semantic ownership or claims resume eligibility. A scoped host
 reference is accepted directly. An unscoped reference is synchronized only if
-the supporting catalogue does not contain conflicting provider scopes; an
-ambiguous value remains discovery.
+the supporting catalogue does not contain conflicting provider scopes and no
+existing scoped Agent claims the same conversation value without that scope. If
+provider scope is temporarily unavailable for an existing scoped Agent, the host
+execution remains discovery until later catalogue evidence can rebind it; a
+second durable Agent is never created. An ambiguous value remains discovery.
 
 Provider-catalogue admission requires a scoped reference and carries the
 provider's actual resume eligibility rather than assuming it is resumable. An
@@ -646,9 +649,12 @@ renderers never write these tables.
 
 The current schema already stores the identity and execution evidence needed by
 host synchronization. No separate Herdr workspace or process records are
-introduced. Existing durable Agents continue to reconcile normally; newly
-recognized host conversations are added through the existing Agent table and
-remain subject to the same archive and history rules.
+introduced. This release intentionally uses a clean-break schema: databases
+from an earlier schema generation must be backed up and explicitly reset before
+startup; no implicit migration or semantic reconstruction is attempted. Once
+the current schema is initialized, existing durable Agents reconcile normally;
+newly recognized host conversations are added through the existing Agent table
+and remain subject to the same archive and history rules.
 
 ## Deleted or collapsed
 

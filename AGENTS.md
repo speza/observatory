@@ -8,15 +8,21 @@
   multiplexer.
 - The spatial universe is the primary product hypothesis. Lists, attention
   queues, inboxes and inspectors are supporting lenses.
-- V1's durable topology is `System -> Goal -> Agent`. A System is a
-  human-authored broad area of work that may span repositories, worktrees and
-  hosts. A reserved `Default` System is seeded at startup and receives Goals
-  created without an explicit System. Repositories, worktrees and Herdr spaces
-  remain agent metadata, not organisational nodes.
+- V1's durable topology is `System -> Goal -> Agent`, with an optional direct
+  `System -> Agent` placement. A System is a human-authored broad area of work
+  that may span repositories, worktrees and hosts. A reserved `Default` System
+  is seeded at startup and receives Goals created without an explicit System.
+  An Agent has either a Goal or a direct System, never both; an unassigned Agent
+  remains in Inbox. Repositories, worktrees and Herdr spaces remain Agent
+  metadata, not organisational nodes.
 - Goal priority, completion and agent/goal archive remain human-controlled
   unless an explicit auto policy says otherwise.
 - Preserve uncertainty. Never convert missing, stale or inferred host facts
-  into accepted semantic state.
+  into accepted semantic state. A recognized exact host conversation may create
+  an identity-only Inbox Agent; unidentified, ambiguous and explicitly
+  untrusted host evidence remains transient discovery. Confirmed host absence
+  removes an Agent from active Atlas and Inbox views but preserves its durable
+  history.
 
 ## Architecture
 

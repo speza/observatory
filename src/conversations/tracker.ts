@@ -379,6 +379,25 @@ export class ConversationTracker implements ConversationTrackerModule {
         continue;
       }
 
+      if (
+        matches.length === 0 &&
+        !reference.continuityScopeId &&
+        this.universe.snapshot().agents.some((agent) => {
+          const candidate = agent.nativeConversationRef;
+          return (
+            candidate?.continuityScopeId !== undefined &&
+            candidate.harnessId === reference.harnessId &&
+            candidate.kind === reference.kind &&
+            candidate.value === reference.value
+          );
+        })
+      ) {
+        diagnostics.push(
+          `Held ${observation.nativeId.trim()} in discovery because its provider scope is unavailable for an existing conversation.`,
+        );
+        continue;
+      }
+
       const canonicalReference = matches[0]?.nativeConversationRef ?? reference;
       if (this.universe.resolveAgentId(canonicalReference) !== undefined) continue;
       const result = this.universe.execute({

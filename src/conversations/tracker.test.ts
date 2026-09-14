@@ -612,6 +612,55 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
+  test("does not duplicate a scoped Agent when its unscoped host identity outlives catalogue evidence", async () => {
+    let snapshot = providerSnapshot();
+    const fixture = trackerFixture(() => snapshot);
+    const system = fixture.universe.execute({ type: "CreateSystem", title: "Project context" });
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.add(fixture.tracker.history()[0]!.handle, undefined, system.systemId);
+    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-before")], 1_000_000));
+
+    snapshot = providerSnapshot([], 1_001_000);
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(hostSnapshot([], 1_002_000));
+    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-after")], 1_003_000));
+
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      systemId: system.systemId,
+      primaryGoalId: undefined,
+      nativeConversationRef: { continuityScopeId: "scope-test" },
+      execution: undefined,
+      executionPresence: "absent",
+    });
+    const beforeCatalogue = fixture.universe.project({
+      kind: "command-centre",
+      now: 1_003_000,
+    });
+    if (beforeCatalogue.kind !== "command-centre") throw new Error("wrong projection");
+    expect(beforeCatalogue.discoveredExecutions).toHaveLength(1);
+
+    snapshot = providerSnapshot([conversation()], 1_004_000);
+    await Effect.runPromise(fixture.tracker.refresh());
+
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      id: "agent-1",
+      systemId: system.systemId,
+      primaryGoalId: undefined,
+      nativeConversationRef: { continuityScopeId: "scope-test" },
+      execution: { nativeId: "pane-after" },
+      executionPresence: "live",
+    });
+    const afterCatalogue = fixture.universe.project({
+      kind: "command-centre",
+      now: 1_004_000,
+    });
+    if (afterCatalogue.kind !== "command-centre") throw new Error("wrong projection");
+    expect(afterCatalogue.discoveredExecutions).toEqual([]);
+    fixture.store.close();
+  });
+
   test("removes a host-synced execution from the active map after confirmed host loss", () => {
     const fixture = trackerFixture();
     fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-before-close")]));
