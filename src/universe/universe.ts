@@ -192,6 +192,11 @@ const copyExecutionContainer = (
   return label ? { id, label } : { id };
 };
 
+const copyNativeConversationAliases = (
+  references: readonly NativeConversationRef[] | undefined,
+): readonly NativeConversationRef[] | undefined =>
+  references?.map((reference) => ({ ...reference }));
+
 const uniqueAgentIds = (agentIds: readonly AgentId[]): AgentId[] => [
   ...new Set(agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
 ];
@@ -207,6 +212,8 @@ export interface DiscoveredExecutionAccess {
   readonly handle: string;
   readonly binding: AgentExecutionBinding;
   readonly nativeConversationRef?: NativeConversationRef;
+  /** Provider-owned alternate identities used to revalidate a live host observation. */
+  readonly nativeConversationAliases?: readonly NativeConversationRef[];
 }
 
 interface DiscoveredExecutionRecord {
@@ -1324,6 +1331,9 @@ export class Universe {
       nativeConversationRef: discovery.nativeConversationRef
         ? { ...discovery.nativeConversationRef }
         : undefined,
+      nativeConversationAliases: copyNativeConversationAliases(
+        discovery.catalogue?.nativeConversationAliases,
+      ),
     };
   }
 
@@ -1344,6 +1354,9 @@ export class Universe {
         nativeConversationRef: admitted.access.nativeConversationRef
           ? { ...admitted.access.nativeConversationRef }
           : undefined,
+        nativeConversationAliases: copyNativeConversationAliases(
+          admitted.access.nativeConversationAliases,
+        ),
       },
     };
   }
@@ -1357,6 +1370,9 @@ export class Universe {
         nativeConversationRef: discovery.nativeConversationRef
           ? { ...discovery.nativeConversationRef }
           : undefined,
+        nativeConversationAliases: copyNativeConversationAliases(
+          discovery.catalogue?.nativeConversationAliases,
+        ),
       },
     });
     while (this.discoveredAdmissions.size > MAX_DISCOVERY_ADMISSIONS) {

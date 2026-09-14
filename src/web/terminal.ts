@@ -10,7 +10,7 @@ import {
   type TerminalOpenOptions,
 } from "../hosts/types.ts";
 import type { Universe } from "../universe/universe.ts";
-import type { Agent } from "../universe/types.ts";
+import type { Agent, NativeConversationRef } from "../universe/types.ts";
 import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import {
   WEB_TERMINAL_DIMENSION_LIMITS,
@@ -304,17 +304,23 @@ export class WebTerminalGateway {
       );
     const expectedConversation = discovery.nativeConversationRef;
     const observedConversation = observation.harnessEvidence?.nativeConversationRef;
+    const expectedConversations = [
+      ...(expectedConversation ? [expectedConversation] : []),
+      ...(discovery.nativeConversationAliases ?? []),
+    ];
     const sameConversation =
-      expectedConversation === undefined && observedConversation === undefined
+      expectedConversations.length === 0 && observedConversation === undefined
         ? true
-        : expectedConversation !== undefined &&
-          observedConversation !== undefined &&
-          expectedConversation.harnessId === observedConversation.harnessId &&
-          expectedConversation.kind === observedConversation.kind &&
-          expectedConversation.value === observedConversation.value &&
-          (expectedConversation.continuityScopeId === undefined ||
-            observedConversation.continuityScopeId === undefined ||
-            expectedConversation.continuityScopeId === observedConversation.continuityScopeId);
+        : observedConversation !== undefined &&
+          expectedConversations.some(
+            (candidate: NativeConversationRef) =>
+              candidate.harnessId === observedConversation.harnessId &&
+              candidate.kind === observedConversation.kind &&
+              candidate.value === observedConversation.value &&
+              (candidate.continuityScopeId === undefined ||
+                observedConversation.continuityScopeId === undefined ||
+                candidate.continuityScopeId === observedConversation.continuityScopeId),
+          );
     if (!sameConversation)
       throw new WebTerminalError(
         "The discovered execution conversation changed; select it again before opening a terminal.",

@@ -1272,6 +1272,97 @@ describe("ObservatoryWebApi", () => {
     await api.close();
   });
 
+  test("accepts a provider alias when revalidating a discovered terminal", async () => {
+    const fixture = makeUniverse();
+    const canonical = {
+      harnessId: "pi",
+      continuityScopeId: "pi-scope",
+      kind: "id",
+      value: "conversation-1",
+    } as const;
+    const alias = {
+      harnessId: "pi",
+      continuityScopeId: "pi-scope",
+      kind: "path",
+      value: "/synthetic/pi/session-1.jsonl",
+    } as const;
+    const observation = (nativeConversationRef: typeof canonical | typeof alias) => ({
+      nativeId: "pi-pane",
+      displayName: "Pi session",
+      runtimeState: "working" as const,
+      runtimeStateSource: "test-host",
+      hostLocator: "same-pi-pane-locator",
+      harnessEvidence: {
+        detectedHarnessId: "pi",
+        nativeConversationRef,
+        restoreState: "host-restored" as const,
+        source: "native-integration" as const,
+        observedAt: fixture.clock.now(),
+      },
+    });
+    const scenario = {
+      name: "provider-alias",
+      description: "The host reports a provider alias after catalogue canonicalization.",
+      tickMs: 1_000,
+      frames: [
+        { label: "canonical", agents: [observation(canonical)] },
+        { label: "alias", agents: [observation(alias)] },
+      ],
+    } satisfies MockScenario;
+    const host = new MockHostAdapter({ clock: fixture.clock, scenario });
+    fixture.universe.reconcile(await Effect.runPromise(host.snapshot()));
+    fixture.universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "pi",
+      continuityScopeId: "pi-scope",
+      observedAt: fixture.clock.now(),
+      complete: true,
+      sessions: [
+        {
+          nativeConversationRef: canonical,
+          nativeConversationAliases: [alias],
+          observedAt: fixture.clock.now(),
+          resumeEligibility: "same-site",
+          title: "Pi session",
+        },
+      ],
+    });
+    const projection = fixture.universe.project({
+      kind: "command-centre",
+      now: fixture.clock.now(),
+    });
+    if (projection.kind !== "command-centre")
+      throw new Error("Expected command-centre projection.");
+    const discovery = projection.discoveredExecutions?.[0];
+    if (!discovery) throw new Error("Expected a discovered execution.");
+    const api = new ObservatoryWebApi({
+      universe: fixture.universe,
+      clock: fixture.clock,
+      allowedOrigin: "http://localhost",
+      host,
+    });
+
+    fixture.clock.value += scenario.tickMs;
+    const opened = await api.fetch(
+      new Request("http://localhost/api/terminal/open", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          discoveryHandle: discovery.handle,
+          dimensions: { columns: 80, rows: 24 },
+        }),
+      }),
+    );
+    expect(opened.status).toBe(200);
+    const body: WebTerminalOpenResponse = await opened.json();
+    expect(body.message).toContain("mock terminal");
+    await api.close();
+  });
+
   test("rejects a discovery terminal when the same host target reports another conversation", async () => {
     const fixture = makeUniverse();
     const scenario = {
