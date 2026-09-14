@@ -1,15 +1,18 @@
 # Observatory technology decisions
 
-Status: accepted for the web-only V1 product
+Status: accepted for the maintained web renderer; macOS desktop delivery evaluation in progress
 
-Updated: 2026-09-03
+Updated: 2026-09-13
 
 Depends on: [Observatory technical architecture](technical-architecture.md)
 
 ## Decision
 
-Observatory uses one maintained application client: a local React GUI served by
-the Bun control-plane process.
+Observatory uses one maintained application renderer: a local React GUI served
+by the Bun control-plane process. The GUI currently runs in a normal browser. A
+small AppKit/WKWebView shell is the leading macOS packaging candidate, subject
+to the performance, lifecycle and distribution gates below; this is not yet an
+adoption decision.
 
 ```text
 Language                  TypeScript
@@ -86,9 +89,14 @@ React with native SVG and CSS is the accepted renderer.
 - Vite owns browser transformation, development serving and production builds.
 
 PixiJS was rejected after direct pan/zoom comparison because rasterised text and
-scene scaling reduced clarity without solving a product requirement. Electron
-is deferred because the current local browser process already provides the GUI;
-add a desktop shell only for a measured packaging or OS-integration need.
+scene scaling reduced clarity without solving a product requirement. A desktop
+shell is now justified as a packaging and macOS-integration experiment. The
+leading candidate is a small AppKit application containing WKWebView and
+supervising the existing Bun process. Electron remains a fallback if measured
+WebKit compatibility, terminal or rendering behaviour is unacceptable; its
+bundled Chromium runtime would trade a larger and less native distribution for
+more predictable cross-platform browser behaviour and a mature desktop tooling
+ecosystem.
 
 The Carbon Survey visual language is an art direction over production
 projections, not a fixture tree or a second semantic model. Neutral carbon and
@@ -98,6 +106,65 @@ and scales with the Atlas, and dragged Goals snap to the same visible grid
 intersections. Atlas, Ledger, Needs you, Catch up and Inbox remain
 complementary lenses over the same accepted state; result and lifecycle actions
 converge in the Inspector.
+
+## Native desktop delivery evaluation
+
+The renderer technology is not itself the product differentiation. Observatory's
+valuable distinction is the quality of spatial supervision, truthful
+`System -> Goal -> Agent` semantics, attention handling, evidence and terminal
+workflows. A lower-level renderer is useful only when operators receive a
+measurably better experience from it.
+
+The disposable GPUI and WKWebView experiments are retained on the
+`spike/gpui-native-client` branch. Both preserve the TypeScript/Bun control plane
+and exercise the same loopback APIs:
+
+- The Rust/GPUI experiment implements a separate renderer. It demonstrates
+  strong custom-paint performance and precise Atlas control, but requires a
+  second presentation implementation. Accessibility, IME, terminal hardening,
+  process lifecycle and live transport reliability remain material adoption
+  risks.
+- The AppKit/WKWebView experiment wraps the maintained React renderer. It selects
+  a loopback port, launches and supervises the Bun sidecar, waits for readiness,
+  retains the existing HTTP/SSE/WebSocket and origin checks, and provides native
+  window and menu lifecycle. It does not introduce a native-JavaScript bridge or
+  another control plane.
+
+Initial September 2026 evidence makes WebKit the lower-risk end-to-end baseline,
+not the accepted winner. The WebKit prototype rendered and shut down in five of
+five automated trials. The comparable GPUI live-server run rendered in two of
+five trials despite healthy server and SSE responses, indicating an unresolved
+native transport path. Those timings included accessibility and screenshot
+automation and are not input-to-photon measurements. The first self-contained
+WebKit package was approximately 212 MB on disk and its measured app, Bun and
+WebKit process group used approximately 472 MiB RSS for the sampled portfolio;
+both require optimization and a fair full-system comparison. GPUI's smaller
+renderer measurements excluded its external Bun server and therefore are not
+direct package or process-tree comparisons.
+
+The current product direction is to continue improving the single React UI and
+to evaluate WKWebView as its macOS delivery shell. Do not maintain the GPUI and
+React renderers in parallel. GPUI should replace the renderer only if repeatable
+evidence shows that the maintained web UI cannot meet a concrete interaction or
+spatial-rendering requirement and GPUI also clears normal application-quality
+gates.
+
+Before adopting the WKWebView shell, demonstrate:
+
+- responsive 10/100/500-Agent Atlas interaction with credible frame and input
+  measurements;
+- sustained terminal output, keyboard, clipboard and reconnect behaviour;
+- VoiceOver, keyboard-only and IME workflows;
+- acceptable cold launch, idle CPU and total process-tree memory;
+- sidecar crash recovery, sleep/wake and clean application shutdown;
+- a materially reduced, reproducible package; and
+- Developer ID signing, notarization and update lifecycle.
+
+Use Electron only if WebKit fails a measured requirement that Chromium solves.
+Choose GPUI only if the resulting operator experience, rather than its technical
+novelty, justifies the extra renderer, accessibility and terminal ownership.
+Until these gates pass, the normal browser remains the accepted delivery path
+and both native clients remain disposable evidence.
 
 ## Host and terminal integration
 

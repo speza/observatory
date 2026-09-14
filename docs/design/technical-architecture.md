@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
 Status: implemented V1 architecture
-Updated: 2026-09-03
+Updated: 2026-09-13
 
 Related documents:
 
@@ -49,7 +49,7 @@ explicit seams instead of leaking through the model.
 ## System shape
 
 ```text
-Browser GUI
+React GUI (browser; candidate AppKit/WKWebView delivery shell)
     │ projections and human commands
     ▼
 Loopback web composition root
@@ -367,7 +367,10 @@ not a source for browser portfolio reconciliation.
 
 `web/src/` owns presentation-only state: selection, viewport, zoom, active lens,
 theme, dialogs and terminal tabs. It renders native SVG/CSS and xterm.js. It
-never reads SQLite or concrete host/provider protocols.
+never reads SQLite or concrete host/provider protocols. Browser delivery and the
+candidate AppKit/WKWebView shell load this same renderer; a desktop wrapper owns
+only application lifecycle, native chrome and Bun-sidecar supervision. It must
+not acquire domain authority or introduce a parallel renderer protocol.
 
 `App` retains navigation, selection and layout orchestration. Search query,
 results and request cancellation belong to `search/useSearch`; inspector
@@ -561,4 +564,5 @@ The current architecture does not include:
 - repositories, worktrees or hosts as organisational topology;
 - automatic Goal completion, acceptance, merge or archive;
 - distributed host aggregation; or
-- a second maintained interactive client.
+- a second maintained interactive renderer. A packaging shell may host the
+  accepted React renderer without becoming another semantic client.
