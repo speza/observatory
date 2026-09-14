@@ -27,6 +27,7 @@ import {
 import {
   isRecord,
   nonEmptyRecord,
+  numberValue,
   parseJsonValue,
   stringValue,
   type JsonRecord,
@@ -41,6 +42,7 @@ const HERDR_HOST_INSTANCE_ID = "herdr:local";
 const MAX_HOST_MESSAGE_LENGTH = 240;
 const OPEN_CODE_PROCESS_CACHE_TTL_MS = 30_000;
 const OPEN_CODE_PROCESS_QUERY_CONCURRENCY = 4;
+const WORKTREE_QUERY_CONCURRENCY = 4;
 
 const traceExcerpt = (value: string): string => value.trim().slice(0, 500);
 
@@ -114,6 +116,132 @@ const unwrapSnapshot = (value: JsonValue | undefined): RecordValue | undefined =
 
 const locator = (workspaceId: string, tabId: string, paneId: string, terminalId: string): string =>
   JSON.stringify({ workspaceId, tabId, paneId, terminalId });
+
+interface HerdrWorkspaceTopology {
+  readonly workspaceId: string;
+  readonly label?: string;
+  readonly repoKey?: string;
+  readonly repoRoot?: string;
+  readonly checkoutPath?: string;
+  readonly linkedWorktree: boolean;
+  readonly primaryCheckout: boolean;
+  readonly order: number;
+}
+
+const workspaceTopology = (
+  value: JsonValue | undefined,
+  index: number,
+): HerdrWorkspaceTopology | undefined => {
+  const workspace = nonEmptyRecord(value);
+  const workspaceId = stringValue(workspace, "workspace_id");
+  if (!workspaceId) return undefined;
+  const worktree = nonEmptyRecord(workspace.worktree);
+  const repoKey = stringValue(worktree, "repo_key");
+  const repoRoot = stringValue(worktree, "repo_root");
+  const checkoutPath = stringValue(worktree, "checkout_path");
+  const label = stringValue(workspace, "label");
+  const linkedWorktree = worktree.is_linked_worktree === true;
+  const primaryCheckout =
+    worktree.is_linked_worktree === false &&
+    repoRoot !== undefined &&
+    checkoutPath !== undefined &&
+    checkoutPath === repoRoot;
+  return {
+    workspaceId,
+    label,
+    repoKey,
+    repoRoot,
+    checkoutPath,
+    linkedWorktree,
+    primaryCheckout,
+    order: numberValue(workspace, "number") ?? index,
+  };
+};
+
+/**
+ * Herdr's workspace snapshot carries Git worktree provenance but not the
+ * parent workspace id. A linked checkout belongs to the earliest primary
+ * checkout for its repository, matching Herdr's worktree inventory. Plain
+ * duplicate workspaces remain distinct execution contexts.
+ */
+const workspaceGroupProbeIds = (workspaces: readonly JsonValue[]): readonly string[] => {
+  const topology = workspaces.flatMap((value, index) => {
+    const workspace = workspaceTopology(value, index);
+    return workspace ? [workspace] : [];
+  });
+  const primaryRepositories = new Set(
+    topology
+      .filter((workspace) => workspace.primaryCheckout && workspace.repoKey)
+      .map((workspace) => workspace.repoKey!),
+  );
+  return topology
+    .filter(
+      (workspace) =>
+        workspace.linkedWorktree &&
+        workspace.repoKey !== undefined &&
+        primaryRepositories.has(workspace.repoKey),
+    )
+    .sort((left, right) => left.order - right.order)
+    .filter(
+      (workspace, index, all) =>
+        all.findIndex((candidate) => candidate.repoKey === workspace.repoKey) === index,
+    )
+    .map((workspace) => workspace.workspaceId);
+};
+
+const workspaceGroupsFromWorktreeList = (
+  value: JsonValue | undefined,
+):
+  | { readonly sourceWorkspaceId: string; readonly linkedWorkspaceIds: readonly string[] }
+  | undefined => {
+  if (!isRecord(value)) return undefined;
+  const result = nonEmptyRecord(value.result);
+  if (stringValue(result, "type") !== "worktree_list") return undefined;
+  const source = nonEmptyRecord(result.source);
+  const sourceWorkspaceId = stringValue(source, "source_workspace_id");
+  if (!sourceWorkspaceId) return undefined;
+  const worktrees = Array.isArray(result.worktrees) ? result.worktrees : [];
+  const linkedWorkspaceIds = worktrees.flatMap((item) => {
+    const worktree = nonEmptyRecord(item);
+    if (worktree.is_linked_worktree !== true) return [];
+    const workspaceId = stringValue(worktree, "open_workspace_id");
+    return workspaceId ? [workspaceId] : [];
+  });
+  return { sourceWorkspaceId, linkedWorkspaceIds };
+};
+
+const workspaceGroupById = (
+  workspaces: readonly JsonValue[],
+  explicitGroups?: ReadonlyMap<string, string>,
+): ReadonlyMap<string, HerdrWorkspaceTopology> => {
+  const topology = workspaces.flatMap((value, index) => {
+    const workspace = workspaceTopology(value, index);
+    return workspace ? [workspace] : [];
+  });
+  const primaryByRepo = new Map<string, HerdrWorkspaceTopology>();
+  for (const workspace of topology) {
+    if (workspace.linkedWorktree || !workspace.repoKey) continue;
+    if (!workspace.primaryCheckout) continue;
+    const existing = primaryByRepo.get(workspace.repoKey);
+    if (!existing || workspace.order < existing.order)
+      primaryByRepo.set(workspace.repoKey, workspace);
+  }
+  const groups = new Map<string, HerdrWorkspaceTopology>();
+  for (const workspace of topology) {
+    if (!workspace.linkedWorktree || !workspace.repoKey) continue;
+    const explicitSourceId = explicitGroups?.get(workspace.workspaceId);
+    const primary = explicitGroups
+      ? topology.find(
+          (candidate) =>
+            candidate.workspaceId === explicitSourceId &&
+            candidate.repoKey === workspace.repoKey &&
+            !candidate.linkedWorktree,
+        )
+      : primaryByRepo.get(workspace.repoKey);
+    if (primary) groups.set(workspace.workspaceId, primary);
+  }
+  return groups;
+};
 
 const harnessEvidenceFor = (
   agent: RecordValue,
@@ -225,6 +353,7 @@ interface OpenCodeProcessCacheEntry {
 export const parseHerdrSnapshot = (
   payload: JsonValue | undefined,
   observedAt: number,
+  explicitWorkspaceGroups?: ReadonlyMap<string, string>,
 ): HostSnapshot => {
   const snapshot = unwrapSnapshot(payload);
   if (!snapshot) {
@@ -271,6 +400,7 @@ export const parseHerdrSnapshot = (
     const workspaceId = stringValue(record, "workspace_id");
     if (workspaceId) workspaceById.set(workspaceId, record);
   }
+  const workspaceGroups = workspaceGroupById(workspaces, explicitWorkspaceGroups);
 
   const observations: HostAgentObservation[] = [];
   const seen = new Set<string>();
@@ -313,7 +443,9 @@ export const parseHerdrSnapshot = (
     const provider = stringValue(item, "display_agent") ?? stringValue(item, "agent");
     const harnessEvidence = harnessEvidenceFor(item, observedAt);
     const discoverable = harnessEvidence?.nativeConversationRef !== undefined;
-    const executionContainerLabel = stringValue(workspace, "label");
+    const workspaceGroup = workspaceGroups.get(workspaceId);
+    const executionContainerId = workspaceGroup?.workspaceId ?? workspaceId;
+    const executionContainerLabel = workspaceGroup?.label ?? stringValue(workspace, "label");
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
       nativeId: paneId,
@@ -323,8 +455,8 @@ export const parseHerdrSnapshot = (
       observedAt,
       hostLocator: locator(workspaceId, tabId, paneId, terminalId),
       executionContainer: executionContainerLabel
-        ? { id: workspaceId, label: executionContainerLabel }
-        : { id: workspaceId },
+        ? { id: executionContainerId, label: executionContainerLabel }
+        : { id: executionContainerId },
     };
     if (harnessEvidence) Object.assign(observation, { harnessEvidence });
     if (!discoverable) Object.assign(observation, { discoverable: false });
@@ -863,6 +995,35 @@ export class HerdrHostAdapter implements SessionHost {
     return this.waitForAgentObservation(paneId, remainingAttempts - 1);
   }
 
+  private async workspaceGroupsFor(
+    payload: JsonValue | undefined,
+  ): Promise<ReadonlyMap<string, string> | undefined> {
+    const snapshot = unwrapSnapshot(payload);
+    const workspaces = snapshot && Array.isArray(snapshot.workspaces) ? snapshot.workspaces : [];
+    const probeIds = workspaceGroupProbeIds(workspaces);
+    if (probeIds.length === 0) return undefined;
+    const results = await mapBounded(probeIds, WORKTREE_QUERY_CONCURRENCY, async (workspaceId) => {
+      try {
+        const result = await this.runner.run(
+          ["herdr", "worktree", "list", "--workspace", workspaceId],
+          { maxOutputBytes: 256 * 1024, timeoutMs: 2_000 },
+        );
+        if (result.exitCode !== 0 || result.stdoutTruncated || result.stderrTruncated)
+          return undefined;
+        return workspaceGroupsFromWorktreeList(parseJsonValue(result.stdout));
+      } catch {
+        return undefined;
+      }
+    });
+    const groups = new Map<string, string>();
+    for (const result of results) {
+      if (!result) continue;
+      for (const workspaceId of result.linkedWorkspaceIds)
+        groups.set(workspaceId, result.sourceWorkspaceId);
+    }
+    return groups;
+  }
+
   private async observeHost(): Promise<HostObservationResult> {
     const unavailable = (error: string): HostObservationResult => ({
       snapshot: {
@@ -892,7 +1053,12 @@ export class HerdrHostAdapter implements SessionHost {
       return unavailable(commandFailureMessage(result, `Herdr exited with ${result.exitCode}.`));
     }
     const parsedPayload = parseJsonValue(result.stdout);
-    const parsedSnapshot = parseHerdrSnapshot(parsedPayload, this.clock.now());
+    const observedAt = this.clock.now();
+    const preliminarySnapshot = parseHerdrSnapshot(parsedPayload, observedAt);
+    const explicitWorkspaceGroups = preliminarySnapshot.available
+      ? await this.workspaceGroupsFor(parsedPayload)
+      : undefined;
+    const parsedSnapshot = parseHerdrSnapshot(parsedPayload, observedAt, explicitWorkspaceGroups);
     const paneFingerprints = paneFingerprintsFor(parsedPayload);
     const snapshot = parsedSnapshot.available
       ? await this.enrichOpenCodeProcessEvidence(parsedSnapshot, paneFingerprints)

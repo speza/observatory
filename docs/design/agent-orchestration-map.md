@@ -1,7 +1,7 @@
 # Goal-centred agent orchestration map
 
 Status: implemented V1 product model; spatial value under active evaluation
-Updated: 2026-09-12
+Updated: 2026-09-14
 
 Related documents:
 
@@ -123,10 +123,14 @@ Stable geography should reduce the amount of work the operator reconstructs in
 memory. The layout therefore follows these rules:
 
 - Systems provide broad portfolio scope rather than map bodies.
-- Fresh live execution workspaces are stable map territories, qualified by host
-  instance and laid out from their opaque identity without exposing it.
-- Agents inhabit their observed workspace; a workspace can contain multiple
-  Goals and one Goal can span multiple workspaces.
+- Fresh live host execution territories follow the host's workspace grouping,
+  qualified by host instance and laid out from an opaque grouping identity
+  without exposing it. For Herdr, linked Git worktree workspaces share the
+  source repository workspace's territory; plain workspaces at the same
+  checkout remain separate.
+- Agents retain their observed execution and worktree metadata; a host grouping
+  is only a projection convenience. A territory can contain multiple Goals and
+  one Goal can span multiple territories.
 - Goals remain human-authored semantic overlays on Agent cards and selections,
   not inferred runtime containers.
 - Live or uncertain Agents without fresh workspace evidence remain visible in
@@ -152,12 +156,12 @@ Needs-you count. Entering a System reveals its Atlas or Ledger.
 
 ### Atlas
 
-Atlas shows fresh live execution workspaces as its primary territories, with
-their Agents in compact card grids. The projection groups workspaces across
-Goal boundaries, includes single-Agent workspaces, qualifies opaque container
-equality by host instance and emits only safe labels, public Agent views and
-derived positions. Tabs and panes remain host-owned placement details rather
-than map grouping levels.
+Atlas shows fresh live host execution territories as its primary geography,
+with Agents in compact card grids. The projection follows host-reported
+workspace grouping across Goal boundaries, includes single-Agent territories,
+qualifies opaque grouping equality by host instance and emits only safe labels,
+public Agent views and derived positions. Tabs and panes remain host-owned
+placement details rather than map grouping levels.
 
 Each Agent card carries its Goal as a coloured semantic tag. Selecting a Goal
 highlights and fits all of its Agents across workspace territories. This keeps
@@ -334,10 +338,12 @@ Every visual property needs a supervisory meaning.
 
 ## Success criteria
 
-Atlas geography is workspace-first. Each fresh live execution context is a
-labelled island containing a compact Agent grid, including contexts with only
-one Agent. Goals are semantic overlays shown on Agent cards and used to
-spotlight matching Agents across any number of islands; they are not spatial
+Atlas geography is workspace-first. Each fresh live host execution territory
+is a labelled island containing a compact Agent grid, including territories
+with only one Agent. Host-specific workspace grouping may combine linked
+worktree workspaces into one island while preserving their execution bindings
+and worktree facts. Goals are semantic overlays shown on Agent cards and used
+to spotlight matching Agents across any number of islands; they are not spatial
 bodies. Live or uncertain Agents without fresh context evidence remain visible
 in a separately labelled workspace-less area, and discovered executions remain
 a separate dock. Confirmed-absent execution records remain in durable history

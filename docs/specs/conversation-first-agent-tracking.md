@@ -2,7 +2,7 @@
 
 Status: accepted and implemented, including automatic Herdr Agent synchronization
 
-Updated: 2026-09-12
+Updated: 2026-09-14
 
 This is the canonical conversation identity and recovery model. It replaces the
 earlier Session import and host-recovery models and owns
@@ -151,9 +151,11 @@ A discovered execution is current `SessionHost` evidence that cannot be safely
 synchronized into an Agent. It is scoped by host kind, host instance and
 native execution identity, is laid out by the map projection in the labelled,
 compact discovery dock below the occupied universe, and is shown separately
-from durable Agents. A discovery handle is opaque and is resolved only at the
-server-side host seam. Browser projections contain safe display metadata,
-never host locators or native terminal targets.
+from durable Agents. A discovery may retain the host's workspace grouping
+context for consistent related presentation, but grouping never admits,
+assigns or merges it. A discovery handle is opaque and is resolved only at the
+server-side host seam. Browser projections contain safe display metadata, never
+host locators or native terminal targets.
 
 Discovery is rebuilt from a fresh host snapshot after restart and does not write
 an Agent, assignment or semantic catch-up entry. Partial, stale or unavailable
@@ -237,6 +239,14 @@ LaunchOperation
 Execution observations and provider observations have independent freshness and
 completeness scopes. Derived presentation state is computed from them; it is
 not persisted as one overloaded Agent status.
+
+A host may also report a grouping context for related execution containers.
+Herdr uses this for its Git worktree family: linked worktree workspaces share
+their source repository workspace's grouping context, while plain duplicate
+workspaces remain separate. Observatory uses that relationship only for
+workspace-first presentation and related evidence; it does not create a
+repository hierarchy, merge execution identities or infer multi-repository
+Agent semantics from it.
 
 ## Core invariants
 

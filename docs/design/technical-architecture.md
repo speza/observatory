@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
 Status: implemented V1 architecture
-Updated: 2026-09-12
+Updated: 2026-09-14
 
 Related documents:
 
@@ -279,11 +279,15 @@ observations.
 
 - Attention composes independent claims into one decision subject per Agent.
 - Projection builds Atlas, Ledger, the separate discovered-execution area,
-  Inbox, Needs-you, Catch up, search and inspector views.
+  Inbox, Needs-you, Catch up, search and inspector views. Atlas follows the
+  host's execution grouping; the Herdr adapter folds linked Git worktree
+  workspaces into their source workspace territory while leaving duplicate
+  plain workspaces distinct.
 - Spatial retains deterministic semantic Goal positions for accepted state. The
   Atlas projection separately derives workspace-first geography from fresh live
-  execution containers across Goal boundaries. It qualifies opaque equality by
-  host instance, exposes only safe labels, Agent views and derived positions,
+  host execution territories across Goal boundaries. It qualifies opaque
+  grouping equality by host instance, exposes only safe labels, Agent views and
+  derived positions,
   keeps live or uncertain Agents without trustworthy workspace evidence
   explicit, and omits confirmed-absent executions from active projections.
   Durable records remain available through history/search and include-archived
@@ -555,10 +559,13 @@ storage, but they do not become trusted Observatory state.
 ## Dependency rule
 
 The browser map projection derives workspace geography at the server boundary
-from the qualified `(host kind, host instance, execution container)` identity.
-It emits only stable coordinates, a safe label, public Agent views, Goal
-references and aggregate attention/uncertainty; opaque grouping keys and native
-host identifiers never cross that boundary. This derived geography does not
+from the qualified `(host kind, host instance, host-reported grouping context)`
+identity. A host adapter may make a linked-worktree grouping context equal to
+its source workspace context while retaining the exact execution binding for
+access and lifecycle. The projection emits only stable coordinates, a safe
+label, public Agent views, Goal references and aggregate
+attention/uncertainty; opaque grouping keys and native host identifiers never
+cross that boundary. This derived geography does not
 alter the durable `System -> Goal -> Agent` authority.
 
 The intended dependency direction is:

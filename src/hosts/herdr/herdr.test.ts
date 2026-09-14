@@ -234,6 +234,189 @@ describe("Herdr adapter", () => {
     expect(snapshot.agents.some((agent) => agent.nativeId === "fixture-w1:p2")).toBe(false);
   });
 
+  test("groups linked worktree executions with the primary repository workspace", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            workspaces: [
+              {
+                workspace_id: "root",
+                number: 6,
+                label: "frontier",
+                worktree: {
+                  repo_key: "frontier.git",
+                  repo_root: "/repos/frontier",
+                  checkout_path: "/repos/frontier",
+                  is_linked_worktree: false,
+                },
+              },
+              {
+                workspace_id: "linked",
+                number: 7,
+                label: "company-compeition-audit",
+                worktree: {
+                  repo_key: "frontier.git",
+                  repo_root: "/repos/frontier",
+                  checkout_path: "/worktrees/company-compeition-audit",
+                  is_linked_worktree: true,
+                },
+              },
+              {
+                workspace_id: "duplicate-root",
+                number: 8,
+                label: "frontier copy",
+                worktree: {
+                  repo_key: "frontier.git",
+                  repo_root: "/repos/frontier",
+                  checkout_path: "/repos/frontier",
+                  is_linked_worktree: false,
+                },
+              },
+            ],
+            panes: [
+              {
+                pane_id: "root-agent",
+                terminal_id: "root-term",
+                workspace_id: "root",
+                tab_id: "root-tab",
+              },
+              {
+                pane_id: "linked-agent",
+                terminal_id: "linked-term",
+                workspace_id: "linked",
+                tab_id: "linked-tab",
+              },
+              {
+                pane_id: "duplicate-agent",
+                terminal_id: "duplicate-term",
+                workspace_id: "duplicate-root",
+                tab_id: "duplicate-tab",
+              },
+            ],
+            agents: [
+              { pane_id: "root-agent", agent: "codex", agent_status: "working" },
+              { pane_id: "linked-agent", agent: "codex", agent_status: "working" },
+              { pane_id: "duplicate-agent", agent: "codex", agent_status: "working" },
+            ],
+          },
+        },
+      },
+      99,
+    );
+
+    const containers = new Map(
+      snapshot.agents.map((agent) => [agent.nativeId, agent.executionContainer]),
+    );
+    expect(containers.get("root-agent")).toEqual({ id: "root", label: "frontier" });
+    expect(containers.get("linked-agent")).toEqual({ id: "root", label: "frontier" });
+    expect(containers.get("duplicate-agent")).toEqual({
+      id: "duplicate-root",
+      label: "frontier copy",
+    });
+  });
+
+  test("uses Herdr worktree provenance when duplicate primary workspaces exist", async () => {
+    const snapshotPayload = {
+      result: {
+        snapshot: {
+          workspaces: [
+            {
+              workspace_id: "duplicate-root",
+              number: 1,
+              label: "frontier copy",
+              worktree: {
+                repo_key: "frontier.git",
+                repo_root: "/repos/frontier",
+                checkout_path: "/repos/frontier",
+                is_linked_worktree: false,
+              },
+            },
+            {
+              workspace_id: "root",
+              number: 2,
+              label: "frontier",
+              worktree: {
+                repo_key: "frontier.git",
+                repo_root: "/repos/frontier",
+                checkout_path: "/repos/frontier",
+                is_linked_worktree: false,
+              },
+            },
+            {
+              workspace_id: "linked",
+              number: 3,
+              label: "company-compeition-audit",
+              worktree: {
+                repo_key: "frontier.git",
+                repo_root: "/repos/frontier",
+                checkout_path: "/worktrees/company-compeition-audit",
+                is_linked_worktree: true,
+              },
+            },
+          ],
+          panes: [
+            {
+              pane_id: "linked-agent",
+              terminal_id: "linked-term",
+              workspace_id: "linked",
+              tab_id: "linked-tab",
+            },
+          ],
+          agents: [{ pane_id: "linked-agent", agent: "codex", agent_status: "working" }],
+        },
+      },
+    };
+    const worktreeListPayload = {
+      result: {
+        type: "worktree_list",
+        source: {
+          source_workspace_id: "root",
+          repo_key: "frontier.git",
+          repo_name: "frontier",
+          repo_root: "/repos/frontier",
+          source_checkout_path: "/repos/frontier",
+        },
+        worktrees: [
+          {
+            path: "/repos/frontier",
+            is_bare: false,
+            is_detached: false,
+            is_prunable: false,
+            is_linked_worktree: false,
+            label: "frontier",
+          },
+          {
+            path: "/worktrees/company-compeition-audit",
+            open_workspace_id: "linked",
+            is_bare: false,
+            is_detached: false,
+            is_prunable: false,
+            is_linked_worktree: true,
+            label: "frontier",
+          },
+        ],
+      },
+    };
+    const calls: string[][] = [];
+    const runner: CommandRunner = {
+      async run(argv) {
+        calls.push([...argv]);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(argv[1] === "worktree" ? worktreeListPayload : snapshotPayload),
+          stderr: "",
+        };
+      },
+    };
+    const adapter = new HerdrHostAdapter({ runner, clock: new FixedClock(99) });
+
+    const snapshot = await Effect.runPromise(adapter.snapshot());
+
+    expect(calls).toContainEqual(["herdr", "worktree", "list", "--workspace", "linked"]);
+    expect(snapshot.agents[0]?.executionContainer).toEqual({ id: "root", label: "frontier" });
+  });
+
   test("removes Herdr's animated working marker from the display name", () => {
     const snapshot = parseHerdrSnapshot(
       {
