@@ -98,6 +98,48 @@ export const workspaceAgentPoints = (
   centre: { x: number; y: number },
 ) => cardGridPoints(workspace.agents, centre);
 
+export interface AtlasPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface MarqueeBounds {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+export const marqueeBounds = (start: AtlasPoint, current: AtlasPoint): MarqueeBounds => ({
+  left: Math.min(start.x, current.x),
+  top: Math.min(start.y, current.y),
+  right: Math.max(start.x, current.x),
+  bottom: Math.max(start.y, current.y),
+});
+
+/**
+ * A marquee is a deliberate gesture, not a stray click. Below this drag the
+ * background keeps its existing click-to-clear behaviour.
+ */
+export const isMarqueeDrag = (bounds: MarqueeBounds, minimum = 4): boolean =>
+  Math.abs(bounds.right - bounds.left) >= minimum ||
+  Math.abs(bounds.bottom - bounds.top) >= minimum;
+
+/** Agent cards whose card rectangle intersects the marquee, in projection order. */
+export const agentsInMarquee = (
+  bounds: MarqueeBounds,
+  cards: readonly (AtlasPoint & { readonly id: string })[],
+): readonly string[] =>
+  cards
+    .filter(
+      (card) =>
+        card.x + AGENT_CARD_WIDTH / 2 >= bounds.left &&
+        card.x - AGENT_CARD_WIDTH / 2 <= bounds.right &&
+        card.y + AGENT_CARD_HEIGHT / 2 >= bounds.top &&
+        card.y - AGENT_CARD_HEIGHT / 2 <= bounds.bottom,
+    )
+    .map((card) => card.id);
+
 /** Render workspace centres on the same fixed grid as their Agent cards. */
 export const workspacePosition = (
   workspace: Pick<MapWorkspaceView, "mapPosition">,

@@ -59,6 +59,7 @@ export type WebCommand =
       readonly systemId: string;
     }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
+  | { readonly type: "UnassignAgents"; readonly agentIds: readonly string[] }
   | { readonly type: "ArchiveAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly string[] }
   | { readonly type: "CompleteGoal"; readonly goalId: string }

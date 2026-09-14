@@ -123,6 +123,7 @@ export type UniverseCommand =
       readonly agentIds: readonly AgentId[];
     }
   | { readonly type: "UnassignAgent"; readonly agentId: AgentId }
+  | { readonly type: "UnassignAgents"; readonly agentIds: readonly AgentId[] }
   | {
       readonly type: "RenameAgent";
       readonly agentId: AgentId;
@@ -2340,6 +2341,31 @@ export class Universe {
         replaceAgent(next, { ...agent, primaryGoalId: undefined, systemId: undefined });
         if (previousGoalId) repairUnpinnedGoalPosition(next, previousGoalId);
         result = { ok: true, agentId: agent.id };
+        break;
+      }
+      case "UnassignAgents": {
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0) return { ok: false, error: "At least one agent is required." };
+        const missingAgentId = agentIds.find((agentId) => !findAgent(next, agentId));
+        if (missingAgentId) return { ok: false, error: `Agent ${missingAgentId} not found.` };
+        const archivedAgentId = agentIds.find(
+          (agentId) => findAgent(next, agentId)?.archivedAt !== undefined,
+        );
+        if (archivedAgentId) return { ok: false, error: "Archived agents cannot be reassigned." };
+        const selected = new Set(agentIds);
+        const previousGoalIds = new Set(
+          next.agents
+            .filter((agent) => selected.has(agent.id) && agent.primaryGoalId)
+            .map((agent) => agent.primaryGoalId!),
+        );
+        next.agents = next.agents.map((agent) =>
+          selected.has(agent.id)
+            ? { ...agent, primaryGoalId: undefined, systemId: undefined }
+            : agent,
+        );
+        for (const previousGoalId of previousGoalIds)
+          repairUnpinnedGoalPosition(next, previousGoalId);
+        result = { ok: true, affectedAgentIds: agentIds };
         break;
       }
       case "RenameAgent": {

@@ -24,7 +24,6 @@ import {
 } from "../api/client.ts";
 import { CloseAgentDialog } from "../agents/CloseAgentDialog.tsx";
 import { Atlas, type AtlasCameraCommand } from "../atlas/Atlas.tsx";
-import type { Selection } from "./selection.ts";
 import { CatchUpPanel } from "../attention/CatchUpPanel.tsx";
 import { Inspector } from "../inspector/Inspector.tsx";
 import { KeyboardGuide } from "../shared/KeyboardGuide.tsx";
@@ -48,15 +47,27 @@ import { usePortfolio } from "./usePortfolio.ts";
 import { WorkspaceReview } from "../workspace-review/WorkspaceReview.tsx";
 import { useSearch } from "../search/useSearch.ts";
 import { useInspector } from "../inspector/useInspector.ts";
+import { parseBatchDestination } from "../inspector/batchDestination.ts";
 
 import { Workspace } from "./Workspace.tsx";
-import { WorkspaceNavigation, type NavigationView } from "./WorkspaceNavigation.tsx";
+import { WorkspaceNavigation } from "./WorkspaceNavigation.tsx";
+import { agentsInView, allAgents, type NavigationView } from "./navigatorAgents.ts";
+import {
+  extendAgentSelection,
+  isBatchAgentSelection,
+  noSelection,
+  onlySelection,
+  pruneSelection,
+  selectAgentSet,
+  selectedAgentIds,
+  toggleAgentSelection,
+  type AgentSelectionHandler,
+  type AgentSetSelectionHandler,
+  type Selection,
+  type SelectionModel,
+} from "./selection.ts";
 
-const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
-  ...projection.goals.flatMap((goal) => goal.agents),
-  ...projection.systems.flatMap((system) => system.agents),
-  ...projection.unassigned,
-];
+const agentsFor = allAgents;
 
 const hostLabel = (projection: CommandCentreProjection): string => {
   const host = projection.host;
@@ -77,7 +88,8 @@ export const App = (): React.JSX.Element => {
   const [navigationView, setNavigationView] = useState<NavigationView>("all");
   const [catchUpOpen, setCatchUpOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [selection, setSelection] = useState<Selection>();
+  const [selection, setSelection] = useState<SelectionModel>(noSelection);
+  const subject = selection.subject;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const {
@@ -102,7 +114,7 @@ export const App = (): React.JSX.Element => {
     projection: inspector,
     error: inspectorError,
     refresh: refreshInspector,
-  } = useInspector(selection, portfolio.affected, portfolio.affectedAll);
+  } = useInspector(subject, portfolio.affected, portfolio.affectedAll);
   const [newGoalOpen, setNewGoalOpen] = useState(false);
   const [systemDialogOpen, setSystemDialogOpen] = useState(false);
   const [editingSystem, setEditingSystem] = useState<SystemView>();
@@ -204,7 +216,7 @@ export const App = (): React.JSX.Element => {
   };
 
   const select = (next: Selection): void => {
-    setSelection(next);
+    setSelection(onlySelection(next));
     setInspectorOpen(true);
   };
 
@@ -216,6 +228,37 @@ export const App = (): React.JSX.Element => {
     setSetting("view", "atlas");
     select(next);
     issueCamera("focus", next);
+  };
+
+  /**
+   * Modifier gestures never move the camera or change System scope: a batch is
+   * built in place, and only an explicit plain click navigates.
+   */
+  const selectAgent: AgentSelectionHandler = (agentId, intent, order) => {
+    setSelection((current) =>
+      intent.range
+        ? extendAgentSelection(current, agentId, order)
+        : intent.additive
+          ? toggleAgentSelection(current, agentId)
+          : onlySelection({ type: "agent", id: agentId }),
+    );
+    setInspectorOpen(true);
+  };
+
+  const selectAgents: AgentSetSelectionHandler = (agentIds) => {
+    setSelection((current) =>
+      selectAgentSet(agentIds, current.subject?.type === "agent" ? current.subject.id : undefined),
+    );
+    setInspectorOpen(true);
+  };
+
+  /**
+   * Keyboard focus keeps the inspector in step with where the operator is, but it
+   * must never mutate an armed batch: a set that was built deliberately is not
+   * reshaped by focus wandering onto a card or one of its quick actions.
+   */
+  const followFocus = (next: Selection): void => {
+    setSelection((current) => (isBatchAgentSelection(current) ? current : onlySelection(next)));
   };
 
   const addHistoricalConversation = async (
@@ -286,7 +329,7 @@ export const App = (): React.JSX.Element => {
         setSelectedSystemId(
           systemScopeForSelection({ type: "agent", id: agent.id }, added.portfolio.commandCentre),
         );
-        setSelection({ type: "agent", id: agent.id });
+        setSelection(onlySelection({ type: "agent", id: agent.id }));
         setInspectorOpen(true);
         if (terminalDiscovery?.handle === handle) {
           setTerminalDiscovery(undefined);
@@ -363,11 +406,42 @@ export const App = (): React.JSX.Element => {
     ];
   }, [scopedCommandCentre, selectedSystemId, view]);
 
+  /** Agent order for range and select-all: exactly what the current view shows. */
+  const orderedAgentIds = useMemo(
+    () =>
+      scopedCommandCentre
+        ? agentsInView(scopedCommandCentre, navigationView).map((agent) => agent.id)
+        : [],
+    [navigationView, scopedCommandCentre],
+  );
+
+  // A selected Agent that stops existing must not linger in a pending batch.
+  useEffect(() => {
+    if (!data) return;
+    const existing = new Set(agentsFor(data.commandCentre).map((agent) => agent.id));
+    setSelection((current) => pruneSelection(current, existing));
+  }, [data]);
+
+  // A batch may only ever hold Agents the operator can currently see. Selected
+  // Agents that the active view no longer shows collapse back to the subject, so
+  // no bulk action can reach work that is off-screen in this lens.
+  useEffect(() => {
+    if (!isBatchAgentSelection(selection)) return;
+    const visible = new Set(orderedAgentIds);
+    if (selectedAgentIds(selection).every((agentId) => visible.has(agentId))) return;
+    setSelection((current) =>
+      selectAgentSet(
+        current.subject?.type === "agent" ? [current.subject.id] : [],
+        current.subject?.id,
+      ),
+    );
+  }, [orderedAgentIds, selection]);
+
   const moveSelection = (delta: number): void => {
     if (allSelections.length === 0) return;
-    const currentIndex = selection
+    const currentIndex = subject
       ? allSelections.findIndex(
-          (candidate) => candidate.type === selection.type && candidate.id === selection.id,
+          (candidate) => candidate.type === subject.type && candidate.id === subject.id,
         )
       : -1;
     const nextIndex = (currentIndex + delta + allSelections.length) % allSelections.length;
@@ -375,20 +449,53 @@ export const App = (): React.JSX.Element => {
     if (next) select(next);
   };
 
+  /** Shift+arrow/j/k extends the Agent range from the existing anchor. */
+  const extendSelection = (delta: number): void => {
+    const current = subject;
+    if (current?.type !== "agent") return;
+    const index = orderedAgentIds.indexOf(current.id);
+    const target = orderedAgentIds[index + delta];
+    if (index < 0 || target === undefined) return;
+    setSelection((model) => extendAgentSelection(model, target, orderedAgentIds));
+  };
+
   const focusSelection = (): void => {
-    if (selection) issueCamera("focus", selection);
+    if (subject) issueCamera("focus", subject);
   };
 
   const selectedAgent =
-    selection?.type === "agent" && data
-      ? agentsFor(data.commandCentre).find((agent) => agent.id === selection.id)
+    subject?.type === "agent" && data
+      ? agentsFor(data.commandCentre).find((agent) => agent.id === subject.id)
       : undefined;
+
+  const assignSelectedAgents = async (target: string): Promise<void> => {
+    const destination = parseBatchDestination(target);
+    const agentIds = selectedAgentIds(selection);
+    if (!destination || agentIds.length < 2) return;
+    const response = await runCommand(
+      destination.kind === "inbox"
+        ? { type: "UnassignAgents", agentIds }
+        : destination.kind === "goal"
+          ? { type: "AssignAgents", agentIds, goalId: destination.id }
+          : { type: "AssignAgentsToSystem", agentIds, systemId: destination.id },
+    );
+    if (!response) return;
+    const label =
+      destination.kind === "inbox"
+        ? "Inbox"
+        : destination.kind === "goal"
+          ? (data?.commandCentre.goals.find((goal) => goal.id === destination.id)?.title ??
+            "the Goal")
+          : (data?.commandCentre.systems.find((system) => system.id === destination.id)?.title ??
+            "the System");
+    setLaunchNotice(`Moved ${agentIds.length} agents to ${label}.`);
+  };
 
   const switchTerminalAgent = (agent: AgentView): void => {
     setTerminalDiscovery(undefined);
     setTerminalLaunch(undefined);
     setTerminalAgent(agent);
-    setSelection({ type: "agent", id: agent.id });
+    setSelection(onlySelection({ type: "agent", id: agent.id }));
   };
 
   const openAgentTerminal = (agent: AgentView): void => {
@@ -400,15 +507,15 @@ export const App = (): React.JSX.Element => {
     setTerminalAgent(undefined);
     setTerminalLaunch(undefined);
     setTerminalDiscovery(execution);
-    setSelection({ type: "discovered-execution", id: execution.handle });
+    setSelection(onlySelection({ type: "discovered-execution", id: execution.handle }));
     setInspectorOpen(true);
   };
 
   const openSelectedTerminal = (): void => {
     if (selectedAgent) openAgentTerminal(selectedAgent);
-    else if (selection?.type === "discovered-execution") {
+    else if (subject?.type === "discovered-execution") {
       const execution = data?.map.discoveredExecutions?.find(
-        (candidate) => candidate.handle === selection.id,
+        (candidate) => candidate.handle === subject.id,
       );
       if (execution) openDiscoveredTerminal(execution);
     }
@@ -457,9 +564,9 @@ export const App = (): React.JSX.Element => {
       type: item.agentId ? ("agent" as const) : ("goal" as const),
       id: item.targetId,
     }));
-    const currentIndex = selection
+    const currentIndex = subject
       ? targets.findIndex(
-          (candidate) => candidate.type === selection.type && candidate.id === selection.id,
+          (candidate) => candidate.type === subject.type && candidate.id === subject.id,
         )
       : -1;
     select(targets[(currentIndex + 1) % targets.length] ?? targets[0]!);
@@ -543,11 +650,21 @@ export const App = (): React.JSX.Element => {
           return;
         }
         if (inspectorOpen) {
+          // A batch collapses to its subject first; a second Escape closes the inspector.
+          if (isBatchAgentSelection(selection)) {
+            setSelection((current) =>
+              selectAgentSet(
+                current.subject?.type === "agent" ? [current.subject.id] : [],
+                current.subject?.id,
+              ),
+            );
+            return;
+          }
           setInspectorOpen(false);
-          setSelection(undefined);
+          setSelection(noSelection);
           return;
         }
-        setSelection(undefined);
+        setSelection(noSelection);
         return;
       }
       // Modal and terminal surfaces own keyboard input. Keep map shortcuts from
@@ -568,6 +685,18 @@ export const App = (): React.JSX.Element => {
       )
         return;
       if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLocaleLowerCase() === "a" &&
+        !isEditableTarget(event.target)
+      ) {
+        // Select every Agent in the current lens so a batch can be filed at once.
+        event.preventDefault();
+        if (orderedAgentIds.length > 0) selectAgents(orderedAgentIds);
+        return;
+      }
+      if (
         event.defaultPrevented ||
         event.metaKey ||
         event.ctrlKey ||
@@ -581,7 +710,14 @@ export const App = (): React.JSX.Element => {
         return;
 
       const key = event.key;
-      if (key === "ArrowDown" || key === "j") {
+      const lowered = key.toLocaleLowerCase();
+      if (event.shiftKey && (key === "ArrowDown" || lowered === "j")) {
+        event.preventDefault();
+        extendSelection(1);
+      } else if (event.shiftKey && (key === "ArrowUp" || lowered === "k")) {
+        event.preventDefault();
+        extendSelection(-1);
+      } else if (key === "ArrowDown" || key === "j") {
         event.preventDefault();
         moveSelection(1);
       } else if (key === "ArrowUp" || key === "k") {
@@ -601,8 +737,8 @@ export const App = (): React.JSX.Element => {
         panCamera(0, 48);
       } else if (key === "Enter") {
         event.preventDefault();
-        if (!selection) moveSelection(1);
-        else if (selection.type === "agent" || selection.type === "discovered-execution")
+        if (!subject) moveSelection(1);
+        else if (subject.type === "agent" || subject.type === "discovered-execution")
           openSelectedTerminal();
         else focusSelection();
       } else if (key === " ") {
@@ -672,6 +808,7 @@ export const App = (): React.JSX.Element => {
     setSetting,
     catchUpOpen,
     inspectorOpen,
+    orderedAgentIds,
     shortcutsOpen,
     terminalAgent,
     terminalDiscovery,
@@ -679,7 +816,6 @@ export const App = (): React.JSX.Element => {
     updateSetting,
     view,
   ]);
-
   if (!data) {
     return (
       <main className={`app app--${theme} app--survey`}>
@@ -794,7 +930,7 @@ export const App = (): React.JSX.Element => {
       </header>
       <Workspace
         revealNavigation={navigationView}
-        revealInspector={selection ? `${selection.type}:${selection.id}` : undefined}
+        revealInspector={subject ? `${subject.type}:${subject.id}` : undefined}
         inspectorOpen={inspectorOpen}
         onInspectorOpenChange={setInspectorOpen}
         navigation={
@@ -854,9 +990,10 @@ export const App = (): React.JSX.Element => {
               systemId={selectedSystemId}
               selection={selection}
               onSelect={selectAndFocus}
+              onSelectAgent={selectAgent}
               onSystem={(id) => {
                 setSelectedSystemId(id);
-                setSelection(undefined);
+                setSelection(noSelection);
                 setCameraCommand(undefined);
                 setSetting("view", "atlas");
               }}
@@ -865,14 +1002,17 @@ export const App = (): React.JSX.Element => {
         }
         inspector={
           <>
-            {selection ? (
+            {subject ? (
               <Inspector
+                batchAgentIds={isBatchAgentSelection(selection) ? selectedAgentIds(selection) : []}
                 commandCentre={data.commandCentre}
                 commandError={commandError}
                 commandPending={commandPending}
                 error={inspectorError}
+                onClearSelection={() => setSelection(noSelection)}
+                onAssignSelected={assignSelectedAgents}
                 onClose={() => {
-                  setSelection(undefined);
+                  setSelection(noSelection);
                   setInspectorOpen(false);
                 }}
                 onCommand={runCommand}
@@ -888,7 +1028,7 @@ export const App = (): React.JSX.Element => {
               />
             ) : null}
 
-            {!selection ? (
+            {!subject ? (
               <aside className="inspector workspace-summary" aria-label="System overview">
                 <header>
                   <div>
@@ -982,16 +1122,18 @@ export const App = (): React.JSX.Element => {
                   setCommandError(undefined);
                   setCloseoutAgent(agent);
                 }}
-                onFocusSelection={setSelection}
+                onFocusSelection={followFocus}
                 onMoveGoal={async (goalId, position) => {
                   await runCommand({ type: "SetGoalMapPosition", goalId, position });
                 }}
                 onSelect={select}
+                onSelectAgent={selectAgent}
+                onSelectAgents={selectAgents}
                 onOpenTerminal={openAgentTerminal}
                 onOpenDiscoveredTerminal={openDiscoveredTerminal}
                 onReviewChanges={openWorkspaceReview}
                 onClearSelection={() => {
-                  setSelection(undefined);
+                  setSelection(noSelection);
                 }}
                 projection={scopedMap}
                 pullRequestUrls={pullRequestUrls}
@@ -1002,8 +1144,21 @@ export const App = (): React.JSX.Element => {
                 motion={motion}
               />
             ) : (
-              <Ledger onSelect={select} projection={scopedCommandCentre ?? data.commandCentre} />
+              <Ledger
+                onSelect={select}
+                onSelectAgent={selectAgent}
+                projection={scopedCommandCentre ?? data.commandCentre}
+                selection={selection}
+              />
             )}
+            {isBatchAgentSelection(selection) ? (
+              <p className="selection-chip" aria-live="polite">
+                <strong>{selectedAgentIds(selection).length} agents selected</strong>
+                <button onClick={() => setSelection(noSelection)} type="button">
+                  Clear
+                </button>
+              </p>
+            ) : null}
             <button
               aria-pressed={motion}
               className="motion-control"
@@ -1032,14 +1187,14 @@ export const App = (): React.JSX.Element => {
             }}
             onClose={() => setCatchUpOpen(false)}
             onOpenInbox={() => {
-              setSelection(undefined);
+              setSelection(noSelection);
               setCatchUpOpen(false);
               setNavigationView("unassigned");
             }}
             onSelectSystem={(systemId) => {
               setSelectedSystemId(systemId);
               setSetting("view", "atlas");
-              setSelection(undefined);
+              setSelection(noSelection);
               setCatchUpOpen(false);
             }}
             onSelect={(next) => {
@@ -1066,8 +1221,8 @@ export const App = (): React.JSX.Element => {
             const closedAgentId = closeoutAgent.id;
             if (!(await runCloseout([closedAgentId]))) return;
             setCloseoutAgent(undefined);
-            if (selection?.type === "agent" && selection.id === closedAgentId) {
-              setSelection(undefined);
+            if (subject?.type === "agent" && subject.id === closedAgentId) {
+              setSelection(noSelection);
               setInspectorOpen(false);
             }
             if (terminalAgent?.id === closedAgentId) setTerminalAgent(undefined);
@@ -1124,7 +1279,7 @@ export const App = (): React.JSX.Element => {
             if (!goalId) return;
             setNewGoalOpen(false);
             if (command.type === "CreateGoal") setSelectedSystemId(response.result.systemId);
-            setSelection({ type: "goal", id: goalId });
+            setSelection(onlySelection({ type: "goal", id: goalId }));
           }}
           pending={commandPending}
           systems={data.commandCentre.systems}
@@ -1151,9 +1306,9 @@ export const App = (): React.JSX.Element => {
       ) : null}
       {newAgentOpen ? (
         <NewAgentDialog
-          defaultGoalId={selection?.type === "goal" ? selection.id : selectedAgent?.primaryGoalId}
+          defaultGoalId={subject?.type === "goal" ? subject.id : selectedAgent?.primaryGoalId}
           defaultSystemId={
-            selection?.type === "goal" || selectedAgent?.primaryGoalId
+            subject?.type === "goal" || selectedAgent?.primaryGoalId
               ? undefined
               : (selectedSystemId ?? selectedAgent?.systemId)
           }
@@ -1176,11 +1331,11 @@ export const App = (): React.JSX.Element => {
               setTerminalAgent(undefined);
               setTerminalLaunch(pendingLaunch);
             } else if (response.result.agentId) {
-              setSelection({ type: "agent", id: response.result.agentId });
+              setSelection(onlySelection({ type: "agent", id: response.result.agentId }));
               setInspectorOpen(true);
               refreshInspector();
             } else if (response.result.goalId) {
-              setSelection({ type: "goal", id: response.result.goalId });
+              setSelection(onlySelection({ type: "goal", id: response.result.goalId }));
             }
           }}
         />
@@ -1216,7 +1371,7 @@ export const App = (): React.JSX.Element => {
             if (action === "focus") selectAndFocus(next);
             else {
               setSetting("view", "atlas");
-              setSelection(next);
+              setSelection(onlySelection(next));
               if (action === "inbox") setNavigationView("unassigned");
               setInspectorOpen(true);
             }

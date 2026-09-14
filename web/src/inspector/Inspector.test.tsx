@@ -194,3 +194,102 @@ describe("Inspector", () => {
     expect(markup).toContain("Agent lifecycle");
   });
 });
+
+const batchFixture = () => {
+  const { universe, clock } = makeUniverse();
+  universe.execute({ type: "CreateGoal", title: "Batch destination" });
+  universe.execute({ type: "CreateGoal", title: "Archived destination" });
+  admitObservedConversationsAndReconcile(
+    universe,
+    hostSnapshot(
+      ["Alpha worker", "Beta worker", "Gamma worker"].map((displayName, index) => ({
+        nativeId: `m${index}`,
+        displayName,
+        runtimeState: "idle" as const,
+        runtimeStateSource: "test",
+        hostLocator: `opaque:${index}`,
+        observedAt: clock.now(),
+      })),
+    ),
+  );
+  universe.execute({ type: "CompleteGoal", goalId: "goal-2" });
+  universe.execute({ type: "ArchiveGoal", goalId: "goal-2" });
+  const commandCentre = () => {
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre.");
+    return projection;
+  };
+  return { clock, commandCentre, universe };
+};
+
+describe("Inspector batch agent selection", () => {
+  const agentIds = ["agent-1", "agent-2", "agent-3"];
+
+  test("replaces the single Agent view with batch actions and placement context", () => {
+    const { clock, commandCentre, universe } = batchFixture();
+    universe.execute({ type: "AssignAgent", agentId: "agent-1", goalId: "goal-1" });
+    const projection = universe.project({
+      kind: "inspector",
+      now: clock.now(),
+      target: { type: "agent", id: "agent-1" },
+    });
+    if (projection.kind !== "agent-inspector") throw new Error("Expected the Agent inspector.");
+    const markup = renderToStaticMarkup(
+      <Inspector
+        batchAgentIds={agentIds}
+        commandCentre={commandCentre()}
+        commandPending={false}
+        onAssignSelected={async () => {}}
+        onClearSelection={() => {}}
+        onClose={() => {}}
+        onCloseAndArchive={async () => true}
+        onCommand={async () => undefined}
+        onOpenTerminal={() => {}}
+        onOpenDiscoveredTerminal={() => {}}
+        onAdmitDiscovered={async () => undefined}
+        onRetry={() => {}}
+        onReviewChanges={() => {}}
+        onResume={async () => {}}
+        projection={projection}
+      />,
+    );
+
+    expect(markup).toContain("<h2>3 agents selected</h2>");
+    expect(markup).toContain("3 agents · currently in 1 goal · 2 in Inbox");
+    expect(markup).toContain("Alpha worker");
+    expect(markup).toContain("Gamma worker");
+    expect(markup).toContain("Move 3 agents");
+    expect(markup).toContain("Clear selection");
+    expect(markup).toContain("A Goal clears any direct System placement, and Inbox clears both.");
+    expect(markup).toContain('<option value="inbox">No Goal or System</option>');
+    // The single-subject controls are gone while a batch is active.
+    expect(markup).not.toContain("Assigned goal");
+    expect(markup).not.toContain("Review result");
+  });
+
+  test("offers only active Goals and names the System destination", () => {
+    const { commandCentre } = batchFixture();
+    const markup = renderToStaticMarkup(
+      <Inspector
+        batchAgentIds={agentIds}
+        commandCentre={commandCentre()}
+        commandPending={false}
+        onClose={() => {}}
+        onCloseAndArchive={async () => true}
+        onCommand={async () => undefined}
+        onOpenTerminal={() => {}}
+        onOpenDiscoveredTerminal={() => {}}
+        onAdmitDiscovered={async () => undefined}
+        onRetry={() => {}}
+        onReviewChanges={() => {}}
+        onResume={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('<optgroup label="Goals">');
+    expect(markup).toContain("Batch destination");
+    expect(markup).not.toContain("Archived destination");
+    expect(markup).toContain('<optgroup label="Systems">');
+    expect(markup).toContain("Default");
+  });
+});

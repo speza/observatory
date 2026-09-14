@@ -666,6 +666,8 @@ describe("ObservatoryWebApi", () => {
     expect((await command({ type: "AssignGoalToSystem", goalId, systemId })).status).toBe(200);
 
     expect((await command({ type: "AssignAgents", agentIds: [agentId], goalId })).status).toBe(200);
+    expect((await command({ type: "UnassignAgents", agentIds: [agentId] })).status).toBe(200);
+    expect((await command({ type: "AssignAgents", agentIds: [agentId], goalId })).status).toBe(200);
     expect((await command({ type: "SetGoalPriority", goalId, priority: "P0" })).status).toBe(200);
     expect(
       (

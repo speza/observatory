@@ -231,6 +231,13 @@
   padding-left: 14px;
   color: var(--muted);
 }
+.workspace-tree .workspace-tree__agent.is-selected {
+  background: var(--faint);
+  color: var(--ink);
+}
+.workspace-tree .workspace-tree__agent.is-selected > span:first-of-type {
+  font-weight: 600;
+}
 .workspace-tree :is(button, summary) > svg {
   width: 14px;
   height: 14px;

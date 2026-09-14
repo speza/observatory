@@ -10,7 +10,22 @@ import {
 } from "../../../src/universe/test-support.ts";
 import type { CommandCentreProjection } from "../../../src/projection/types.ts";
 import { WorkspaceNavigation, type NavigationView } from "./WorkspaceNavigation.tsx";
-import type { Selection } from "./selection.ts";
+import { onlySelection, type Selection, type SelectionModel } from "./selection.ts";
+/** Click a rendered row through happy-dom so modifier intent is exercised end to end. */
+const click = (
+  browser: Window,
+  selector: string,
+  index: number,
+  modifiers: {
+    readonly metaKey?: boolean;
+    readonly ctrlKey?: boolean;
+    readonly shiftKey?: boolean;
+  },
+): void => {
+  const target = browser.document.querySelectorAll(selector)[index];
+  if (!target) throw new Error(`Expected ${selector} at index ${index}.`);
+  target.dispatchEvent(new browser.MouseEvent("click", { bubbles: true, ...modifiers }));
+};
 
 const fixture = () => {
   const { universe, clock } = makeUniverse();
@@ -56,7 +71,7 @@ const TogglingHarness = ({
   readonly projection: CommandCentreProjection;
   readonly onSelect: (selection: Selection) => void;
 }) => {
-  const [selection, setSelection] = useState<Selection>();
+  const [selection, setSelection] = useState<SelectionModel>();
   return (
     <WorkspaceNavigation
       projection={projection}
@@ -66,7 +81,7 @@ const TogglingHarness = ({
       onSystem={() => {}}
       onSelect={(next) => {
         onSelect(next);
-        setSelection(next);
+        setSelection(onlySelection(next));
       }}
     />
   );
@@ -286,5 +301,107 @@ describe("Workspace navigation disclosure", () => {
     expect(onSelect).toEqual([{ type: "goal", id: "goal-1" }]);
     expect(second.open).toBe(true);
     expect(first.open).toBe(true);
+  });
+});
+
+describe("Workspace navigation multi-select", () => {
+  let browser: Window;
+  let root: Root;
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+
+  beforeEach(() => {
+    browser = new Window();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    await browser.happyDOM.close();
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    saved.clear();
+  });
+
+  test("a plain click stays navigation while modifiers defer to the set handler", async () => {
+    const { universe, clock } = fixture();
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    const navigated: Selection[] = [];
+    const gesture: {
+      agentId: string;
+      additive: boolean;
+      range: boolean;
+      order: readonly string[];
+    }[] = [];
+    await act(async () =>
+      root.render(
+        <WorkspaceNavigation
+          projection={projection}
+          systemId="system-1"
+          view="all"
+          onSystem={() => {}}
+          onSelect={(next) => navigated.push(next)}
+          onSelectAgent={(agentId, intent, order) => gesture.push({ agentId, ...intent, order })}
+        />,
+      ),
+    );
+    expect(document.querySelectorAll(".workspace-tree__agent").length).toBeGreaterThan(1);
+
+    await act(async () => click(browser, ".workspace-tree__agent", 0, { metaKey: true }));
+    expect(navigated).toEqual([]);
+    expect(gesture).toHaveLength(1);
+    expect(gesture[0]?.agentId).toBe("agent-1");
+    expect(gesture[0]?.additive).toBe(true);
+    expect(gesture[0]?.range).toBe(false);
+    expect(gesture[0]?.order[0]).toBe("agent-1");
+    expect(gesture[0]?.order).toContain("agent-3");
+
+    await act(async () => click(browser, ".workspace-tree__agent", 1, { shiftKey: true }));
+    expect(gesture[1]?.agentId).toBe("agent-2");
+    expect(gesture[1]?.range).toBe(true);
+
+    await act(async () => click(browser, ".workspace-tree__agent", 0, {}));
+    expect(navigated).toEqual([{ type: "agent", id: "agent-1" }]);
+    expect(gesture).toHaveLength(2);
+  });
+
+  test("shows batch membership and the inspector subject distinctly", async () => {
+    const { universe, clock } = fixture();
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    await act(async () =>
+      root.render(
+        <WorkspaceNavigation
+          projection={projection}
+          systemId="system-1"
+          view="all"
+          onSystem={() => {}}
+          onSelect={() => {}}
+          selection={{
+            subject: { type: "agent", id: "agent-2" },
+            agentIds: new Set(["agent-1", "agent-2"]),
+            anchor: "agent-1",
+          }}
+        />,
+      ),
+    );
+    const rows = [...document.querySelectorAll<HTMLButtonElement>(".workspace-tree__agent")];
+    const selected = rows.filter((row) => row.getAttribute("aria-pressed") === "true");
+    expect(selected.map((row) => row.textContent)).toHaveLength(2);
+    const current = rows.filter((row) => row.getAttribute("aria-current") === "true");
+    expect(current).toHaveLength(1);
+    expect(current[0]?.textContent).toContain("Quiet worker");
   });
 });

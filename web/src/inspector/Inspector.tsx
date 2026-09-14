@@ -7,6 +7,7 @@ import type {
 } from "../../../src/projection/types.ts";
 import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
 import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol.ts";
+import { batchDestinationValue } from "./batchDestination.ts";
 import { RepositoryStatus } from "./RepositoryStatus.tsx";
 
 interface InspectorProps {
@@ -15,6 +16,10 @@ interface InspectorProps {
   readonly commandCentre: CommandCentreProjection;
   readonly commandError?: string;
   readonly commandPending: boolean;
+  /** Two or more selected Agents replace the single-subject view with batch actions. */
+  readonly batchAgentIds?: readonly string[];
+  readonly onAssignSelected?: (target: string) => Promise<void>;
+  readonly onClearSelection?: () => void;
   readonly onCommand: (command: WebCommand) => Promise<WebCommandResponse | undefined>;
   readonly onCloseAndArchive: (agentIds: readonly string[]) => Promise<boolean>;
   readonly onClose: () => void;
@@ -53,12 +58,39 @@ const copyIdentifier = (value: string): void => {
   void navigator.clipboard.writeText(value);
 };
 
+const BATCH_PREVIEW_LIMIT = 8;
+
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** Where the selected Agents currently sit, so a bulk move is an informed one. */
+const batchPlacement = (agents: readonly (AgentView | undefined)[]): readonly string[] => {
+  const goals = new Set(
+    agents.flatMap((agent) => (agent?.primaryGoalId === undefined ? [] : [agent.primaryGoalId])),
+  );
+  const directSystems = agents.filter(
+    (agent) =>
+      agent !== undefined && agent.primaryGoalId === undefined && agent.systemId !== undefined,
+  ).length;
+  const inbox = agents.filter(
+    (agent) =>
+      agent === undefined || (agent.primaryGoalId === undefined && agent.systemId === undefined),
+  ).length;
+  return [
+    goals.size > 0 ? `currently in ${plural(goals.size, "goal")}` : undefined,
+    directSystems > 0 ? plural(directSystems, "direct System placement") : undefined,
+    inbox > 0 ? `${inbox} in Inbox` : undefined,
+  ].filter((part): part is string => part !== undefined);
+};
+
 export const Inspector = ({
   projection,
   error,
   commandCentre,
   commandError,
   commandPending,
+  batchAgentIds,
+  onAssignSelected,
+  onClearSelection,
   onCommand,
   onCloseAndArchive,
   onClose,
@@ -70,10 +102,13 @@ export const Inspector = ({
   onReviewChanges,
   onResume,
 }: InspectorProps): React.JSX.Element => {
-  const goal = projection?.kind === "goal-inspector" ? projection.goal : undefined;
-  const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
+  const batch = batchAgentIds && batchAgentIds.length > 1 ? batchAgentIds : undefined;
+  const goal = !batch && projection?.kind === "goal-inspector" ? projection.goal : undefined;
+  const agent = !batch && projection?.kind === "agent-inspector" ? projection.agent : undefined;
   const discovery =
-    projection?.kind === "discovered-execution-inspector" ? projection.execution : undefined;
+    !batch && projection?.kind === "discovered-execution-inspector"
+      ? projection.execution
+      : undefined;
   const agentSystemId =
     agent?.primaryGoalId !== undefined
       ? commandCentre.goals.find((candidate) => candidate.id === agent.primaryGoalId)?.systemId
@@ -85,6 +120,18 @@ export const Inspector = ({
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
   const [discoveryGoalId, setDiscoveryGoalId] = useState<string>();
   const [discoverySystemId, setDiscoverySystemId] = useState<string>();
+  const [batchTarget, setBatchTarget] = useState("");
+  const batchKey = batch?.join("\u0000") ?? "";
+  const agentsById = new Map<string, AgentView>(
+    [
+      ...commandCentre.goals.flatMap((goalView) => goalView.agents),
+      ...commandCentre.systems.flatMap((system) => system.agents),
+      ...commandCentre.unassigned,
+    ].map((candidate) => [candidate.id, candidate]),
+  );
+  const batchAgents = (batch ?? []).map((agentId) => agentsById.get(agentId));
+  const batchPlacementSummary = batchPlacement(batchAgents);
+  const activeGoals = commandCentre.goals.filter((candidate) => candidate.status === "active");
 
   useEffect(() => {
     setTitle(goal?.title ?? "");
@@ -92,10 +139,12 @@ export const Inspector = ({
     setConfirming(undefined);
     setDiscoveryGoalId(undefined);
     setDiscoverySystemId(undefined);
-  }, [goal?.description, goal?.id, goal?.title, agent?.id, discovery?.handle]);
+    setBatchTarget("");
+  }, [goal?.description, goal?.id, goal?.title, agent?.id, discovery?.handle, batchKey]);
 
-  const heading =
-    projection?.kind === "goal-inspector"
+  const heading = batch
+    ? `${batch.length} agents selected`
+    : projection?.kind === "goal-inspector"
       ? projection.goal.title
       : projection?.kind === "agent-inspector"
         ? projection.agent.displayName
@@ -113,8 +162,77 @@ export const Inspector = ({
           ×
         </button>
       </header>
-      {!projection && !error ? <p className="inspector__loading">Loading trusted facts…</p> : null}
-      {error ? (
+      {!batch && !projection && !error ? (
+        <p className="inspector__loading">Loading trusted facts…</p>
+      ) : null}
+      {batch ? (
+        <section className="inspector__batch" aria-label="Batch agent actions">
+          <p className="inspector__batch-summary">
+            {plural(batch.length, "agent")}
+            {batchPlacementSummary.length > 0 ? ` · ${batchPlacementSummary.join(" · ")}` : ""}
+          </p>
+          <ul className="inspector__batch-list">
+            {batchAgents.slice(0, BATCH_PREVIEW_LIMIT).map((candidate, index) => (
+              <li key={candidate?.id ?? batch[index]}>{candidate?.displayName ?? batch[index]}</li>
+            ))}
+          </ul>{" "}
+          {batch.length > BATCH_PREVIEW_LIMIT ? (
+            <p className="inspector__batch-note">and {batch.length - BATCH_PREVIEW_LIMIT} more</p>
+          ) : null}
+          <label className="inspector__assignment">
+            <span>Move to</span>
+            <select
+              disabled={commandPending}
+              onChange={(event) => setBatchTarget(event.target.value)}
+              value={batchTarget}
+            >
+              <option value="">Choose a destination</option>
+              <optgroup label="Inbox">
+                <option value={batchDestinationValue({ kind: "inbox" })}>No Goal or System</option>
+              </optgroup>
+              <optgroup label="Goals">
+                {activeGoals.map((candidate) => (
+                  <option
+                    key={candidate.id}
+                    value={batchDestinationValue({ kind: "goal", id: candidate.id })}
+                  >
+                    {candidate.priority} · {candidate.title}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Systems">
+                {commandCentre.systems.map((candidate) => (
+                  <option
+                    key={candidate.id}
+                    value={batchDestinationValue({ kind: "system", id: candidate.id })}
+                  >
+                    {candidate.title}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </label>
+          <nav className="inspector__actions" aria-label="Batch agent actions">
+            <button
+              className="is-primary"
+              disabled={!batchTarget || commandPending}
+              onClick={() => void onAssignSelected?.(batchTarget)}
+              type="button"
+            >
+              Move {plural(batch.length, "agent")}
+            </button>
+            <button onClick={onClearSelection} type="button">
+              Clear selection
+            </button>
+          </nav>
+          <p className="inspector__batch-note">
+            A Goal clears any direct System placement, and Inbox clears both. Archived Goals cannot
+            receive Agents; archived Agents are refused with an error. Nothing is archived or closed
+            by a move.
+          </p>
+        </section>
+      ) : null}
+      {!batch && error ? (
         <div className="inspector__error">
           <p>{error}</p>
           <button onClick={onRetry} type="button">
@@ -361,7 +479,7 @@ export const Inspector = ({
           </p>
         </section>
       ) : null}
-      {projection?.kind === "agent-inspector" ? (
+      {!batch && projection?.kind === "agent-inspector" ? (
         <>
           {projection.agent.attention ? (
             <section className="inspector__decision" aria-label="Current decision">

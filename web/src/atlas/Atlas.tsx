@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -11,17 +12,26 @@ import type {
   MapAgentView,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
-import type { Selection } from "../app/selection.ts";
+import {
+  selectionIntent,
+  type SelectionModel,
+  type AgentSelectionHandler,
+  type AgentSetSelectionHandler,
+  type Selection,
+} from "../app/selection.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
   ATLAS_GRID_STEP,
+  agentsInMarquee,
   DISCOVERED_CARD_HEIGHT,
   DISCOVERED_CARD_WIDTH,
   discoveredExecutionPoint,
   discoveredDockPlacement,
   hash,
+  isMarqueeDrag,
+  marqueeBounds,
   stateLabel,
   truncateAtlasLine,
   workspaceAgentPoints,
@@ -31,6 +41,7 @@ import {
   workspaceLessPosition,
   workspacePosition,
   type AtlasCameraCommand,
+  type AtlasPoint,
 } from "./atlasGeometry.ts";
 import { presentAgentCard } from "./agentCardPresentation.ts";
 import { useAtlasCamera } from "./useAtlasCamera.ts";
@@ -51,7 +62,7 @@ const palettes = {
 interface AtlasProps {
   readonly additionalControls?: React.ReactNode;
   readonly projection: UniverseMapProjection;
-  readonly selection?: Selection;
+  readonly selection?: SelectionModel;
   readonly reservedLeft: number;
   readonly reservedRight: number;
   readonly theme?: "light" | "dark";
@@ -59,6 +70,8 @@ interface AtlasProps {
   readonly cameraCommand?: AtlasCameraCommand;
   readonly onClearSelection?: () => void;
   readonly onFocusSelection?: (selection: Selection) => void;
+  readonly onSelectAgent?: AgentSelectionHandler;
+  readonly onSelectAgents?: AgentSetSelectionHandler;
   readonly onMoveGoal?: (
     goalId: string,
     position: { readonly x: number; readonly y: number },
@@ -95,26 +108,40 @@ export const Atlas = ({
   onReviewChanges,
   pullRequestUrls,
   onSelect,
+  onSelectAgent,
+  onSelectAgents,
 }: AtlasProps): React.JSX.Element => {
+  const subject = selection?.subject;
+  const selectedAgentIds = selection?.agentIds ?? new Set<string>();
+  const [marquee, setMarquee] = useState<
+    { readonly start: AtlasPoint; readonly current: AtlasPoint } | undefined
+  >();
+  const marqueeRef = useRef<{ start: AtlasPoint; current: AtlasPoint } | undefined>(undefined);
+  const marqueeDrag = useRef(false);
+  const suppressClearClick = useRef(false);
+  const updateMarquee = (value: { start: AtlasPoint; current: AtlasPoint } | undefined): void => {
+    marqueeRef.current = value;
+    setMarquee(value);
+  };
   const [discoveryDockOpen, setDiscoveryDockOpen] = useState(
-    () => selection?.type === "discovered-execution",
+    () => subject?.type === "discovered-execution",
   );
   useEffect(() => {
-    if (selection?.type === "discovered-execution") setDiscoveryDockOpen(true);
-  }, [selection?.id, selection?.type]);
+    if (subject?.type === "discovered-execution") setDiscoveryDockOpen(true);
+  }, [subject?.id, subject?.type]);
   const camera = useAtlasCamera({
     cameraCommand,
     projection,
     reservedLeft,
     reservedRight,
-    selection,
+    selection: subject,
     discoveryDockOpen,
   });
   const goalFocused =
     camera.focusedSelection?.type === "goal"
       ? camera.focusedSelection.id
-      : selection?.type === "goal"
-        ? selection.id
+      : subject?.type === "goal"
+        ? subject.id
         : undefined;
   const discoveryDock = discoveredDockPlacement(
     projection,
@@ -125,8 +152,62 @@ export const Atlas = ({
   const workspaceLessCentre = workspaceLessPosition(projection, camera.layout.goalSpacingScale);
   const gridStep = ATLAS_GRID_STEP;
   const gridOrigin = camera.screenPoint({ x: 0, y: 0 });
+  /** Every rendered Agent card, in projection order, for marquee hit testing. */
+  const agentCards = [
+    ...projection.workspaces.flatMap((workspace) =>
+      workspaceAgentPoints(
+        workspace,
+        workspacePosition(workspace, camera.layout.goalSpacingScale),
+      ).flatMap((point, index) => {
+        const agent = workspace.agents[index];
+        return agent ? [{ id: agent.id, x: point.x, y: point.y }] : [];
+      }),
+    ),
+    ...projection.workspaceLess.flatMap((agent, index) => {
+      const point = workspaceLessPoints[index] ?? workspaceLessCentre;
+      return [{ id: agent.id, x: point.x, y: point.y }];
+    }),
+  ];
+  const orderedAgentIds = agentCards.map((card) => card.id);
+  const toWorld = (event: React.PointerEvent<SVGSVGElement>): AtlasPoint => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: (event.clientX - bounds.left - camera.camera.panX) / camera.camera.zoom,
+      y: (event.clientY - bounds.top - camera.camera.panY) / camera.camera.zoom,
+    };
+  };
+  const beginMarquee = (event: React.PointerEvent<SVGSVGElement>): boolean => {
+    if (!event.shiftKey || event.button !== 0) return false;
+    const target = event.target;
+    if (target instanceof Element && target.closest('[role="button"]')) return false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = toWorld(event);
+    marqueeDrag.current = true;
+    updateMarquee({ start: point, current: point });
+    return true;
+  };
+  const continueMarquee = (event: React.PointerEvent<SVGSVGElement>): boolean => {
+    const drag = marqueeRef.current;
+    if (!marqueeDrag.current || !drag) return false;
+    updateMarquee({ start: drag.start, current: toWorld(event) });
+    return true;
+  };
+  const endMarquee = (): void => {
+    if (!marqueeDrag.current) return;
+    marqueeDrag.current = false;
+    const finished = marqueeRef.current;
+    updateMarquee(undefined);
+    if (!finished) return;
+    const bounds = marqueeBounds(finished.start, finished.current);
+    // A stray Shift click is not a marquee, so the background keeps its own
+    // click-to-clear meaning; only a real drag suppresses the release click.
+    if (!isMarqueeDrag(bounds)) return;
+    suppressClearClick.current = true;
+    if (onSelectAgents) onSelectAgents(agentsInMarquee(bounds, agentCards));
+  };
   const renderAgent = (agent: MapAgentView, point: { x: number; y: number }) => {
-    const selected = selection?.type === "agent" && selection.id === agent.id;
+    const selected = selectedAgentIds.has(agent.id);
+    const agentSubject = subject?.type === "agent" && subject.id === agent.id;
     const dimmed = goalFocused !== undefined && agent.primaryGoalId !== goalFocused;
     const attention = agent.attention?.requiresHumanInput === true;
     const canOpenTerminal = agent.executionPresence === "live" && onOpenTerminal !== undefined;
@@ -153,7 +234,7 @@ export const Atlas = ({
     const focus = (): void => (onFocusSelection ?? onSelect)({ type: "agent", id: agent.id });
     return (
       <g
-        className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${selected ? "is-selected" : ""} ${dimmed ? "goal--spotlight-dimmed" : "goal--spotlight-focus"}`}
+        className={`agent agent--${state} ${attention ? "agent--attention" : ""} ${uncertain ? "agent--uncertain" : ""} ${selected ? "is-selected" : ""} ${agentSubject ? "agent--subject" : ""} ${dimmed ? "goal--spotlight-dimmed" : "goal--spotlight-focus"}`}
         data-agent-id={agent.id}
         data-parent-goal-id={agent.primaryGoalId}
         data-screen-x={point.x.toFixed(2)}
@@ -167,14 +248,22 @@ export const Atlas = ({
           className="agent__card-target"
           role="button"
           tabIndex={0}
-          onClick={() => onSelect({ type: "agent", id: agent.id })}
+          onClick={(event) => {
+            const intent = selectionIntent(event);
+            if ((intent.additive || intent.range) && onSelectAgent) {
+              event.preventDefault();
+              onSelectAgent(agent.id, intent, orderedAgentIds);
+              return;
+            }
+            onSelect({ type: "agent", id: agent.id });
+          }}
           onDoubleClick={(event) => {
             event.stopPropagation();
             onSelect({ type: "agent", id: agent.id });
             camera.focusPoint(point, { type: "agent", id: agent.id });
           }}
           onFocus={focus}
-          onKeyDown={(event) => activate(event, focus)}
+          onKeyDown={(event) => activate(event, () => onSelect({ type: "agent", id: agent.id }))}
         >
           {attention ? (
             <rect
@@ -374,7 +463,7 @@ export const Atlas = ({
   };
   return (
     <div
-      className={`atlas ${motion ? "atlas--motion" : "atlas--still"} ${camera.focusedSelection ? "atlas--spotlight" : ""}`}
+      className={`atlas ${motion ? "atlas--motion" : "atlas--still"} ${camera.focusedSelection ? "atlas--spotlight" : ""} ${selectedAgentIds.size > 1 ? "atlas--batch" : ""}`}
       ref={camera.containerRef}
     >
       <div aria-label="Agent state key" className="atlas__status-key">
@@ -392,11 +481,21 @@ export const Atlas = ({
       </div>
       <svg
         aria-label={`${projection.workspaces.length} workspaces and ${projection.counts.agents} agents`}
-        className={camera.isPanning ? "is-panning" : ""}
-        onPointerDown={camera.beginPan}
-        onPointerMove={camera.continuePan}
-        onPointerUp={camera.endPan}
-        onPointerCancel={camera.endPan}
+        className={`${camera.isPanning ? "is-panning" : ""} ${marquee ? "is-marquee" : ""}`.trim()}
+        onPointerDown={(event) => {
+          if (!beginMarquee(event)) camera.beginPan(event);
+        }}
+        onPointerMove={(event) => {
+          if (!continueMarquee(event)) camera.continuePan(event);
+        }}
+        onPointerUp={() => {
+          endMarquee();
+          camera.endPan();
+        }}
+        onPointerCancel={() => {
+          endMarquee();
+          camera.endPan();
+        }}
         onWheel={camera.zoom}
         onDoubleClick={camera.reset}
         role="group"
@@ -421,7 +520,13 @@ export const Atlas = ({
           className="atlas__hit-area"
           width={camera.size.width}
           height={camera.size.height}
-          onClick={onClearSelection}
+          onClick={() => {
+            if (suppressClearClick.current) {
+              suppressClearClick.current = false;
+              return;
+            }
+            onClearSelection?.();
+          }}
         />
         <g className="atlas__world" transform={camera.worldTransform}>
           <rect
@@ -564,8 +669,7 @@ export const Atlas = ({
                     const state =
                       execution.presence === "live" ? execution.runtimeState : "unknown";
                     const selected =
-                      selection?.type === "discovered-execution" &&
-                      selection.id === execution.handle;
+                      subject?.type === "discovered-execution" && subject.id === execution.handle;
                     const focus = (): void =>
                       (onFocusSelection ?? onSelect)({
                         type: "discovered-execution",
@@ -681,6 +785,17 @@ export const Atlas = ({
                   })
                 : null}
             </g>
+          ) : null}
+          {marquee ? (
+            <rect
+              aria-hidden="true"
+              className="atlas__marquee"
+              height={Math.abs(marquee.current.y - marquee.start.y)}
+              rx="6"
+              width={Math.abs(marquee.current.x - marquee.start.x)}
+              x={Math.min(marquee.start.x, marquee.current.x)}
+              y={Math.min(marquee.start.y, marquee.current.y)}
+            />
           ) : null}
         </g>
       </svg>

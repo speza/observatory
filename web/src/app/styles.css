@@ -963,6 +963,38 @@ button {
   gap: 6px;
 }
 
+.inspector__batch {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+.inspector__batch-summary {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.inspector__batch-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.inspector__batch-list li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector__batch-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .inspector__assignment > span {
   color: var(--muted);
   font-family: "DM Mono", ui-monospace, monospace;
@@ -1922,6 +1954,44 @@ button {
   color: var(--muted);
 }
 
+.selection-chip {
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  bottom: 30px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+  background: var(--paper-panel);
+  box-shadow: 4px 4px 0 var(--faint);
+  transform: translateX(-50%);
+}
+.selection-chip strong {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.selection-chip button {
+  padding: 3px 7px;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.selection-chip button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .pending-launches {
   position: absolute;
   z-index: 17;
@@ -2211,6 +2281,13 @@ button {
 }
 .ledger li button:hover b {
   color: var(--accent);
+}
+.ledger li button.is-selected {
+  background: var(--faint);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.ledger li button.is-selected b {
+  color: var(--ink);
 }
 .ledger__agent-copy {
   min-width: 0;

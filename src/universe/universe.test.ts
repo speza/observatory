@@ -447,6 +447,66 @@ describe("Universe", () => {
     ]);
   });
 
+  test("unassigns multiple agents atomically and leaves a pinned goal in place", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "First destination" });
+    universe.execute({ type: "CreateGoal", title: "Second destination" });
+    universe.execute({ type: "CreateSystem", title: "Direct system" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2"), observation("pane-3")]),
+    );
+    universe.execute({ type: "AssignAgents", agentIds: ["agent-1", "agent-2"], goalId: "goal-1" });
+    universe.execute({ type: "AssignAgentToSystem", agentId: "agent-3", systemId: "system-1" });
+    universe.execute({ type: "SetGoalMapPosition", goalId: "goal-1", position: { x: 0, y: 0 } });
+
+    // An unknown or archived Agent rejects the whole batch without partial state.
+    expect(universe.execute({ type: "UnassignAgents", agentIds: ["agent-1", "missing"] })).toEqual({
+      ok: false,
+      error: "Agent missing not found.",
+    });
+    expect(universe.snapshot().agents[0]?.primaryGoalId).toBe("goal-1");
+    expect(universe.execute({ type: "UnassignAgents", agentIds: [] })).toEqual({
+      ok: false,
+      error: "At least one agent is required.",
+    });
+
+    expect(
+      universe.execute({
+        type: "UnassignAgents",
+        agentIds: ["agent-1", "agent-2", "agent-3", "agent-1"],
+      }),
+    ).toEqual({ ok: true, affectedAgentIds: ["agent-1", "agent-2", "agent-3"] });
+    expect(
+      universe.snapshot().agents.map((agent) => [agent.primaryGoalId, agent.systemId]),
+    ).toEqual([
+      [undefined, undefined],
+      [undefined, undefined],
+      [undefined, undefined],
+    ]);
+    expect(universe.snapshot().goals[0]).toMatchObject({
+      mapPosition: { x: 0, y: 0 },
+      mapPositionPinned: true,
+    });
+  });
+
+  test("refuses to unassign an archived agent", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Destination" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
+    universe.execute({ type: "AssignAgents", agentIds: ["agent-1", "agent-2"], goalId: "goal-1" });
+    universe.execute({ type: "ArchiveAgent", agentId: "agent-2" });
+
+    expect(universe.execute({ type: "UnassignAgents", agentIds: ["agent-1", "agent-2"] })).toEqual({
+      ok: false,
+      error: "Archived agents cannot be reassigned.",
+    });
+    expect(universe.snapshot().agents[0]?.primaryGoalId).toBe("goal-1");
+  });
+
   test("adopts related agents in a human-controlled batch and preserves dismissal state", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Primary outcome" });

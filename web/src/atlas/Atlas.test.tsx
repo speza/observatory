@@ -13,7 +13,7 @@ import {
   admitObservedConversationsAndReconcile,
 } from "../../../src/universe/test-support.ts";
 import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
-import type { Selection } from "../app/selection.ts";
+import { onlySelection, type SelectionModel } from "../app/selection.ts";
 import {
   ATLAS_GRID_STEP,
   atlasContentBounds,
@@ -31,7 +31,7 @@ const mapProjection = (projection: Projection): UniverseMapProjection => {
 };
 
 interface RenderOptions {
-  readonly selection?: Selection;
+  readonly selection?: SelectionModel;
   readonly pullRequestUrls?: ReadonlyMap<string, string>;
   readonly onCloseAndArchive?: () => void;
   readonly onOpenTerminal?: () => void;
@@ -234,10 +234,10 @@ describe("production web Atlas", () => {
     expect(collapsedMarkup).toContain('aria-expanded="false"');
     expect(collapsedMarkup).not.toContain("data-discovery-handle=");
     const markup = renderAtlas(projection, {
-      selection: {
+      selection: onlySelection({
         type: "discovered-execution",
         id: projection.discoveredExecutions?.[0]?.handle ?? "",
-      },
+      }),
     });
 
     expect(placement).toBeDefined();

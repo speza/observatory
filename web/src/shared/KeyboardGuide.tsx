@@ -19,6 +19,22 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
         <dd>Select the next goal or agent</dd>
       </div>
       <div>
+        <dt>⇧ + ↑ ↓ / j k</dt>
+        <dd>Extend the Agent selection from its anchor</dd>
+      </div>
+      <div>
+        <dt>⌘/Ctrl+click</dt>
+        <dd>Add or remove one Agent</dd>
+      </div>
+      <div>
+        <dt>⇧+click / ⇧+drag</dt>
+        <dd>Select an Agent range, or marquee the Atlas</dd>
+      </div>
+      <div>
+        <dt>⌘/Ctrl+A</dt>
+        <dd>Select every Agent in the current view</dd>
+      </div>
+      <div>
         <dt>Enter / Space</dt>
         <dd>Focus the selection or open its terminal</dd>
       </div>
@@ -49,7 +65,7 @@ export const KeyboardGuide = ({ onClose }: KeyboardGuideProps): React.JSX.Elemen
       <div>
         <dt>i / ? / Esc</dt>
         <dd>Inspector, shortcuts, close or clear</dd>
-      </div>
+      </div>{" "}
       <div>
         <dt>⌘/Ctrl+Tab / 1–9</dt>
         <dd>Switch terminal tabs when a terminal deck is open</dd>

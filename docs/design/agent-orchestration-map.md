@@ -256,6 +256,51 @@ available. Repository status and bounded working-tree review provide
 verification context without exposing arbitrary filesystem access to the
 browser.
 
+### Multi-select filing
+
+One Agent at a time is the reviewer's unit; several Agents at once is the
+filer's. Agent multi-select exists so that organising a portfolio does not
+require opening and re-filing each Agent individually, and it covers exactly one
+durable effect: placement. A batch can receive a Goal, be placed directly in a
+System, or be returned to Inbox.
+
+Every Agent-rendering surface participates. A plain click keeps its existing
+meaning, a `Cmd`/`Ctrl`-click toggles one Agent without disturbing the rest, and
+a `Shift`-click replaces the selection with the range between the anchor and
+the target. `Shift`-drag on the Atlas canvas marquees the covered cards instead
+of panning; an unmodified drag still pans. `Cmd`/`Ctrl+A` selects every Agent
+the current view shows, and `Shift` with the navigation keys extends the range.
+
+Visible order has exactly one definition, shared by the navigator, Ledger and
+Atlas gestures: each System contributes its Goals' Agents then its directly
+placed Agents, and Inbox comes last. Filtering a view changes which Agents are
+in that order, never the order itself, so Shift-click, Shift-arrow and the
+marquee always walk the same sequence. A bulk gesture cannot reach an Agent the
+operator cannot currently see, and a batch does not outlive the lens that shows
+it: changing view, or an Agent leaving the projection, collapses the batch back
+to its subject rather than leaving hidden Agents armed.
+
+Focus is not a batch gesture. Keyboard focus keeps the inspector in step with
+where the operator is, but it never reshapes an armed batch, so tabbing or
+landing on a card's own quick actions cannot silently drop Agents the operator
+deliberately selected.
+
+With two or more Agents selected, the inspector replaces its single-subject
+view with batch actions: the current placement summary, a bounded name preview,
+and one explicit destination. Selection is staged and committed by a single
+labelled action rather than applied on choice, so a batch move is always
+confirmed and a selection spanning several Goals is legible before it is
+executed. Assigning a Goal clears any direct System placement and returning to
+Inbox clears both placements, exactly as the single-Agent path does; the
+Universe still rejects archived Agents and archived Goals. Batch actions never
+archive, close, complete, or otherwise end work.
+
+Selection is transient renderer state, so a selected Agent that leaves the
+projection is dropped before a command can span a stale id. Multi-select never
+moves the camera or changes System scope: a batch is built in place, and only
+an explicit plain click navigates. Pressing Escape collapses a batch to its
+subject before a second Escape closes the inspector.
+
 ### Terminal deck
 
 The terminal deck renders host-owned terminal streams. It preserves the Atlas
@@ -410,7 +455,8 @@ count/section, Inbox, Needs you and Catch up. Selecting a goal, Agent or
 discovered execution locates it on Atlas and opens its inspector;
 All work, Needs you and Unassigned are views of the same sidebar list. Needs
 you retains system/goal context and includes unassigned agents requiring
-attention. Unassigned agents are assigned through the existing inspector.
+attention. Unassigned agents are assigned through the existing inspector,
+individually or as a batch selection.
 Catch up is a separate centred modal action. With no selection,
 the right column shows the current system overview.
 
@@ -424,7 +470,9 @@ time. Resize separators support pointer dragging and keyboard arrows/Home/End.
 
 The left navigator uses aligned attention action badges,
 indented System/Goal/Agent rows, provider marks and accessible agent status
-indicators. Only the selected item receives the full selection highlight.
+indicators. Only the selected item receives the full selection highlight;
+additional members of a batch are marked as a distinct set, and the inspector
+subject remains identifiable within it.
 
 The navigator and system inspector avoid repeating portfolio metrics. Empty
 list views show a short message. Catch up uses native modal

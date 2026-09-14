@@ -6,25 +6,57 @@ import type {
 } from "../../../src/projection/types.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
 import { presentAgentCard } from "../atlas/agentCardPresentation.ts";
-import type { Selection } from "../app/selection.ts";
+import { flattenAgentOrder } from "../app/navigatorAgents.ts";
+import {
+  selectionIntent,
+  type AgentSelectionHandler,
+  type Selection,
+  type SelectionModel,
+} from "../app/selection.ts";
 
 interface LedgerProps {
   readonly projection: CommandCentreProjection;
+  readonly selection?: SelectionModel;
   readonly onSelect: (selection: Selection) => void;
+  readonly onSelectAgent?: AgentSelectionHandler;
+}
+
+interface LedgerAgentRowProps {
+  readonly agent: AgentView;
+  readonly selected: boolean;
+  readonly subject: boolean;
+  readonly order: readonly string[];
+  readonly onSelect: (selection: Selection) => void;
+  readonly onSelectAgent?: AgentSelectionHandler;
 }
 
 const AgentRow = ({
   agent,
+  selected,
+  subject,
+  order,
   onSelect,
-}: {
-  readonly agent: AgentView;
-  readonly onSelect: (selection: Selection) => void;
-}): React.JSX.Element => {
+  onSelectAgent,
+}: LedgerAgentRowProps): React.JSX.Element => {
   const presentation = presentAgentCard(agent);
   const state = agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
   return (
     <li>
-      <button onClick={() => onSelect({ type: "agent", id: agent.id })} type="button">
+      <button
+        aria-current={subject ? "true" : undefined}
+        aria-pressed={selected}
+        className={selected ? "is-selected" : undefined}
+        onClick={(event) => {
+          const intent = selectionIntent(event);
+          if ((intent.additive || intent.range) && onSelectAgent) {
+            event.preventDefault();
+            onSelectAgent(agent.id, intent, order);
+            return;
+          }
+          onSelect({ type: "agent", id: agent.id });
+        }}
+        type="button"
+      >
         <span className={`state state--${state}`} />
         <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
         <span className="ledger__agent-copy">
@@ -39,9 +71,11 @@ const AgentRow = ({
 
 const GoalCard = ({
   goal,
+  agentRow,
   onSelect,
 }: {
   readonly goal: GoalView;
+  readonly agentRow: (agent: AgentView) => React.JSX.Element;
   readonly onSelect: (selection: Selection) => void;
 }): React.JSX.Element => (
   <article className={goal.status !== "active" ? "is-muted" : ""}>
@@ -52,11 +86,7 @@ const GoalCard = ({
         {goal.agents.length} agents · {goal.attentionCount} need you · {goal.staleCount} monitor
       </small>
     </button>
-    <ul>
-      {goal.agents.map((agent) => (
-        <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
-      ))}
-    </ul>
+    <ul>{goal.agents.map(agentRow)}</ul>
   </article>
 );
 
@@ -91,7 +121,12 @@ const DiscoveredRow = ({
   );
 };
 
-export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element => {
+export const Ledger = ({
+  projection,
+  selection,
+  onSelect,
+  onSelectAgent,
+}: LedgerProps): React.JSX.Element => {
   const groups = projection.systems.map((system) => ({
     id: system.id,
     title: system.title,
@@ -99,6 +134,21 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
     agents: system.agents,
     goals: projection.goals.filter((goal) => goal.systemId === system.id),
   }));
+  const subject = selection?.subject;
+  const selectedAgentIds = selection?.agentIds ?? new Set<string>();
+  /** Range selection follows the order the operator can actually see here. */
+  const order = flattenAgentOrder(groups, projection.unassigned).map((agent) => agent.id);
+  const agentRow = (agent: AgentView): React.JSX.Element => (
+    <AgentRow
+      agent={agent}
+      key={agent.id}
+      order={order}
+      selected={selectedAgentIds.has(agent.id)}
+      subject={subject?.type === "agent" && subject.id === agent.id}
+      onSelect={onSelect}
+      onSelectAgent={onSelectAgent}
+    />
+  );
   return (
     <section className="ledger" aria-label="Systems, goals, and agents ledger">
       <header>
@@ -114,7 +164,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
           </header>
           <div className="ledger__grid">
             {group.goals.map((goal) => (
-              <GoalCard goal={goal} key={goal.id} onSelect={onSelect} />
+              <GoalCard agentRow={agentRow} goal={goal} key={goal.id} onSelect={onSelect} />
             ))}
             {group.agents.length > 0 ? (
               <article className="ledger__unassigned">
@@ -123,11 +173,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
                   <strong>Agents without a Goal</strong>
                   <small>{group.agents.length} direct System assignments</small>
                 </div>
-                <ul>
-                  {group.agents.map((agent) => (
-                    <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
-                  ))}
-                </ul>
+                <ul>{group.agents.map(agentRow)}</ul>
               </article>
             ) : null}
           </div>
@@ -148,11 +194,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
                   {projection.unassigned.length} observations awaiting human organisation
                 </small>
               </div>
-              <ul>
-                {projection.unassigned.map((agent) => (
-                  <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
-                ))}
-              </ul>
+              <ul>{projection.unassigned.map(agentRow)}</ul>
             </article>
           </div>
         </section>

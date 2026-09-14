@@ -403,6 +403,14 @@ projection loading, selection resets and affected-subject invalidation belong
 to `inspector/useInspector`. Commands and retry actions explicitly refresh the
 inspector through the hook, retaining its last projection during refresh.
 
+`app/selection.ts` owns the renderer's Agent selection: an optional subject for
+the inspector, camera focus and keyboard navigation, plus the selected Agent id
+set and the range anchor. It is pure data plus total helpers, so every surface
+shares one definition of toggle, range, set and pruning behaviour, and no
+surface invents its own. `app/navigatorAgents.ts` owns the single definition of
+visible Agent order for the active navigation view, so the navigator, Ledger,
+Atlas and keyboard range gestures cannot diverge from one another.
+
 ## Identity and reconciliation
 
 Provider conversation identity and host execution identity are independent.
@@ -529,7 +537,9 @@ operator checkpoint.
 
 Renderer-local selection, hover, viewport, zoom, open dialogs and terminal tabs
 are not persisted in SQLite. Versioned browser preferences may use local
-storage, but they do not become trusted Observatory state.
+storage, but they do not become trusted Observatory state. A selected Agent
+batch is transient context only: filing it produces ordinary assignment
+commands, and nothing about the batch itself is persisted.
 
 ## Security and privacy
 

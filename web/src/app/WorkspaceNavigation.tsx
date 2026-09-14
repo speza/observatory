@@ -7,11 +7,15 @@ import type {
   DiscoveredExecutionView,
   GoalView,
 } from "../../../src/projection/types.ts";
-import type { Selection } from "./selection.ts";
+import { flattenAgentOrder, needsHumanInput, type NavigationView } from "./navigatorAgents.ts";
+import {
+  selectionIntent,
+  type AgentSelectionHandler,
+  type Selection,
+  type SelectionModel,
+} from "./selection.ts";
 
-export type NavigationView = "all" | "attention" | "unassigned";
-
-const needsHumanInput = (agent: AgentView): boolean => agent.attention?.requiresHumanInput === true;
+export type { NavigationView } from "./navigatorAgents.ts";
 
 const systemKey = (id: string): string => `system:${id}`;
 const goalKey = (id: string): string => `goal:${id}`;
@@ -50,23 +54,27 @@ export const WorkspaceNavigation = ({
   selection,
   onSystem,
   onSelect,
+  onSelectAgent,
 }: {
   readonly view?: NavigationView;
   readonly projection: CommandCentreProjection;
   readonly systemId?: string;
-  readonly selection?: Selection;
+  readonly selection?: SelectionModel;
   readonly onSystem: (id?: string) => void;
   readonly onSelect: (selection: Selection) => void;
+  readonly onSelectAgent?: AgentSelectionHandler;
 }): React.JSX.Element => {
+  const subject = selection?.subject;
+  const selectedAgentIds = selection?.agentIds ?? new Set<string>();
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
-  const selectionKey = selection ? `${selection.type}:${selection.id}` : "";
+  const selectionKey = subject ? `${subject.type}:${subject.id}` : "";
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
-    () => new Set(requiredExpansion(projection, systemId, selection)),
+    () => new Set(requiredExpansion(projection, systemId, subject)),
   );
 
   useEffect(() => {
-    const required = requiredExpansion(projectionRef.current, systemId, selection);
+    const required = requiredExpansion(projectionRef.current, systemId, subject);
     if (required.length === 0) return;
     setExpanded((existing) => {
       if (required.every((key) => existing.has(key))) return existing;
@@ -106,34 +114,46 @@ export const WorkspaceNavigation = ({
       .filter((item) => item.requiresHumanInput && item.goalId)
       .map((item) => item.goalId!),
   );
-  const agentRow = (agent: AgentView): React.JSX.Element => (
-    <button
-      type="button"
-      className="workspace-tree__agent"
-      key={agent.id}
-      aria-current={selection?.type === "agent" && selection.id === agent.id ? "true" : undefined}
-      title={`${agent.displayName} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
-      onClick={() => onSelect({ type: "agent", id: agent.id })}
-    >
-      <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-      <span>{agent.displayName}</span>
-      <span
-        className="workspace-tree__status"
-        role="img"
-        aria-label={
-          agent.attention
-            ? `${agent.runtimeState} · ${agent.attention.explanation}`
-            : agent.runtimeState
-        }
+  const agentRow = (agent: AgentView): React.JSX.Element => {
+    const selected = selectedAgentIds.has(agent.id);
+    return (
+      <button
+        type="button"
+        className={`workspace-tree__agent${selected ? " is-selected" : ""}`}
+        key={agent.id}
+        aria-current={subject?.type === "agent" && subject.id === agent.id ? "true" : undefined}
+        aria-pressed={selected}
+        title={`${agent.displayName} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
+        onClick={(event) => {
+          const intent = selectionIntent(event);
+          if ((intent.additive || intent.range) && onSelectAgent) {
+            event.preventDefault();
+            onSelectAgent(agent.id, intent, orderedAgentIds);
+            return;
+          }
+          onSelect({ type: "agent", id: agent.id });
+        }}
       >
-        {agent.attention ? (
-          <CircleAlert size={13} className="is-attention" />
-        ) : (
-          <i className={`workspace-tree__dot is-${agent.runtimeState}`} />
-        )}
-      </span>
-    </button>
-  );
+        <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
+        <span>{agent.displayName}</span>
+        <span
+          className="workspace-tree__status"
+          role="img"
+          aria-label={
+            agent.attention
+              ? `${agent.runtimeState} · ${agent.attention.explanation}`
+              : agent.runtimeState
+          }
+        >
+          {agent.attention ? (
+            <CircleAlert size={13} className="is-attention" />
+          ) : (
+            <i className={`workspace-tree__dot is-${agent.runtimeState}`} />
+          )}
+        </span>
+      </button>
+    );
+  };
   const goals =
     view === "unassigned"
       ? []
@@ -159,6 +179,8 @@ export const WorkspaceNavigation = ({
             : [],
     }))
     .filter((system) => view === "all" || system.goals.length || system.agents.length);
+  /** Range selection follows the order the operator can actually see here. */
+  const orderedAgentIds = flattenAgentOrder(systems, unassigned).map((agent) => agent.id);
   const goalRow = (goal: GoalView): React.JSX.Element => (
     <details
       key={goal.id}
@@ -166,10 +188,10 @@ export const WorkspaceNavigation = ({
       open={view === "attention" || expanded.has(goalKey(goal.id)) || undefined}
     >
       <summary
-        aria-current={selection?.type === "goal" && selection.id === goal.id ? "true" : undefined}
+        aria-current={subject?.type === "goal" && subject.id === goal.id ? "true" : undefined}
         title={goal.title}
         className={
-          selection?.type === "agent" && goal.agents.some((agent) => agent.id === selection.id)
+          subject?.type === "agent" && goal.agents.some((agent) => agent.id === subject.id)
             ? "is-ancestor"
             : undefined
         }
@@ -199,7 +221,7 @@ export const WorkspaceNavigation = ({
         className="workspace-tree__agent workspace-tree__discovered"
         key={execution.handle}
         aria-current={
-          selection?.type === "discovered-execution" && selection.id === execution.handle
+          subject?.type === "discovered-execution" && subject.id === execution.handle
             ? "true"
             : undefined
         }
@@ -231,7 +253,7 @@ export const WorkspaceNavigation = ({
         <button
           type="button"
           className="workspace-tree__all"
-          aria-current={!systemId && !selection ? "true" : undefined}
+          aria-current={!systemId && !subject ? "true" : undefined}
           onClick={() => onSystem()}
         >
           <Layers size={15} />
@@ -246,8 +268,8 @@ export const WorkspaceNavigation = ({
           open={view === "attention" || expanded.has(systemKey(system.id)) || undefined}
         >
           <summary
-            aria-current={systemId === system.id && !selection ? "true" : undefined}
-            className={systemId === system.id && selection ? "is-ancestor" : undefined}
+            aria-current={systemId === system.id && !subject ? "true" : undefined}
+            className={systemId === system.id && subject ? "is-ancestor" : undefined}
             title={system.title}
             onClick={(event) => {
               event.preventDefault();
