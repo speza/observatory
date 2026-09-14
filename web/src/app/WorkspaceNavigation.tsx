@@ -34,6 +34,11 @@ const requiredExpansion = (
     required.push(goalKey(goalId));
     const goal = projection.goals.find((candidate) => candidate.id === goalId);
     if (goal?.systemId) required.push(systemKey(goal.systemId));
+  } else if (selection?.type === "agent") {
+    const system = projection.systems.find((candidate) =>
+      candidate.agents.some((agent) => agent.id === selection.id),
+    );
+    if (system) required.push(systemKey(system.id));
   }
   return required;
 };
@@ -143,8 +148,17 @@ export const WorkspaceNavigation = ({
   );
   const discoveredExecutions = view === "all" ? (projection.discoveredExecutions ?? []) : [];
   const systems = projection.systems
-    .map((system) => ({ ...system, goals: goals.filter((goal) => goal.systemId === system.id) }))
-    .filter((system) => view === "all" || system.goals.length);
+    .map((system) => ({
+      ...system,
+      goals: goals.filter((goal) => goal.systemId === system.id),
+      agents:
+        view === "all"
+          ? system.agents
+          : view === "attention"
+            ? system.agents.filter((agent) => needsHumanInput(agent))
+            : [],
+    }))
+    .filter((system) => view === "all" || system.goals.length || system.agents.length);
   const goalRow = (goal: GoalView): React.JSX.Element => (
     <details
       key={goal.id}
@@ -205,7 +219,7 @@ export const WorkspaceNavigation = ({
     );
   };
   return (
-    <nav className="workspace-tree" aria-label="Systems and goals">
+    <nav className="workspace-tree" aria-label="Systems, goals, and agents">
       <p className="overline">
         {view === "unassigned"
           ? "Unassigned agents"
@@ -242,9 +256,18 @@ export const WorkspaceNavigation = ({
           >
             {view === "all" ? toggle(systemKey(system.id), system.title) : null}
             <span>{system.title}</span>
-            <small aria-label={`${system.goals.length} goals`}>{system.goals.length}</small>
+            <small
+              aria-label={`${system.goals.length} goals, ${system.agents.length} direct agents`}
+            >
+              {system.goals.length + system.agents.length}
+            </small>
           </summary>
           {system.goals.map(goalRow)}
+          {system.agents.length > 0 ? (
+            <section className="workspace-tree__system-agents" aria-label="Agents without a goal">
+              {system.agents.map(agentRow)}
+            </section>
+          ) : null}
         </details>
       ))}
       {unassigned.length ? (

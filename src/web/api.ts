@@ -62,10 +62,12 @@ const DiscoveryHandle = Schema.String.pipe(Schema.minLength(1), Schema.maxLength
 const AddConversationRequestSchema = Schema.Struct({
   handle: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
 });
 const AdmitDiscoveredExecutionRequestSchema = Schema.Struct({
   handle: DiscoveryHandle,
   goalId: Schema.optional(DiscoveryHandle),
+  systemId: Schema.optional(DiscoveryHandle),
 });
 
 class WebDiscoveryAdmissionError extends Error {
@@ -79,7 +81,7 @@ class WebDiscoveryAdmissionError extends Error {
 
 const decodeAdmitDiscoveredExecutionRequest = (
   encoded: string,
-): { readonly handle: string; readonly goalId?: string } => {
+): { readonly handle: string; readonly goalId?: string; readonly systemId?: string } => {
   if (encoded.length > MAX_DISCOVERY_REQUEST_BYTES)
     throw new WebDiscoveryAdmissionError("Admission request is too large.", 413);
   try {
@@ -244,6 +246,7 @@ export class ObservatoryWebApi {
         const result = this.conversations.admitDiscovered(
           handle,
           values.goalId?.trim() || undefined,
+          values.systemId?.trim() || undefined,
         );
         const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
@@ -585,7 +588,8 @@ export class ObservatoryWebApi {
         if (!values.handle.trim())
           return json({ error: "A conversation handle is required." }, 400);
         const goalId = values.goalId?.trim() || undefined;
-        const added = this.conversations.add(values.handle, goalId);
+        const systemId = values.systemId?.trim() || undefined;
+        const added = this.conversations.add(values.handle, goalId, systemId);
         const portfolio = this.portfolio();
         if (portfolio instanceof Response) return portfolio;
         return json({ ...added, portfolio } satisfies WebAddConversationResponse);

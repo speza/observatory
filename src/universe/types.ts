@@ -65,6 +65,8 @@ export interface UniverseChange {
   readonly targetType: "system" | "goal" | "agent";
   readonly targetId: string;
   readonly goalId?: GoalId;
+  /** Direct System context for an Agent without a Goal. */
+  readonly systemId?: SystemId;
   readonly summary: string;
 }
 
@@ -120,6 +122,8 @@ export interface Agent {
   readonly displayName: string;
   readonly displayNameSource: "human" | "provider" | "fallback";
   readonly description?: string;
+  /** Direct System placement used only when the Agent has no Goal. */
+  readonly systemId?: SystemId;
   readonly primaryGoalId?: GoalId;
   readonly runtimeState: RuntimeState;
   readonly runtimeStateSource: string;

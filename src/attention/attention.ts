@@ -225,7 +225,7 @@ export const evaluateAttention = (
 
     if (
       agent.archivedAt === undefined &&
-      agent.primaryGoalId &&
+      (agent.primaryGoalId !== undefined || agent.systemId !== undefined) &&
       agent.executionPresence === "absent"
     ) {
       const startedAt = agent.lastSeenAt;

@@ -23,10 +23,12 @@ interface InspectorProps {
   readonly onAdmitDiscovered: (
     handle: string,
     goalId?: string,
+    systemId?: string,
   ) => Promise<
     | {
         readonly agentId: string;
         readonly goalId?: string;
+        readonly systemId?: string;
         readonly message: string;
         readonly partial?: boolean;
       }
@@ -72,18 +74,24 @@ export const Inspector = ({
   const agent = projection?.kind === "agent-inspector" ? projection.agent : undefined;
   const discovery =
     projection?.kind === "discovered-execution-inspector" ? projection.execution : undefined;
+  const agentSystemId =
+    agent?.primaryGoalId !== undefined
+      ? commandCentre.goals.find((candidate) => candidate.id === agent.primaryGoalId)?.systemId
+      : agent?.systemId;
   const conversationId =
     projection?.kind === "agent-inspector" ? projection.conversation?.id : undefined;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [confirming, setConfirming] = useState<"goal" | "agent-archive" | "agent-close">();
   const [discoveryGoalId, setDiscoveryGoalId] = useState<string>();
+  const [discoverySystemId, setDiscoverySystemId] = useState<string>();
 
   useEffect(() => {
     setTitle(goal?.title ?? "");
     setDescription(goal?.description ?? "");
     setConfirming(undefined);
     setDiscoveryGoalId(undefined);
+    setDiscoverySystemId(undefined);
   }, [goal?.description, goal?.id, goal?.title, agent?.id, discovery?.handle]);
 
   const heading =
@@ -278,7 +286,11 @@ export const Inspector = ({
             <span>Optional Goal</span>
             <select
               disabled={commandPending}
-              onChange={(event) => setDiscoveryGoalId(event.target.value || undefined)}
+              onChange={(event) => {
+                const nextGoalId = event.target.value || undefined;
+                setDiscoveryGoalId(nextGoalId);
+                if (nextGoalId) setDiscoverySystemId(undefined);
+              }}
               value={discoveryGoalId ?? ""}
             >
               <option value="">No Goal</option>
@@ -291,14 +303,39 @@ export const Inspector = ({
                 ))}
             </select>
           </label>
+          <label className="inspector__assignment">
+            <span>Optional System</span>
+            <select
+              disabled={commandPending}
+              onChange={(event) => {
+                const nextSystemId = event.target.value || undefined;
+                setDiscoverySystemId(nextSystemId);
+                if (nextSystemId) setDiscoveryGoalId(undefined);
+              }}
+              value={discoverySystemId ?? ""}
+            >
+              <option value="">No System</option>
+              {commandCentre.systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <nav className="inspector__actions" aria-label="Discovered execution actions">
             <button
               className="is-primary"
               disabled={commandPending || discovery.admission.status !== "available"}
-              onClick={() => void onAdmitDiscovered(discovery.handle, discoveryGoalId)}
+              onClick={() =>
+                void onAdmitDiscovered(discovery.handle, discoveryGoalId, discoverySystemId)
+              }
               type="button"
             >
-              {discoveryGoalId ? "Add and assign to Goal" : "Add to Inbox"}
+              {discoveryGoalId
+                ? "Add and assign to Goal"
+                : discoverySystemId
+                  ? "Add and assign to System"
+                  : "Add to Inbox"}
             </button>
             {discovery.presence === "live" ? (
               <button onClick={() => onOpenDiscoveredTerminal(discovery)} type="button">
@@ -312,7 +349,9 @@ export const Inspector = ({
             <p className="inspector__discovered-note">
               {discoveryGoalId
                 ? "The Agent will be filed through the selected Goal and its System."
-                : "No Goal selected. The accepted Agent will start in Inbox until you assign one."}{" "}
+                : discoverySystemId
+                  ? "The Agent will be placed directly in the selected System without a Goal."
+                  : "No Goal or System selected. The accepted Agent will start in Inbox until you assign one."}{" "}
               Exact catalogue evidence is available; admission remains explicit.
             </p>
           )}
@@ -360,7 +399,7 @@ export const Inspector = ({
                 }}
                 value={projection.agent.primaryGoalId ?? ""}
               >
-                <option value="">Unassigned inbox</option>
+                <option value="">No Goal</option>
                 {commandCentre.goals
                   .filter(
                     (candidate) =>
@@ -377,6 +416,28 @@ export const Inspector = ({
                       {candidate.status !== "active" ? ` · ${candidate.status}` : ""}
                     </option>
                   ))}
+              </select>
+            </label>
+            <label className="inspector__assignment">
+              <span>Assigned System</span>
+              <select
+                disabled={commandPending || projection.agent.primaryGoalId !== undefined}
+                onChange={(event) => {
+                  const systemId = event.target.value;
+                  void onCommand(
+                    systemId
+                      ? { type: "AssignAgentToSystem", agentId: projection.agent.id, systemId }
+                      : { type: "UnassignAgent", agentId: projection.agent.id },
+                  );
+                }}
+                value={agentSystemId ?? ""}
+              >
+                <option value="">No System</option>
+                {commandCentre.systems.map((system) => (
+                  <option key={system.id} value={system.id}>
+                    {system.title}
+                  </option>
+                ))}
               </select>
             </label>
             <nav className="inspector__actions" aria-label="Agent actions">

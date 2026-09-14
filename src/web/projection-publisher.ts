@@ -76,6 +76,8 @@ const expandedSubjects = (
     if (subject.type !== "agent") continue;
     for (const goal of goals)
       if (goal.agents.some((agent) => agent.id === subject.id)) add("goal", goal.id);
+    for (const system of systems)
+      if (system.agents.some((agent) => agent.id === subject.id)) add("system", system.id);
   }
   const subjectsWithGoals = Array.from(values.values());
   for (const subject of subjectsWithGoals) {

@@ -143,8 +143,9 @@ export const Atlas = ({
     const state = stateLabel(agent);
     const card = presentAgentCard(agent);
     const goalColor =
-      palettes[theme][hash(agent.primaryGoalId ?? "unassigned") % palettes[theme].length] ??
-      palettes[theme][0];
+      palettes[theme][
+        hash(agent.primaryGoalId ?? agent.systemId ?? "unassigned") % palettes[theme].length
+      ] ?? palettes[theme][0];
     const style: AgentStyle = {
       "--goal-color": goalColor,
       "--agent-phase": `${-(hash(agent.id) % 4200)}ms`,
@@ -162,7 +163,7 @@ export const Atlas = ({
         transform={`translate(${point.x} ${point.y})`}
       >
         <g
-          aria-label={`${agent.displayName}, ${state}, goal ${agent.goalTitle ?? "unassigned"}`}
+          aria-label={`${agent.displayName}, ${state}, ${agent.goalTitle ? `goal ${agent.goalTitle}` : agent.systemTitle ? `system ${agent.systemTitle}` : "unassigned"}`}
           className="agent__card-target"
           role="button"
           tabIndex={0}
@@ -235,7 +236,11 @@ export const Atlas = ({
           ) : null}
           <rect className="agent__goal-chip" height="16" rx="3" width="192" x="-96" y="28" />
           <text className="agent__context" x="-90" y="40">
-            GOAL · {truncateAtlasLine(agent.goalTitle ?? "UNASSIGNED", 25)}
+            {agent.goalTitle
+              ? `GOAL · ${truncateAtlasLine(agent.goalTitle, 25)}`
+              : agent.systemTitle
+                ? `SYSTEM · ${truncateAtlasLine(agent.systemTitle, 25)}`
+                : "GOAL · UNASSIGNED"}
           </text>
           <rect
             className="agent__selection"

@@ -44,6 +44,7 @@ const LaunchGoalSchema = Schema.Struct({
   title: Schema.String,
   priority: Schema.Literal("P0", "P1", "P2", "P3"),
 });
+const LaunchSystemSchema = Schema.Struct({ id: Schema.String, title: Schema.String });
 const WorkspaceChoiceSchema = Schema.Struct({
   path: Schema.String,
   label: Schema.String,
@@ -59,6 +60,7 @@ const LaunchOptionSchema = Schema.Struct({
 });
 const LaunchOptionsSchema: Schema.Schema<WebLaunchOptionsResponse> = Schema.Struct({
   kind: Schema.Literal("launch-options"),
+  systems: Schema.Array(LaunchSystemSchema),
   goals: Schema.Array(LaunchGoalSchema),
   locations: Schema.Array(WorkspaceChoiceSchema),
   agents: Schema.Array(LaunchOptionSchema),
@@ -124,11 +126,13 @@ const ConversationHistorySchema: Schema.Schema<WebConversationHistoryResponse> =
 const AddConversationSchema = Schema.Struct({
   agentId: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   portfolio: WebPortfolioResponseSchema,
 });
 const AdmitDiscoveredExecutionSchema = Schema.Struct({
   agentId: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   message: Schema.String,
   partial: Schema.optional(Schema.Boolean),
   portfolio: WebPortfolioResponseSchema,
@@ -164,11 +168,12 @@ export const fetchConversationHistory = async (options?: {
 export const addConversation = async (
   handle: string,
   goalId?: string,
+  systemId?: string,
 ): Promise<WebAddConversationResponse> => {
   const response = await fetch("/api/conversations/add", {
     method: "POST",
     headers: { "content-type": "application/json", "x-ao-command": "1" },
-    body: JSON.stringify({ handle, goalId }),
+    body: JSON.stringify({ handle, goalId, systemId }),
   });
   if (!response.ok)
     throw new Error(await errorMessage(response, `Add conversation failed (${response.status}).`));
@@ -178,11 +183,12 @@ export const addConversation = async (
 export const admitDiscoveredExecution = async (
   handle: string,
   goalId?: string,
+  systemId?: string,
 ): Promise<WebAdmitDiscoveredExecutionResponse> => {
   const response = await fetch("/api/discoveries/admit", {
     method: "POST",
     headers: { "content-type": "application/json", "x-ao-command": "1" },
-    body: JSON.stringify({ handle, goalId }),
+    body: JSON.stringify({ handle, goalId, systemId }),
   });
   if (!response.ok)
     throw new Error(

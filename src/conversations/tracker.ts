@@ -152,7 +152,9 @@ export class ConversationTracker implements ConversationTrackerModule {
       .sort((left, right) => (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0));
   }
 
-  add(handle: string, goalId?: string): AddedConversation {
+  add(handle: string, goalId?: string, systemId?: string): AddedConversation {
+    if (goalId && systemId)
+      throw new Error("Choose a Goal or a System for the added conversation, not both.");
     const session = this.store.conversation(handle.trim());
     if (!session) throw new Error("Provider conversation not found.");
     const label =
@@ -168,14 +170,17 @@ export class ConversationTracker implements ConversationTrackerModule {
       workspaceRef: session.workspaceRef,
       observedAt: session.observedAt,
       goalId,
+      systemId,
     });
     if (!result.ok || !result.agentId)
       throw new Error(result.error ?? "Provider conversation could not be added.");
     if (this.lastHostSnapshot) this.observeHost(this.lastHostSnapshot);
-    return { agentId: result.agentId, goalId: result.goalId };
+    return { agentId: result.agentId, goalId: result.goalId, systemId: result.systemId };
   }
 
-  admitDiscovered(handle: string, goalId?: string): AdmittedDiscoveredExecution {
+  admitDiscovered(handle: string, goalId?: string, systemId?: string): AdmittedDiscoveredExecution {
+    if (goalId && systemId)
+      throw new Error("Choose a Goal or a System for the admitted execution, not both.");
     const normalizedHandle = handle.trim();
     const discovery = this.universe.resolveDiscoveredExecution(normalizedHandle);
     const previouslyAdmitted = discovery
@@ -185,6 +190,7 @@ export class ConversationTracker implements ConversationTrackerModule {
       let assignedGoalId: string | undefined;
       let partial = false;
       let message = "Execution was already added to Observatory.";
+      let assignedSystemId: string | undefined;
       if (goalId) {
         const assigned = this.universe.execute({
           type: "AssignAgent",
@@ -196,13 +202,38 @@ export class ConversationTracker implements ConversationTrackerModule {
           message = `Execution was already added to Observatory, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
         } else {
           assignedGoalId = assigned.goalId;
+          assignedSystemId = assigned.systemId;
           message = "Execution was already added to Observatory and assigned to the Goal.";
+        }
+      } else if (systemId) {
+        const assigned = this.universe.execute({
+          type: "AssignAgentToSystem",
+          agentId: previouslyAdmitted.agentId,
+          systemId,
+        });
+        if (!assigned.ok) {
+          partial = true;
+          message = `Execution was already added to Observatory, but System assignment failed: ${assigned.error ?? "unknown error"}`;
+        } else {
+          assignedSystemId = assigned.systemId;
+          message = "Execution was already added to Observatory and assigned to the System.";
         }
       }
       const admittedAgentId = previouslyAdmitted.agentId;
       if (partial)
-        return { agentId: admittedAgentId, goalId: assignedGoalId, message, partial: true };
-      return { agentId: admittedAgentId, goalId: assignedGoalId, message };
+        return {
+          agentId: admittedAgentId,
+          goalId: assignedGoalId,
+          systemId: assignedSystemId,
+          message,
+          partial: true,
+        };
+      return {
+        agentId: admittedAgentId,
+        goalId: assignedGoalId,
+        systemId: assignedSystemId,
+        message,
+      };
     }
     if (!discovery) throw new Error("Discovered execution is no longer visible.");
     const reference = discovery.nativeConversationRef;
@@ -244,6 +275,7 @@ export class ConversationTracker implements ConversationTrackerModule {
       throw new Error(admitted.error ?? "Discovered execution could not be added.");
 
     let assignedGoalId: string | undefined;
+    let assignedSystemId: string | undefined;
     let partial = false;
     let message = "Execution added to Observatory Inbox.";
     if (goalId) {
@@ -257,7 +289,21 @@ export class ConversationTracker implements ConversationTrackerModule {
         message = `Execution added to Observatory Inbox, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
       } else {
         assignedGoalId = assigned.goalId;
+        assignedSystemId = assigned.systemId;
         message = "Execution added to Observatory and assigned to the Goal.";
+      }
+    } else if (systemId) {
+      const assigned = this.universe.execute({
+        type: "AssignAgentToSystem",
+        agentId: admitted.agentId,
+        systemId,
+      });
+      if (!assigned.ok) {
+        partial = true;
+        message = `Execution added to Observatory Inbox, but System assignment failed: ${assigned.error ?? "unknown error"}`;
+      } else {
+        assignedSystemId = assigned.systemId;
+        message = "Execution added to Observatory and assigned to the System.";
       }
     }
     if (this.lastHostSnapshot) this.observeHost(this.lastHostSnapshot);
@@ -265,10 +311,16 @@ export class ConversationTracker implements ConversationTrackerModule {
       return {
         agentId: admitted.agentId,
         goalId: assignedGoalId,
+        systemId: assignedSystemId,
         message,
         partial: true,
       };
-    return { agentId: admitted.agentId, goalId: assignedGoalId, message };
+    return {
+      agentId: admitted.agentId,
+      goalId: assignedGoalId,
+      systemId: assignedSystemId,
+      message,
+    };
   }
 
   observeHost(snapshot: HostSnapshot): ReconciliationResult {

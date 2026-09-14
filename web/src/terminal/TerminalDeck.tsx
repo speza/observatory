@@ -353,7 +353,7 @@ export const TerminalDeck = ({
             <input
               autoFocus
               onChange={(event) => setAgentQuery(event.target.value)}
-              placeholder="Find by agent, Goal, state, or host…"
+              placeholder="Find by agent, Goal, System, state, or host…"
               type="search"
               value={agentQuery}
             />
@@ -382,7 +382,7 @@ export const TerminalDeck = ({
                 <span>
                   <strong>{candidate.displayName}</strong>
                   <small>
-                    {candidate.goalTitle ?? "Inbox"} ·{" "}
+                    {candidate.goalTitle ?? candidate.systemTitle ?? "Inbox"} ·{" "}
                     {candidate.lifecycleState.replaceAll("-", " ")}
                   </small>
                 </span>

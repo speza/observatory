@@ -13,9 +13,9 @@ the identity rules used by [Agent launch and workspace preparation](session-laun
 Observatory tracks provider conversations as Agents when either the operator
 adds them from Conversation history, Observatory launches them, or a supported
 host reports recognized exact conversation identity. A host-synchronized Agent
-starts in Inbox with no inferred Goal or human metadata. Merely appearing in a
-provider catalogue, or appearing as an unidentified or ambiguous host process,
-never creates an Agent.
+starts in Inbox with no inferred Goal, direct System placement or human metadata.
+Merely appearing in a provider catalogue, or appearing as an unidentified or
+ambiguous host process, never creates an Agent.
 
 Herdr does not define the Agent's human semantics. It reports exact execution
 identity and whether and where the conversation currently runs, which
@@ -25,12 +25,17 @@ executions remain transient discovery.
 
 ```text
 System
-└── Goal
-    └── Agent = one admitted durable provider conversation
-        ├── human metadata and assignment
-        ├── provider metadata and continuity
-        └── execution binding = current runtime location, when proven
+├── Goal
+│   └── Agent = one admitted durable provider conversation
+└── Agent = one admitted durable provider conversation without a Goal
+    ├── human metadata and assignment
+    ├── provider metadata and continuity
+    └── execution binding = current runtime location, when proven
 ```
+
+An Agent has at most one human placement: an active Goal, a direct System, or
+Inbox. Direct System placement is explicit and human-controlled; host,
+repository and workspace evidence never chooses it.
 
 Conversation history remains the admission surface for provider conversations
 with no current host execution. A live Herdr execution with recognized exact
@@ -65,8 +70,9 @@ identity.
   Observatory restart and exact resume into a new execution.
 - Detect current Herdr execution presence independently from provider
   continuity.
-- Keep Goal assignment, human name, archive and semantic admission under human
-  control; host synchronization may create only an unassigned identity record.
+- Keep Goal/System assignment, human name, archive and semantic admission under
+  human control; host synchronization may create only an unassigned identity
+  record.
 - Preserve uncertainty without exposing internal reconciliation axes as the
   primary user experience.
 - Keep dormant provider conversations discoverable in Conversation history and
@@ -141,7 +147,8 @@ show it temporarily as `Starting`.
 A searchable catalogue of provider conversations that are not part of the
 active Observatory. It replaces Session import as a recovery-heavy workflow.
 Selecting an entry performs `Add to Observatory` for a conversation with no
-current recognized host execution. A recognized live host execution is already
+current recognized host execution; the operator may place it in a Goal, directly
+in a System, or leave it in Inbox. A recognized live host execution is already
 synchronized into Observatory; explicit admission remains required for
 untrusted or ambiguous discovery and for dormant catalogue entries.
 
@@ -256,7 +263,7 @@ Agent semantics from it.
 4. An execution can temporarily exist without a conversation key, but it is
    not admitted as a managed Agent; it may be visible as transient discovery.
    A recognized exact conversation key may synchronize an identity-only Agent
-   without assigning a Goal.
+   without assigning a Goal or direct System.
 5. An exact conversation key is the only automatic join between an Agent and
    an execution.
 6. Exact provider-declared aliases may canonicalise identity; matching UUID
@@ -269,7 +276,7 @@ Agent semantics from it.
 9. Provider absence affects conversation availability only when a complete,
    correctly scoped snapshot proves it.
 10. Missing or unavailable evidence becomes `unknown`, never a stronger claim.
-11. Human names, Goal assignment and archive survive all observation changes.
+11. Human names, Goal/System placement and archive survive all observation changes.
 12. A provider or host observation never automatically completes a Goal.
 13. A launch operation may remain ambiguous, but it may not manufacture an
     Agent or retry its process side effect without exact evidence.
@@ -289,8 +296,8 @@ Three paths may create a durable Agent:
 
 The host-synchronization command carries `host-observation` provenance and
 creates an unassigned Inbox Agent with fallback naming and unknown provider
-continuity until catalogue evidence arrives. It never assigns a Goal, copies a
-workspace into semantic ownership or claims resume eligibility. A scoped host
+continuity until catalogue evidence arrives. It never assigns a Goal or System,
+copies a workspace into semantic ownership or claims resume eligibility. A scoped host
 reference is accepted directly. An unscoped reference is synchronized only if
 the supporting catalogue does not contain conflicting provider scopes; an
 ambiguous value remains discovery.
@@ -533,11 +540,11 @@ provider conversations with no current execution remain in Conversation history.
 
 ### Database reset
 
-A full semantic reset loses Observatory-owned Goal assignment, human names,
-relationships and layout. Provider catalogue refreshes after reset repopulate
-Conversation history only; the next host refresh may recreate identity-only
-Inbox Agents for recognized exact live conversations. No Goal or human metadata
-is inferred from provider or host facts.
+A full semantic reset loses Observatory-owned Goal/System placement, human
+names, relationships and layout. Provider catalogue refreshes after reset
+repopulate Conversation history only; the next host refresh may recreate
+identity-only Inbox Agents for recognized exact live conversations. No Goal,
+System or human metadata is inferred from provider or host facts.
 
 ## Projections and interaction
 
@@ -561,10 +568,10 @@ launch operation.
 
 ### Inbox
 
-Inbox contains active Agents without a Goal. Recognized exact Herdr sessions
-arrive here automatically; dormant catalogue entries and ambiguous discoveries
-do not. Confirmed-absent Agents leave the active Inbox without being deleted or
-archived.
+Inbox contains active Agents without a Goal or direct System placement.
+Recognized exact Herdr sessions arrive here automatically; dormant catalogue
+entries and ambiguous discoveries do not. Confirmed-absent Agents leave the
+active Inbox without being deleted or archived.
 
 ### Conversation history
 

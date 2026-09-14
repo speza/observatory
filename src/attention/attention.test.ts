@@ -114,6 +114,30 @@ describe("attention", () => {
     expect(projection.currentCount).toBe(0);
   });
 
+  test("surfaces confirmed-ended direct System Agents for review", () => {
+    const projection = evaluateAttention(
+      20_000,
+      [],
+      [
+        {
+          ...agent("direct-ended", "idle", "", 0),
+          primaryGoalId: undefined,
+          systemId: "system-1",
+          execution: undefined,
+          executionPresence: "absent",
+          hostHealth: "stale",
+        },
+      ],
+    );
+
+    expect(projection.items).toHaveLength(1);
+    expect(projection.items[0]).toMatchObject({
+      agentId: "direct-ended",
+      reason: "ended-externally",
+      requiresHumanInput: true,
+    });
+  });
+
   test("keeps unavailable host instances as distinct uncertainty subjects", () => {
     const projection = evaluateAttention(
       20_000,

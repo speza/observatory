@@ -229,6 +229,27 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
+  test("adds conversation history directly to a System without a Goal", async () => {
+    const fixture = trackerFixture();
+    await Effect.runPromise(fixture.tracker.refresh());
+    const system = fixture.universe.execute({ type: "CreateSystem", title: "Project context" });
+    const added = fixture.tracker.add(
+      fixture.tracker.history()[0]!.handle,
+      undefined,
+      system.systemId,
+    );
+
+    expect(added).toMatchObject({ agentId: "agent-1", systemId: "system-1" });
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      primaryGoalId: undefined,
+      systemId: "system-1",
+    });
+    expect(() => fixture.tracker.add("missing", "goal-1", "system-1")).toThrow(
+      "Choose a Goal or a System",
+    );
+    fixture.store.close();
+  });
+
   test("preserves blocked resume eligibility during explicit admission", async () => {
     const blocked = { ...conversation(), resumeEligibility: "blocked" as const };
     const fixture = trackerFixture(() => providerSnapshot([blocked]));
@@ -359,6 +380,32 @@ describe("conversation tracker", () => {
     expect(admitted.goalId).toBe(goal.goalId);
     expect(fixture.universe.snapshot().agents[0]?.primaryGoalId).toBe(goal.goalId);
     expect(fixture.universe.snapshot().goals[0]?.systemId).toBe(DEFAULT_SYSTEM_ID);
+    fixture.store.close();
+  });
+
+  test("files an admitted discovery directly through a selected System", async () => {
+    const fixture = trackerFixture();
+    const system = fixture.universe.execute({ type: "CreateSystem", title: "Project context" });
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(
+      hostSnapshot([
+        manuallyAdmittedDiscovery("pane-system", "path", "/synthetic/native-secret-id.jsonl"),
+      ]),
+    );
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+
+    const admitted = fixture.tracker.admitDiscovered(
+      projection.discoveredExecutions![0]!.handle,
+      undefined,
+      system.systemId,
+    );
+
+    expect(admitted).toMatchObject({ systemId: system.systemId });
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      primaryGoalId: undefined,
+      systemId: system.systemId,
+    });
     fixture.store.close();
   });
 

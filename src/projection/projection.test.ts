@@ -221,6 +221,54 @@ describe("projections", () => {
     expect(projection.counts.systems).toBe(2);
   });
 
+  test("projects direct System Agents through the command centre, map and search", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Project context" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("direct", "Direct worker", "working")]),
+    );
+    expect(
+      universe.execute({
+        type: "AssignAgentToSystem",
+        agentId: "agent-1",
+        systemId: "system-1",
+      }),
+    ).toEqual({ ok: true, agentId: "agent-1", systemId: "system-1" });
+
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong command centre");
+    const system = commandCentre.systems.find((candidate) => candidate.id === "system-1");
+    expect(system?.agents.map((agent) => agent.displayName)).toEqual(["Direct worker"]);
+    expect(system).toMatchObject({ agentCount: 1, workingCount: 1 });
+    expect(commandCentre.unassigned).toHaveLength(0);
+    expect(commandCentre.counts.agents).toBe(1);
+
+    const map = universe.project({ kind: "universe-map", now: 1_001_000 });
+    if (map.kind !== "universe-map") throw new Error("wrong map");
+    expect(
+      [...map.workspaces.flatMap((workspace) => workspace.agents), ...map.workspaceLess].some(
+        (agent) => agent.id === "agent-1",
+      ),
+    ).toBe(true);
+
+    const search = universe.project({ kind: "search", query: "Project context" });
+    if (search.kind !== "search") throw new Error("wrong search projection");
+    expect(search.results).toContainEqual(
+      expect.objectContaining({ type: "agent", id: "agent-1", systemId: "system-1" }),
+    );
+    expect(
+      universe.project({
+        kind: "inspector",
+        now: 1_001_000,
+        target: { type: "agent", id: "agent-1" },
+      }),
+    ).toMatchObject({
+      kind: "agent-inspector",
+      agent: { systemId: "system-1", systemTitle: "Project context" },
+    });
+  });
+
   test("groups agents by observed code context without changing goal assignment", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Cross-repository outcome" });

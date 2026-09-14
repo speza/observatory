@@ -10,17 +10,20 @@ import { ModalDialog } from "../shared/ModalDialog.tsx";
 
 interface NewAgentDialogProps {
   readonly defaultGoalId?: string;
+  readonly defaultSystemId?: string;
   readonly onCancel: () => void;
   readonly onStarted: (response: WebStartAgentResponse) => void;
 }
 
 export const NewAgentDialog = ({
   defaultGoalId,
+  defaultSystemId,
   onCancel,
   onStarted,
 }: NewAgentDialogProps): React.JSX.Element => {
   const [options, setOptions] = useState<WebLaunchOptionsResponse>();
   const [goalId, setGoalId] = useState(defaultGoalId ?? "");
+  const [systemId, setSystemId] = useState(defaultSystemId ?? "");
   const [location, setLocation] = useState("");
   const [workspaceMode, setWorkspaceMode] = useState<"existing" | "worktree">("existing");
   const [branch, setBranch] = useState("feat/observatory-agent");
@@ -41,13 +44,15 @@ export const NewAgentDialog = ({
         setLocation(result.locations.find((choice) => choice.available)?.path ?? "");
         setHarnessId(result.agents[0]?.harnessId ?? "");
         if (defaultGoalId && !result.goals.some((goal) => goal.id === defaultGoalId)) setGoalId("");
+        if (defaultSystemId && !result.systems.some((system) => system.id === defaultSystemId))
+          setSystemId("");
       })
       .catch((cause) => {
         if (!controller.signal.aborted)
           setError(cause instanceof Error ? cause.message : "Launch choices are unavailable.");
       });
     return () => controller.abort();
-  }, [defaultGoalId]);
+  }, [defaultGoalId, defaultSystemId]);
 
   useEffect(() => () => browseRequest.current?.abort(), []);
 
@@ -85,9 +90,12 @@ export const NewAgentDialog = ({
     }
     setPending(true);
     setError(undefined);
+    const selectedGoalId = goalId || undefined;
+    const selectedSystemId = selectedGoalId ? undefined : systemId || undefined;
     const request: WebStartAgentRequest = {
       requestId: `web-launch-${crypto.randomUUID()}`,
-      goalId: goalId || undefined,
+      goalId: selectedGoalId,
+      systemId: selectedSystemId,
       workspace:
         workspaceMode === "worktree"
           ? { kind: "worktree", repositoryPath: cleanLocation, branch: branch.trim() }
@@ -119,11 +127,34 @@ export const NewAgentDialog = ({
         <div className="goal-dialog__body">
           <label>
             <span>Goal</span>
-            <select onChange={(event) => setGoalId(event.target.value)} value={goalId}>
-              <option value="">Inbox / assign later</option>
+            <select
+              onChange={(event) => {
+                setGoalId(event.target.value);
+                if (event.target.value) setSystemId("");
+              }}
+              value={goalId}
+            >
+              <option value="">No Goal</option>
               {options?.goals.map((goal) => (
                 <option key={goal.id} value={goal.id}>
                   {goal.priority} · {goal.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>System</span>
+            <select
+              onChange={(event) => {
+                setSystemId(event.target.value);
+                if (event.target.value) setGoalId("");
+              }}
+              value={systemId}
+            >
+              <option value="">No System / Inbox</option>
+              {options?.systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
                 </option>
               ))}
             </select>

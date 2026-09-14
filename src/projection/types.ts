@@ -75,6 +75,7 @@ export interface AgentView extends Omit<
 > {
   readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind">;
   readonly goalTitle?: string;
+  readonly systemTitle?: string;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;
@@ -125,6 +126,8 @@ export interface GoalView extends Goal {
 }
 
 export interface SystemView extends System {
+  /** Agents placed directly in this System without a Goal. */
+  readonly agents: readonly AgentView[];
   readonly goals: readonly GoalView[];
   readonly agentCount: number;
   readonly workingCount: number;
@@ -323,6 +326,7 @@ export interface SearchResult {
   readonly context: string;
   readonly status: string;
   readonly goalId?: string;
+  readonly systemId?: string;
 }
 
 export interface SearchProjection {

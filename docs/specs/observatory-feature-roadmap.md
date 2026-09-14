@@ -24,26 +24,26 @@ agent work.
 
 ## Implemented baseline
 
-| Capability                                            | State       | Evidence                                                  |
-| ----------------------------------------------------- | ----------- | --------------------------------------------------------- |
-| System → Goal → Agent organisation                    | Implemented | Durable Universe and SQLite tests                         |
-| Human Goal priority, completion, archive and position | Implemented | Command and restart tests                                 |
-| Conversation-first Agent identity                     | Implemented | Provider-first/host-first convergence tests               |
-| Herdr execution reconciliation                        | Implemented | Shared host contract and live smoke path                  |
-| Deterministic mock host                               | Implemented | Healthy, degraded and recovery scenarios                  |
-| Atlas and Ledger                                      | Implemented | Shared projection and browser tests                       |
-| Needs-you decision composition                        | Implemented | Independent host/provider claims compose per Agent        |
-| Durable Goal-level Catch up                           | Implemented | Explicit checkpoint and synthesis tests                   |
-| Inbox and Conversation history                        | Implemented | Explicit add plus Observatory-managed launch admission    |
-| New launch and exact resume                           | Implemented | Idempotent coordinator and browser gateway tests          |
-| Claude Code, Codex and Pi harnesses                   | Implemented | Plugin contract and live validation                       |
-| Metadata-only provider observations                   | Deferred    | Optional future enrichment; Herdr supplies live status    |
-| Host-owned primary and linked terminals               | Implemented | Mock and Herdr stream contract tests                      |
-| Repository and code-host status                       | Implemented | Bounded local reader and plugin evidence                  |
-| Multi-pane workspace review                           | Initial     | Bounded tree, source/baseline, diff and opaque handles    |
-| Host-synchronised close and archive                   | Implemented | Revalidation and failure-path tests                       |
-| Search and browser preference retention               | Implemented | Browser and projection tests                              |
-| Related-Agent evidence projection                     | Core only   | Deterministic projection exists; product workflow pending |
+| Capability                                                   | State       | Evidence                                                  |
+| ------------------------------------------------------------ | ----------- | --------------------------------------------------------- |
+| System → Goal → Agent and direct System → Agent organisation | Implemented | Durable Universe and SQLite tests                         |
+| Human Goal priority, completion, archive and position        | Implemented | Command and restart tests                                 |
+| Conversation-first Agent identity                            | Implemented | Provider-first/host-first convergence tests               |
+| Herdr execution reconciliation                               | Implemented | Shared host contract and live smoke path                  |
+| Deterministic mock host                                      | Implemented | Healthy, degraded and recovery scenarios                  |
+| Atlas and Ledger                                             | Implemented | Shared projection and browser tests                       |
+| Needs-you decision composition                               | Implemented | Independent host/provider claims compose per Agent        |
+| Durable Goal-level Catch up                                  | Implemented | Explicit checkpoint and synthesis tests                   |
+| Inbox and Conversation history                               | Implemented | Explicit add plus Observatory-managed launch admission    |
+| New launch and exact resume                                  | Implemented | Idempotent coordinator and browser gateway tests          |
+| Claude Code, Codex and Pi harnesses                          | Implemented | Plugin contract and live validation                       |
+| Metadata-only provider observations                          | Deferred    | Optional future enrichment; Herdr supplies live status    |
+| Host-owned primary and linked terminals                      | Implemented | Mock and Herdr stream contract tests                      |
+| Repository and code-host status                              | Implemented | Bounded local reader and plugin evidence                  |
+| Multi-pane workspace review                                  | Initial     | Bounded tree, source/baseline, diff and opaque handles    |
+| Host-synchronised close and archive                          | Implemented | Revalidation and failure-path tests                       |
+| Search and browser preference retention                      | Implemented | Browser and projection tests                              |
+| Related-Agent evidence projection                            | Core only   | Deterministic projection exists; product workflow pending |
 
 ## Risks to prove
 

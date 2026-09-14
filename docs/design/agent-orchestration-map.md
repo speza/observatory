@@ -17,8 +17,9 @@ problem.
 
 Observatory tests one product hypothesis: a stable spatial universe organised
 around human Goals can make concurrent agent work easier to supervise than a
-flat list. Its durable geography is `System → Goal → Agent`. Atlas is the
-primary proof surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
+flat list. Its durable geography is `System → Goal → Agent`, with direct System-level
+Agents available when no outcome has been chosen. Atlas is the primary proof
+surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
 review and terminals are supporting lenses over the same trusted state. Live
 host executions with recognized exact conversation identity are synchronized
 into Inbox Agents; ambiguous or unidentified executions remain in a separate
@@ -86,14 +87,18 @@ any other scope; it exists so that organisation never blocks starting work.
 
 A Goal is a durable human intention within a System. It owns priority,
 completion, archive, accepted map position and direct Agent assignments. Goal
-lifecycle remains human-controlled.
+lifecycle remains human-controlled. Goals are optional for Agents: exploratory,
+project-level or cross-repository work can sit directly under its System until
+an outcome is selected.
 
 ### Agent
 
 An Agent is a durable, exactly identified provider conversation. It may have a
 current host execution, a previous execution, no execution, or conflicting
 execution evidence. Process and host lifecycle never replace conversation
-identity.
+identity. An Agent may be assigned to one active Goal, assigned directly to one
+System without a Goal, or remain in Inbox; direct System placement is human
+controlled and never inferred from execution metadata.
 
 ### Supporting facts
 
@@ -105,9 +110,9 @@ search and related-work proposals but do not become map hierarchy.
 
 Observatory separates accepted semantic state from observed facts.
 
-- Humans own Systems, Goals, assignment, priority, completion and archive.
+- Humans own Systems, Goals, placement, priority, completion and archive.
 - A recognized exact host conversation may create an identity-only Inbox Agent;
-  host evidence never assigns a Goal or invents human semantics.
+  host evidence never assigns a Goal or System or invents human semantics.
 - Providers own conversation identity and provider-native lifecycle evidence.
 - Session hosts own execution, process and terminal facts.
 - Plugins contribute bounded observations or proposals.
@@ -152,7 +157,8 @@ appeal.
 ### Systems overview
 
 The entry view summarises broad Systems by Goal and Agent load, current work and
-Needs-you count. Entering a System reveals its Atlas or Ledger.
+Needs-you count. Entering a System reveals its Atlas or Ledger, including Agents
+that are placed directly in the System without a Goal.
 
 ### Atlas
 

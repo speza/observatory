@@ -142,6 +142,40 @@ describe("scopePortfolio", () => {
     expect(scoped.workingAgentCount).toBe(1);
   });
 
+  test("keeps direct System Agents in their scoped portfolio", () => {
+    const { universe, clock } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Direct context" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          nativeId: "direct",
+          displayName: "Direct worker",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "opaque:direct",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    universe.execute({
+      type: "AssignAgentToSystem",
+      agentId: "agent-1",
+      systemId: "system-1",
+    });
+    const current = projectPortfolio(universe, clock.now())!;
+    const scoped = scopePortfolio(current, "system-1");
+
+    expect(scoped.commandCentre.systems[0]?.agents.map((agent) => agent.id)).toEqual(["agent-1"]);
+    expect(scoped.commandCentre.goals).toHaveLength(0);
+    expect(scoped.commandCentre.unassigned).toHaveLength(0);
+    expect(scoped.commandCentre.counts).toMatchObject({ agents: 1, goals: 0 });
+    expect(scoped.workingAgentCount).toBe(1);
+    expect(systemScopeForSelection({ type: "agent", id: "agent-1" }, current.commandCentre)).toBe(
+      "system-1",
+    );
+  });
+
   test("represents the Default system as a first-class scope", () => {
     const scoped = scopePortfolio(portfolio, DEFAULT_SYSTEM_ID);
 

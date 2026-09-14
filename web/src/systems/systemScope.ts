@@ -11,5 +11,9 @@ export const systemScopeForSelection = (
       : projection.goals.find((candidate) =>
           candidate.agents.some((agent) => agent.id === selection.id),
         );
-  return goal?.systemId;
+  if (goal?.systemId) return goal.systemId;
+  if (selection.type !== "agent") return undefined;
+  return projection.systems.find((system) =>
+    system.agents.some((agent) => agent.id === selection.id),
+  )?.id;
 };

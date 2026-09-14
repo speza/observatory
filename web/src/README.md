@@ -7,7 +7,7 @@ The browser is a renderer over trusted server projections. It keeps navigation a
 - `app/` — composition, browser-local navigation, and projection polling.
 - `api/` — the transport seam: request execution and response decoding.
 - `atlas/` — the spatial universe implementation, camera, geometry, and presentation policy.
-- `systems/`, `goals/`, `agents/` — System → Goal → Agent workflows.
+- `systems/`, `goals/`, `agents/` — System, Goal and direct Agent workflows.
 - `attention/`, `inbox/`, `inspector/`, `ledger/`, `search/` — supporting product lenses.
 - `terminal/` — host-owned terminal rendering and interaction.
 - `workspace-review/` — transient read-only working-tree review.

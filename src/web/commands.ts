@@ -65,6 +65,16 @@ const WebCommandSchema: Schema.Schema<WebCommand> = Schema.Union(
     agentIds: Schema.Array(Id).pipe(Schema.minItems(1), Schema.maxItems(500)),
     goalId: Id,
   }),
+  Schema.Struct({
+    type: Schema.Literal("AssignAgentToSystem"),
+    agentId: Id,
+    systemId: Id,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("AssignAgentsToSystem"),
+    agentIds: Schema.Array(Id).pipe(Schema.minItems(1), Schema.maxItems(500)),
+    systemId: Id,
+  }),
   Schema.Struct({ type: Schema.Literal("UnassignAgent"), agentId: Id }),
   Schema.Struct({ type: Schema.Literal("ArchiveAgent"), agentId: Id }),
   Schema.Struct({

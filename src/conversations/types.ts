@@ -55,6 +55,7 @@ export interface ConversationRefreshResult {
 export interface AddedConversation {
   readonly agentId: string;
   readonly goalId?: string;
+  readonly systemId?: string;
 }
 
 export interface AdmittedDiscoveredExecution extends AddedConversation {
@@ -71,7 +72,11 @@ export interface AdmittedDiscoveredExecution extends AddedConversation {
 export interface ConversationTrackerModule {
   refresh(): Effect.Effect<ConversationRefreshResult>;
   history(): readonly ConversationHistoryView[];
-  add(handle: string, goalId?: string): AddedConversation;
-  readonly admitDiscovered?: (handle: string, goalId?: string) => AdmittedDiscoveredExecution;
+  add(handle: string, goalId?: string, systemId?: string): AddedConversation;
+  readonly admitDiscovered?: (
+    handle: string,
+    goalId?: string,
+    systemId?: string,
+  ) => AdmittedDiscoveredExecution;
   observeHost(snapshot: HostSnapshot): ReconciliationResult;
 }

@@ -96,6 +96,7 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
     id: system.id,
     title: system.title,
     description: system.description,
+    agents: system.agents,
     goals: projection.goals.filter((goal) => goal.systemId === system.id),
   }));
   return (
@@ -115,6 +116,20 @@ export const Ledger = ({ projection, onSelect }: LedgerProps): React.JSX.Element
             {group.goals.map((goal) => (
               <GoalCard goal={goal} key={goal.id} onSelect={onSelect} />
             ))}
+            {group.agents.length > 0 ? (
+              <article className="ledger__unassigned">
+                <div className="ledger__unassigned-heading">
+                  <span className="ledger__priority">SYSTEM</span>
+                  <strong>Agents without a Goal</strong>
+                  <small>{group.agents.length} direct System assignments</small>
+                </div>
+                <ul>
+                  {group.agents.map((agent) => (
+                    <AgentRow agent={agent} key={agent.id} onSelect={onSelect} />
+                  ))}
+                </ul>
+              </article>
+            ) : null}
           </div>
         </section>
       ))}

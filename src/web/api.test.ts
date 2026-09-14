@@ -185,6 +185,7 @@ describe("ObservatoryWebApi", () => {
     const options: WebLaunchOptionsResponse = await optionsResponse.json();
     expect(optionsResponse.status).toBe(200);
     expect(options.goals[0]?.id).toBe(goal.goalId);
+    expect(options.systems.some((system) => system.id === "system:default")).toBe(true);
     expect(options.locations[0]?.path).toBe("/synthetic/project");
     expect(options.agents.some((agent) => agent.harnessId === "codex")).toBe(true);
 
@@ -226,6 +227,33 @@ describe("ObservatoryWebApi", () => {
         ?.agents.some((agent) => agent.id === started.result.agentId),
     ).toBe(true);
     expect(JSON.stringify(started.portfolio)).not.toContain("mock-conversation-");
+
+    const directResponse = await api.fetch(
+      new Request("http://localhost/api/launch/start", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          "x-ao-command": "1",
+        },
+        body: JSON.stringify({
+          requestId: "web-direct-system-launch",
+          systemId: "system:default",
+          workspace: { kind: "existing", path: "/synthetic/project" },
+          harnessId: "codex",
+        }),
+      }),
+    );
+    const direct: WebStartAgentResponse = await directResponse.json();
+    expect(directResponse.status).toBe(200);
+    expect(direct.result.systemId).toBe("system:default");
+    expect(fixture.universe.snapshot().agents).toContainEqual(
+      expect.objectContaining({
+        id: direct.result.agentId,
+        primaryGoalId: undefined,
+        systemId: "system:default",
+      }),
+    );
 
     fixture.universe.invalidateRuntimeFacts();
     const resumable = fixture.universe.project({

@@ -3,7 +3,7 @@ import type { ControlPlaneEventSink } from "../control-plane-events/index.ts";
 import type { HostSnapshot, SessionHost } from "../hosts/types.ts";
 import type { AgentHarness, OpaqueNativeConversationRef } from "../plugin-sdk/index.ts";
 import type { ReconciliationResult, Universe } from "../universe/universe.ts";
-import type { GoalId, AgentId } from "../universe/types.ts";
+import type { GoalId, AgentId, SystemId } from "../universe/types.ts";
 import type {
   PreparedWorkspace,
   WorkspaceProvider,
@@ -28,7 +28,9 @@ export type LaunchGoal =
       readonly kind: "new-goal";
       readonly title: string;
       readonly description?: string;
+      readonly systemId?: SystemId;
     }
+  | { readonly kind: "system"; readonly systemId: SystemId }
   | { readonly kind: "inbox" };
 
 export interface StartAgentIntent {
@@ -57,6 +59,7 @@ export interface StartAgentResult {
   readonly message: string;
   readonly requestId: string;
   readonly goalId?: GoalId;
+  readonly systemId?: SystemId;
   readonly agentId?: AgentId;
   readonly workspace?: PreparedWorkspace;
   readonly warnings?: readonly string[];
@@ -79,6 +82,7 @@ export interface LaunchRecovery {
   readonly displayName?: string;
   readonly nativeConversationRef?: OpaqueNativeConversationRef;
   readonly goalId?: GoalId;
+  readonly systemId?: SystemId;
   readonly agentId?: AgentId;
 }
 
@@ -101,6 +105,7 @@ export interface PendingLaunch {
   readonly hostInstanceId?: string;
   readonly displayName: string;
   readonly goalId?: GoalId;
+  readonly systemId?: SystemId;
   readonly message: string;
 }
 

@@ -36,6 +36,7 @@ const WorkspaceSelectionSchema = Schema.Union(
 const WebStartAgentRequestSchema: Schema.Schema<WebStartAgentRequest> = Schema.Struct({
   requestId: Id,
   goalId: Schema.optional(Id),
+  systemId: Schema.optional(Id),
   workspace: WorkspaceSelectionSchema,
   harnessId: Id,
   agentName: OptionalName,
@@ -55,6 +56,7 @@ export const pendingLaunchView = (
   harnessId: launch.harnessId,
   displayName: launch.displayName,
   goalId: launch.goalId,
+  systemId: launch.systemId,
   message: launch.message,
 });
 
@@ -103,6 +105,9 @@ export class WebLaunchGateway {
       ]);
       return {
         kind: "launch-options",
+        systems: this.universe
+          .snapshot()
+          .systems.map((system) => ({ id: system.id, title: system.title })),
         goals: this.universe
           .snapshot()
           .goals.filter((goal) => goal.status === "active")
@@ -148,9 +153,15 @@ export class WebLaunchGateway {
 
   async start(encoded: string) {
     const request = decodeRequest(encoded);
+    if (request.goalId && request.systemId)
+      throw new WebLaunchError("Choose a Goal or a System, not both.", 400);
     const intent: StartAgentIntent = {
       requestId: request.requestId,
-      goal: request.goalId ? { kind: "goal", goalId: request.goalId } : { kind: "inbox" },
+      goal: request.goalId
+        ? { kind: "goal", goalId: request.goalId }
+        : request.systemId
+          ? { kind: "system", systemId: request.systemId }
+          : { kind: "inbox" },
       workspace: request.workspace,
       harness: { id: request.harnessId },
       agentName: request.agentName,

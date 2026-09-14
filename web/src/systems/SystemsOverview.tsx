@@ -60,7 +60,9 @@ export const SystemsOverview = ({
         <div>
           <p className="overline">ALL SYSTEMS</p>
           <h2>Broad areas of work</h2>
-          <p>Systems contain Goals and can span repositories, workspaces, and hosts.</p>
+          <p>
+            Systems contain Goals and direct Agents, spanning repositories, workspaces, and hosts.
+          </p>
         </div>
         <button onClick={onCreate} type="button">
           New system

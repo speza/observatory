@@ -25,11 +25,13 @@ explicit seams instead of leaking through the model.
 
 ## Product invariants
 
-- The durable topology is `System → Goal → Agent`.
+- The durable topology is `System → Goal → Agent`, with an optional direct
+  `System → Agent` placement.
 - Systems and Goals are human-authored semantic organisation. The single
   exception is a reserved `Default` System seeded at startup: Goals created
   without an explicit System are filed into it, so System membership is total
-  without making organisation a prerequisite.
+  without making organisation a prerequisite. An Agent may have a Goal or a
+  direct System, never both; an unassigned Agent remains in Inbox.
 - Repositories, worktrees, hosts and terminal containers are Agent metadata,
   never organisational nodes.
 - A durable Agent represents an exactly identified provider conversation, not a
@@ -84,7 +86,8 @@ persistence, the mutable Universe or concrete host adapters.
 accepts typed commands and typed observations. It owns:
 
 - Systems, Goals and conversation-backed Agents;
-- assignment, priority, completion, archive and accepted Goal position;
+- assignment (including direct System placement), priority, completion, archive
+  and accepted Goal position;
 - provider continuity and execution-presence invariants;
 - host reconciliation and identity conflict handling;
 - transient discovered-execution reconciliation and opaque target resolution;
@@ -112,8 +115,9 @@ mutations. There is no implicit history retention or compaction policy.
 An immediate transaction keeps comparison and writes on one database revision.
 Foreign-key checks are deferred during row replacement, then explicitly checked
 before completion; changed execution identities are all removed before insertion
-so valid swaps satisfy the unique index. Assignments, dismissals, semantic history
-and the semantic checkpoint still commit or roll back together. Provider
+so valid swaps satisfy the unique index. Assignments (including direct System
+assignments), dismissals, semantic history and the semantic checkpoint still
+commit or roll back together. Provider
 catalogues, observations, their checkpoint and launch receipts retain separate
 ownership and are not included in semantic snapshot writes.
 
@@ -230,11 +234,11 @@ without changing accepted semantic state.
 
 Evidence authority remains split by claim axis:
 
-| Claim                                                               | Evidence owner                        | Cannot establish                                          |
-| ------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
-| Execution presence, location, runtime state and terminal capability | `SessionHost`                         | Provider outcome or accepted completion                   |
-| Human-input request, provider turn outcome and context pressure     | `AgentHarness` observation source     | Execution presence, Agent admission or semantic lifecycle |
-| Agent identity, Goal assignment, priority, completion and archive   | Universe commands and human decisions | Fresh external runtime facts                              |
+| Claim                                                                   | Evidence owner                        | Cannot establish                                          |
+| ----------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
+| Execution presence, location, runtime state and terminal capability     | `SessionHost`                         | Provider outcome or accepted completion                   |
+| Human-input request, provider turn outcome and context pressure         | `AgentHarness` observation source     | Execution presence, Agent admission or semantic lifecycle |
+| Agent identity, Goal/System placement, priority, completion and archive | Universe commands and human decisions | Fresh external runtime facts                              |
 
 A provider claim may explain or conflict with host state, but does not replace
 it. Missing or conflicting evidence stays explicit, and target-sensitive
@@ -251,7 +255,7 @@ idempotent operation. It coordinates:
 2. provider plan construction through an AgentHarness;
 3. process placement through `SessionHost`;
 4. canonical host/provider reconciliation; and
-5. Goal assignment after exact Agent identity exists.
+5. Goal or direct System placement after exact Agent identity exists.
 
 Launch receipts prevent ordinary retries from creating duplicate processes.
 A pending launch is visible but is not a phantom Agent. Workspace inspection is

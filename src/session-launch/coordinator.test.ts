@@ -122,6 +122,41 @@ describe("agent launch coordinator", () => {
     );
   });
 
+  test("launches and assigns an Agent directly to a System", async () => {
+    const clock = new FixedClock(61_000);
+    const { universe } = makeUniverse({ clock });
+    const host = new MockHostAdapter({ clock, scenario: createMockScenario() });
+    await Effect.runPromise(host.snapshot()).then((snapshot) => universe.reconcile(snapshot));
+    const system = universe.execute({ type: "CreateSystem", title: "Project context" });
+    expect(system.ok).toBe(true);
+    const coordinator = createStartAgentCoordinator({
+      universe,
+      host,
+      harnesses: { agentHarness: (id) => (id === "codex" ? codexHarness : undefined) },
+      workspace: new TestWorkspaceProvider(),
+      now: () => clock.now(),
+    });
+
+    const result = await Effect.runPromise(
+      coordinator.start({
+        requestId: "direct-system-launch",
+        goal: { kind: "system", systemId: system.systemId! },
+        workspace: { kind: "existing", path: "/synthetic/project" },
+        harness: { id: "codex" },
+        agentName: "system worker",
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "started", systemId: system.systemId });
+    expect(universe.snapshot().agents).toContainEqual(
+      expect.objectContaining({
+        displayName: "system worker",
+        primaryGoalId: undefined,
+        systemId: system.systemId,
+      }),
+    );
+  });
+
   test("coalesces concurrent duplicate requests without launching twice", async () => {
     const clock = new FixedClock(62_000);
     const store = new SqliteUniverseStore(":memory:");

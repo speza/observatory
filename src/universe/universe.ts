@@ -103,6 +103,16 @@ export type UniverseCommand =
       readonly goalId: GoalId;
     }
   | {
+      readonly type: "AssignAgentToSystem";
+      readonly agentId: AgentId;
+      readonly systemId: SystemId;
+    }
+  | {
+      readonly type: "AssignAgentsToSystem";
+      readonly agentIds: readonly AgentId[];
+      readonly systemId: SystemId;
+    }
+  | {
       readonly type: "AdoptRelatedAgents";
       readonly goalId: GoalId;
       readonly agentIds: readonly AgentId[];
@@ -133,6 +143,7 @@ export type UniverseCommand =
       readonly workspaceRef?: string;
       readonly observedAt: number;
       readonly goalId?: GoalId;
+      readonly systemId?: SystemId;
     }
   | { readonly type: "ArchiveAgent"; readonly agentId: AgentId }
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly AgentId[] }
@@ -260,19 +271,36 @@ const replaceAgent = (state: UniverseState, agent: Agent): void => {
   state.agents = state.agents.map((candidate) => (candidate.id === agent.id ? agent : candidate));
 };
 
+const normalizeAgentAssignments = (state: UniverseState): boolean => {
+  let changed = false;
+  state.agents = state.agents.map((agent) => {
+    if (agent.primaryGoalId !== undefined && agent.systemId !== undefined) {
+      changed = true;
+      const { systemId: _systemId, ...withoutDirectSystem } = agent;
+      return withoutDirectSystem;
+    }
+    if (agent.systemId !== undefined && !findSystem(state, agent.systemId)) {
+      changed = true;
+      const { systemId: _systemId, ...withoutMissingSystem } = agent;
+      return withoutMissingSystem;
+    }
+    return agent;
+  });
+  return changed;
+};
+
 const DEFAULT_SYSTEM_TITLE = "Default";
 const DEFAULT_SYSTEM_DESCRIPTION = "Work that has not been filed into another System.";
 
 /**
- * Seeds the reserved Default System when missing and files any legacy unfiled
- * Goals into it. This is a one-way normalisation: System membership becomes
- * total without inventing a Goal or Agent.
+ * Seeds the reserved Default System when missing, files any legacy unfiled
+ * Goals into it and removes invalid direct Agent placements. This is a one-way
+ * normalisation: System membership becomes total without inventing a Goal or
+ * Agent, and a Goal remains authoritative over a conflicting direct System.
  */
 const ensureDefaultSystem = (state: UniverseState, now: number): boolean => {
-  const hasDefault = state.systems.some((system) => system.id === DEFAULT_SYSTEM_ID);
-  const unfiledGoals = state.goals.filter((goal) => !goal.systemId);
-  if (hasDefault && unfiledGoals.length === 0) return false;
-  if (!hasDefault)
+  let changed = false;
+  if (!state.systems.some((system) => system.id === DEFAULT_SYSTEM_ID)) {
     state.systems = [
       ...state.systems,
       {
@@ -283,11 +311,18 @@ const ensureDefaultSystem = (state: UniverseState, now: number): boolean => {
         updatedAt: now,
       },
     ];
-  if (unfiledGoals.length > 0)
+    changed = true;
+  }
+  // Create the reserved System before validating direct placements so a
+  // legacy Agent already pointing at Default is not moved to Inbox.
+  if (normalizeAgentAssignments(state)) changed = true;
+  if (state.goals.some((goal) => !goal.systemId)) {
     state.goals = state.goals.map((goal) =>
       goal.systemId ? goal : { ...goal, systemId: DEFAULT_SYSTEM_ID },
     );
-  return true;
+    changed = true;
+  }
+  return changed;
 };
 
 const repairUnpinnedGoalPosition = (state: UniverseState, goalId: GoalId): void => {
@@ -325,6 +360,7 @@ const change = (
   targetId: string,
   summary: string,
   goalId?: GoalId,
+  systemId?: SystemId,
 ): UniverseChange => {
   const item: UniverseChange = {
     sequence,
@@ -335,6 +371,7 @@ const change = (
     summary,
   };
   if (goalId) Object.assign(item, { goalId });
+  if (systemId) Object.assign(item, { systemId });
   return item;
 };
 
@@ -354,9 +391,12 @@ const deriveChanges = (
     targetId: string,
     summary: string,
     goalId?: GoalId,
+    systemId?: SystemId,
   ): void => {
     sequence += 1;
-    changes.push(change(sequence, occurredAt, outcome, targetType, targetId, summary, goalId));
+    changes.push(
+      change(sequence, occurredAt, outcome, targetType, targetId, summary, goalId, systemId),
+    );
   };
 
   const previousGoals = new Map(previous.goals.map((goal) => [goal.id, goal]));
@@ -421,28 +461,52 @@ const deriveChanges = (
   }
 
   const nextGoals = new Map(next.goals.map((goal) => [goal.id, goal]));
+  const systemIdFor = (agent: Agent): SystemId | undefined =>
+    agent.primaryGoalId ? nextGoals.get(agent.primaryGoalId)?.systemId : agent.systemId;
   const previousAgents = new Map(previous.agents.map((agent) => [agent.id, agent]));
   for (const agent of next.agents) {
     const before = previousAgents.get(agent.id);
-    const goalId = agent.primaryGoalId ?? before?.primaryGoalId;
+    // A new direct System destination supersedes the old Goal as the
+    // catch-up subject; when an Agent becomes unassigned, retain its prior
+    // owner so the human can find the transition.
+    const goalId =
+      agent.primaryGoalId ?? (agent.systemId === undefined ? before?.primaryGoalId : undefined);
+    const systemId = systemIdFor(agent) ?? (before ? systemIdFor(before) : undefined);
     if (!before) {
-      append("new", "agent", agent.id, `New agent observed · ${agent.displayName}`, goalId);
+      append(
+        "new",
+        "agent",
+        agent.id,
+        `New agent observed · ${agent.displayName}`,
+        goalId,
+        systemId,
+      );
       continue;
     }
     if (before.archivedAt === undefined && agent.archivedAt !== undefined) {
-      append("finished", "agent", agent.id, `Archived agent · ${agent.displayName}`, goalId);
+      append(
+        "finished",
+        "agent",
+        agent.id,
+        `Archived agent · ${agent.displayName}`,
+        goalId,
+        systemId,
+      );
       continue;
     }
-    if (before.primaryGoalId !== agent.primaryGoalId) {
+    if (before.primaryGoalId !== agent.primaryGoalId || before.systemId !== agent.systemId) {
       const destination = agent.primaryGoalId
         ? (nextGoals.get(agent.primaryGoalId)?.title ?? "another goal")
-        : "unassigned inbox";
+        : agent.systemId
+          ? (next.systems.find((system) => system.id === agent.systemId)?.title ?? "another system")
+          : "unassigned inbox";
       append(
         "changed",
         "agent",
         agent.id,
         `Assignment changed · ${agent.displayName} → ${destination}`,
         goalId,
+        systemId,
       );
       continue;
     }
@@ -456,6 +520,7 @@ const deriveChanges = (
           ? `Agent returned live · ${agent.displayName}`
           : `Host observation ${agent.hostHealth} · ${agent.displayName}`,
         goalId,
+        systemId,
       );
       continue;
     }
@@ -472,11 +537,19 @@ const deriveChanges = (
         agent.id,
         `Agent state · ${agent.displayName} · ${before.runtimeState} → ${agent.runtimeState}`,
         goalId,
+        systemId,
       );
       continue;
     }
     if (before.displayName !== agent.displayName || before.description !== agent.description)
-      append("changed", "agent", agent.id, `Updated agent · ${agent.displayName}`, goalId);
+      append(
+        "changed",
+        "agent",
+        agent.id,
+        `Updated agent · ${agent.displayName}`,
+        goalId,
+        systemId,
+      );
   }
   return changes;
 };
@@ -931,6 +1004,16 @@ const mergeConversationAgents = (
       diagnostics.push(
         `Consolidated duplicate Agent ${duplicate.id} into ${merged.id}; retained the canonical Goal assignment.`,
       );
+    if (
+      !merged.primaryGoalId &&
+      !duplicate.primaryGoalId &&
+      merged.systemId &&
+      duplicate.systemId &&
+      merged.systemId !== duplicate.systemId
+    )
+      diagnostics.push(
+        `Consolidated duplicate Agent ${duplicate.id} into ${merged.id}; retained the canonical System assignment.`,
+      );
     const duplicateNameWins =
       displayNameRank(duplicate.displayNameSource) > displayNameRank(merged.displayNameSource);
     merged = Object.assign({}, merged, {
@@ -938,6 +1021,10 @@ const mergeConversationAgents = (
       displayNameSource: duplicateNameWins ? duplicate.displayNameSource : merged.displayNameSource,
       description: merged.description ?? duplicate.description,
       primaryGoalId: merged.primaryGoalId ?? duplicate.primaryGoalId,
+      systemId:
+        (merged.primaryGoalId ?? duplicate.primaryGoalId)
+          ? undefined
+          : (merged.systemId ?? duplicate.systemId),
       harnessId: merged.harnessId ?? duplicate.harnessId,
       executionHistory: appendDistinctExecutions(merged.executionHistory, [
         ...duplicate.executionHistory,
@@ -2056,12 +2143,15 @@ export class Universe {
           };
         if (agent.archivedAt !== undefined)
           return { ok: false, error: "Archived agents cannot be assigned." };
-        replaceAgent(next, { ...agent, primaryGoalId: goal.id });
+        const previousGoalId = agent.primaryGoalId;
+        replaceAgent(next, { ...agent, systemId: undefined, primaryGoalId: goal.id });
         next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
           (dismissal) => dismissal.goalId !== goal.id || dismissal.agentId !== command.agentId,
         );
+        if (previousGoalId && previousGoalId !== goal.id)
+          repairUnpinnedGoalPosition(next, previousGoalId);
         repairUnpinnedGoalPosition(next, goal.id);
-        result = { ok: true, agentId: agent.id, goalId: goal.id };
+        result = { ok: true, agentId: agent.id, goalId: goal.id, systemId: goal.systemId };
         break;
       }
       case "AssignAgents": {
@@ -2078,14 +2168,68 @@ export class Universe {
         );
         if (archivedAgentId) return { ok: false, error: "Archived agents cannot be assigned." };
         const selected = new Set(agentIds);
+        const previousGoalIds = new Set(
+          next.agents
+            .filter((agent) => selected.has(agent.id) && agent.primaryGoalId)
+            .map((agent) => agent.primaryGoalId!),
+        );
         next.agents = next.agents.map((agent) =>
-          selected.has(agent.id) ? { ...agent, primaryGoalId: goal.id } : agent,
+          selected.has(agent.id)
+            ? { ...agent, systemId: undefined, primaryGoalId: goal.id }
+            : agent,
         );
         next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
           (dismissal) => dismissal.goalId !== goal.id || !selected.has(dismissal.agentId),
         );
+        for (const previousGoalId of previousGoalIds)
+          if (previousGoalId !== goal.id) repairUnpinnedGoalPosition(next, previousGoalId);
         repairUnpinnedGoalPosition(next, goal.id);
-        result = { ok: true, goalId: goal.id, affectedAgentIds: agentIds };
+        result = {
+          ok: true,
+          goalId: goal.id,
+          systemId: goal.systemId,
+          affectedAgentIds: agentIds,
+        };
+        break;
+      }
+      case "AssignAgentToSystem": {
+        const agent = findAgent(next, command.agentId);
+        const system = findSystem(next, command.systemId);
+        if (!agent) return { ok: false, error: "Agent not found." };
+        if (!system) return { ok: false, error: "System not found." };
+        if (agent.archivedAt !== undefined)
+          return { ok: false, error: "Archived agents cannot be assigned." };
+        const previousGoalId = agent.primaryGoalId;
+        replaceAgent(next, { ...agent, primaryGoalId: undefined, systemId: system.id });
+        if (previousGoalId) repairUnpinnedGoalPosition(next, previousGoalId);
+        result = { ok: true, agentId: agent.id, systemId: system.id };
+        break;
+      }
+      case "AssignAgentsToSystem": {
+        const system = findSystem(next, command.systemId);
+        if (!system) return { ok: false, error: "System not found." };
+        const agentIds = uniqueAgentIds(command.agentIds);
+        if (agentIds.length === 0) return { ok: false, error: "At least one agent is required." };
+        const missingAgentId = agentIds.find((agentId) => !findAgent(next, agentId));
+        if (missingAgentId) return { ok: false, error: `Agent ${missingAgentId} not found.` };
+        const archivedAgentId = agentIds.find(
+          (agentId) => findAgent(next, agentId)?.archivedAt !== undefined,
+        );
+        if (archivedAgentId) return { ok: false, error: "Archived agents cannot be assigned." };
+        const selected = new Set(agentIds);
+        const previousGoalIds = new Set(
+          next.agents
+            .filter((agent) => selected.has(agent.id) && agent.primaryGoalId)
+            .map((agent) => agent.primaryGoalId!),
+        );
+        next.agents = next.agents.map((agent) =>
+          selected.has(agent.id)
+            ? { ...agent, primaryGoalId: undefined, systemId: system.id }
+            : agent,
+        );
+        for (const previousGoalId of previousGoalIds)
+          repairUnpinnedGoalPosition(next, previousGoalId);
+        result = { ok: true, systemId: system.id, affectedAgentIds: agentIds };
         break;
       }
       case "AdoptRelatedAgents": {
@@ -2114,14 +2258,30 @@ export class Universe {
             error: `${assignedElsewhere.displayName} is already attached to another goal.`,
           };
         const selected = new Set(agentIds);
+        const previousGoalIds = new Set(
+          agents
+            .filter(
+              (agent): agent is Agent => agent !== undefined && agent.primaryGoalId !== undefined,
+            )
+            .map((agent) => agent.primaryGoalId!),
+        );
         next.agents = next.agents.map((agent) =>
-          selected.has(agent.id) ? { ...agent, primaryGoalId: goal.id } : agent,
+          selected.has(agent.id)
+            ? { ...agent, systemId: undefined, primaryGoalId: goal.id }
+            : agent,
         );
         next.relatedAgentDismissals = next.relatedAgentDismissals.filter(
           (dismissal) => dismissal.goalId !== goal.id || !selected.has(dismissal.agentId),
         );
+        for (const previousGoalId of previousGoalIds)
+          if (previousGoalId !== goal.id) repairUnpinnedGoalPosition(next, previousGoalId);
         repairUnpinnedGoalPosition(next, goal.id);
-        result = { ok: true, goalId: goal.id, affectedAgentIds: agentIds };
+        result = {
+          ok: true,
+          goalId: goal.id,
+          systemId: goal.systemId,
+          affectedAgentIds: agentIds,
+        };
         break;
       }
       case "DismissRelatedAgents": {
@@ -2160,7 +2320,9 @@ export class Universe {
       case "UnassignAgent": {
         const agent = findAgent(next, command.agentId);
         if (!agent) return { ok: false, error: "Agent not found." };
-        replaceAgent(next, { ...agent, primaryGoalId: undefined });
+        const previousGoalId = agent.primaryGoalId;
+        replaceAgent(next, { ...agent, primaryGoalId: undefined, systemId: undefined });
+        if (previousGoalId) repairUnpinnedGoalPosition(next, previousGoalId);
         result = { ok: true, agentId: agent.id };
         break;
       }
@@ -2215,7 +2377,14 @@ export class Universe {
           ? { harnessId, continuityScopeId, kind, value }
           : { harnessId, kind, value };
         const goal = command.goalId ? findGoal(next, command.goalId) : undefined;
+        const system = command.systemId ? findSystem(next, command.systemId) : undefined;
         if (command.goalId && !goal) return { ok: false, error: "Goal not found." };
+        if (command.systemId && !system) return { ok: false, error: "System not found." };
+        if (goal && system)
+          return {
+            ok: false,
+            error: "An Agent can be assigned to a Goal or directly to a System, not both.",
+          };
         if (goal?.status === "archived")
           return { ok: false, error: "Archived goals cannot receive agents." };
         const providerAdmission = command.admissionSource === "provider-catalogue";
@@ -2226,6 +2395,9 @@ export class Universe {
         if (existing) {
           if (existing.archivedAt !== undefined)
             return { ok: false, error: "Archived agents cannot be added." };
+          const previousGoalId = existing.primaryGoalId;
+          const nextGoalId = goal?.id ?? (system ? undefined : existing.primaryGoalId);
+          const nextSystemId = goal ? undefined : (system?.id ?? existing.systemId);
           replaceAgent(next, {
             ...existing,
             nativeConversationRef:
@@ -2255,10 +2427,19 @@ export class Universe {
               providerAdmission && existing.displayNameSource === "fallback"
                 ? "provider"
                 : existing.displayNameSource,
-            primaryGoalId: goal?.id ?? existing.primaryGoalId,
+            primaryGoalId: nextGoalId,
+            systemId: nextSystemId,
             worktree: normalizeText(command.workspaceRef) ?? existing.worktree,
           });
-          result = { ok: true, agentId: existing.id, goalId: goal?.id };
+          if (previousGoalId && previousGoalId !== nextGoalId)
+            repairUnpinnedGoalPosition(next, previousGoalId);
+          if (nextGoalId) repairUnpinnedGoalPosition(next, nextGoalId);
+          result = {
+            ok: true,
+            agentId: existing.id,
+            goalId: nextGoalId,
+            systemId: goal?.systemId ?? nextSystemId,
+          };
           break;
         }
         const agentId = this.ids.next("agent");
@@ -2281,6 +2462,7 @@ export class Universe {
           conflictingExecutions: [],
           displayName,
           displayNameSource: providerAdmission ? "provider" : "fallback",
+          systemId: system?.id,
           primaryGoalId: goal?.id,
           runtimeState: "unknown",
           runtimeStateSource: `${harnessId}.${command.admissionSource}`,
@@ -2291,7 +2473,7 @@ export class Universe {
           worktree: normalizeText(command.workspaceRef),
         });
         if (goal) repairUnpinnedGoalPosition(next, goal.id);
-        result = { ok: true, agentId, goalId: goal?.id };
+        result = { ok: true, agentId, goalId: goal?.id, systemId: goal?.systemId ?? system?.id };
         break;
       }
       case "ArchiveAgent": {
@@ -2451,7 +2633,7 @@ export class Universe {
     cause: "human-command" | "host-observation",
   ): void {
     const semanticSequence = next.changes.at(-1)?.sequence;
-    const systemIds = changedRecordIds(previous.systems, next.systems);
+    const systemIds = new Set(changedRecordIds(previous.systems, next.systems));
     const agentIds = changedRecordIds(previous.agents, next.agents);
     const goalIds = new Set(changedRecordIds(previous.goals, next.goals));
     for (const agentId of agentIds) {
@@ -2459,6 +2641,8 @@ export class Universe {
       const after = next.agents.find((agent) => agent.id === agentId);
       if (before?.primaryGoalId) goalIds.add(before.primaryGoalId);
       if (after?.primaryGoalId) goalIds.add(after.primaryGoalId);
+      if (before?.systemId) systemIds.add(before.systemId);
+      if (after?.systemId) systemIds.add(after.systemId);
     }
     if (
       JSON.stringify(previous.relatedAgentDismissals) !==
@@ -2467,12 +2651,12 @@ export class Universe {
       for (const dismissal of [...previous.relatedAgentDismissals, ...next.relatedAgentDismissals])
         goalIds.add(dismissal.goalId);
     const events: UnsequencedControlPlaneEvent[] = [];
-    if (systemIds.length > 0)
+    if (systemIds.size > 0)
       events.push({
         type: "system-changed",
         cause,
         occurredAt: at,
-        systemIds,
+        systemIds: [...systemIds],
         semanticSequence,
       });
     if (goalIds.size > 0)

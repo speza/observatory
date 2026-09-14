@@ -54,6 +54,7 @@ import { WorkspaceNavigation, type NavigationView } from "./WorkspaceNavigation.
 
 const agentsFor = (projection: CommandCentreProjection): readonly AgentView[] => [
   ...projection.goals.flatMap((goal) => goal.agents),
+  ...projection.systems.flatMap((system) => system.agents),
   ...projection.unassigned,
 ];
 
@@ -154,13 +155,18 @@ export const App = (): React.JSX.Element => {
       portfolio.accept(response.portfolio);
       if (command.type === "AssignGoalToSystem") {
         setSelectedSystemId(response.result.systemId);
-      } else if (command.type === "AssignAgent") {
+      } else if (command.type === "AssignAgent" || command.type === "AssignAgentToSystem") {
         setSelectedSystemId(
-          systemScopeForSelection(
-            { type: "agent", id: command.agentId },
-            response.portfolio.commandCentre,
-          ),
+          command.type === "AssignAgentToSystem"
+            ? command.systemId
+            : systemScopeForSelection(
+                { type: "agent", id: command.agentId },
+                response.portfolio.commandCentre,
+              ),
         );
+        setNavigationView("all");
+      } else if (command.type === "AssignAgentsToSystem") {
+        setSelectedSystemId(command.systemId);
         setNavigationView("all");
       } else if (command.type === "UnassignAgent") {
         setSelectedSystemId(undefined);
@@ -232,12 +238,13 @@ export const App = (): React.JSX.Element => {
   const addHistoricalConversation = async (
     handle: string,
     goalId?: string,
+    systemId?: string,
     resume = false,
   ): Promise<{ readonly agentId: string } | undefined> => {
     setCommandPending(true);
     setCommandError(undefined);
     try {
-      const added = await addConversation(handle, goalId);
+      const added = await addConversation(handle, goalId, systemId);
       portfolio.accept(added.portfolio);
       setConversationHistory((conversations) =>
         conversations.filter((conversation) => conversation.handle !== handle),
@@ -251,10 +258,13 @@ export const App = (): React.JSX.Element => {
         setLaunchNotice(resumed.result.message);
       } else {
         const goal = data?.commandCentre.goals.find((candidate) => candidate.id === goalId);
+        const system = data?.commandCentre.systems.find((candidate) => candidate.id === systemId);
         setLaunchNotice(
           goalId
             ? `Conversation added to ${goal?.title ?? "its Goal"}.`
-            : "Conversation added without a Goal. Find it in Inbox.",
+            : systemId
+              ? `Conversation added to ${system?.title ?? "its System"}.`
+              : "Conversation added without a Goal or System. Find it in Inbox.",
         );
       }
       refreshInspector();
@@ -270,10 +280,12 @@ export const App = (): React.JSX.Element => {
   const admitSelectedDiscovery = async (
     handle: string,
     goalId?: string,
+    systemId?: string,
   ): Promise<
     | {
         readonly agentId: string;
         readonly goalId?: string;
+        readonly systemId?: string;
         readonly message: string;
         readonly partial?: boolean;
       }
@@ -282,7 +294,7 @@ export const App = (): React.JSX.Element => {
     setCommandPending(true);
     setCommandError(undefined);
     try {
-      const added = await admitDiscoveredExecution(handle, goalId);
+      const added = await admitDiscoveredExecution(handle, goalId, systemId);
       portfolio.accept(added.portfolio);
       const agent = agentsFor(added.portfolio.commandCentre).find(
         (candidate) => candidate.id === added.agentId,
@@ -308,10 +320,16 @@ export const App = (): React.JSX.Element => {
         return {
           agentId: added.agentId,
           goalId: added.goalId,
+          systemId: added.systemId,
           message: added.message,
           partial: true,
         };
-      return { agentId: added.agentId, goalId: added.goalId, message: added.message };
+      return {
+        agentId: added.agentId,
+        goalId: added.goalId,
+        systemId: added.systemId,
+        message: added.message,
+      };
     } catch (error) {
       setCommandError(
         error instanceof Error ? error.message : "Discovered execution admission failed.",
@@ -1151,6 +1169,11 @@ export const App = (): React.JSX.Element => {
       {newAgentOpen ? (
         <NewAgentDialog
           defaultGoalId={selection?.type === "goal" ? selection.id : selectedAgent?.primaryGoalId}
+          defaultSystemId={
+            selection?.type === "goal" || selectedAgent?.primaryGoalId
+              ? undefined
+              : (selectedSystemId ?? selectedAgent?.systemId)
+          }
           onCancel={() => setNewAgentOpen(false)}
           onStarted={(response) => {
             portfolio.accept(response.portfolio);
