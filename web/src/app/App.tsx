@@ -153,25 +153,8 @@ export const App = (): React.JSX.Element => {
     try {
       const response = await executeCommand(command);
       portfolio.accept(response.portfolio);
-      if (command.type === "AssignGoalToSystem") {
-        setSelectedSystemId(response.result.systemId);
-      } else if (command.type === "AssignAgent" || command.type === "AssignAgentToSystem") {
-        setSelectedSystemId(
-          command.type === "AssignAgentToSystem"
-            ? command.systemId
-            : systemScopeForSelection(
-                { type: "agent", id: command.agentId },
-                response.portfolio.commandCentre,
-              ),
-        );
-        setNavigationView("all");
-      } else if (command.type === "AssignAgentsToSystem") {
-        setSelectedSystemId(command.systemId);
-        setNavigationView("all");
-      } else if (command.type === "UnassignAgent") {
-        setSelectedSystemId(undefined);
-        setNavigationView("unassigned");
-      }
+      // Assignment commands update the data without changing the operator's
+      // current lens. This keeps repeated filing in the same context.
       refreshInspector();
       return response;
     } catch (error) {

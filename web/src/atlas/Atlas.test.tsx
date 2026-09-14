@@ -85,6 +85,8 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__provider-mark");
     expect(markup).toContain("agent__attention-wave");
     expect(markup).toContain("agent__working-aura");
+    expect(markup).toContain("agent__working-circuit");
+    expect(markup).toContain("agent__state-pulse");
     expect(markup).toMatch(/aria-label="Open [^"]+ terminal"/u);
     expect(markup).toContain('class="agent__quick-action"');
     expect(markup).toContain('class="agent__quick-action agent__quick-action--destructive"');

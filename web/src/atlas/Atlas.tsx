@@ -202,6 +202,14 @@ export const Atlas = ({
             x={-AGENT_CARD_WIDTH / 2}
             y={-AGENT_CARD_HEIGHT / 2}
           />
+          <rect
+            className="agent__working-circuit"
+            height={AGENT_CARD_HEIGHT}
+            rx="4"
+            width={AGENT_CARD_WIDTH}
+            x={-AGENT_CARD_WIDTH / 2}
+            y={-AGENT_CARD_HEIGHT / 2}
+          />
           <line className="agent__rule" x1="-96" x2="96" y1="-22" y2="-22" />
           <g className="agent__provider-mark" transform="translate(-91 -35)">
             <AgentLogo harnessId={agent.harnessId} map provider={agent.provider} />
