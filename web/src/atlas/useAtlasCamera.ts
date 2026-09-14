@@ -16,10 +16,12 @@ import {
   DISCOVERED_CARD_WIDTH,
   atlasContentBounds,
   atlasGoalSpacingScale,
+  discoveredExecutionPoint,
   discoveredDockPlacement,
   selectionBelongsToFocus,
   workspaceAgentPoints,
   workspaceLessAgentPoints,
+  workspacePosition,
   type AtlasCameraCommand,
   type AtlasContentBounds,
 } from "./atlasGeometry.ts";
@@ -74,9 +76,10 @@ const atlasLayout = (
   size: Size,
   reservedLeft: number,
   reservedRight: number,
+  discoveryDockOpen: boolean,
 ): AtlasLayout => {
   const goalSpacingScale = atlasGoalSpacingScale(projection);
-  const bounds = atlasContentBounds(projection, goalSpacingScale);
+  const bounds = atlasContentBounds(projection, goalSpacingScale, discoveryDockOpen);
   return {
     centreX: reservedLeft + (size.width - reservedLeft - reservedRight) / 2,
     centreY: size.height / 2,
@@ -117,12 +120,14 @@ export const useAtlasCamera = ({
   reservedLeft,
   reservedRight,
   selection,
+  discoveryDockOpen,
 }: {
   readonly cameraCommand?: AtlasCameraCommand;
   readonly projection: UniverseMapProjection;
   readonly reservedLeft: number;
   readonly reservedRight: number;
   readonly selection?: Selection;
+  readonly discoveryDockOpen: boolean;
 }): AtlasCameraState => {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | undefined>(
@@ -133,8 +138,8 @@ export const useAtlasCamera = ({
   const autoFocus = useRef(false);
   const [size, setSize] = useState<Size>({ width: 1200, height: 760 });
   const layout = useMemo(
-    () => atlasLayout(projection, size, reservedLeft, reservedRight),
-    [projection, reservedLeft, reservedRight, size],
+    () => atlasLayout(projection, size, reservedLeft, reservedRight, discoveryDockOpen),
+    [discoveryDockOpen, projection, reservedLeft, reservedRight, size],
   );
   const [camera, setCamera] = useState<Camera>(layout.fitCamera);
   const [isPanning, setIsPanning] = useState(false);
@@ -144,7 +149,7 @@ export const useAtlasCamera = ({
   // recenter an unchanged camera when another Goal extends the global bounds.
   useEffect(() => {
     if (!cameraAdjusted.current) setCamera(layout.fitCamera);
-  }, [size, reservedLeft, reservedRight]);
+  }, [discoveryDockOpen, size, reservedLeft, reservedRight]);
 
   useEffect(() => {
     if (!selectionBelongsToFocus(focusedSelection, selection, projection)) {
@@ -174,7 +179,12 @@ export const useAtlasCamera = ({
       const agents: { x: number; y: number }[] = projection.workspaces.flatMap((workspace) =>
         workspace.agents.flatMap((agent, index) =>
           agent.primaryGoalId === target.id
-            ? [workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition))[index]!]
+            ? [
+                workspaceAgentPoints(
+                  workspace,
+                  workspacePosition(workspace, layout.goalSpacingScale),
+                )[index]!,
+              ]
             : [],
         ),
       );
@@ -195,14 +205,21 @@ export const useAtlasCamera = ({
         (candidate) => candidate.handle === target.id,
       );
       if (!execution) return undefined;
-      const point = screenPoint(execution.mapPosition);
-      const translation = discoveredDockPlacement(projection, layout.goalSpacingScale)?.translation;
+      const point = discoveredExecutionPoint(execution);
+      const translation = discoveredDockPlacement(
+        projection,
+        layout.goalSpacingScale,
+        discoveryDockOpen,
+      )?.translation;
       return translation ? { x: point.x + translation.x, y: point.y + translation.y } : point;
     }
     for (const workspace of projection.workspaces) {
       const agentIndex = workspace.agents.findIndex((candidate) => candidate.id === target.id);
       if (agentIndex >= 0) {
-        return workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition))[agentIndex];
+        return workspaceAgentPoints(
+          workspace,
+          workspacePosition(workspace, layout.goalSpacingScale),
+        )[agentIndex];
       }
     }
     const workspaceLessIndex = projection.workspaceLess.findIndex(
@@ -225,9 +242,10 @@ export const useAtlasCamera = ({
       next?.type === "goal"
         ? [
             ...projection.workspaces.flatMap((workspace) =>
-              workspaceAgentPoints(workspace, screenPoint(workspace.mapPosition)).filter(
-                (_, index) => workspace.agents[index]?.primaryGoalId === next.id,
-              ),
+              workspaceAgentPoints(
+                workspace,
+                workspacePosition(workspace, layout.goalSpacingScale),
+              ).filter((_, index) => workspace.agents[index]?.primaryGoalId === next.id),
             ),
             ...projection.workspaceLess.flatMap((agent, index) =>
               agent.primaryGoalId === next.id

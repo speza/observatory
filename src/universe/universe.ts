@@ -125,7 +125,7 @@ export type UniverseCommand =
     }
   | {
       readonly type: "AddConversation";
-      readonly admissionSource: "provider-catalogue" | "managed-launch";
+      readonly admissionSource: "provider-catalogue" | "managed-launch" | "host-observation";
       readonly resumeEligibility?: "same-site" | "provider-account" | "blocked" | "unknown";
       readonly harnessId: string;
       readonly nativeConversationRef: NativeConversationRef;
@@ -1052,6 +1052,9 @@ const reconcileObservation = (
       : [];
   const byConversation =
     exactByConversation ??
+    (observedConversation
+      ? resolveConversationAgent(draft.state.agents, observedConversation)
+      : undefined) ??
     (compatibleProcessAgents.length === 1 ? compatibleProcessAgents[0] : undefined);
   let byExecution = draft.state.agents.find((agent) =>
     executionMatches(agent, snapshot.hostKind, snapshot.hostInstanceId, observation.nativeId),
@@ -2371,7 +2374,14 @@ export class Universe {
     }
     const previous = this.state;
     this.state = next;
-    this.publishSemanticChanges(previous, next, now);
+    this.publishSemanticChanges(
+      previous,
+      next,
+      now,
+      command.type === "AddConversation" && command.admissionSource === "host-observation"
+        ? "host-observation"
+        : "human-command",
+    );
     const previousDiscoveries = this.discoveries;
     this.rememberAdmittedDiscoveries(next);
     const nextDiscoveries = new Map(
@@ -2434,7 +2444,12 @@ export class Universe {
     };
   }
 
-  private publishSemanticChanges(previous: UniverseState, next: UniverseState, at: number): void {
+  private publishSemanticChanges(
+    previous: UniverseState,
+    next: UniverseState,
+    at: number,
+    cause: "human-command" | "host-observation",
+  ): void {
     const semanticSequence = next.changes.at(-1)?.sequence;
     const systemIds = changedRecordIds(previous.systems, next.systems);
     const agentIds = changedRecordIds(previous.agents, next.agents);
@@ -2455,7 +2470,7 @@ export class Universe {
     if (systemIds.length > 0)
       events.push({
         type: "system-changed",
-        cause: "human-command",
+        cause,
         occurredAt: at,
         systemIds,
         semanticSequence,
@@ -2463,7 +2478,7 @@ export class Universe {
     if (goalIds.size > 0)
       events.push({
         type: "goal-changed",
-        cause: "human-command",
+        cause,
         occurredAt: at,
         goalIds: [...goalIds],
         semanticSequence,
@@ -2471,7 +2486,7 @@ export class Universe {
     if (agentIds.length > 0)
       events.push({
         type: "agent-changed",
-        cause: "human-command",
+        cause,
         occurredAt: at,
         agentIds,
         semanticSequence,
@@ -2479,7 +2494,7 @@ export class Universe {
     if (JSON.stringify(previous.operatorCheckpoint) !== JSON.stringify(next.operatorCheckpoint))
       events.push({
         type: "catch-up-changed",
-        cause: "human-command",
+        cause,
         occurredAt: at,
         semanticSequence: next.operatorCheckpoint?.lastSequence ?? semanticSequence ?? 0,
       });

@@ -1,4 +1,9 @@
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { ArchiveX, GitCompareArrows, GitPullRequest, Terminal } from "lucide-react";
 import type {
   AgentView,
@@ -11,26 +16,27 @@ import { AgentLogo } from "../shared/AgentLogo.tsx";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
+  ATLAS_GRID_STEP,
   DISCOVERED_CARD_HEIGHT,
   DISCOVERED_CARD_WIDTH,
+  discoveredExecutionPoint,
   discoveredDockPlacement,
   hash,
   stateLabel,
   truncateAtlasLine,
   workspaceAgentPoints,
   workspaceDimensions,
+  WORKSPACE_HEADER,
   workspaceLessAgentPoints,
   workspaceLessPosition,
+  workspacePosition,
   type AtlasCameraCommand,
 } from "./atlasGeometry.ts";
 import { presentAgentCard } from "./agentCardPresentation.ts";
 import { useAtlasCamera } from "./useAtlasCamera.ts";
 
 export type { AtlasCameraCommand } from "./atlasGeometry.ts";
-export const snapToAtlasGrid = (position: { readonly x: number; readonly y: number }) => ({
-  x: Math.round(position.x / 24) * 24 || 0,
-  y: Math.round(position.y / 24) * 24 || 0,
-});
+export { snapToAtlasGrid } from "./atlasGeometry.ts";
 
 interface AgentStyle extends CSSProperties {
   readonly "--goal-color": string;
@@ -90,12 +96,19 @@ export const Atlas = ({
   pullRequestUrls,
   onSelect,
 }: AtlasProps): React.JSX.Element => {
+  const [discoveryDockOpen, setDiscoveryDockOpen] = useState(
+    () => selection?.type === "discovered-execution",
+  );
+  useEffect(() => {
+    if (selection?.type === "discovered-execution") setDiscoveryDockOpen(true);
+  }, [selection?.id, selection?.type]);
   const camera = useAtlasCamera({
     cameraCommand,
     projection,
     reservedLeft,
     reservedRight,
     selection,
+    discoveryDockOpen,
   });
   const goalFocused =
     camera.focusedSelection?.type === "goal"
@@ -103,15 +116,27 @@ export const Atlas = ({
       : selection?.type === "goal"
         ? selection.id
         : undefined;
-  const discoveryDock = discoveredDockPlacement(projection, camera.layout.goalSpacingScale);
+  const discoveryDock = discoveredDockPlacement(
+    projection,
+    camera.layout.goalSpacingScale,
+    discoveryDockOpen,
+  );
   const workspaceLessPoints = workspaceLessAgentPoints(projection, camera.layout.goalSpacingScale);
   const workspaceLessCentre = workspaceLessPosition(projection, camera.layout.goalSpacingScale);
-  const gridStep = 24 * camera.layout.goalSpacingScale;
+  const gridStep = ATLAS_GRID_STEP;
   const gridOrigin = camera.screenPoint({ x: 0, y: 0 });
   const renderAgent = (agent: MapAgentView, point: { x: number; y: number }) => {
     const selected = selection?.type === "agent" && selection.id === agent.id;
     const dimmed = goalFocused !== undefined && agent.primaryGoalId !== goalFocused;
     const attention = agent.attention?.requiresHumanInput === true;
+    const canOpenTerminal = agent.executionPresence === "live" && onOpenTerminal !== undefined;
+    const canCloseAndArchive =
+      agent.executionPresence === "live" && onCloseAndArchive !== undefined;
+    const canReview = agent.attention?.action === "review" && onReviewChanges !== undefined;
+    const pullRequestUrl = pullRequestUrls?.get(agent.id);
+    const reviewActionX = canOpenTerminal ? 48 : 74;
+    const pullRequestActionX = 74 - (canOpenTerminal ? 26 : 0) - (canReview ? 26 : 0);
+    const closeActionX = pullRequestActionX - (pullRequestUrl === undefined ? 0 : 26);
     const uncertain = ["runtime-unknown", "conversation-unavailable", "conflict"].includes(
       agent.lifecycleState,
     );
@@ -222,44 +247,112 @@ export const Atlas = ({
           />
         </g>
         <g className="agent__quick-actions">
-          {onReviewChanges && agent.attention?.action === "review" ? (
+          {canReview ? (
             <g
               aria-label={`Review ${agent.displayName} changes`}
+              className="agent__quick-action"
+              onClick={(event) => {
+                event.stopPropagation();
+                onReviewChanges?.(agent);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onFocus={focus}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                activate(event, () => onReviewChanges?.(agent));
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
               role="button"
               tabIndex={0}
-              onClick={() => onReviewChanges(agent)}
             >
-              <GitCompareArrows x="30" y="28" />
+              <title>Review changes</title>
+              <rect height="20" rx="3" width="22" x={reviewActionX} y="27" />
+              <GitCompareArrows
+                aria-hidden="true"
+                height="14"
+                strokeWidth="1.8"
+                width="14"
+                x={reviewActionX + 4}
+                y="30"
+              />
             </g>
           ) : null}
-          {pullRequestUrls?.get(agent.id) ? (
+          {pullRequestUrl ? (
             <a
               aria-label={`Open ${agent.displayName} pull request on GitHub`}
-              href={pullRequestUrls.get(agent.id)}
+              className="agent__quick-action"
+              href={pullRequestUrl}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onFocus={focus}
+              onPointerDown={(event) => event.stopPropagation()}
               target="_blank"
               rel="noreferrer"
             >
-              <GitPullRequest x="52" y="28" />
+              <title>Open pull request on GitHub</title>
+              <rect height="20" rx="3" width="22" x={pullRequestActionX} y="27" />
+              <GitPullRequest
+                aria-hidden="true"
+                height="14"
+                strokeWidth="1.8"
+                width="14"
+                x={pullRequestActionX + 4}
+                y="30"
+              />
             </a>
           ) : null}
-          {onCloseAndArchive && agent.executionPresence === "live" ? (
+          {canCloseAndArchive ? (
             <g
               aria-label={`Close and archive ${agent.displayName}`}
+              className="agent__quick-action agent__quick-action--destructive"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCloseAndArchive?.(agent);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onFocus={focus}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                activate(event, () => onCloseAndArchive?.(agent));
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
               role="button"
               tabIndex={0}
-              onClick={() => onCloseAndArchive(agent)}
             >
-              <ArchiveX x="72" y="28" />
+              <title>Close &amp; archive</title>
+              <rect height="20" rx="3" width="22" x={closeActionX} y="27" />
+              <ArchiveX
+                aria-hidden="true"
+                height="14"
+                strokeWidth="1.8"
+                width="14"
+                x={closeActionX + 4}
+                y="30"
+              />
             </g>
           ) : null}
-          {onOpenTerminal && agent.executionPresence === "live" ? (
+          {canOpenTerminal ? (
             <g
               aria-label={`Open ${agent.displayName} terminal`}
+              className="agent__quick-action"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenTerminal?.(agent);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onFocus={focus}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                activate(event, () => onOpenTerminal?.(agent));
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
               role="button"
               tabIndex={0}
-              onClick={() => onOpenTerminal(agent)}
+              transform="translate(74 27)"
             >
-              <Terminal x="94" y="28" />
+              <title>Open terminal</title>
+              <rect height="20" rx="3" width="22" />
+              <Terminal aria-hidden="true" height="14" strokeWidth="1.8" width="14" x="4" y="3" />
             </g>
           ) : null}
         </g>
@@ -330,7 +423,7 @@ export const Atlas = ({
             y="-100000"
           />
           {projection.workspaces.map((workspace, workspaceIndex) => {
-            const centre = camera.screenPoint(workspace.mapPosition);
+            const centre = workspacePosition(workspace, camera.layout.goalSpacingScale);
             const size = workspaceDimensions(workspace);
             const points = workspaceAgentPoints(workspace, centre);
             return (
@@ -403,8 +496,9 @@ export const Atlas = ({
           {(projection.discoveredExecutions ?? []).length > 0 ? (
             <g aria-label="Discovered in Herdr executions" className="discovered-executions">
               {discoveryDock ? (
-                <g aria-hidden="true" className="discovered-dock">
+                <g className="discovered-dock">
                   <rect
+                    aria-hidden="true"
                     className="discovered-dock__frame"
                     height={discoveryDock.bounds.height}
                     rx="10"
@@ -412,134 +506,167 @@ export const Atlas = ({
                     x={discoveryDock.bounds.left}
                     y={discoveryDock.bounds.top}
                   />
-                  <text
-                    className="discovered-dock__heading"
-                    x={discoveryDock.bounds.left + 18}
-                    y={discoveryDock.bounds.top + 25}
+                  <g
+                    aria-expanded={discoveryDockOpen}
+                    aria-label={`${discoveryDockOpen ? "Collapse" : "Expand"} discovered in Herdr`}
+                    className="discovered-dock__toggle"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDiscoveryDockOpen((open) => !open);
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      activate(event, () => setDiscoveryDockOpen((open) => !open));
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    role="button"
+                    tabIndex={0}
                   >
-                    DISCOVERED IN HERDR · {projection.discoveredExecutions?.length}
-                  </text>
+                    <rect
+                      aria-hidden="true"
+                      className="discovered-dock__toggle-hit"
+                      height={WORKSPACE_HEADER}
+                      width={discoveryDock.bounds.width}
+                      x={discoveryDock.bounds.left}
+                      y={discoveryDock.bounds.top}
+                    />
+                    <text
+                      className="discovered-dock__heading"
+                      x={discoveryDock.bounds.left + 18}
+                      y={discoveryDock.bounds.top + 25}
+                    >
+                      {discoveryDockOpen ? "−" : "+"} DISCOVERED IN HERDR ·{" "}
+                      {projection.discoveredExecutions?.length}
+                    </text>
+                  </g>
                 </g>
               ) : null}
-              {projection.discoveredExecutions?.map((execution) => {
-                const point = camera.screenPoint(execution.mapPosition);
-                const centre = {
-                  x: point.x + (discoveryDock?.translation.x ?? 0),
-                  y: point.y + (discoveryDock?.translation.y ?? 0),
-                };
-                const state = execution.presence === "live" ? execution.runtimeState : "unknown";
-                const selected =
-                  selection?.type === "discovered-execution" && selection.id === execution.handle;
-                const focus = (): void =>
-                  (onFocusSelection ?? onSelect)({
-                    type: "discovered-execution",
-                    id: execution.handle,
-                  });
-                return (
-                  <g
-                    className={`discovered-execution discovered-execution--${state} ${selected ? "is-selected" : ""}`}
-                    data-discovery-handle={execution.handle}
-                    key={execution.handle}
-                    transform={`translate(${centre.x} ${centre.y})`}
-                  >
-                    <g
-                      aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
-                      className="discovered-execution__card-target"
-                      onClick={() =>
-                        onSelect({ type: "discovered-execution", id: execution.handle })
-                      }
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        camera.focusPoint(centre, {
-                          type: "discovered-execution",
-                          id: execution.handle,
-                        });
-                      }}
-                      onFocus={focus}
-                      onKeyDown={(event) =>
-                        activate(event, () =>
-                          onSelect({ type: "discovered-execution", id: execution.handle }),
-                        )
-                      }
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <rect
-                        className="discovered-execution__card"
-                        height={DISCOVERED_CARD_HEIGHT}
-                        rx="5"
-                        width={DISCOVERED_CARD_WIDTH}
-                        x={-DISCOVERED_CARD_WIDTH / 2}
-                        y={-DISCOVERED_CARD_HEIGHT / 2}
-                      />
-                      <rect
-                        className="discovered-execution__selection"
-                        height={DISCOVERED_CARD_HEIGHT + 8}
-                        rx="7"
-                        width={DISCOVERED_CARD_WIDTH + 8}
-                        x={-DISCOVERED_CARD_WIDTH / 2 - 4}
-                        y={-DISCOVERED_CARD_HEIGHT / 2 - 4}
-                      />
-                      <line
-                        className="discovered-execution__rule"
-                        x1={-DISCOVERED_CARD_WIDTH / 2 + 14}
-                        x2={DISCOVERED_CARD_WIDTH / 2 - 14}
-                        y1="-38"
-                        y2="-38"
-                      />
-                      <g className="discovered-execution__provider" transform="translate(-124 -54)">
-                        <AgentLogo map provider={execution.provider} />
-                      </g>
-                      <text className="discovered-execution__identity" x="-108" y="-51">
-                        DISCOVERED / {execution.hostKind.toUpperCase()}
-                      </text>
-                      <g className="discovered-execution__state" transform="translate(122 -54)">
-                        <circle r="3" />
-                        <text x="-8" y="3">
-                          {state.toUpperCase()}
-                        </text>
-                      </g>
-                      <text className="discovered-execution__name" x="-124" y="-15">
-                        {truncateAtlasLine(execution.displayName, 29)}
-                      </text>
-                      <text className="discovered-execution__context" x="-124" y="17">
-                        {truncateAtlasLine(
-                          execution.worktree ?? execution.repository ?? "Workspace unknown",
-                          43,
-                        )}
-                      </text>
-                      <text className="discovered-execution__conversation" x="-124" y="38">
-                        {execution.conversation
-                          ? truncateAtlasLine(`Conversation · ${execution.conversation.id}`, 46)
-                          : execution.conversationIdentified
-                            ? "Conversation · identified"
-                            : "Conversation not identified"}
-                      </text>
-                    </g>
-                    {execution.presence === "live" && onOpenDiscoveredTerminal ? (
+              {discoveryDockOpen
+                ? projection.discoveredExecutions?.map((execution) => {
+                    const point = discoveredExecutionPoint(execution);
+                    const centre = {
+                      x: point.x + (discoveryDock?.translation.x ?? 0),
+                      y: point.y + (discoveryDock?.translation.y ?? 0),
+                    };
+                    const state =
+                      execution.presence === "live" ? execution.runtimeState : "unknown";
+                    const selected =
+                      selection?.type === "discovered-execution" &&
+                      selection.id === execution.handle;
+                    const focus = (): void =>
+                      (onFocusSelection ?? onSelect)({
+                        type: "discovered-execution",
+                        id: execution.handle,
+                      });
+                    return (
                       <g
-                        aria-label={`Open ${execution.displayName} terminal`}
-                        className="discovered-execution__quick-action"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenDiscoveredTerminal(execution);
-                        }}
-                        onFocus={focus}
-                        onKeyDown={(event) =>
-                          activate(event, () => onOpenDiscoveredTerminal(execution))
-                        }
-                        role="button"
-                        tabIndex={0}
-                        transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`}
+                        className={`discovered-execution discovered-execution--${state} ${selected ? "is-selected" : ""}`}
+                        data-discovery-handle={execution.handle}
+                        key={execution.handle}
+                        transform={`translate(${centre.x} ${centre.y})`}
                       >
-                        <title>Open terminal</title>
-                        <rect height="20" rx="3" width="22" />
-                        <Terminal height="14" strokeWidth="1.8" width="14" x="4" y="3" />
+                        <g
+                          aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+                          className="discovered-execution__card-target"
+                          onClick={() =>
+                            onSelect({ type: "discovered-execution", id: execution.handle })
+                          }
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
+                            camera.focusPoint(centre, {
+                              type: "discovered-execution",
+                              id: execution.handle,
+                            });
+                          }}
+                          onFocus={focus}
+                          onKeyDown={(event) =>
+                            activate(event, () =>
+                              onSelect({ type: "discovered-execution", id: execution.handle }),
+                            )
+                          }
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <rect
+                            className="discovered-execution__card"
+                            height={DISCOVERED_CARD_HEIGHT}
+                            rx="5"
+                            width={DISCOVERED_CARD_WIDTH}
+                            x={-DISCOVERED_CARD_WIDTH / 2}
+                            y={-DISCOVERED_CARD_HEIGHT / 2}
+                          />
+                          <rect
+                            className="discovered-execution__selection"
+                            height={DISCOVERED_CARD_HEIGHT + 8}
+                            rx="7"
+                            width={DISCOVERED_CARD_WIDTH + 8}
+                            x={-DISCOVERED_CARD_WIDTH / 2 - 4}
+                            y={-DISCOVERED_CARD_HEIGHT / 2 - 4}
+                          />
+                          <line
+                            className="discovered-execution__rule"
+                            x1={-DISCOVERED_CARD_WIDTH / 2 + 14}
+                            x2={DISCOVERED_CARD_WIDTH / 2 - 14}
+                            y1="-38"
+                            y2="-38"
+                          />
+                          <g
+                            className="discovered-execution__provider"
+                            transform="translate(-124 -54)"
+                          >
+                            <AgentLogo map provider={execution.provider} />
+                          </g>
+                          <text className="discovered-execution__identity" x="-108" y="-51">
+                            DISCOVERED / {execution.hostKind.toUpperCase()}
+                          </text>
+                          <g className="discovered-execution__state" transform="translate(122 -54)">
+                            <circle r="3" />
+                            <text x="-8" y="3">
+                              {state.toUpperCase()}
+                            </text>
+                          </g>
+                          <text className="discovered-execution__name" x="-124" y="-15">
+                            {truncateAtlasLine(execution.displayName, 29)}
+                          </text>
+                          <text className="discovered-execution__context" x="-124" y="17">
+                            {truncateAtlasLine(
+                              execution.worktree ?? execution.repository ?? "Workspace unknown",
+                              43,
+                            )}
+                          </text>
+                          <text className="discovered-execution__conversation" x="-124" y="38">
+                            {execution.conversation
+                              ? truncateAtlasLine(`Conversation · ${execution.conversation.id}`, 46)
+                              : execution.conversationIdentified
+                                ? "Conversation · identified"
+                                : "Conversation not identified"}
+                          </text>
+                        </g>
+                        {execution.presence === "live" && onOpenDiscoveredTerminal ? (
+                          <g
+                            aria-label={`Open ${execution.displayName} terminal`}
+                            className="discovered-execution__quick-action"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenDiscoveredTerminal(execution);
+                            }}
+                            onFocus={focus}
+                            onKeyDown={(event) =>
+                              activate(event, () => onOpenDiscoveredTerminal(execution))
+                            }
+                            role="button"
+                            tabIndex={0}
+                            transform={`translate(${DISCOVERED_CARD_WIDTH / 2 - 36} ${DISCOVERED_CARD_HEIGHT / 2 - 30})`}
+                          >
+                            <title>Open terminal</title>
+                            <rect height="20" rx="3" width="22" />
+                            <Terminal height="14" strokeWidth="1.8" width="14" x="4" y="3" />
+                          </g>
+                        ) : null}
                       </g>
-                    ) : null}
-                  </g>
-                );
-              })}
+                    );
+                  })
+                : null}
             </g>
           ) : null}
         </g>

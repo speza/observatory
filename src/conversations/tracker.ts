@@ -1,5 +1,9 @@
 import { Effect, Either } from "effect";
-import type { AgentHarness, AgentHarnessSnapshotRequest } from "../plugin-sdk/index.ts";
+import type {
+  AgentHarness,
+  AgentHarnessSnapshotRequest,
+  OpaqueNativeConversationRef,
+} from "../plugin-sdk/index.ts";
 import type { HostAgentObservation, HostSnapshot } from "../hosts/types.ts";
 import type { HostExecutionKey, ReconciliationResult, Universe } from "../universe/universe.ts";
 import type {
@@ -18,6 +22,32 @@ const boundedText = (value: string | undefined, fallback: string): string => {
 };
 
 const HISTORY_ITEMS_PER_HARNESS = 50;
+const MAX_AUTOMATIC_HOST_ADMISSIONS = 512;
+const AUTOMATIC_HOST_EVIDENCE_SOURCES = new Set(["native-integration", "hook", "process"]);
+
+const normalizedConversationRef = (
+  reference: OpaqueNativeConversationRef | undefined,
+): OpaqueNativeConversationRef | undefined => {
+  const harnessId = reference?.harnessId.trim();
+  const kind = reference?.kind.trim();
+  const value = reference?.value.trim();
+  const continuityScopeId = reference?.continuityScopeId?.trim();
+  if (!harnessId || !kind || !value) return undefined;
+  return continuityScopeId
+    ? { harnessId, continuityScopeId, kind, value }
+    : { harnessId, kind, value };
+};
+
+const sameConversationIdentity = (
+  left: OpaqueNativeConversationRef,
+  right: OpaqueNativeConversationRef,
+): boolean =>
+  left.harnessId === right.harnessId &&
+  left.kind === right.kind &&
+  left.value === right.value &&
+  (left.continuityScopeId === undefined ||
+    right.continuityScopeId === undefined ||
+    left.continuityScopeId === right.continuityScopeId);
 
 export class ConversationTracker implements ConversationTrackerModule {
   private lastHostSnapshot: HostSnapshot | undefined;
@@ -215,7 +245,7 @@ export class ConversationTracker implements ConversationTrackerModule {
 
     let assignedGoalId: string | undefined;
     let partial = false;
-    let message = "Execution added to Observatory.";
+    let message = "Execution added to Observatory Inbox.";
     if (goalId) {
       const assigned = this.universe.execute({
         type: "AssignAgent",
@@ -224,7 +254,7 @@ export class ConversationTracker implements ConversationTrackerModule {
       });
       if (!assigned.ok) {
         partial = true;
-        message = `Execution added to Observatory, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
+        message = `Execution added to Observatory Inbox, but Goal assignment failed: ${assigned.error ?? "unknown error"}`;
       } else {
         assignedGoalId = assigned.goalId;
         message = "Execution added to Observatory and assigned to the Goal.";
@@ -242,8 +272,13 @@ export class ConversationTracker implements ConversationTrackerModule {
   }
 
   observeHost(snapshot: HostSnapshot): ReconciliationResult {
+    const previousSnapshot = this.lastHostSnapshot;
     this.lastHostSnapshot = snapshot;
     const sessions = this.store.conversations();
+    const automaticDiagnostics =
+      previousSnapshot && snapshot.observedAt < previousSnapshot.observedAt
+        ? []
+        : this.automaticallyAdmitRecognizedExecutions(snapshot, sessions);
     const agents = snapshot.agents.map((observation) =>
       this.canonicalObservation(observation, sessions),
     );
@@ -253,7 +288,65 @@ export class ConversationTracker implements ConversationTrackerModule {
       pendingExecutionKeys: this.pendingExecutionKeys?.() ?? [],
     });
     if (result.accepted) this.refreshAcceptedProviderFacts(sessions);
-    return result;
+    return automaticDiagnostics.length === 0
+      ? result
+      : { ...result, diagnostics: [...result.diagnostics, ...automaticDiagnostics] };
+  }
+
+  private automaticallyAdmitRecognizedExecutions(
+    snapshot: HostSnapshot,
+    sessions: readonly StoredConversation[],
+  ): readonly string[] {
+    if (!snapshot.available || snapshot.agents.length > MAX_AUTOMATIC_HOST_ADMISSIONS) return [];
+    const nativeIds = snapshot.agents.map((observation) => observation.nativeId.trim());
+    if (nativeIds.some((nativeId) => !nativeId) || new Set(nativeIds).size !== nativeIds.length)
+      return [];
+
+    const diagnostics: string[] = [];
+    for (const observation of snapshot.agents) {
+      const evidence = observation.harnessEvidence;
+      const reference = normalizedConversationRef(evidence?.nativeConversationRef);
+      if (
+        !reference ||
+        observation.discoverable === false ||
+        !evidence ||
+        !AUTOMATIC_HOST_EVIDENCE_SOURCES.has(evidence.source)
+      )
+        continue;
+
+      const matches = sessions.filter((session) =>
+        [session.nativeConversationRef, ...session.nativeConversationAliases].some((candidate) =>
+          sameConversationIdentity(reference, candidate),
+        ),
+      );
+      if (matches.length > 1) {
+        if (!reference.continuityScopeId)
+          diagnostics.push(
+            `Held ${observation.nativeId.trim()} in discovery because its conversation identity is ambiguous across provider scopes.`,
+          );
+        continue;
+      }
+
+      const canonicalReference = matches[0]?.nativeConversationRef ?? reference;
+      if (this.universe.resolveAgentId(canonicalReference) !== undefined) continue;
+      const result = this.universe.execute({
+        type: "AddConversation",
+        admissionSource: "host-observation",
+        harnessId: canonicalReference.harnessId,
+        nativeConversationRef: canonicalReference,
+        displayName: boundedText(
+          observation.displayName,
+          `${canonicalReference.harnessId} execution`,
+        ),
+        workspaceRef: observation.worktree,
+        observedAt: observation.observedAt,
+      });
+      if (!result.ok)
+        diagnostics.push(
+          `Could not synchronize ${observation.nativeId.trim()} into Observatory: ${result.error ?? "unknown error"}`,
+        );
+    }
+    return diagnostics;
   }
 
   private refreshAcceptedProviderFacts(sessions: readonly StoredConversation[]): void {

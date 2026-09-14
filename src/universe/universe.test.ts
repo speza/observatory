@@ -910,7 +910,7 @@ describe("Universe", () => {
       continuity: "unknown",
     });
     expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
-      counts: { discovered: 1, agents: 1 },
+      counts: { discovered: 1, agents: 0 },
     });
   });
 

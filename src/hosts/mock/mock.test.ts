@@ -142,10 +142,11 @@ describe("Mock host adapter", () => {
     expect(staleProjection.kind).toBe("universe-map");
     if (staleProjection.kind !== "universe-map") throw new Error("Expected the universe map.");
     expect(staleProjection.counts.stale).toBe(0);
-    expect(staleProjection.unassigned.every((agent) => agent.executionPresence === "absent")).toBe(
-      true,
-    );
-    expect(staleProjection.counts.unassigned).toBe(4);
+    expect(staleProjection.unassigned).toEqual([]);
+    expect(staleProjection.counts.unassigned).toBe(0);
+    expect(
+      universe.snapshot().agents.filter((agent) => agent.executionPresence === "absent"),
+    ).toHaveLength(4);
   });
 
   test("provides a deterministic embedded terminal stream", async () => {

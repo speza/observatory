@@ -254,10 +254,13 @@ export const WorkspaceNavigation = ({
         </section>
       ) : null}
       {discoveredExecutions.length ? (
-        <section className="workspace-tree__discovered-section" aria-label="Discovered in Herdr">
-          <p className="overline">Discovered in Herdr · {discoveredExecutions.length}</p>
+        <details className="workspace-tree__discovered-section">
+          <summary className="workspace-tree__discovered-heading">
+            <span>Discovered in Herdr</span>
+            <small>{discoveredExecutions.length}</small>
+          </summary>
           {discoveredExecutions.map(discoveredRow)}
-        </section>
+        </details>
       ) : null}
       {view !== "all" && !goals.length && !unassigned.length ? (
         <p className="workspace-tree__empty">

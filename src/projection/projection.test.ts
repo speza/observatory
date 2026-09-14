@@ -33,7 +33,7 @@ const bareAgent = (id: string, hostHealth: Agent["hostHealth"]): Agent => ({
   id,
   continuity: "proved",
   providerContinuity: "confirmed",
-  executionPresence: "absent",
+  executionPresence: "unknown",
   resumeCapability: "eligible",
   observationHealth: "fresh",
   executionHistory: [],
@@ -717,7 +717,7 @@ describe("projections", () => {
       "agent-1",
       "agent-3",
     ]);
-    expect(afterExit.workspaceLess.map((agent) => agent.id)).toContain("agent-2");
+    expect(afterExit.workspaceLess.map((agent) => agent.id)).not.toContain("agent-2");
   });
 
   test("projects unassigned agents into a stable neutral inbox sector", () => {
@@ -756,12 +756,17 @@ describe("projections", () => {
     const projection = universe.project({ kind: "command-centre", now: 1_005_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
     expect(projection.counts.stale).toBe(0);
-    expect(projection.unassigned).toHaveLength(2);
-    const stale = projection.unassigned.find((agent) => agent.displayName === "stale agent");
-    expect(stale?.hostHealth).toBe("stale");
-    expect(stale?.executionPresence).toBe("absent");
-    expect(stale?.observationHealth).toBe("fresh");
-    expect(stale?.attention).toBeUndefined();
+    expect(projection.unassigned).toHaveLength(1);
+    expect(projection.unassigned[0]?.displayName).toBe("live agent");
+    expect(
+      projection.unassigned.find((agent) => agent.displayName === "stale agent"),
+    ).toBeUndefined();
+    expect(
+      universe.snapshot().agents.find((agent) => agent.displayName === "stale agent"),
+    ).toMatchObject({
+      executionPresence: "absent",
+      observationHealth: "fresh",
+    });
   });
 
   test("groups only post-checkpoint changes into a deterministic catch-up projection", () => {

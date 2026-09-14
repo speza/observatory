@@ -298,7 +298,7 @@ export const Inspector = ({
               onClick={() => void onAdmitDiscovered(discovery.handle, discoveryGoalId)}
               type="button"
             >
-              {discoveryGoalId ? "Add and assign to Goal" : "Add to Observatory"}
+              {discoveryGoalId ? "Add and assign to Goal" : "Add to Inbox"}
             </button>
             {discovery.presence === "live" ? (
               <button onClick={() => onOpenDiscoveredTerminal(discovery)} type="button">
@@ -310,8 +310,10 @@ export const Inspector = ({
             <p className="inspector__discovered-note">{discovery.admission.explanation}</p>
           ) : (
             <p className="inspector__discovered-note">
-              Exact catalogue evidence is available. Admission remains explicit; terminal access is
-              independent.
+              {discoveryGoalId
+                ? "The Agent will be filed through the selected Goal and its System."
+                : "No Goal selected. The accepted Agent will start in Inbox until you assign one."}{" "}
+              Exact catalogue evidence is available; admission remains explicit.
             </p>
           )}
           <p className="inspector__discovered-note">

@@ -7,7 +7,7 @@ import {
 } from "../plugin-sdk/index.ts";
 import { SqliteUniverseStore } from "../persistence/sqlite/sqlite-store.ts";
 import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
-import type { Agent } from "../universe/types.ts";
+import { DEFAULT_SYSTEM_ID, type Agent } from "../universe/types.ts";
 import { ConversationTracker } from "./tracker.ts";
 
 const conversation = (value = "native-secret-id", title = "Regression work") => ({
@@ -64,6 +64,17 @@ const liveProviderExecution = (nativeId: string, kind = "id", value = "native-se
     observedAt: 1_000_000,
   },
 });
+
+const manuallyAdmittedDiscovery = (nativeId: string, kind = "id", value = "native-secret-id") => {
+  const execution = liveProviderExecution(nativeId, kind, value);
+  return {
+    ...execution,
+    harnessEvidence: {
+      ...execution.harnessEvidence,
+      source: "unknown" as const,
+    },
+  };
+};
 
 const semanticAgentFacts = (agent: Agent) => ({
   conversation: agent.nativeConversationRef,
@@ -250,7 +261,7 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
-  test("keeps an exact live conversation untracked until explicitly added", async () => {
+  test("automatically syncs an exact live conversation into the Inbox", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
 
@@ -261,21 +272,27 @@ describe("conversation tracker", () => {
     );
 
     expect(reconciled.accepted).toBe(true);
-    expect(reconciled.diagnostics.join(" ")).toContain("untracked");
-    expect(fixture.universe.snapshot().agents).toEqual([]);
+    expect(reconciled.diagnostics.join(" ")).not.toContain("untracked");
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      primaryGoalId: undefined,
+      execution: { nativeId: "pane-live" },
+      runtimeStateSource: "test-host",
+    });
     const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
-    expect(projection.discoveredExecutions).toHaveLength(1);
-    expect(fixture.tracker.history()).toHaveLength(1);
+    expect(projection.discoveredExecutions).toEqual([]);
+    expect(projection.unassigned).toHaveLength(1);
+    expect(fixture.tracker.history()).toHaveLength(0);
     fixture.store.close();
   });
 
-  test("admits a discovered execution only after exact catalogue evidence", async () => {
+  test("keeps an untrusted exact execution in discovery for explicit admission", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
     fixture.tracker.observeHost(
       hostSnapshot([
-        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+        manuallyAdmittedDiscovery("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
       ]),
     );
     const before = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
@@ -285,7 +302,7 @@ describe("conversation tracker", () => {
     expect(discovery?.conversationIdentified).toBe(true);
     expect(discovery?.conversation).toEqual({ kind: "id", id: "native-secret-id" });
     const admitted = fixture.tracker.admitDiscovered(discovery!.handle);
-    expect(admitted).toMatchObject({ message: "Execution added to Observatory." });
+    expect(admitted).toMatchObject({ message: "Execution added to Observatory Inbox." });
     expect(fixture.universe.snapshot().agents).toHaveLength(1);
     expect(fixture.universe.snapshot().agents[0]).toMatchObject({
       id: admitted.agentId,
@@ -301,7 +318,7 @@ describe("conversation tracker", () => {
   test("admits an unscoped discovery through its unique scoped catalogue entry", async () => {
     const fixture = trackerFixture();
     await Effect.runPromise(fixture.tracker.refresh());
-    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-unscoped")]));
+    fixture.tracker.observeHost(hostSnapshot([manuallyAdmittedDiscovery("pane-unscoped")]));
     const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
     const discovery = projection.discoveredExecutions?.[0];
@@ -309,7 +326,7 @@ describe("conversation tracker", () => {
 
     const admitted = fixture.tracker.admitDiscovered(discovery!.handle);
 
-    expect(admitted).toMatchObject({ message: "Execution added to Observatory." });
+    expect(admitted).toMatchObject({ message: "Execution added to Observatory Inbox." });
     expect(fixture.universe.snapshot().agents[0]).toMatchObject({
       nativeConversationRef: {
         harnessId: "codex",
@@ -319,6 +336,29 @@ describe("conversation tracker", () => {
       },
       execution: { nativeId: "pane-unscoped" },
     });
+    fixture.store.close();
+  });
+
+  test("files an admitted discovery through the selected Goal in the Default system", async () => {
+    const fixture = trackerFixture();
+    const goal = fixture.universe.execute({ type: "CreateGoal", title: "Default work" });
+    await Effect.runPromise(fixture.tracker.refresh());
+    fixture.tracker.observeHost(
+      hostSnapshot([
+        manuallyAdmittedDiscovery("pane-default", "path", "/synthetic/native-secret-id.jsonl"),
+      ]),
+    );
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+
+    const admitted = fixture.tracker.admitDiscovered(
+      projection.discoveredExecutions![0]!.handle,
+      goal.goalId,
+    );
+
+    expect(admitted.goalId).toBe(goal.goalId);
+    expect(fixture.universe.snapshot().agents[0]?.primaryGoalId).toBe(goal.goalId);
+    expect(fixture.universe.snapshot().goals[0]?.systemId).toBe(DEFAULT_SYSTEM_ID);
     fixture.store.close();
   });
 
@@ -361,7 +401,7 @@ describe("conversation tracker", () => {
     await Effect.runPromise(fixture.tracker.refresh());
     fixture.tracker.observeHost(
       hostSnapshot([
-        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+        manuallyAdmittedDiscovery("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
       ]),
     );
     const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
@@ -388,7 +428,7 @@ describe("conversation tracker", () => {
     fixture.universe.execute({ type: "ArchiveGoal", goalId: goal.goalId! });
     fixture.tracker.observeHost(
       hostSnapshot([
-        liveProviderExecution("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
+        manuallyAdmittedDiscovery("pane-live", "path", "/synthetic/native-secret-id.jsonl"),
       ]),
     );
     const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
@@ -438,7 +478,7 @@ describe("conversation tracker", () => {
       ]),
     );
     await Effect.runPromise(hostFirst.tracker.refresh());
-    hostFirst.tracker.add(hostFirst.tracker.history()[0]!.handle);
+    expect(hostFirst.universe.snapshot().agents).toHaveLength(1);
 
     expect(semanticAgentFacts(hostFirst.universe.snapshot().agents[0]!)).toEqual(
       semanticAgentFacts(providerFirst.universe.snapshot().agents[0]!),
@@ -500,7 +540,7 @@ describe("conversation tracker", () => {
     fixture.store.close();
   });
 
-  test("does not automatically promote an unscoped host identity but offers exact admission", () => {
+  test("automatically promotes an unscoped host identity with unique catalogue evidence", () => {
     const fixture = trackerFixture();
     fixture.store.reconcileProviderCatalogue(providerSnapshot());
 
@@ -511,17 +551,36 @@ describe("conversation tracker", () => {
     expect(result.accepted).toBe(true);
     const projection = fixture.universe.project({ kind: "command-centre", now: 1_000_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
-    expect(projection.discoveredExecutions).toHaveLength(1);
-    expect(projection.discoveredExecutions?.[0]).toMatchObject({
-      conversationTitle: "Regression work",
-      admission: { status: "available", resumeEligibility: "same-site" },
+    expect(projection.discoveredExecutions).toEqual([]);
+    expect(fixture.universe.snapshot().agents).toHaveLength(1);
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      nativeConversationRef: {
+        harnessId: "codex",
+        continuityScopeId: "scope-test",
+        kind: "id",
+        value: "native-secret-id",
+      },
+      execution: { nativeId: "unscoped-host" },
     });
-    expect(
-      fixture.universe.resolveDiscoveredExecution(
-        projection.discoveredExecutions?.[0]?.handle ?? "",
-      )?.nativeConversationRef,
-    ).toEqual({ harnessId: "codex", kind: "id", value: "native-secret-id" });
-    expect(fixture.universe.snapshot().agents).toEqual([]);
+    fixture.store.close();
+  });
+
+  test("removes a host-synced execution from the active map after confirmed host loss", () => {
+    const fixture = trackerFixture();
+    fixture.tracker.observeHost(hostSnapshot([liveProviderExecution("pane-before-close")]));
+    fixture.tracker.observeHost(hostSnapshot([], 1_001_000));
+
+    expect(fixture.universe.snapshot().agents[0]).toMatchObject({
+      execution: undefined,
+      executionPresence: "absent",
+      executionHistory: [{ nativeId: "pane-before-close" }],
+    });
+    const projection = fixture.universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (projection.kind !== "command-centre") throw new Error("wrong projection");
+    expect(projection.counts.agents).toBe(0);
+    expect(fixture.universe.project({ kind: "search", query: "Codex" })).toMatchObject({
+      results: [{ id: "agent-1" }],
+    });
     fixture.store.close();
   });
 

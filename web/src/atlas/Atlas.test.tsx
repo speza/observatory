@@ -13,12 +13,16 @@ import {
   admitObservedConversationsAndReconcile,
 } from "../../../src/universe/test-support.ts";
 import { Atlas, snapToAtlasGrid } from "./Atlas.tsx";
+import type { Selection } from "../app/selection.ts";
 import {
+  ATLAS_GRID_STEP,
   atlasContentBounds,
   atlasGoalSpacingScale,
   discoveredDockPlacement,
+  workspaceAgentPoints,
   workspaceDimensions,
   workspaceLessPosition,
+  workspacePosition,
 } from "./atlasGeometry.ts";
 
 const mapProjection = (projection: Projection): UniverseMapProjection => {
@@ -27,6 +31,7 @@ const mapProjection = (projection: Projection): UniverseMapProjection => {
 };
 
 interface RenderOptions {
+  readonly selection?: Selection;
   readonly pullRequestUrls?: ReadonlyMap<string, string>;
   readonly onCloseAndArchive?: () => void;
   readonly onOpenTerminal?: () => void;
@@ -81,6 +86,10 @@ describe("production web Atlas", () => {
     expect(markup).toContain("agent__attention-wave");
     expect(markup).toContain("agent__working-aura");
     expect(markup).toMatch(/aria-label="Open [^"]+ terminal"/u);
+    expect(markup).toContain('class="agent__quick-action"');
+    expect(markup).toContain('class="agent__quick-action agent__quick-action--destructive"');
+    expect(markup).toContain('class="agent__quick-action" href="https://github.com');
+    expect(markup).toContain('<rect height="20" rx="3" width="22"');
     expect(markup).toContain("Close and archive ");
     expect(markup).toMatch(/aria-label="Review [^"]+ changes"/u);
     expect(markup).toContain(`Open ${pullRequestAgent?.displayName} pull request on GitHub`);
@@ -174,6 +183,16 @@ describe("production web Atlas", () => {
     expect(markup.indexOf('class="atlas__coordinate-grid"')).toBeLessThan(
       markup.indexOf('class="workspace-island"'),
     );
+    const scale = atlasGoalSpacingScale(projection);
+    for (const workspace of projection.workspaces) {
+      const centre = workspacePosition(workspace, scale);
+      expect(centre.x % ATLAS_GRID_STEP).toBeCloseTo(0);
+      expect(centre.y % ATLAS_GRID_STEP).toBeCloseTo(0);
+      for (const point of workspaceAgentPoints(workspace, centre)) {
+        expect(point.x % ATLAS_GRID_STEP).toBeCloseTo(0);
+        expect(point.y % ATLAS_GRID_STEP).toBeCloseTo(0);
+      }
+    }
     expect(snapToAtlasGrid({ x: 11, y: -13 })).toEqual({ x: 0, y: -24 });
     expect(snapToAtlasGrid({ x: 12, y: -12 })).toEqual({ x: 24, y: 0 });
     expect(snapToAtlasGrid({ x: 35, y: 37 })).toEqual({ x: 24, y: 48 });
@@ -181,9 +200,20 @@ describe("production web Atlas", () => {
 
   test("keeps discovered executions in a separate dock below accepted work", () => {
     const { universe, clock } = makeUniverse();
+    const accepted = {
+      nativeId: "accepted-pane",
+      displayName: "Accepted workspace Agent",
+      runtimeState: "working" as const,
+      runtimeStateSource: "test",
+      hostLocator: "test:accepted-pane",
+      observedAt: clock.now(),
+      executionContainer: { id: "accepted-workspace", label: "Accepted workspace" },
+    };
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([accepted]));
     universe.reconcile(
-      hostSnapshot(
-        ["Alpha", "A discovered execution title that cannot fit inside its card", "Charlie"].map(
+      hostSnapshot([
+        accepted,
+        ...["Alpha", "A discovered execution title that cannot fit inside its card", "Charlie"].map(
           (displayName, index) => ({
             nativeId: `pane-${index}`,
             displayName,
@@ -193,12 +223,20 @@ describe("production web Atlas", () => {
             observedAt: clock.now(),
           }),
         ),
-      ),
+      ]),
     );
     const projection = mapProjection(universe.project({ kind: "universe-map", now: clock.now() }));
     const scale = atlasGoalSpacingScale(projection);
     const placement = discoveredDockPlacement(projection, scale);
-    const markup = renderAtlas(projection);
+    const collapsedMarkup = renderAtlas(projection);
+    expect(collapsedMarkup).toContain('aria-expanded="false"');
+    expect(collapsedMarkup).not.toContain("data-discovery-handle=");
+    const markup = renderAtlas(projection, {
+      selection: {
+        type: "discovered-execution",
+        id: projection.discoveredExecutions?.[0]?.handle ?? "",
+      },
+    });
 
     expect(placement).toBeDefined();
     expect(markup).toContain('class="discovered-dock__frame"');
@@ -209,10 +247,19 @@ describe("production web Atlas", () => {
     expect(markup).toContain(
       'aria-label="A discovered execution title that cannot fit inside its card, working, discovered in test-host"',
     );
+    const occupiedBottom = Math.max(
+      ...projection.workspaces.map(
+        (workspace) => workspace.mapPosition.y * scale + workspaceDimensions(workspace).height / 2,
+      ),
+    );
+    expect(placement?.bounds.top).toBeGreaterThan(occupiedBottom);
     expect(markup.indexOf('class="discovered-dock__frame"')).toBeLessThan(
       markup.indexOf('class="discovered-execution__card"'),
     );
     expect(markup.match(/data-discovery-handle=/gu)).toHaveLength(3);
     expect(placement?.bounds.height).toBeGreaterThan(132);
+    expect(discoveredDockPlacement(projection, scale * 4)?.bounds.width).toBe(
+      placement?.bounds.width,
+    );
   });
 });

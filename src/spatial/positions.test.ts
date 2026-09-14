@@ -155,10 +155,10 @@ describe("spatial positions", () => {
     expect(points.every((point) => point !== undefined)).toBe(true);
     const xs = points.map((point) => point?.x ?? 0);
     const ys = points.map((point) => point?.y ?? 0);
-    expect(Math.min(...xs)).toBeGreaterThanOrEqual(144 - 302);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(302);
-    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(156);
-    expect(Math.min(...ys)).toBeGreaterThanOrEqual(200);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(144 - 288);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(288);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(144);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(192);
     expect(discoveredExecutionDockPositions(occupied, handles)).toEqual(positions);
   });
 

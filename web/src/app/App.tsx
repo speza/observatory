@@ -955,7 +955,8 @@ export const App = (): React.JSX.Element => {
             />
             {view === "atlas" &&
             !selectedSystemId &&
-            (data.commandCentre.discoveredExecutions?.length ?? 0) === 0 ? (
+            (data.commandCentre.discoveredExecutions?.length ?? 0) === 0 &&
+            data.commandCentre.counts.agents === 0 ? (
               <SystemsOverview
                 onCreate={() => {
                   setEditingSystem(undefined);

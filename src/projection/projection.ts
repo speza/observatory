@@ -153,7 +153,8 @@ const projectCommandCentre = (
     (agent) =>
       includeArchived ||
       hasUnresolvedExecution(agent) ||
-      (agent.archivedAt === undefined &&
+      (agent.executionPresence !== "absent" &&
+        agent.archivedAt === undefined &&
         goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived"),
   );
   const attention = evaluateAttention(now, state.goals, projectedAgents, state.hosts);
