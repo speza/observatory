@@ -1,7 +1,7 @@
 # Goal-centred agent orchestration map
 
 Status: implemented V1 product model; spatial value under active evaluation
-Updated: 2026-09-09
+Updated: 2026-09-14
 
 Related documents:
 
@@ -17,11 +17,13 @@ problem.
 
 Observatory tests one product hypothesis: a stable spatial universe organised
 around human Goals can make concurrent agent work easier to supervise than a
-flat list. Its durable geography is `System → Goal → Agent`. Atlas is the
-primary proof surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
+flat list. Its durable geography is `System → Goal → Agent`, with direct System-level
+Agents available when no outcome has been chosen. Atlas is the primary proof
+surface; Ledger, Needs you, Catch up, Inbox, inspector, workspace
 review and terminals are supporting lenses over the same trusted state. Live
-host executions without an admitted Agent appear in a separate transient
-`Discovered in Herdr` surface; they do not extend the durable hierarchy.
+host executions with recognized exact conversation identity are synchronized
+into Inbox Agents; ambiguous or unidentified executions remain in a separate
+transient `Discovered in Herdr` surface.
 
 ## Positioning
 
@@ -85,14 +87,18 @@ any other scope; it exists so that organisation never blocks starting work.
 
 A Goal is a durable human intention within a System. It owns priority,
 completion, archive, accepted map position and direct Agent assignments. Goal
-lifecycle remains human-controlled.
+lifecycle remains human-controlled. Goals are optional for Agents: exploratory,
+project-level or cross-repository work can sit directly under its System until
+an outcome is selected.
 
 ### Agent
 
 An Agent is a durable, exactly identified provider conversation. It may have a
 current host execution, a previous execution, no execution, or conflicting
 execution evidence. Process and host lifecycle never replace conversation
-identity.
+identity. An Agent may be assigned to one active Goal, assigned directly to one
+System without a Goal, or remain in Inbox; direct System placement is human
+controlled and never inferred from execution metadata.
 
 ### Supporting facts
 
@@ -104,7 +110,9 @@ search and related-work proposals but do not become map hierarchy.
 
 Observatory separates accepted semantic state from observed facts.
 
-- Humans own Systems, Goals, assignment, priority, completion and archive.
+- Humans own Systems, Goals, placement, priority, completion and archive.
+- A recognized exact host conversation may create an identity-only Inbox Agent;
+  host evidence never assigns a Goal or System or invents human semantics.
 - Providers own conversation identity and provider-native lifecycle evidence.
 - Session hosts own execution, process and terminal facts.
 - Plugins contribute bounded observations or proposals.
@@ -119,14 +127,23 @@ must not silently transfer a Goal or join two conversations.
 Stable geography should reduce the amount of work the operator reconstructs in
 memory. The layout therefore follows these rules:
 
-- Systems provide broad portfolio scope.
-- Goals are stable bodies in world space.
-- Direct Agents occupy deterministic satellite positions around their Goal.
-- Manual Goal movement pins the accepted position.
-- Adding unrelated work does not globally reflow existing geography.
-- An unpinned Goal may move locally when its own expanded footprint collides.
+- Systems provide broad portfolio scope rather than map bodies.
+- Fresh live host execution territories follow the host's workspace grouping,
+  qualified by host instance and laid out from an opaque grouping identity
+  without exposing it. For Herdr, linked Git worktree workspaces share the
+  source repository workspace's territory; plain workspaces at the same
+  checkout remain separate.
+- Agents retain their observed execution and worktree metadata; a host grouping
+  is only a projection convenience. A territory can contain multiple Goals and
+  one Goal can span multiple territories.
+- Goals remain human-authored semantic overlays on Agent cards and selections,
+  not inferred runtime containers.
+- Live or uncertain Agents without fresh workspace evidence remain visible in
+  one explicit workspace-less area. Confirmed-absent executions leave the
+  active Atlas but their durable Agent history remains searchable.
+- Adding unrelated work does not globally reflow existing workspace geography.
 - Attention changes emphasis and navigation, not durable position.
-- Repositories, runtimes and hosts never become spatial parent nodes.
+- Repositories and hosts never become spatial parent nodes.
 - Discovered executions share one labelled, compact dock placed below the
   rendered universe footprint; it never relocates accepted Goals or implies
   System membership.
@@ -140,58 +157,56 @@ appeal.
 ### Systems overview
 
 The entry view summarises broad Systems by Goal and Agent load, current work and
-Needs-you count. Entering a System reveals its Atlas or Ledger.
+Needs-you count. Entering a System reveals its Atlas or Ledger, including Agents
+that are placed directly in the System without a Goal.
 
 ### Atlas
 
-Atlas shows Goal bodies and their direct Agent satellites. It is designed for
-orientation, relationship memory and navigation rather than full text
-legibility for every card at every scale.
+Atlas shows fresh live host execution territories as its primary geography,
+with Agents in compact card grids. The projection follows host-reported
+workspace grouping across Goal boundaries, includes single-Agent territories,
+qualifies opaque grouping equality by host instance and emits only safe labels,
+public Agent views and derived positions. Tabs and panes remain host-owned
+placement details rather than map grouping levels.
+
+Each Agent card carries its Goal as a coloured semantic tag. Selecting a Goal
+highlights and fits all of its Agents across workspace territories. This keeps
+human intent visible without claiming a false Workspace-to-Goal 1:1 invariant.
+Agents whose workspace evidence is missing, stale or unavailable appear in a
+separate labelled area rather than being assigned by inference or omitted.
 
 Atlas also shows a labelled `Discovered in Herdr` dock for current
-host-reported agent executions that have no admitted Agent match. The dock is a
-single compact grid anchored below the rendered universe footprint, orbit
-cards and Goal captions included, and drawn with its own bounded frame so it
-reads as one neutral staging area rather than scattered cards. These cards are
-visibly separate from Goal or System geography and carry safe host/runtime/
-workspace metadata, freshness and conversation-identification state. Selecting
-one opens the same inspector; terminal access is available through a freshly
-validated SessionHost capability. Exact catalogue evidence enables explicit
-admission, and promotion replaces the discovery card while retaining the
-selection.
+host-reported executions that cannot be safely synchronized into an Agent. This
+includes unidentified, ambiguous and explicitly untrusted identity evidence.
+The dock starts collapsed to a compact heading and can be expanded when the
+operator wants to inspect or explicitly admit its cards. Expanded, it is a
+single compact grid anchored below the rendered universe footprint, workspace
+territories and workspace-less cards included, and drawn with its own bounded
+frame so it reads as one neutral staging area rather than scattered cards.
+These cards are visibly separate from Goal or System geography and carry safe
+host/runtime/workspace metadata, freshness and conversation-identification
+state. Selecting one opens the same inspector; terminal access is available
+through a freshly validated SessionHost capability. Exact catalogue evidence
+enables explicit admission for these exceptions, and promotion replaces the
+discovery card while retaining the selection.
 
 Geometric zoom changes camera scale. Presentation density changes labels and
 metadata while preserving positions. Selected and attention-bearing work retain
-identity at low density. Focus mode shows one complete Goal orbit when the full
-portfolio is too dense.
-
-Goal focus fits its body, caption, orbit ellipses and Agent cards within the
-viewport left after reserving the Inspector or another side panel. This is a
-geometric fit, not a guarantee that every label is readable: use individual
-Agent focus or Ledger for detailed reading. Individual Agent focus retains the
+identity at low density. Goal focus fits all matching Agent cards across their
+workspace territories within the viewport left after reserving the Inspector
+or another side panel. Individual Agent focus retains the
 1.45 zoom cap. The camera uses an absolute world origin; projection refreshes do
 not refit the overview. Active focus adapts to viewport and panel changes until
 the operator manually pans or zooms. Terminal entry, switching and return retain
 background panel context rather than reframing the map; explicit System changes
 start a new fitted view.
 
-The full spatial-memory hypothesis is not yet met. Renderer peer redistribution
-and portfolio-dependent spacing still permit reflow, and sorted-ID collision
-probing in projected satellite slots can change ownership after membership edits.
-A fixed-scale canonical-band alternative was not integrated because it materially
-reduced overview and focused-Goal readability. A compact, legible placement policy
-needs separate design work; no browser slot cache or schema change substitutes for
-that decision.
-
-Pending approval: strict membership- and reload-stable satellites would require
-Universe-owned `{goalId, agentId, slot}` reservations, unique per identity and per
-Goal slot, persisted atomically with assignment. Reservations would survive
-archive, unassignment and reassignment, restoring the previous slot on return,
-without automatic reuse or compaction. Initial allocation would be deterministic;
-footprints would use the highest active reserved slot band, including expansion
-beyond the current slot table. This needs an explicit migration decision and
-restart, rollback, assignment and arbitrary-membership regression coverage. It is
-not implemented.
+Workspace positions are currently deterministic projections of qualified live
+container identity, not durable accepted coordinates. Membership changes resize
+an island and can alter portfolio fit without changing its anchor. Persisted,
+operator-arranged workspace geography would require a safe durable Observatory
+identity for a host container and an explicit lifecycle policy; it is not
+inferred from labels or added in this version.
 
 ### Ledger
 
@@ -222,12 +237,14 @@ Older or repeated acknowledgements cannot regress either durable checkpoint.
 
 ### Inbox and Conversation history
 
-Inbox contains accepted Agents that do not yet have a Goal. Conversation history
-is a supporting catalogue of provider conversations that are not active
-Observatory Agents. Catalogue and host observations never admit Agents;
-Conversation history requires an explicit add action regardless of recency or
-liveness. Discovered executions have their own global count and section; they
-are not included in Inbox's Agent count and are not hidden behind History.
+Inbox contains accepted Agents that do not yet have a Goal. A recognized exact
+Herdr execution is synchronized into Inbox automatically; provider catalogue
+entries with no current host evidence remain Conversation history until an
+operator adds them. Ambiguous or unidentified host executions remain in the
+separate discovery surface. Confirmed-absent Agents leave the active Inbox and
+Atlas projections without being deleted or archived. Discovered executions
+have their own global count and section; they are not included in Inbox's Agent
+count and are not hidden behind History.
 
 ### Inspector and review
 
@@ -278,15 +295,17 @@ Agents.
 1. Choose Goal, workspace and supported harness.
 2. Start a new provider conversation or resume one exact dormant conversation.
 3. Show launch as pending until exact provider identity exists.
-4. Admit and assign the resulting Agent without creating a host-only phantom.
+4. Bind the resulting Agent and apply its requested human assignment without
+   creating a host-only phantom.
 
 ### Observe external work
 
 1. Start a supported agent directly in Herdr.
-2. Let the normal host refresh place it in `Discovered in Herdr`.
+2. Let the normal host refresh synchronize recognized exact identity into an
+   Inbox Agent.
 3. Inspect safe runtime and workspace evidence or open its validated terminal.
-4. Admit it only when exact catalogue identity is available, optionally
-   assigning it to an existing Goal.
+4. Leave ambiguous or unidentified executions in `Discovered in Herdr`, and
+   explicitly admit them only after exact catalogue evidence becomes available.
 
 ### Review and close
 
@@ -294,6 +313,8 @@ Agents.
 2. Inspect provider claims, repository state, diff and checks.
 3. Decide whether to continue, accept, close or archive.
 4. Revalidate and close the exact host execution before archiving a live Agent.
+   Closing it directly in Herdr is reflected after confirmed host absence; a
+   second close action is not required.
 
 Goal archive does not stop execution. Archived Goals remain visible as context
 containers while they have unresolved executions: live, conflicting, or unknown
@@ -322,6 +343,17 @@ Every visual property needs a supervisory meaning.
 - Delight must improve orientation or judgment rather than decorate activity.
 
 ## Success criteria
+
+Atlas geography is workspace-first. Each fresh live host execution territory
+is a labelled island containing a compact Agent grid, including territories
+with only one Agent. Host-specific workspace grouping may combine linked
+worktree workspaces into one island while preserving their execution bindings
+and worktree facts. Goals are semantic overlays shown on Agent cards and used
+to spotlight matching Agents across any number of islands; they are not spatial
+bodies. Live or uncertain Agents without fresh context evidence remain visible
+in a separately labelled workspace-less area, and discovered executions remain
+a separate dock. Confirmed-absent execution records remain in durable history
+but are omitted from the active map. Systems only filter this geography.
 
 The spatial product is useful when operators can:
 

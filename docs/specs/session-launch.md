@@ -14,7 +14,7 @@ Depends on:
 
 Observatory accepts one structured start or exact-resume intent and owns the
 coordination across workspace preparation, provider planning, host placement,
-identity reconciliation and Goal assignment.
+identity reconciliation and optional Goal or direct System assignment.
 
 ```text
 Browser launch intent
@@ -39,7 +39,7 @@ A start intent contains:
 - selected harness;
 - existing checkout or requested worktree;
 - optional display name;
-- target existing Goal, new Goal or Inbox; and
+- target existing Goal, new Goal, direct System or Inbox; and
 - the explicit prompt supplied for a new conversation.
 
 An exact-resume intent contains the request ID, Agent identity and selected
@@ -73,7 +73,7 @@ recover an accepted host launch without launching it again.
 ## Start flow
 
 1. Validate the request ID and atomically reserve its launch receipt.
-2. Validate harness availability and the Goal intent without creating a Goal.
+2. Validate harness availability and the Goal/System placement intent without creating a Goal.
 3. Validate or prepare the workspace.
 4. Ask the selected harness for a structured new-conversation process plan.
 5. Observe host availability and only then materialise a requested new Goal.
@@ -81,7 +81,7 @@ recover an accepted host launch without launching it again.
 7. Persist the execution reference immediately when the host accepts placement.
 8. Poll canonical host/provider observations for exact conversation identity.
 9. Create or resolve the Agent through Universe observation.
-10. Assign it to the requested Goal, or retain it in Inbox.
+10. Assign it to the requested Goal or direct System, or retain it in Inbox.
 11. Mark the receipt complete and return the refreshed projection.
 
 A failure before process placement is saved as a failed receipt and returned as
@@ -105,7 +105,7 @@ and the harness supports exact resume in the current continuity scope.
 3. Ask the harness for a structured exact-resume plan.
 4. Launch one new host execution.
 5. Reconcile the exact conversation back into the existing Agent.
-6. Preserve Goal, human metadata and Agent ID while replacing execution binding.
+6. Preserve Goal/System placement, human metadata and Agent ID while replacing execution binding.
 
 Unknown, conflicting, unsupported or remotely non-portable continuity never
 becomes an optimistic resume button.

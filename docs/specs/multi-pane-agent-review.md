@@ -617,7 +617,7 @@ Renderer-local review state includes:
 - Terminal width; and
 - filename search query.
 
-Agent identity, Goal assignment, repository evidence and review snapshots do not
+Agent identity, Goal/System placement, repository evidence and review snapshots do not
 become renderer-authored state. Browser preferences may retain presentation
 settings, but a refresh or invalid handle always yields to the server's current
 trusted snapshot.

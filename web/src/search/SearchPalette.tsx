@@ -28,7 +28,10 @@ export const searchResultAction = (
   if (result.type === "goal")
     return projection.goals.some((goal) => goal.id === result.id) ? "focus" : "inspect";
   if (result.type === "discovered-execution") return "inspect";
-  if (projection.goals.some((goal) => goal.agents.some((agent) => agent.id === result.id)))
+  if (
+    projection.goals.some((goal) => goal.agents.some((agent) => agent.id === result.id)) ||
+    result.systemId !== undefined
+  )
     return "focus";
   return projection.unassigned.some((agent) => agent.id === result.id) ? "inbox" : "inspect";
 };

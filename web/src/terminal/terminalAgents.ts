@@ -32,7 +32,13 @@ export const filterTerminalAgents = (
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return agents;
   return agents.filter((agent) =>
-    [agent.displayName, agent.goalTitle, agent.lifecycleState, agent.execution?.hostKind]
+    [
+      agent.displayName,
+      agent.goalTitle,
+      agent.systemTitle,
+      agent.lifecycleState,
+      agent.execution?.hostKind,
+    ]
       .filter(Boolean)
       .some((value) => value!.toLocaleLowerCase().includes(normalized)),
   );

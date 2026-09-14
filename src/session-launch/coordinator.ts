@@ -7,7 +7,7 @@ import type {
   HarnessObservationEvidence,
   OpaqueNativeConversationRef,
 } from "../plugin-sdk/index.ts";
-import type { Agent, GoalId } from "../universe/types.ts";
+import type { Agent, GoalId, SystemId } from "../universe/types.ts";
 import type { ReconciliationResult } from "../universe/universe.ts";
 import { isPlausibleUnidentifiedExecution } from "../universe/execution-ambiguity.ts";
 import type { WorkspaceError } from "../workspaces/types.ts";
@@ -88,6 +88,11 @@ const fingerprint = (
   intent: StartAgentIntent | ResumeAgentIntent,
 ): string => createHash("sha256").update(JSON.stringify({ kind, intent })).digest("hex");
 
+interface ResolvedPlacement {
+  readonly goalId?: GoalId;
+  readonly systemId?: SystemId;
+}
+
 export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
   private readonly receipts: LaunchReceiptStore;
   private readonly resumesInFlight = new Set<string>();
@@ -108,7 +113,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       const harnessId = intent.harness.id.trim();
       const harness = yield* this.requireHarness(harnessId);
       yield* this.requireAvailable(harness);
-      yield* this.validateGoal(intent);
+      yield* this.validatePlacement(intent);
       const requestedAgentName = agentName(intent);
       const prepared = yield* this.options.workspace
         .prepare(intent.workspace)
@@ -121,7 +126,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         })
         .pipe(Effect.mapError(mapError("harness.plan-start")));
       const before = yield* this.observeHost();
-      const goalId = yield* this.resolveGoal(intent);
+      const placement = yield* this.resolvePlacement(intent);
+      const { goalId, systemId } = placement;
       launchAttempted = true;
       const launched = yield* this.options.host
         .launchExecution({
@@ -137,6 +143,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             status: "failed",
             requestId,
             goalId,
+            systemId,
             workspace: prepared,
             warnings: prepared.warnings,
             message: launched.message,
@@ -154,6 +161,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             displayName: requestedAgentName,
             nativeConversationRef: plan.nativeConversationRef,
             goalId,
+            systemId,
           } satisfies LaunchRecovery)
         : undefined;
       yield* this.remember(
@@ -161,6 +169,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           status: "pending",
           requestId,
           goalId,
+          systemId,
           workspace: prepared,
           warnings: prepared.warnings,
           message: `${launched.message} Waiting for continuity evidence.`,
@@ -195,17 +204,19 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
       if (agent) {
         if (requestedAgentName) yield* this.rename(agent, requestedAgentName);
         if (goalId) yield* this.assign(agent, goalId);
+        else if (systemId) yield* this.assignSystem(agent, systemId);
       }
       return yield* this.remember(
         {
           status: agent ? "started" : "pending",
           requestId,
           goalId,
+          systemId,
           agentId: agent?.id,
           workspace: prepared,
           warnings: prepared.warnings,
           message: agent
-            ? `Started ${harness.describe().label}${goalId ? " and assigned it to the goal" : ""}.`
+            ? `Started ${harness.describe().label}${goalId ? " and assigned it to the Goal" : systemId ? " and assigned it to the System" : ""}.`
             : `${launched.message} Identity remains ${continuity.kind}.`,
         },
         intentFingerprint,
@@ -354,6 +365,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               hostInstanceId: before.hostInstanceId,
               nativeConversationRef: saved.nativeConversationRef,
               goalId: saved.primaryGoalId,
+              systemId: saved.systemId,
               agentId: saved.id,
             } satisfies LaunchRecovery)
           : undefined;
@@ -362,6 +374,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             status: "pending",
             requestId,
             goalId: saved.primaryGoalId,
+            systemId: saved.systemId,
             message: `${launched.message} Waiting for exact continuity evidence.`,
           },
           intentFingerprint,
@@ -384,6 +397,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
               status: "started",
               requestId,
               goalId: saved.primaryGoalId,
+              systemId: saved.systemId,
               agentId: saved.id,
               message: `Resumed ${saved.displayName}.`,
             },
@@ -411,6 +425,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
             status: rebound?.id === saved.id ? "started" : "pending",
             requestId,
             goalId: saved.primaryGoalId,
+            systemId: saved.systemId,
             agentId: rebound?.id === saved.id ? saved.id : undefined,
             message:
               rebound?.id === saved.id
@@ -448,6 +463,7 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         hostInstanceId: receipt.recovery.hostInstanceId,
         displayName: receipt.recovery.displayName?.trim() || `${receipt.recovery.harnessId} agent`,
         goalId: receipt.recovery.goalId,
+        systemId: receipt.recovery.systemId,
         message: receipt.result.message,
       }));
   }
@@ -604,6 +620,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           yield* this.rename(reconciledAgent, recovery.displayName);
         if (recovery.kind === "start" && recovery.goalId)
           yield* this.assign(reconciledAgent, recovery.goalId);
+        else if (recovery.kind === "start" && recovery.systemId)
+          yield* this.assignSystem(reconciledAgent, recovery.systemId);
         return yield* this.remember(
           {
             ...receipt.result,
@@ -643,6 +661,8 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
           yield* this.rename(agent, recovery.displayName);
         if (recovery.kind === "start" && recovery.goalId)
           yield* this.assign(agent, recovery.goalId);
+        else if (recovery.kind === "start" && recovery.systemId)
+          yield* this.assignSystem(agent, recovery.systemId);
         return yield* this.remember(
           {
             ...receipt.result,
@@ -802,6 +822,22 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
         );
   }
 
+  private assignSystem(agent: Agent, systemId: SystemId): Effect.Effect<void, LaunchError> {
+    const assigned = this.options.universe.execute({
+      type: "AssignAgentToSystem",
+      agentId: agent.id,
+      systemId,
+    });
+    return assigned.ok
+      ? Effect.void
+      : Effect.fail(
+          launchError(
+            "launch.assign-system",
+            assigned.error ?? "The launched Agent could not be assigned to the System.",
+          ),
+        );
+  }
+
   private rename(agent: Agent, displayName: string): Effect.Effect<void, LaunchError> {
     const renamed = this.options.universe.execute({
       type: "RenameAgent",
@@ -830,39 +866,50 @@ export class DefaultStartAgentCoordinator implements StartAgentCoordinator {
     ).pipe(Effect.flatMap(() => Effect.fail(error)));
   }
 
-  private validateGoal(intent: StartAgentIntent): Effect.Effect<void, LaunchError> {
-    const goalIntent = intent.goal;
-    if (goalIntent.kind === "inbox") return Effect.void;
-    if (goalIntent.kind === "new-goal")
-      return goalIntent.title.trim()
+  private validatePlacement(intent: StartAgentIntent): Effect.Effect<void, LaunchError> {
+    const placement = intent.goal;
+    const state = this.options.universe.snapshot();
+    if (placement.kind === "inbox") return Effect.void;
+    if (placement.kind === "system")
+      return state.systems.some((system) => system.id === placement.systemId)
         ? Effect.void
-        : Effect.fail(launchError("launch.goal", "A new Goal title is required."));
-    const goal = this.options.universe
-      .snapshot()
-      .goals.find((candidate) => candidate.id === goalIntent.goalId);
+        : Effect.fail(launchError("launch.system", "The selected System does not exist."));
+    if (placement.kind === "new-goal") {
+      if (!placement.title.trim())
+        return Effect.fail(launchError("launch.goal", "A new Goal title is required."));
+      return placement.systemId === undefined ||
+        state.systems.some((system) => system.id === placement.systemId)
+        ? Effect.void
+        : Effect.fail(launchError("launch.system", "The selected System does not exist."));
+    }
+    const goal = state.goals.find((candidate) => candidate.id === placement.goalId);
     return goal?.status === "active"
       ? Effect.void
       : Effect.fail(launchError("launch.goal", "The selected goal is not active."));
   }
 
-  private resolveGoal(intent: StartAgentIntent): Effect.Effect<GoalId | undefined, LaunchError> {
-    const goalIntent = intent.goal;
-    if (goalIntent.kind === "inbox") return Effect.succeed(undefined);
-    if (goalIntent.kind === "goal") {
+  private resolvePlacement(
+    intent: StartAgentIntent,
+  ): Effect.Effect<ResolvedPlacement, LaunchError> {
+    const placement = intent.goal;
+    if (placement.kind === "inbox") return Effect.succeed({});
+    if (placement.kind === "system") return Effect.succeed({ systemId: placement.systemId });
+    if (placement.kind === "goal") {
       const goal = this.options.universe
         .snapshot()
-        .goals.find((candidate) => candidate.id === goalIntent.goalId);
+        .goals.find((candidate) => candidate.id === placement.goalId);
       if (!goal || goal.status !== "active")
         return Effect.fail(launchError("launch.goal", "The selected goal is not active."));
-      return Effect.succeed(goal.id);
+      return Effect.succeed({ goalId: goal.id, systemId: goal.systemId });
     }
     const result = this.options.universe.execute({
       type: "CreateGoal",
-      title: goalIntent.title,
-      description: goalIntent.description,
+      title: placement.title,
+      description: placement.description,
+      systemId: placement.systemId,
     });
     return result.ok && result.goalId
-      ? Effect.succeed(result.goalId)
+      ? Effect.succeed({ goalId: result.goalId, systemId: result.systemId })
       : Effect.fail(
           launchError("launch.goal", result.error ?? "The new goal could not be created."),
         );

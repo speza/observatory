@@ -75,6 +75,7 @@ export interface AgentView extends Omit<
 > {
   readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind">;
   readonly goalTitle?: string;
+  readonly systemTitle?: string;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;
@@ -125,6 +126,8 @@ export interface GoalView extends Goal {
 }
 
 export interface SystemView extends System {
+  /** Agents placed directly in this System without a Goal. */
+  readonly agents: readonly AgentView[];
   readonly goals: readonly GoalView[];
   readonly agentCount: number;
   readonly workingCount: number;
@@ -202,6 +205,16 @@ export interface MapAgentView extends AgentView {
   readonly mapPosition: MapPosition;
 }
 
+/** A map-only, host-neutral view of one fresh live execution context. */
+export interface MapWorkspaceView {
+  readonly label: string;
+  readonly mapPosition: MapPosition;
+  readonly agents: readonly MapAgentView[];
+  readonly goalIds: readonly string[];
+  readonly attentionCount: number;
+  readonly uncertaintyCount: number;
+}
+
 export interface MapGoalView extends GoalView {
   readonly mapPosition: MapPosition;
   readonly radiusX: number;
@@ -214,6 +227,10 @@ export interface UniverseMapProjection {
   readonly generatedAt: number;
   readonly host: HostHealth | undefined;
   readonly attention: AttentionProjection;
+  /** Fresh live execution contexts. Their opaque grouping identities never leave the server. */
+  readonly workspaces: readonly MapWorkspaceView[];
+  /** Agents for which fresh execution-context membership cannot be established. */
+  readonly workspaceLess: readonly MapAgentView[];
   readonly goals: readonly MapGoalView[];
   readonly unassigned: readonly MapAgentView[];
   readonly discoveredExecutions?: readonly MapDiscoveredExecutionView[];
@@ -309,6 +326,7 @@ export interface SearchResult {
   readonly context: string;
   readonly status: string;
   readonly goalId?: string;
+  readonly systemId?: string;
 }
 
 export interface SearchProjection {

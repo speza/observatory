@@ -52,6 +52,12 @@ export type WebCommand =
   | { readonly type: "AssignGoalToSystem"; readonly goalId: string; readonly systemId?: string }
   | { readonly type: "AssignAgent"; readonly agentId: string; readonly goalId: string }
   | { readonly type: "AssignAgents"; readonly agentIds: readonly string[]; readonly goalId: string }
+  | { readonly type: "AssignAgentToSystem"; readonly agentId: string; readonly systemId: string }
+  | {
+      readonly type: "AssignAgentsToSystem";
+      readonly agentIds: readonly string[];
+      readonly systemId: string;
+    }
   | { readonly type: "UnassignAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgent"; readonly agentId: string }
   | { readonly type: "ArchiveAgents"; readonly agentIds: readonly string[] }
@@ -89,8 +95,14 @@ export interface WebLaunchGoal {
   readonly priority: Priority;
 }
 
+export interface WebLaunchSystem {
+  readonly id: string;
+  readonly title: string;
+}
+
 export interface WebLaunchOptionsResponse {
   readonly kind: "launch-options";
+  readonly systems: readonly WebLaunchSystem[];
   readonly goals: readonly WebLaunchGoal[];
   readonly locations: readonly WorkspaceChoice[];
   readonly agents: readonly AgentHarnessDescriptor[];
@@ -103,6 +115,7 @@ export interface WebWorkspaceBrowserResponse extends WorkspaceBrowser {
 export interface WebStartAgentRequest {
   readonly requestId: string;
   readonly goalId?: string;
+  readonly systemId?: string;
   readonly workspace: WorkspaceSelection;
   readonly harnessId: string;
   readonly agentName?: string;
@@ -120,6 +133,7 @@ export interface WebPendingLaunch {
   readonly harnessId: string;
   readonly displayName: string;
   readonly goalId?: string;
+  readonly systemId?: string;
   readonly message: string;
 }
 
@@ -197,12 +211,14 @@ export interface WebConversationHistoryResponse {
 export interface WebAddConversationResponse {
   readonly agentId: string;
   readonly goalId?: string;
+  readonly systemId?: string;
   readonly portfolio: WebPortfolioResponse;
 }
 
 export interface WebAdmitDiscoveredExecutionResponse {
   readonly agentId: string;
   readonly goalId?: string;
+  readonly systemId?: string;
   readonly message: string;
   readonly partial?: boolean;
   readonly portfolio: WebPortfolioResponse;

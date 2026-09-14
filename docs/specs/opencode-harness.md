@@ -124,8 +124,8 @@ another installation. An unscoped host observation can be enriched only when
 the unscoped id has one unique scoped catalogue match.
 
 `projectId` and `directory` are catalogue metadata only. They are not stable
-Observatory identity and must not be used for scope, Goal assignment or map
-topology.
+Observatory identity and must not be used for scope, Goal/System assignment or
+map topology.
 
 ## Harness contract
 

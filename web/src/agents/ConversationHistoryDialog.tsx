@@ -15,6 +15,7 @@ interface ConversationHistoryDialogProps {
   readonly onAdd: (
     handle: string,
     goalId?: string,
+    systemId?: string,
     resume?: boolean,
   ) => Promise<{ readonly agentId: string } | undefined>;
   readonly onAdded: (agentId: string) => void;
@@ -61,6 +62,7 @@ export const ConversationHistoryDialog = ({
   const [workspace, setWorkspace] = useState("all");
   const [state, setState] = useState<ConversationFilter>("all");
   const [goalId, setGoalId] = useState("");
+  const [systemId, setSystemId] = useState("");
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [notice, setNotice] = useState<string>();
   const systemTitles = useMemo(
@@ -107,29 +109,37 @@ export const ConversationHistoryDialog = ({
   const performAdd = async (
     conversation: ConversationHistoryView,
     selectedGoalId?: string,
+    selectedSystemId?: string,
     resume = false,
     revealInAtlas = true,
   ): Promise<boolean> => {
-    const result = await onAdd(conversation.handle, selectedGoalId, resume);
+    const result = await onAdd(conversation.handle, selectedGoalId, selectedSystemId, resume);
     if (!result) return false;
     setSelected((current) => current.filter((handle) => handle !== conversation.handle));
     setNotice(
       resume
-        ? `${conversation.title} added to its Goal and resumed.`
+        ? `${conversation.title} added to its ${selectedGoalId ? "Goal" : "System"} and resumed.`
         : selectedGoalId
           ? `${conversation.title} added to its Goal.`
-          : `${conversation.title} added without a Goal. Find it in Inbox.`,
+          : selectedSystemId
+            ? `${conversation.title} added to its System.`
+            : `${conversation.title} added without a Goal or System. Find it in Inbox.`,
     );
-    if (selectedGoalId && revealInAtlas) onAdded(result.agentId);
+    if ((selectedGoalId || selectedSystemId) && revealInAtlas) onAdded(result.agentId);
     return true;
   };
 
-  const performBulkAdd = async (selectedGoalId?: string): Promise<void> => {
+  const performBulkAdd = async (
+    selectedGoalId?: string,
+    selectedSystemId?: string,
+  ): Promise<void> => {
     const chosen = conversations.filter((conversation) => selected.includes(conversation.handle));
     const added = await chosen.reduce(
       (result, conversation) =>
         result.then(async (count) =>
-          (await performAdd(conversation, selectedGoalId, false, false)) ? count + 1 : count,
+          (await performAdd(conversation, selectedGoalId, selectedSystemId, false, false))
+            ? count + 1
+            : count,
         ),
       Promise.resolve(0),
     );
@@ -137,7 +147,9 @@ export const ConversationHistoryDialog = ({
       setNotice(
         selectedGoalId
           ? `${added} conversation${added === 1 ? "" : "s"} added to the selected Goal.`
-          : `${added} conversation${added === 1 ? "" : "s"} added without a Goal. Find ${added === 1 ? "it" : "them"} in Inbox.`,
+          : selectedSystemId
+            ? `${added} conversation${added === 1 ? "" : "s"} added to the selected System.`
+            : `${added} conversation${added === 1 ? "" : "s"} added without a Goal or System. Find ${added === 1 ? "it" : "them"} in Inbox.`,
       );
   };
 
@@ -287,17 +299,35 @@ export const ConversationHistoryDialog = ({
                       Add to goal
                     </button>
                     <button
+                      disabled={pending || !systemId}
+                      onClick={() => void performAdd(conversation, undefined, systemId)}
+                      type="button"
+                    >
+                      Add to System
+                    </button>
+                    <button
                       disabled={pending}
                       onClick={() => void performAdd(conversation)}
-                      title="Add without a Goal. The Agent will appear in Inbox."
+                      title="Add without a Goal or System. The Agent will appear in Inbox."
                       type="button"
                     >
                       Add unassigned
                     </button>
                     <button
-                      disabled={pending || !canResume || !goalId}
-                      onClick={() => void performAdd(conversation, goalId, true)}
-                      title={!goalId ? "Choose a destination Goal before resuming." : undefined}
+                      disabled={pending || !canResume || (!goalId && !systemId)}
+                      onClick={() =>
+                        void performAdd(
+                          conversation,
+                          goalId || undefined,
+                          systemId || undefined,
+                          true,
+                        )
+                      }
+                      title={
+                        !goalId && !systemId
+                          ? "Choose a destination Goal or System before resuming."
+                          : undefined
+                      }
                       type="button"
                     >
                       Add & resume
@@ -313,7 +343,13 @@ export const ConversationHistoryDialog = ({
         <footer>
           <label>
             <span>Destination Goal</span>
-            <select onChange={(event) => setGoalId(event.target.value)} value={goalId}>
+            <select
+              onChange={(event) => {
+                setGoalId(event.target.value);
+                if (event.target.value) setSystemId("");
+              }}
+              value={goalId}
+            >
               <option value="">Choose a Goal</option>
               {goals
                 .filter((goal) => goal.status === "active")
@@ -324,20 +360,37 @@ export const ConversationHistoryDialog = ({
                 ))}
             </select>
           </label>
+          <label>
+            <span>Destination System</span>
+            <select
+              onChange={(event) => {
+                setSystemId(event.target.value);
+                if (event.target.value) setGoalId("");
+              }}
+              value={systemId}
+            >
+              <option value="">Choose a System</option>
+              {systems.map((system) => (
+                <option key={system.id} value={system.id}>
+                  {system.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             disabled={pending || selected.length === 0}
             onClick={() => void performBulkAdd()}
-            title="Add without a Goal. The Agents will appear in Inbox."
+            title="Add without a Goal or System. The Agents will appear in Inbox."
             type="button"
           >
             Add unassigned
           </button>
           <button
-            disabled={pending || selected.length === 0 || !goalId}
-            onClick={() => void performBulkAdd(goalId)}
+            disabled={pending || selected.length === 0 || (!goalId && !systemId)}
+            onClick={() => void performBulkAdd(goalId || undefined, systemId || undefined)}
             type="button"
           >
-            Add selected to goal
+            {goalId ? "Add selected to goal" : "Add selected to System"}
           </button>
         </footer>
       </section>

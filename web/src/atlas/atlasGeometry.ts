@@ -1,7 +1,6 @@
 import type {
   MapAgentView,
-  MapGoalView,
-  MapDiscoveredExecutionView,
+  MapWorkspaceView,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
 import type { Selection } from "../app/selection.ts";
@@ -13,23 +12,24 @@ export type AtlasCameraCommand =
   | { readonly type: "reset"; readonly nonce: number }
   | { readonly type: "pan"; readonly dx: number; readonly dy: number; readonly nonce: number };
 
-export interface OrbitPlacement {
-  readonly band: number;
-  readonly phase: number;
-  readonly radiusX: number;
-  readonly radiusY: number;
-  readonly x: number;
-  readonly y: number;
-}
-
 export const AGENT_CARD_WIDTH = 220;
 export const AGENT_CARD_HEIGHT = 104;
 export const DISCOVERED_CARD_WIDTH = 278;
 export const DISCOVERED_CARD_HEIGHT = 132;
-const AGENT_CARD_GAP = 14;
-const AGENT_CARD_COLUMN_GAP = 18;
-const AGENT_CARD_ROW_GAP = 10;
-const CAPTION_CLEARANCE = 0.72;
+export const WORKSPACE_GAP = 18;
+export const WORKSPACE_HEADER = 40;
+export const ATLAS_GRID_STEP = 24;
+
+const snapCoordinateToGrid = (value: number, step = ATLAS_GRID_STEP): number =>
+  Math.round(value / step) * step || 0;
+
+export const snapToAtlasGrid = (position: { readonly x: number; readonly y: number }) => ({
+  x: snapCoordinateToGrid(position.x),
+  y: snapCoordinateToGrid(position.y),
+});
+
+const snapAtOrAboveGrid = (value: number, step = ATLAS_GRID_STEP): number =>
+  Math.ceil(value / step) * step || 0;
 
 export const hash = (value: string): number => {
   let result = 2166136261;
@@ -40,206 +40,15 @@ export const hash = (value: string): number => {
   return result >>> 0;
 };
 
-const wrappedLines = (
-  title: string,
-  maximumCharacters: number,
-  maximumLines: number,
-): readonly string[] => {
-  const lines: string[] = [];
-  for (const word of title.split(/\s+/u)) {
-    const line = lines.at(-1);
-    if (!line || line.length + word.length + 1 > maximumCharacters) lines.push(word);
-    else lines[lines.length - 1] = `${line} ${word}`;
-  }
-  return lines.slice(0, maximumLines);
-};
-
-export const linesFor = (title: string): readonly string[] => wrappedLines(title, 16, 3);
-
-/** Clamp one rendered line to its card width without breaking SVG bounds. */
-export const truncateAtlasLine = (value: string, maximumCharacters: number): string => {
-  const normalized = value.trim();
-  if (normalized.length <= maximumCharacters) return normalized;
-  return `${normalized.slice(0, maximumCharacters - 1).trimEnd()}…`;
-};
+export const truncateAtlasLine = (value: string, maximum: number): string =>
+  value.trim().length <= maximum
+    ? value.trim()
+    : `${value
+        .trim()
+        .slice(0, maximum - 1)
+        .trimEnd()}…`;
 export const stateLabel = (agent: MapAgentView): string =>
   agent.hostHealth === "live" ? agent.runtimeState : agent.hostHealth;
-
-const sameSelection = (left: Selection | undefined, right: Selection | undefined): boolean =>
-  left?.type === right?.type && left?.id === right?.id;
-
-export const selectionBelongsToFocus = (
-  focus: Selection | undefined,
-  next: Selection | undefined,
-  projection: UniverseMapProjection,
-): boolean => {
-  if (!focus || !next) return false;
-  if (sameSelection(focus, next))
-    return (
-      next.type !== "discovered-execution" ||
-      (projection.discoveredExecutions ?? []).some((execution) => execution.handle === next.id)
-    );
-  if (focus.type !== "goal" || next.type !== "agent") return false;
-  return projection.goals.some(
-    (goal) => goal.id === focus.id && goal.agents.some((agent) => agent.id === next.id),
-  );
-};
-
-export const goalRadius = (goal: MapGoalView): number =>
-  Math.min(82, 52 + Math.sqrt(goal.agents.length) * 8);
-
-const orbitPlacement = ({
-  id,
-  point,
-  anchor,
-  centre,
-  radiusX,
-  radiusY,
-  ringUnitX,
-  ringUnitY,
-  bandStepX,
-  bandStepY,
-}: {
-  readonly id: string;
-  readonly point: { readonly x: number; readonly y: number };
-  readonly anchor: { readonly x: number; readonly y: number };
-  readonly centre: { readonly x: number; readonly y: number };
-  readonly radiusX: number;
-  readonly radiusY: number;
-  readonly ringUnitX: number;
-  readonly ringUnitY: number;
-  readonly bandStepX: number;
-  readonly bandStepY: number;
-}): OrbitPlacement => {
-  const deltaX = point.x - anchor.x;
-  const deltaY = point.y - anchor.y;
-  const logicalRing = Math.max(Math.abs(deltaX) / ringUnitX, Math.abs(deltaY) / ringUnitY);
-  const band = Math.max(0, Math.round(logicalRing) - 1);
-  const phase =
-    Math.abs(deltaX) + Math.abs(deltaY) < 0.01
-      ? ((hash(id) % 360) * Math.PI) / 180
-      : Math.atan2(deltaY / ringUnitY, deltaX / ringUnitX);
-  const finalRadiusX = radiusX + band * bandStepX;
-  const finalRadiusY = radiusY + band * bandStepY;
-  return {
-    band,
-    phase,
-    radiusX: finalRadiusX,
-    radiusY: finalRadiusY,
-    x: centre.x + Math.cos(phase) * finalRadiusX,
-    y: centre.y + Math.sin(phase) * finalRadiusY,
-  };
-};
-
-const distributeAgentCards = (
-  placements: readonly OrbitPlacement[],
-  goalBodyRadius: number,
-): readonly OrbitPlacement[] => {
-  const result: Array<OrbitPlacement | undefined> = Array.from({ length: placements.length });
-  const bands = [...new Set(placements.map((placement) => placement.band))].sort(
-    (left, right) => left - right,
-  );
-  const minimumRadius =
-    goalBodyRadius + Math.hypot(AGENT_CARD_WIDTH / 2, AGENT_CARD_HEIGHT / 2) + AGENT_CARD_GAP;
-  const availableArc = Math.PI * 2 - CAPTION_CLEARANCE * 2;
-  let previousRadiusX = minimumRadius - AGENT_CARD_WIDTH - AGENT_CARD_COLUMN_GAP;
-  let previousRadiusY = minimumRadius - AGENT_CARD_HEIGHT - AGENT_CARD_ROW_GAP;
-  for (const band of bands) {
-    const peers = placements
-      .map((placement, index) => ({ index, placement }))
-      .filter((entry) => entry.placement.band === band)
-      .sort(
-        (left, right) => left.placement.phase - right.placement.phase || left.index - right.index,
-      );
-    const phaseStep = availableArc / peers.length;
-    const separation = Math.sin(Math.min(phaseStep, Math.PI / 2));
-    let radiusX = Math.max(
-      minimumRadius,
-      (AGENT_CARD_WIDTH + AGENT_CARD_GAP) / separation,
-      previousRadiusX + AGENT_CARD_WIDTH + AGENT_CARD_COLUMN_GAP,
-    );
-    let radiusY = Math.max(
-      minimumRadius,
-      (AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP) / separation,
-      previousRadiusY + AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP,
-    );
-    const firstPeer = peers[0];
-    if (!firstPeer) continue;
-    const centreX =
-      firstPeer.placement.x - Math.cos(firstPeer.placement.phase) * firstPeer.placement.radiusX;
-    const centreY =
-      firstPeer.placement.y - Math.sin(firstPeer.placement.phase) * firstPeer.placement.radiusY;
-    const phases = peers.map(
-      (_, rank) => Math.PI / 2 + CAPTION_CLEARANCE + (rank + 0.5) * phaseStep,
-    );
-    const overlapsAnotherCard = (): boolean => {
-      const points = phases.map((phase) => ({
-        x: centreX + Math.cos(phase) * radiusX,
-        y: centreY + Math.sin(phase) * radiusY,
-      }));
-      const earlierPoints = result.flatMap((placement) => (placement ? [placement] : []));
-      const allPoints = [...earlierPoints, ...points];
-      for (let leftIndex = 0; leftIndex < allPoints.length; leftIndex += 1) {
-        const left = allPoints[leftIndex];
-        if (!left) continue;
-        for (
-          let rightIndex = Math.max(leftIndex + 1, earlierPoints.length);
-          rightIndex < allPoints.length;
-          rightIndex += 1
-        ) {
-          const right = allPoints[rightIndex];
-          if (
-            right &&
-            Math.abs(left.x - right.x) < AGENT_CARD_WIDTH + AGENT_CARD_GAP &&
-            Math.abs(left.y - right.y) < AGENT_CARD_HEIGHT + AGENT_CARD_ROW_GAP
-          )
-            return true;
-        }
-      }
-      return false;
-    };
-    while (overlapsAnotherCard()) {
-      radiusX *= 1.08;
-      radiusY *= 1.08;
-    }
-    for (const [rank, peer] of peers.entries()) {
-      const phase = phases[rank] ?? peer.placement.phase;
-      result[peer.index] = {
-        ...peer.placement,
-        phase,
-        radiusX,
-        radiusY,
-        x: centreX + Math.cos(phase) * radiusX,
-        y: centreY + Math.sin(phase) * radiusY,
-      };
-    }
-    previousRadiusX = radiusX;
-    previousRadiusY = radiusY;
-  }
-  return placements.map((placement, index) => result[index] ?? placement);
-};
-
-export const goalAgentPoints = (
-  goal: MapGoalView,
-  centre: { readonly x: number; readonly y: number },
-): readonly OrbitPlacement[] =>
-  distributeAgentCards(
-    goal.agents.map((agent) =>
-      orbitPlacement({
-        id: agent.id,
-        point: agent.mapPosition,
-        anchor: goal.mapPosition,
-        centre,
-        radiusX: goalRadius(goal) + 45,
-        radiusY: goalRadius(goal) + 32,
-        ringUnitX: 32,
-        ringUnitY: 24,
-        bandStepX: 28,
-        bandStepY: 24,
-      }),
-    ),
-    goalRadius(goal),
-  );
 
 export interface AtlasContentBounds {
   readonly minimumX: number;
@@ -248,60 +57,122 @@ export interface AtlasContentBounds {
   readonly maximumY: number;
 }
 
-interface GoalLocalBounds {
-  readonly left: number;
-  readonly right: number;
-  readonly top: number;
-  readonly bottom: number;
-}
-
-export const goalLocalBounds = (goal: MapGoalView): GoalLocalBounds => {
-  const radius = goalRadius(goal);
-  const orbits = goalAgentPoints(goal, { x: 0, y: 0 });
-  const orbitWidth =
-    Math.max(
-      AGENT_CARD_WIDTH / 2,
-      ...orbits.map((orbit) => Math.max(Math.abs(orbit.x) + AGENT_CARD_WIDTH / 2, orbit.radiusX)),
-    ) + 4;
-  const orbitHeight =
-    Math.max(
-      AGENT_CARD_HEIGHT / 2,
-      ...orbits.map((orbit) => Math.max(Math.abs(orbit.y) + AGENT_CARD_HEIGHT / 2, orbit.radiusY)),
-    ) + 4;
-  const titleLines = linesFor(goal.title);
-  const titleWidth = Math.max(0, ...titleLines.map((line) => line.length * 9.5)) / 2 + 4;
+export const workspaceDimensions = (workspace: Pick<MapWorkspaceView, "agents">) => {
+  const columns = Math.max(1, Math.ceil(Math.sqrt(workspace.agents.length)));
+  const rows = Math.max(1, Math.ceil(workspace.agents.length / columns));
+  const columnPitch = snapAtOrAboveGrid(AGENT_CARD_WIDTH + WORKSPACE_GAP);
+  const rowPitch = snapAtOrAboveGrid(AGENT_CARD_HEIGHT + WORKSPACE_GAP);
   return {
-    left: Math.max(radius + 3, orbitWidth, titleWidth),
-    right: Math.max(radius + 3, orbitWidth, titleWidth),
-    top: Math.max(radius + 3, orbitHeight),
-    bottom: Math.max(radius + 54 + Math.max(0, titleLines.length - 1) * 18, orbitHeight),
+    columns,
+    columnPitch,
+    rowPitch,
+    width: AGENT_CARD_WIDTH + (columns - 1) * columnPitch + WORKSPACE_GAP * 2,
+    height: AGENT_CARD_HEIGHT + (rows - 1) * rowPitch + WORKSPACE_GAP * 2 + WORKSPACE_HEADER,
   };
 };
 
-/** Expand durable goal anchors just enough that their rendered groups cannot overlap. */
+const cardGridPoints = (agents: readonly MapAgentView[], centre: { x: number; y: number }) => {
+  const dimensions = workspaceDimensions({ agents });
+  return agents.map((agent, index) => ({
+    id: agent.id,
+    x: snapCoordinateToGrid(
+      centre.x -
+        dimensions.width / 2 +
+        WORKSPACE_GAP +
+        AGENT_CARD_WIDTH / 2 +
+        (index % dimensions.columns) * dimensions.columnPitch,
+    ),
+    y: snapCoordinateToGrid(
+      centre.y -
+        dimensions.height / 2 +
+        WORKSPACE_HEADER +
+        WORKSPACE_GAP +
+        AGENT_CARD_HEIGHT / 2 +
+        Math.floor(index / dimensions.columns) * dimensions.rowPitch,
+    ),
+  }));
+};
+
+export const workspaceAgentPoints = (
+  workspace: MapWorkspaceView,
+  centre: { x: number; y: number },
+) => cardGridPoints(workspace.agents, centre);
+
+/** Render workspace centres on the same fixed grid as their Agent cards. */
+export const workspacePosition = (
+  workspace: Pick<MapWorkspaceView, "mapPosition">,
+  scale: number,
+) =>
+  snapToAtlasGrid({
+    x: workspace.mapPosition.x * scale,
+    y: workspace.mapPosition.y * scale,
+  });
+
+const WORKSPACE_LESS_CONTENT_GAP = 48;
+
+export const workspaceLessPosition = (projection: UniverseMapProjection, scale: number) => {
+  const natural = {
+    x: snapCoordinateToGrid(projection.inboxPosition.x * scale),
+    y: snapCoordinateToGrid(projection.inboxPosition.y * scale),
+  };
+  if (projection.workspaces.length === 0) return natural;
+  const size = workspaceDimensions({ agents: projection.workspaceLess });
+  const occupiedBottom = Math.max(
+    ...projection.workspaces.map(
+      (workspace) =>
+        workspacePosition(workspace, scale).y + workspaceDimensions(workspace).height / 2,
+    ),
+  );
+  const y = Math.max(natural.y, occupiedBottom + WORKSPACE_LESS_CONTENT_GAP + size.height / 2);
+  return {
+    x: natural.x,
+    y: snapAtOrAboveGrid(y),
+  };
+};
+
+export const workspaceLessAgentPoints = (projection: UniverseMapProjection, scale: number) =>
+  cardGridPoints(projection.workspaceLess, workspaceLessPosition(projection, scale));
+
+export const selectionBelongsToFocus = (
+  focus: Selection | undefined,
+  next: Selection | undefined,
+  projection: UniverseMapProjection,
+): boolean => {
+  if (!focus || !next) return false;
+  if (focus.type === next.type && focus.id === next.id) return true;
+  return (
+    focus.type === "goal" &&
+    next.type === "agent" &&
+    [
+      ...projection.workspaces.flatMap((workspace) => workspace.agents),
+      ...projection.workspaceLess,
+    ].some((agent) => agent.id === next.id && agent.primaryGoalId === focus.id)
+  );
+};
+
+/** Expand logical workspace anchors until their rendered islands cannot overlap. */
 export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number => {
+  const territories = projection.workspaces.map((workspace) => ({
+    position: workspace.mapPosition,
+    size: workspaceDimensions(workspace),
+  }));
   let scale = 1;
-  const goalBounds = projection.goals.map(goalLocalBounds);
-  for (let leftIndex = 0; leftIndex < projection.goals.length; leftIndex += 1) {
-    const left = projection.goals[leftIndex];
-    const leftBounds = goalBounds[leftIndex];
-    if (!left || !leftBounds) continue;
-    for (let rightIndex = leftIndex + 1; rightIndex < projection.goals.length; rightIndex += 1) {
-      const right = projection.goals[rightIndex];
-      const rightBounds = goalBounds[rightIndex];
-      if (!right || !rightBounds) continue;
-      const deltaX = Math.abs(left.mapPosition.x - right.mapPosition.x);
-      const deltaY = Math.abs(left.mapPosition.y - right.mapPosition.y);
+  for (let leftIndex = 0; leftIndex < territories.length; leftIndex += 1) {
+    const left = territories[leftIndex];
+    if (!left) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < territories.length; rightIndex += 1) {
+      const right = territories[rightIndex];
+      if (!right) continue;
+      const deltaX = Math.abs(left.position.x - right.position.x);
+      const deltaY = Math.abs(left.position.y - right.position.y);
       const horizontalScale =
         deltaX < 0.01
           ? Number.POSITIVE_INFINITY
-          : (leftBounds.right + rightBounds.left + 16) / deltaX;
-      const verticalExtent =
-        left.mapPosition.y <= right.mapPosition.y
-          ? leftBounds.bottom + rightBounds.top
-          : leftBounds.top + rightBounds.bottom;
+          : (left.size.width / 2 + right.size.width / 2 + WORKSPACE_GAP * 2) / deltaX;
       const verticalScale =
-        deltaY < 0.01 ? Number.POSITIVE_INFINITY : (verticalExtent + 16) / deltaY;
+        deltaY < 0.01
+          ? Number.POSITIVE_INFINITY
+          : (left.size.height / 2 + right.size.height / 2 + WORKSPACE_GAP * 2) / deltaY;
       const separationScale = Math.min(horizontalScale, verticalScale);
       if (Number.isFinite(separationScale)) scale = Math.max(scale, separationScale);
     }
@@ -309,108 +180,139 @@ export const atlasGoalSpacingScale = (projection: UniverseMapProjection): number
   return scale;
 };
 
-const DISCOVERED_DOCK_PADDING = 18;
-const DISCOVERED_DOCK_HEADING_HEIGHT = 40;
-const DISCOVERED_DOCK_GOAL_GAP = 48;
-
-export interface DiscoveredDockBounds {
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-export interface DiscoveredDockPlacement {
-  readonly bounds: DiscoveredDockBounds;
-  readonly translation: { readonly x: number; readonly y: number };
-}
-
-/** Bounds of the labelled discovery dock in logical (pre-camera) space. */
-export const discoveredExecutionDockBounds = (
-  executions: readonly MapDiscoveredExecutionView[],
-  scale: number,
-): DiscoveredDockBounds | undefined => {
-  if (executions.length === 0) return undefined;
-  const points = executions.map((execution) => ({
-    x: execution.mapPosition.x * scale,
-    y: execution.mapPosition.y * scale,
-  }));
-  const left =
-    Math.min(...points.map((point) => point.x)) -
-    DISCOVERED_CARD_WIDTH / 2 -
-    DISCOVERED_DOCK_PADDING;
-  const right =
-    Math.max(...points.map((point) => point.x)) +
-    DISCOVERED_CARD_WIDTH / 2 +
-    DISCOVERED_DOCK_PADDING;
-  const top =
-    Math.min(...points.map((point) => point.y)) -
-    DISCOVERED_CARD_HEIGHT / 2 -
-    DISCOVERED_DOCK_PADDING -
-    DISCOVERED_DOCK_HEADING_HEIGHT;
-  const bottom =
-    Math.max(...points.map((point) => point.y)) +
-    DISCOVERED_CARD_HEIGHT / 2 +
-    DISCOVERED_DOCK_PADDING;
-  return { left, top, width: right - left, height: bottom - top };
-};
-
-/**
- * Place the dock below everything the Atlas actually renders. The projection
- * cannot know rendered orbit and caption extents, and a System-scoped map may
- * carry a server anchor computed from goals outside the scope, so the renderer
- * aligns the whole dock group to the lowest rendered card on the shown map.
- */
-export const discoveredDockPlacement = (
-  projection: UniverseMapProjection,
-  scale: number,
-): DiscoveredDockPlacement | undefined => {
-  const bounds = discoveredExecutionDockBounds(projection.discoveredExecutions ?? [], scale);
-  if (!bounds) return undefined;
-  const renderedBottoms = [
-    ...projection.goals.map((goal) => goal.mapPosition.y * scale + goalLocalBounds(goal).bottom),
-    ...projection.unassigned.map((agent) => agent.mapPosition.y * scale + AGENT_CARD_HEIGHT / 2),
-  ];
-  const lowest = renderedBottoms.length > 0 ? Math.max(...renderedBottoms) : undefined;
-  const translationY = lowest === undefined ? 0 : lowest + DISCOVERED_DOCK_GOAL_GAP - bounds.top;
-  return {
-    bounds: { ...bounds, top: bounds.top + translationY },
-    translation: { x: 0, y: translationY },
-  };
-};
-
-/** Bounds of the visible goal bodies, captions, agent nodes, and the discovery dock. */
 export const atlasContentBounds = (
   projection: UniverseMapProjection,
-  goalSpacingScale = 1,
+  scale = 1,
+  discoveryDockOpen = true,
 ): AtlasContentBounds => {
-  const bounds = projection.goals.map((goal) => {
-    const local = goalLocalBounds(goal);
-    const goalX = goal.mapPosition.x * goalSpacingScale;
-    const goalY = goal.mapPosition.y * goalSpacingScale;
+  const bounds: AtlasContentBounds[] = projection.workspaces.map((workspace) => {
+    const size = workspaceDimensions(workspace);
+    const centre = workspacePosition(workspace, scale);
     return {
-      minimumX: goalX - local.left,
-      maximumX: goalX + local.right,
-      minimumY: goalY - local.top,
-      maximumY: goalY + local.bottom,
+      minimumX: centre.x - size.width / 2,
+      maximumX: centre.x + size.width / 2,
+      minimumY: centre.y - size.height / 2,
+      maximumY: centre.y + size.height / 2,
     };
   });
-  const dock = discoveredDockPlacement(projection, goalSpacingScale);
-  if (dock) {
+  if (projection.workspaceLess.length > 0) {
+    const size = workspaceDimensions({ agents: projection.workspaceLess });
+    const centre = workspaceLessPosition(projection, scale);
+    bounds.push({
+      minimumX: centre.x - size.width / 2,
+      maximumX: centre.x + size.width / 2,
+      minimumY: centre.y - size.height / 2,
+      maximumY: centre.y + size.height / 2,
+    });
+  }
+  const dock = discoveredDockPlacement(projection, scale, discoveryDockOpen);
+  if (dock)
     bounds.push({
       minimumX: dock.bounds.left,
       maximumX: dock.bounds.left + dock.bounds.width,
       minimumY: dock.bounds.top,
       maximumY: dock.bounds.top + dock.bounds.height,
     });
-  }
-
-  if (bounds.length === 0) return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
-
+  if (!bounds.length) return { minimumX: -1, maximumX: 1, minimumY: -1, maximumY: 1 };
   return {
-    minimumX: Math.min(...bounds.map((bound) => bound.minimumX)),
-    maximumX: Math.max(...bounds.map((bound) => bound.maximumX)),
-    minimumY: Math.min(...bounds.map((bound) => bound.minimumY)),
-    maximumY: Math.max(...bounds.map((bound) => bound.maximumY)),
+    minimumX: Math.min(...bounds.map((item) => item.minimumX)),
+    maximumX: Math.max(...bounds.map((item) => item.maximumX)),
+    minimumY: Math.min(...bounds.map((item) => item.minimumY)),
+    maximumY: Math.max(...bounds.map((item) => item.maximumY)),
   };
 };
+
+interface DockPlacement {
+  readonly bounds: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly translation: { readonly x: number; readonly y: number };
+}
+const DISCOVERED_DOCK_PADDING = 18;
+const DISCOVERED_DOCK_HEADING_HEIGHT = 40;
+const DISCOVERED_DOCK_CONTENT_GAP = 48;
+const DISCOVERED_DOCK_COLLAPSED_WIDTH = 320;
+const DISCOVERY_DOCK_POSITION_SCALE = 1;
+
+export const discoveredDockPlacement = (
+  projection: UniverseMapProjection,
+  scale: number,
+  expanded = true,
+): DockPlacement | undefined => {
+  const executions = projection.discoveredExecutions ?? [];
+  if (executions.length === 0) return undefined;
+  const points = executions.map((execution) => ({
+    // Discovery cards use their own compact grid. Applying the workspace
+    // separation scale here turns four cards into a widely scattered row.
+    x: execution.mapPosition.x * DISCOVERY_DOCK_POSITION_SCALE,
+    y: execution.mapPosition.y * DISCOVERY_DOCK_POSITION_SCALE,
+  }));
+  const sourceLeft = Math.min(...points.map((point) => point.x)) - DISCOVERED_CARD_WIDTH / 2;
+  const sourceRight = Math.max(...points.map((point) => point.x)) + DISCOVERED_CARD_WIDTH / 2;
+  const sourceTop = Math.min(...points.map((point) => point.y)) - DISCOVERED_CARD_HEIGHT / 2;
+  const sourceBottom = Math.max(...points.map((point) => point.y)) + DISCOVERED_CARD_HEIGHT / 2;
+  const occupiedHorizontalBounds = [
+    ...projection.workspaces.map((workspace) => {
+      const centre = workspacePosition(workspace, scale);
+      const width = workspaceDimensions(workspace).width;
+      return { left: centre.x - width / 2, right: centre.x + width / 2 };
+    }),
+    ...(projection.workspaceLess.length > 0
+      ? [
+          (() => {
+            const centre = workspaceLessPosition(projection, scale);
+            const width = workspaceDimensions({ agents: projection.workspaceLess }).width;
+            return { left: centre.x - width / 2, right: centre.x + width / 2 };
+          })(),
+        ]
+      : []),
+  ];
+  const occupiedLeft = Math.min(0, ...occupiedHorizontalBounds.map((bounds) => bounds.left));
+  const occupiedRight = Math.max(0, ...occupiedHorizontalBounds.map((bounds) => bounds.right));
+  const occupiedCentre = (occupiedLeft + occupiedRight) / 2;
+  const sourceCentre = (sourceLeft + sourceRight) / 2;
+  const translationX = snapCoordinateToGrid(occupiedCentre - sourceCentre);
+  const occupiedBottom = Math.max(
+    0,
+    ...projection.workspaces.map(
+      (workspace) =>
+        workspacePosition(workspace, scale).y + workspaceDimensions(workspace).height / 2,
+    ),
+    ...(projection.workspaceLess.length > 0
+      ? [
+          workspaceLessPosition(projection, scale).y +
+            workspaceDimensions({ agents: projection.workspaceLess }).height / 2,
+        ]
+      : []),
+  );
+  const dockTop = snapAtOrAboveGrid(occupiedBottom + DISCOVERED_DOCK_CONTENT_GAP);
+  const contentTop = dockTop + DISCOVERED_DOCK_HEADING_HEIGHT + DISCOVERED_DOCK_PADDING;
+  const translationY = snapAtOrAboveGrid(contentTop - sourceTop);
+  const dockWidth = expanded
+    ? sourceRight - sourceLeft + DISCOVERED_DOCK_PADDING * 2
+    : DISCOVERED_DOCK_COLLAPSED_WIDTH;
+  const dockLeft = expanded
+    ? sourceLeft + translationX - DISCOVERED_DOCK_PADDING
+    : snapCoordinateToGrid(occupiedCentre - dockWidth / 2);
+  return {
+    bounds: {
+      left: dockLeft,
+      top: dockTop,
+      width: dockWidth,
+      height: expanded
+        ? sourceBottom + translationY - dockTop + DISCOVERED_DOCK_PADDING
+        : DISCOVERED_DOCK_HEADING_HEIGHT + DISCOVERED_DOCK_PADDING * 2,
+    },
+    translation: { x: translationX, y: translationY },
+  };
+};
+
+export const discoveredExecutionPoint = (execution: {
+  readonly mapPosition: { x: number; y: number };
+}) => ({
+  x: execution.mapPosition.x * DISCOVERY_DOCK_POSITION_SCALE,
+  y: execution.mapPosition.y * DISCOVERY_DOCK_POSITION_SCALE,
+});

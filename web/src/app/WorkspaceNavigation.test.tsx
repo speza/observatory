@@ -160,6 +160,37 @@ describe("Workspace navigation views", () => {
     expect(markup).toContain('<summary aria-current="true"');
     expect(markup).not.toContain("summary aria-expanded");
   });
+
+  test("starts discovered executions in a collapsed section", () => {
+    const { universe, clock } = makeUniverse();
+    universe.reconcile(
+      hostSnapshot([
+        {
+          nativeId: "discovered",
+          displayName: "Discovered execution",
+          runtimeState: "idle",
+          runtimeStateSource: "test",
+          hostLocator: "test:discovered",
+          observedAt: clock.now(),
+        },
+      ]),
+    );
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    const markup = renderToStaticMarkup(
+      <WorkspaceNavigation
+        projection={projection}
+        view="all"
+        onSystem={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('<details class="workspace-tree__discovered-section">');
+    expect(markup).not.toContain('<details class="workspace-tree__discovered-section" open>');
+    expect(markup).toContain("Discovered in Herdr");
+    expect(markup).toContain("Discovered execution");
+  });
 });
 
 describe("Workspace navigation disclosure", () => {

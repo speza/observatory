@@ -36,7 +36,7 @@ export const projectPortfolio = (
     maximumTransitions: limits?.maximumTransitions,
   });
   if (commandCentre.kind !== "command-centre" || catchUp.kind !== "catch-up") return undefined;
-  const map = mapFromCommandCentre(commandCentre);
+  const map = mapFromCommandCentre(commandCentre, universe.snapshot().agents);
   if (!agentObservations) return { map, commandCentre, catchUp };
   const evidence = agentObservations.snapshot();
   const enrichedCommandCentre = enrichCommandCentre(commandCentre, evidence);

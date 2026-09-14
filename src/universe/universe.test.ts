@@ -340,6 +340,78 @@ describe("Universe", () => {
     ).toEqual({ ok: false, error: "Archived goals cannot receive agents." });
   });
 
+  test("places Agents directly in Systems and enforces exclusive assignments", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Project context" });
+    universe.execute({ type: "CreateGoal", title: "Concrete outcome", systemId: "system-1" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("pane-1"), observation("pane-2")]),
+    );
+
+    expect(
+      universe.execute({
+        type: "AssignAgentToSystem",
+        agentId: "agent-1",
+        systemId: "system-1",
+      }),
+    ).toEqual({ ok: true, agentId: "agent-1", systemId: "system-1" });
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      systemId: "system-1",
+      primaryGoalId: undefined,
+    });
+    expect(universe.snapshot().changes.at(-1)).toMatchObject({
+      targetType: "agent",
+      targetId: "agent-1",
+      systemId: "system-1",
+    });
+    expect(universe.snapshot().changes.at(-1)?.goalId).toBeUndefined();
+    expect(
+      universe.execute({
+        type: "AssignAgent",
+        agentId: "agent-1",
+        goalId: "goal-1",
+      }),
+    ).toEqual({ ok: true, agentId: "agent-1", goalId: "goal-1", systemId: "system-1" });
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      systemId: undefined,
+      primaryGoalId: "goal-1",
+    });
+
+    expect(
+      universe.execute({
+        type: "AssignAgentsToSystem",
+        agentIds: ["agent-1", "agent-2"],
+        systemId: "system-1",
+      }),
+    ).toEqual({
+      ok: true,
+      systemId: "system-1",
+      affectedAgentIds: ["agent-1", "agent-2"],
+    });
+    expect(
+      universe.snapshot().agents.map((agent) => [agent.primaryGoalId, agent.systemId]),
+    ).toEqual([
+      [undefined, "system-1"],
+      [undefined, "system-1"],
+    ]);
+    expect(universe.execute({ type: "UnassignAgent", agentId: "agent-1" })).toEqual({
+      ok: true,
+      agentId: "agent-1",
+    });
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      systemId: undefined,
+      primaryGoalId: undefined,
+    });
+    expect(
+      universe.execute({
+        type: "AssignAgentToSystem",
+        agentId: "agent-1",
+        systemId: "missing",
+      }),
+    ).toEqual({ ok: false, error: "System not found." });
+  });
+
   test("assigns multiple agents atomically", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Batch destination" });
@@ -366,6 +438,7 @@ describe("Universe", () => {
     ).toEqual({
       ok: true,
       goalId: "goal-1",
+      systemId: "system:default",
       affectedAgentIds: ["agent-1", "agent-2"],
     });
     expect(universe.snapshot().agents.map((agent) => agent.primaryGoalId)).toEqual([
@@ -435,6 +508,7 @@ describe("Universe", () => {
     ).toEqual({
       ok: true,
       goalId: "goal-1",
+      systemId: "system:default",
       affectedAgentIds: ["agent-2"],
     });
     expect(universe.snapshot().agents[1]?.primaryGoalId).toBe("goal-1");
@@ -910,7 +984,7 @@ describe("Universe", () => {
       continuity: "unknown",
     });
     expect(universe.project({ kind: "command-centre", now: clock.now() })).toMatchObject({
-      counts: { discovered: 1, agents: 1 },
+      counts: { discovered: 1, agents: 0 },
     });
   });
 

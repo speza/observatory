@@ -280,13 +280,18 @@ const expandAttention = (items: readonly AttentionItem[]): readonly AttentionIte
 
 const fuseAgents = (
   goals: readonly GoalView[],
+  systems: readonly SystemView[],
   unassigned: readonly AgentView[],
   baseAttention: readonly AttentionItem[],
   snapshot: AgentEvidenceSnapshot,
 ) => {
   const byAgent = new Map(snapshot.agents.map((item) => [item.agentId, item]));
   const priorities = new Map(goals.map((goal) => [goal.id, goal.priority]));
-  const allAgents = [...goals.flatMap((goal) => goal.agents), ...unassigned];
+  const allAgents = [
+    ...goals.flatMap((goal) => goal.agents),
+    ...systems.flatMap((system) => system.agents),
+    ...unassigned,
+  ];
   const providerItems = allAgents.flatMap((agent) => {
     const evidence = byAgent.get(agent.id);
     return evidence
@@ -315,6 +320,7 @@ export const enrichCommandCentre = (
 ): CommandCentreProjection => {
   const { items, enrich } = fuseAgents(
     projection.goals,
+    projection.systems,
     projection.unassigned,
     projection.attention.items,
     snapshot,
@@ -327,11 +333,31 @@ export const enrichCommandCentre = (
         const enriched = goalsById.get(goal.id);
         return enriched ? [enriched] : [];
       });
+      const systemAgents = system.agents.map(enrich).sort(compareAgents);
       return {
         ...system,
+        agents: systemAgents,
         goals: systemGoals,
-        attentionCount: systemGoals.reduce((total, goal) => total + goal.attentionCount, 0),
-        staleCount: systemGoals.reduce((total, goal) => total + goal.staleCount, 0),
+        agentCount:
+          systemAgents.length + systemGoals.reduce((total, goal) => total + goal.agents.length, 0),
+        workingCount:
+          systemAgents.filter(
+            (agent) => agent.executionPresence === "live" && agent.runtimeState === "working",
+          ).length +
+          systemGoals.reduce(
+            (total, goal) =>
+              total +
+              goal.agents.filter(
+                (agent) => agent.executionPresence === "live" && agent.runtimeState === "working",
+              ).length,
+            0,
+          ),
+        attentionCount:
+          systemAgents.filter((agent) => agent.attention?.requiresHumanInput).length +
+          systemGoals.reduce((total, goal) => total + goal.attentionCount, 0),
+        staleCount:
+          systemAgents.filter(uncertainAgent).length +
+          systemGoals.reduce((total, goal) => total + goal.staleCount, 0),
       };
     })
     .sort(compareSystems);
@@ -358,9 +384,11 @@ export const enrichMap = (
   commandCentre: CommandCentreProjection,
 ): UniverseMapProjection => {
   const agentsById = new Map(
-    [...commandCentre.goals.flatMap((goal) => goal.agents), ...commandCentre.unassigned].map(
-      (agent) => [agent.id, agent],
-    ),
+    [
+      ...commandCentre.goals.flatMap((goal) => goal.agents),
+      ...commandCentre.systems.flatMap((system) => system.agents),
+      ...commandCentre.unassigned,
+    ].map((agent) => [agent.id, agent]),
   );
   const enrich = <T extends AgentView>(agent: T): T => ({
     ...agent,
@@ -368,6 +396,11 @@ export const enrichMap = (
   });
   return {
     ...projection,
+    workspaces: projection.workspaces.map((workspace) => ({
+      ...workspace,
+      agents: workspace.agents.map(enrich),
+    })),
+    workspaceLess: projection.workspaceLess.map(enrich),
     goals: projection.goals.map((goal) => {
       const agents = goal.agents.map(enrich);
       return {
@@ -433,7 +466,11 @@ export const enrichCatchUp = (
     "activity",
   ];
   const agents = commandCentre
-    ? [...commandCentre.goals.flatMap((goal) => goal.agents), ...commandCentre.unassigned]
+    ? [
+        ...commandCentre.goals.flatMap((goal) => goal.agents),
+        ...commandCentre.systems.flatMap((system) => system.agents),
+        ...commandCentre.unassigned,
+      ]
     : [];
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
   const subjects = new Map(
@@ -453,14 +490,24 @@ export const enrichCatchUp = (
   const subjectForAgent = (agentId: string) => {
     const agent = agentsById.get(agentId);
     const goalId = agent?.primaryGoalId;
-    return goalId
-      ? {
-          id: `goal:${goalId}`,
-          subjectType: "goal" as const,
-          subjectId: goalId,
-          title: agent.goalTitle ?? "Goal no longer available",
-        }
-      : { id: "unassigned", subjectType: "unassigned" as const, title: "Unassigned work" };
+    if (goalId)
+      return {
+        id: `goal:${goalId}`,
+        subjectType: "goal" as const,
+        subjectId: goalId,
+        title: agent?.goalTitle ?? "Goal no longer available",
+      };
+    const systemId = agent?.systemId;
+    if (systemId) {
+      const system = commandCentre?.systems.find((candidate) => candidate.id === systemId);
+      return {
+        id: `system:${systemId}`,
+        subjectType: "system" as const,
+        subjectId: systemId,
+        title: system?.title ?? agent?.systemTitle ?? "System no longer available",
+      };
+    }
+    return { id: "unassigned", subjectType: "unassigned" as const, title: "Unassigned work" };
   };
   for (const kind of order) {
     const matching = snapshot.transitions.filter((item) => item.observation.kind === kind);

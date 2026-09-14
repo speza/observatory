@@ -1,7 +1,7 @@
 # Observatory technical architecture
 
 Status: implemented V1 architecture
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 Related documents:
 
@@ -25,18 +25,24 @@ explicit seams instead of leaking through the model.
 
 ## Product invariants
 
-- The durable topology is `System → Goal → Agent`.
+- The durable topology is `System → Goal → Agent`, with an optional direct
+  `System → Agent` placement.
 - Systems and Goals are human-authored semantic organisation. The single
   exception is a reserved `Default` System seeded at startup: Goals created
   without an explicit System are filed into it, so System membership is total
-  without making organisation a prerequisite.
+  without making organisation a prerequisite. An Agent may have a Goal or a
+  direct System, never both; an unassigned Agent remains in Inbox.
 - Repositories, worktrees, hosts and terminal containers are Agent metadata,
   never organisational nodes.
 - A durable Agent represents an exactly identified provider conversation, not a
   pane, process or inferred workspace match.
-- A live unadmitted host execution may appear in a separate transient
-  discovered-execution projection, but never becomes an Agent, Goal, System or
-  Inbox entry without explicit admission.
+- A host execution with recognized exact conversation identity may be
+  synchronized into an identity-only Inbox Agent. Unidentified, ambiguous or
+  explicitly untrusted host evidence remains a transient discovered execution
+  and never becomes an Agent, Goal or System by itself.
+- A complete authoritative host absence detaches the current execution and
+  removes the confirmed-ended Agent from active projections, but does not
+  delete or archive its durable conversation history.
 - Goal priority, completion, archive and Agent archive remain human-controlled
   unless a future explicit policy says otherwise.
 - Missing, stale, partial or conflicting observations remain uncertain. They are
@@ -80,7 +86,8 @@ persistence, the mutable Universe or concrete host adapters.
 accepts typed commands and typed observations. It owns:
 
 - Systems, Goals and conversation-backed Agents;
-- assignment, priority, completion, archive and accepted Goal position;
+- assignment (including direct System placement), priority, completion, archive
+  and accepted Goal position;
 - provider continuity and execution-presence invariants;
 - host reconciliation and identity conflict handling;
 - transient discovered-execution reconciliation and opaque target resolution;
@@ -108,8 +115,9 @@ mutations. There is no implicit history retention or compaction policy.
 An immediate transaction keeps comparison and writes on one database revision.
 Foreign-key checks are deferred during row replacement, then explicitly checked
 before completion; changed execution identities are all removed before insertion
-so valid swaps satisfy the unique index. Assignments, dismissals, semantic history
-and the semantic checkpoint still commit or roll back together. Provider
+so valid swaps satisfy the unique index. Assignments (including direct System
+assignments), dismissals, semantic history and the semantic checkpoint still
+commit or roll back together. Provider
 catalogues, observations, their checkpoint and launch receipts retain separate
 ownership and are not included in semantic snapshot writes.
 
@@ -173,24 +181,31 @@ understands both typed interfaces.
 ### `conversations/`
 
 `ConversationTracker` ingests provider catalogues through harness plugins. It
-owns supporting Conversation history and submits provider facts to Universe
-without granting them admission authority:
+owns supporting Conversation history, host-first identity synchronization and
+provider/host correlation:
 
-- catalogue entries remain history until explicitly added;
-- host liveness and recency do not admit an entry;
+- catalogue entries with no current host execution remain history until
+  explicitly added;
+- a host observation may create an identity-only Agent through a Universe
+  `AddConversation` command when its exact evidence is recognized;
+- host liveness and recency alone do not admit an entry;
 - aliases are canonicalised only with provider proof; and
 - unavailable or incomplete catalogues cannot prove absence.
 
 The same tracker passes the retained host snapshot through Universe's
-reconciliation path. Exact scoped catalogue matches can enrich a discovered
-execution, but do not admit it automatically. Admission is explicit and
-reuses the catalogue's provenance; assignment is a second existing Goal
-command, so a failed assignment is reported as a partial result.
+reconciliation path. Exact host identity is enough for an Inbox Agent when the
+host adapter marks the evidence as recognized; an unscoped identity is only
+accepted automatically when it is not ambiguous across provider scopes.
+Unidentified, ambiguous and explicitly untrusted observations remain in the
+discovery path, where exact catalogue evidence still enables explicit
+admission. Assignment is a separate existing Goal command and is never
+inferred from workspace or provider facts.
 
-Only `AddConversation` and a proven Observatory-managed new launch create a
-durable Agent. Admission provenance is explicit: catalogue admission carries
-scoped provider evidence, while managed-launch admission may begin with an
-unscoped host reference and must not fabricate provider freshness or naming.
+Only `AddConversation` creates a durable Agent. Admission provenance is
+explicit: catalogue admission carries scoped provider evidence,
+managed-launch admission records an Observatory-owned launch, and
+host-observation admission records a recognized exact host identity without
+fabricating provider freshness or naming.
 Accepted catalogue refreshes update fallback and provider-owned Agent names
 from non-empty titles for the exact conversation. Explicit human names remain
 protected from provider and host updates. Catalogue refresh remains bounded to
@@ -219,11 +234,11 @@ without changing accepted semantic state.
 
 Evidence authority remains split by claim axis:
 
-| Claim                                                               | Evidence owner                        | Cannot establish                                          |
-| ------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
-| Execution presence, location, runtime state and terminal capability | `SessionHost`                         | Provider outcome or accepted completion                   |
-| Human-input request, provider turn outcome and context pressure     | `AgentHarness` observation source     | Execution presence, Agent admission or semantic lifecycle |
-| Agent identity, Goal assignment, priority, completion and archive   | Universe commands and human decisions | Fresh external runtime facts                              |
+| Claim                                                                   | Evidence owner                        | Cannot establish                                          |
+| ----------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
+| Execution presence, location, runtime state and terminal capability     | `SessionHost`                         | Provider outcome or accepted completion                   |
+| Human-input request, provider turn outcome and context pressure         | `AgentHarness` observation source     | Execution presence, Agent admission or semantic lifecycle |
+| Agent identity, Goal/System placement, priority, completion and archive | Universe commands and human decisions | Fresh external runtime facts                              |
 
 A provider claim may explain or conflict with host state, but does not replace
 it. Missing or conflicting evidence stays explicit, and target-sensitive
@@ -240,7 +255,7 @@ idempotent operation. It coordinates:
 2. provider plan construction through an AgentHarness;
 3. process placement through `SessionHost`;
 4. canonical host/provider reconciliation; and
-5. Goal assignment after exact Agent identity exists.
+5. Goal or direct System placement after exact Agent identity exists.
 
 Launch receipts prevent ordinary retries from creating duplicate processes.
 A pending launch is visible but is not a phantom Agent. Workspace inspection is
@@ -268,10 +283,20 @@ observations.
 
 - Attention composes independent claims into one decision subject per Agent.
 - Projection builds Atlas, Ledger, the separate discovered-execution area,
-  Inbox, Needs-you, Catch up, search and inspector views.
-- Spatial assigns deterministic Goal anchors and Agent satellites, lays out
-  the compact discovery dock, repairs only unpinned collisions and keeps
-  viewport state outside persistence.
+  Inbox, Needs-you, Catch up, search and inspector views. Atlas follows the
+  host's execution grouping; the Herdr adapter folds linked Git worktree
+  workspaces into their source workspace territory while leaving duplicate
+  plain workspaces distinct.
+- Spatial retains deterministic semantic Goal positions for accepted state. The
+  Atlas projection separately derives workspace-first geography from fresh live
+  host execution territories across Goal boundaries. It qualifies opaque
+  grouping equality by host instance, exposes only safe labels, Agent views and
+  derived positions,
+  keeps live or uncertain Agents without trustworthy workspace evidence
+  explicit, and omits confirmed-absent executions from active projections.
+  Durable records remain available through history/search and include-archived
+  views. The renderer lays out workspace card grids and the compact discovery
+  dock while keeping viewport state outside persistence.
 
 Renderers consume projections; they do not reproduce domain rules.
 
@@ -393,25 +418,26 @@ Host snapshot ───────► execution + exact ref ────┘
 Cwd, repository, title, recency and a bare process name are supporting facts
 only. They may block an unsafe resume but never establish identity or inherit
 a Goal. A host may additionally report an exact provider session id from a
-supported process argument; that remains identity evidence only when the
-selected harness validates the argument and the id matches a canonical
-conversation.
+supported native integration, hook or validated process argument. Recognized
+exact evidence can create an identity-only Inbox Agent; an unscoped value is
+held in discovery when provider catalogue matches are ambiguous, and later
+catalogue evidence can canonicalise and enrich it.
 
 A complete fresh snapshot can prove execution absence for one host instance. A
 partial snapshot, transport failure or stale last-known state cannot. Provider
 absence likewise requires a complete catalogue for the relevant continuity
 scope.
 
-For unadmitted executions, the host snapshot is also the source of a bounded
-current discovery inventory. An exact admitted execution suppresses its
-discovery entry, including for archived Agents and pending launches. Multiple
-executions claiming one exact conversation remain visible as separate
-discoveries until explicit admission, after which the existing Agent conflict
-model applies. A host execution becomes discoverable only when it carries a
-native session identity; attribute-less or session-less rows, including
-transient screen detections of an ordinary terminal, remain non-discoverable
-observations. Execution presence is preserved, so an admitted Agent is never
-detached by such a row and a plain terminal never surfaces as a discovered
+For executions that cannot be synchronized safely, the host snapshot is also
+the source of a bounded current discovery inventory. A recognized exact host
+execution is promoted to an Inbox Agent and suppresses its discovery entry,
+including for archived Agents and pending launches. Multiple executions
+claiming one exact conversation bind to the same Agent and use the existing
+conflict model. A host execution becomes eligible for automatic synchronization
+only when it carries a recognized native session identity; attribute-less,
+ambiguous or explicitly untrusted rows remain discovery observations. Execution
+presence is preserved, so an admitted Agent is never detached by a row that
+cannot prove identity and a plain terminal never surfaces as a discovered
 execution. A snapshot is complete only when no row was skipped and no duplicate
 identity was reported.
 
@@ -421,15 +447,17 @@ identity was reported.
 
 1. Poll the selected SessionHost through a serialized, deadline-bounded refresh loop.
 2. Enrich host observations with exact harness evidence where available.
-3. Refresh provider catalogues at startup or on explicit history requests.
-4. If an optional provider-observation plugin is loaded, receive its bounded
+3. Synchronize recognized exact host conversations into identity-only Inbox
+   Agents; retain ambiguous or unidentified rows as discovery.
+4. Refresh provider catalogues at startup or on explicit history requests.
+5. If an optional provider-observation plugin is loaded, receive its bounded
    observations through the owning harness and reconcile its snapshot.
-5. Submit typed host and catalogue observations to Universe; provider evidence
+6. Submit typed host and catalogue observations to Universe; provider evidence
    remains in its separate operational store.
-6. Persist accepted state atomically, then publish an authority-specific typed
+7. Persist accepted state atomically, then publish an authority-specific typed
    event.
-7. Batch concurrent events and derive each affected renderer projection once.
-8. Deliver revisioned complete snapshots or replacements to renderers over SSE;
+8. Batch concurrent events and derive each affected renderer projection once.
+9. Deliver revisioned complete snapshots or replacements to renderers over SSE;
    repair reconnects with current snapshots.
 
 Out-of-order observations are ignored without regressing accepted state.
@@ -536,6 +564,16 @@ storage, but they do not become trusted Observatory state.
 - Live Herdr smoke paths use disposable Agents only.
 
 ## Dependency rule
+
+The browser map projection derives workspace geography at the server boundary
+from the qualified `(host kind, host instance, host-reported grouping context)`
+identity. A host adapter may make a linked-worktree grouping context equal to
+its source workspace context while retaining the exact execution binding for
+access and lifecycle. The projection emits only stable coordinates, a safe
+label, public Agent views, Goal references and aggregate
+attention/uncertainty; opaque grouping keys and native host identifiers never
+cross that boundary. This derived geography does not
+alter the durable `System -> Goal -> Agent` authority.
 
 The intended dependency direction is:
 

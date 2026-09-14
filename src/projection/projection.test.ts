@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { projectPortfolio } from "../web/portfolio.ts";
-import { projectCommandCentre } from "./projection.ts";
+import { mapFromCommandCentre, projectCommandCentre } from "./projection.ts";
 import type { Agent } from "../universe/types.ts";
 import {
   admitObservedConversationsAndReconcile,
@@ -33,7 +33,7 @@ const bareAgent = (id: string, hostHealth: Agent["hostHealth"]): Agent => ({
   id,
   continuity: "proved",
   providerContinuity: "confirmed",
-  executionPresence: "absent",
+  executionPresence: "unknown",
   resumeCapability: "eligible",
   observationHealth: "fresh",
   executionHistory: [],
@@ -219,6 +219,54 @@ describe("projections", () => {
     });
     expect(projection.goals[0]?.agents[0]?.primaryGoalId).toBe("goal-1");
     expect(projection.counts.systems).toBe(2);
+  });
+
+  test("projects direct System Agents through the command centre, map and search", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateSystem", title: "Project context" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([observation("direct", "Direct worker", "working")]),
+    );
+    expect(
+      universe.execute({
+        type: "AssignAgentToSystem",
+        agentId: "agent-1",
+        systemId: "system-1",
+      }),
+    ).toEqual({ ok: true, agentId: "agent-1", systemId: "system-1" });
+
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_001_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong command centre");
+    const system = commandCentre.systems.find((candidate) => candidate.id === "system-1");
+    expect(system?.agents.map((agent) => agent.displayName)).toEqual(["Direct worker"]);
+    expect(system).toMatchObject({ agentCount: 1, workingCount: 1 });
+    expect(commandCentre.unassigned).toHaveLength(0);
+    expect(commandCentre.counts.agents).toBe(1);
+
+    const map = universe.project({ kind: "universe-map", now: 1_001_000 });
+    if (map.kind !== "universe-map") throw new Error("wrong map");
+    expect(
+      [...map.workspaces.flatMap((workspace) => workspace.agents), ...map.workspaceLess].some(
+        (agent) => agent.id === "agent-1",
+      ),
+    ).toBe(true);
+
+    const search = universe.project({ kind: "search", query: "Project context" });
+    if (search.kind !== "search") throw new Error("wrong search projection");
+    expect(search.results).toContainEqual(
+      expect.objectContaining({ type: "agent", id: "agent-1", systemId: "system-1" }),
+    );
+    expect(
+      universe.project({
+        kind: "inspector",
+        now: 1_001_000,
+        target: { type: "agent", id: "agent-1" },
+      }),
+    ).toMatchObject({
+      kind: "agent-inspector",
+      agent: { systemId: "system-1", systemTitle: "Project context" },
+    });
   });
 
   test("groups agents by observed code context without changing goal assignment", () => {
@@ -606,7 +654,7 @@ describe("projections", () => {
     expect(projection.lines.join("\n")).toContain("worktree");
   });
 
-  test("projects a stable portfolio of goal bodies and direct satellites", () => {
+  test("preserves stable semantic Goal positions in the workspace-first map projection", () => {
     const { universe } = makeUniverse();
     universe.execute({ type: "CreateGoal", title: "Map goal", priority: "P0" });
     admitObservedConversationsAndReconcile(
@@ -639,6 +687,85 @@ describe("projections", () => {
     expect(first.goals[0]?.agents).toHaveLength(2);
     expect(first.goals[0]?.agents[0]?.mapPosition).toEqual(second.goals[0]?.agents[0]?.mapPosition);
     expect(first.goals[0]?.priority).toBe("P0");
+  });
+
+  test("groups fresh live Agents by qualified execution context across Goals", () => {
+    const { universe } = makeUniverse();
+    universe.execute({ type: "CreateGoal", title: "Primary" });
+    universe.execute({ type: "CreateGoal", title: "Separate intent" });
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation("pane-a", "one", "working", "repo", "/tree-a", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+        observation("pane-b", "two", "idle", "repo", "/tree-b", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+        observation("pane-c", "other goal", "working", "repo", "/tree-c", {
+          id: "private-workspace-id",
+          label: "API workspace",
+        }),
+      ]),
+    );
+    universe.execute({
+      type: "AssignAgents",
+      agentIds: ["agent-1", "agent-2"],
+      goalId: "goal-1",
+    });
+    universe.execute({ type: "AssignAgent", agentId: "agent-3", goalId: "goal-2" });
+
+    const grouped = universe.project({ kind: "universe-map", now: 1_000_000 });
+    if (grouped.kind !== "universe-map") throw new Error("wrong projection");
+    expect(grouped.workspaces).toHaveLength(1);
+    expect(grouped.workspaces[0]).toMatchObject({
+      label: "API workspace",
+      goalIds: ["goal-1", "goal-2"],
+    });
+    expect(grouped.workspaces[0]?.agents.map((agent) => agent.id).sort()).toEqual([
+      "agent-1",
+      "agent-2",
+      "agent-3",
+    ]);
+    expect(JSON.stringify(grouped)).not.toContain("private-workspace-id");
+
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const differentlyScopedAgents = universe.snapshot().agents.map((agent) =>
+      agent.id === "agent-2" && agent.execution
+        ? {
+            ...agent,
+            execution: { ...agent.execution, hostInstanceId: "other-host-instance" },
+          }
+        : agent,
+    );
+    expect(mapFromCommandCentre(commandCentre, differentlyScopedAgents).workspaces).toHaveLength(2);
+
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot(
+        [
+          observation("pane-a", "one", "working", "repo", "/tree-a", {
+            id: "private-workspace-id",
+            label: "API workspace",
+          }),
+          observation("pane-c", "other goal", "working", "repo", "/tree-c", {
+            id: "private-workspace-id",
+            label: "API workspace",
+          }),
+        ],
+        1_001_000,
+      ),
+    );
+    const afterExit = universe.project({ kind: "universe-map", now: 1_001_000 });
+    if (afterExit.kind !== "universe-map") throw new Error("wrong projection");
+    expect(afterExit.workspaces[0]?.agents.map((agent) => agent.id)).toEqual([
+      "agent-1",
+      "agent-3",
+    ]);
+    expect(afterExit.workspaceLess.map((agent) => agent.id)).not.toContain("agent-2");
   });
 
   test("projects unassigned agents into a stable neutral inbox sector", () => {
@@ -677,12 +804,17 @@ describe("projections", () => {
     const projection = universe.project({ kind: "command-centre", now: 1_005_000 });
     if (projection.kind !== "command-centre") throw new Error("wrong projection");
     expect(projection.counts.stale).toBe(0);
-    expect(projection.unassigned).toHaveLength(2);
-    const stale = projection.unassigned.find((agent) => agent.displayName === "stale agent");
-    expect(stale?.hostHealth).toBe("stale");
-    expect(stale?.executionPresence).toBe("absent");
-    expect(stale?.observationHealth).toBe("fresh");
-    expect(stale?.attention).toBeUndefined();
+    expect(projection.unassigned).toHaveLength(1);
+    expect(projection.unassigned[0]?.displayName).toBe("live agent");
+    expect(
+      projection.unassigned.find((agent) => agent.displayName === "stale agent"),
+    ).toBeUndefined();
+    expect(
+      universe.snapshot().agents.find((agent) => agent.displayName === "stale agent"),
+    ).toMatchObject({
+      executionPresence: "absent",
+      observationHealth: "fresh",
+    });
   });
 
   test("groups only post-checkpoint changes into a deterministic catch-up projection", () => {

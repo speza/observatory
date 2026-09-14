@@ -91,16 +91,16 @@ rules or Observatory recovery policy.
 
 The boundary is defined by who can make each decision:
 
-| Concern                                                   | Owner                     |
-| --------------------------------------------------------- | ------------------------- |
-| New versus resumed native conversation                    | `AgentHarness`            |
-| Provider executable, arguments and exact resume reference | `AgentHarness`            |
-| Workspace preparation                                     | `WorkspaceProvider`       |
-| Process placement, PTY, terminal access and close         | `SessionHost`             |
-| Host-assisted restore and agent-aware runtime evidence    | `SessionHost` observation |
-| Whether evidence proves continuity                        | `AgentHarness`            |
-| Rebinding a durable Agent and preserving Goal assignment  | `Universe` command        |
-| Recovery ordering, deduplication and retry                | coordinator               |
+| Concern                                                        | Owner                     |
+| -------------------------------------------------------------- | ------------------------- |
+| New versus resumed native conversation                         | `AgentHarness`            |
+| Provider executable, arguments and exact resume reference      | `AgentHarness`            |
+| Workspace preparation                                          | `WorkspaceProvider`       |
+| Process placement, PTY, terminal access and close              | `SessionHost`             |
+| Host-assisted restore and agent-aware runtime evidence         | `SessionHost` observation |
+| Whether evidence proves continuity                             | `AgentHarness`            |
+| Rebinding a durable Agent and preserving Goal/System placement | `Universe` command        |
+| Recovery ordering, deduplication and retry                     | coordinator               |
 
 A host capability may improve fidelity without becoming required by every
 host. Herdr can report semantic runtime state, an opaque native-session
@@ -260,8 +260,8 @@ must support these reconciliation rules:
    the old Agent interrupted/replaced; it does not inherit the old Goal.
 3. An unproved observation after a cold restart remains unknown and enters the
    discovery/inbox path rather than taking over a durable Agent.
-4. Goal assignment survives only a proved continuation or an explicit human
-   rebind.
+4. Goal/System placement survives only a proved continuation or an explicit
+   human rebind.
 5. Runtime state and continuity are separate: a running process can still have
    unknown identity, and a proved conversation can still be interrupted.
 
@@ -301,7 +301,7 @@ cannot be manually promoted through cwd, title or recency.
 Provider conversations remain in Conversation history until the operator adds
 them explicitly. Exact liveness, recency and first-observed time do not create
 Agents. A proven Observatory-managed new launch is the only non-history path to
-admission. Provider facts never overwrite human-authored Goal assignment,
+admission. Provider facts never overwrite human-authored Goal/System placement,
 priority, completion, archive or naming.
 
 Harness plugins do not receive concrete Herdr payloads. `SessionHost` exposes

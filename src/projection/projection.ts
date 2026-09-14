@@ -9,6 +9,7 @@ import {
   type System,
   type UniverseChange,
   type OperatorCheckpoint,
+  type MapPosition,
 } from "../universe/types.ts";
 import {
   defaultGoalMapPosition,
@@ -41,6 +42,7 @@ import type {
   AgentView,
   DiscoveredExecutionView,
   MapDiscoveredExecutionView,
+  MapWorkspaceView,
   UniverseMapProjection,
 } from "./types.ts";
 
@@ -108,6 +110,12 @@ const hasUnresolvedExecution = (agent: Agent): boolean =>
   agent.executionPresence === "conflict" ||
   (agent.executionPresence === "unknown" && agent.execution !== undefined);
 
+const effectiveSystemId = (
+  agent: Pick<Agent, "primaryGoalId" | "systemId">,
+  goals: ReadonlyMap<string, Goal>,
+): string | undefined =>
+  agent.primaryGoalId ? goals.get(agent.primaryGoalId)?.systemId : agent.systemId;
+
 const publicAgent = (agent: Agent) => {
   const {
     execution,
@@ -147,11 +155,13 @@ const projectCommandCentre = (
   maximumAgents?: number,
 ): CommandCentreProjection => {
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
+  const systemsById = new Map((state.systems ?? []).map((system) => [system.id, system]));
   const projectedAgents = state.agents.filter(
     (agent) =>
       includeArchived ||
       hasUnresolvedExecution(agent) ||
-      (agent.archivedAt === undefined &&
+      (agent.executionPresence !== "absent" &&
+        agent.archivedAt === undefined &&
         goalsById.get(agent.primaryGoalId ?? "")?.status !== "archived"),
   );
   const attention = evaluateAttention(now, state.goals, projectedAgents, state.hosts);
@@ -160,6 +170,10 @@ const projectCommandCentre = (
     return {
       ...publicAgent(agent),
       goalTitle: agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
+      systemTitle: (() => {
+        const systemId = effectiveSystemId(agent, goalsById);
+        return systemId ? systemsById.get(systemId)?.title : undefined;
+      })(),
       attention: attentionByAgent.get(agent.id),
     };
   });
@@ -205,6 +219,7 @@ const projectCommandCentre = (
     : attention;
 
   const viewsByGoal = new Map<string, AgentView[]>();
+  const viewsBySystem = new Map<string, AgentView[]>();
   const unassignedViews: AgentView[] = [];
   let visibleStaleCount = 0;
   for (const view of views) {
@@ -213,6 +228,10 @@ const projectCommandCentre = (
       const bucket = viewsByGoal.get(view.primaryGoalId);
       if (bucket) bucket.push(view);
       else viewsByGoal.set(view.primaryGoalId, [view]);
+    } else if (view.systemId) {
+      const bucket = viewsBySystem.get(view.systemId);
+      if (bucket) bucket.push(view);
+      else viewsBySystem.set(view.systemId, [view]);
     } else {
       unassignedViews.push(view);
     }
@@ -255,10 +274,14 @@ const projectCommandCentre = (
   const systems = (state.systems ?? [])
     .map((system): SystemView => {
       const goals = goalsBySystem.get(system.id) ?? [];
-      let agentCount = 0;
+      const agents = [...(viewsBySystem.get(system.id) ?? [])].sort(compareAgents);
+      let agentCount = agents.length;
       let workingCount = 0;
-      let attentionCount = 0;
-      let staleCount = 0;
+      let attentionCount = agents.filter((agent) => agent.attention?.requiresHumanInput).length;
+      let staleCount = agents.filter(agentIsUncertain).length;
+      for (const agent of agents)
+        if (agent.executionPresence === "live" && agent.runtimeState === "working")
+          workingCount += 1;
       for (const goal of goals) {
         attentionCount += goal.attentionCount;
         staleCount += goal.staleCount;
@@ -270,6 +293,7 @@ const projectCommandCentre = (
       }
       return {
         ...system,
+        agents,
         goals,
         agentCount,
         workingCount,
@@ -355,6 +379,7 @@ const projectCodeContexts = (
   const commandCentre = projectCommandCentre(state, now, includeArchived, maximumAgents);
   const agents = [
     ...commandCentre.goals.flatMap((goal) => goal.agents),
+    ...commandCentre.systems.flatMap((system) => system.agents),
     ...commandCentre.unassigned,
   ];
   const grouped = new Map<
@@ -517,6 +542,7 @@ const projectRelatedAgents = (
     ...commandCentre.goals
       .filter((candidate) => candidate.id !== goal.id)
       .flatMap((candidate) => candidate.agents),
+    ...commandCentre.systems.flatMap((system) => system.agents),
     ...commandCentre.unassigned,
   ];
   const candidates = otherAgents.flatMap((agent): RelatedAgentCandidate[] => {
@@ -637,12 +663,17 @@ const projectUniverseMap = (
   includeArchived = false,
   maximumAgents?: number,
 ): UniverseMapProjection => {
-  return mapFromCommandCentre(projectCommandCentre(state, now, includeArchived, maximumAgents));
+  return mapFromCommandCentre(
+    projectCommandCentre(state, now, includeArchived, maximumAgents),
+    state.agents,
+  );
 };
 
 export const mapFromCommandCentre = (
   commandCentre: CommandCentreProjection,
+  sourceAgents: readonly Agent[] = [],
 ): UniverseMapProjection => {
+  const sourceAgentsById = new Map(sourceAgents.map((agent) => [agent.id, agent]));
   const mapGoals = commandCentre.goals.map((goal) => {
     const mapPosition = goal.mapPosition ?? defaultGoalMapPosition(goal.id);
     const satellitePositions = agentSatellitePositions(
@@ -663,21 +694,77 @@ export const mapFromCommandCentre = (
       agents,
     };
   });
-  const occupiedPositions = mapGoals.flatMap((goal) => [
-    goal.mapPosition,
-    ...goal.agents.map((agent) => agent.mapPosition),
-  ]);
+  const allAgents = [
+    ...mapGoals.flatMap((goal) => goal.agents),
+    ...commandCentre.systems.flatMap((system) => system.agents),
+    ...commandCentre.unassigned,
+  ];
+  const grouped = new Map<string, { label: string; agents: typeof allAgents }>();
+  const workspaceLessAgents: typeof allAgents = [];
+  for (const agent of allAgents) {
+    const source = sourceAgentsById.get(agent.id);
+    const containerId = opaqueContextValue(source?.executionContainer?.id);
+    if (
+      !source?.execution ||
+      !containerId ||
+      source.executionPresence !== "live" ||
+      source.observationHealth !== "fresh" ||
+      source.hostHealth !== "live"
+    ) {
+      workspaceLessAgents.push(agent);
+      continue;
+    }
+    const key = `${source.execution.hostKind}\u0000${source.execution.hostInstanceId}\u0000${containerId}`;
+    const existing = grouped.get(key);
+    if (existing) existing.agents.push(agent);
+    else
+      grouped.set(key, {
+        label: source.executionContainer?.label?.trim() || "Live workspace",
+        agents: [agent],
+      });
+  }
+  const occupied: { position: MapPosition; agentCount: number }[] = [];
+  const workspaces: MapWorkspaceView[] = [];
+  for (const [key, workspace] of [...grouped].sort(([left], [right]) => compareText(left, right))) {
+    const mapPosition = initialGoalMapPosition(
+      `execution-context:${key}`,
+      occupied,
+      workspace.agents.length,
+    );
+    const ids = workspace.agents.map((agent) => agent.id).sort(compareText);
+    const cardPositions = agentSatellitePositions(mapPosition, `execution-context:${key}`, ids);
+    const agents = workspace.agents
+      .sort(compareAgents)
+      .map((agent) => ({ ...agent, mapPosition: cardPositions.get(agent.id) ?? mapPosition }));
+    workspaces.push({
+      label: workspace.label,
+      mapPosition,
+      agents,
+      goalIds: [...new Set(agents.flatMap((agent) => agent.primaryGoalId ?? []))].sort(compareText),
+      attentionCount: agents.filter((agent) => agent.attention?.requiresHumanInput).length,
+      uncertaintyCount: agents.filter(agentIsUncertain).length,
+    });
+    occupied.push({ position: mapPosition, agentCount: agents.length });
+  }
+  const occupiedPositions = workspaces.map((workspace) => workspace.mapPosition);
   const inboxPosition = mapInboxAnchor(occupiedPositions);
   const unassignedPositions = unassignedAgentPositions(
     inboxPosition,
-    commandCentre.unassigned.map((agent) => agent.id),
+    workspaceLessAgents.map((agent) => agent.id),
   );
-  const mapUnassigned = commandCentre.unassigned.map((agent) => ({
+  const workspaceLess = workspaceLessAgents.map((agent) => ({
     ...agent,
     mapPosition: unassignedPositions.get(agent.id) ?? inboxPosition,
   }));
+  const mapUnassigned = commandCentre.unassigned.map(
+    (agent) =>
+      workspaceLess.find((candidate) => candidate.id === agent.id) ?? {
+        ...agent,
+        mapPosition: inboxPosition,
+      },
+  );
   const discoveryPositions = discoveredExecutionDockPositions(
-    [...occupiedPositions, ...mapUnassigned.map((agent) => agent.mapPosition)],
+    [...occupiedPositions, ...workspaceLess.map((agent) => agent.mapPosition)],
     (commandCentre.discoveredExecutions ?? [])
       .map((execution) => execution.handle)
       .sort(compareText),
@@ -693,6 +780,8 @@ export const mapFromCommandCentre = (
     generatedAt: commandCentre.generatedAt,
     host: commandCentre.host,
     attention: commandCentre.attention,
+    workspaces,
+    workspaceLess,
     goals: mapGoals,
     unassigned: mapUnassigned,
     discoveredExecutions: mapDiscoveredExecutions,
@@ -711,6 +800,7 @@ const searchable = (value: string | undefined): string => value?.toLowerCase() ?
 
 const projectSearch = (
   state: {
+    readonly systems?: readonly System[];
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly discoveredExecutions?: readonly DiscoveredExecutionView[];
@@ -723,6 +813,7 @@ const projectSearch = (
   const maximum = limit === undefined ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(limit));
   const results: SearchResult[] = [];
   const goalsById = new Map(state.goals.map((goal) => [goal.id, goal]));
+  const systemsById = new Map((state.systems ?? []).map((system) => [system.id, system]));
   for (const goal of state.goals) {
     if (results.length >= maximum) break;
     const haystack = [goal.title, goal.description, goal.priority, goal.status]
@@ -749,20 +840,26 @@ const projectSearch = (
       agent.worktree,
       agent.provider,
       agent.runtimeState,
+      agent.primaryGoalId ? goalsById.get(agent.primaryGoalId)?.title : undefined,
+      agent.systemId ? systemsById.get(agent.systemId)?.title : undefined,
     ]
       .map(searchable)
       .join(" ");
     if (haystack.includes(normalized)) {
+      const systemId = effectiveSystemId(agent, goalsById);
       const result: SearchResult = {
         type: "agent",
         id: agent.id,
         label: agent.displayName,
         context: agent.primaryGoalId
           ? `agent · ${goalsById.get(agent.primaryGoalId)?.title ?? "Goal unavailable"}`
-          : "unassigned agent",
+          : systemId
+            ? `agent · ${systemsById.get(systemId)?.title ?? "System unavailable"}`
+            : "unassigned agent",
         status: agent.archivedAt === undefined ? agent.runtimeState : "archived",
       };
       if (agent.primaryGoalId) Object.assign(result, { goalId: agent.primaryGoalId });
+      else if (systemId) Object.assign(result, { systemId });
       results.push(result);
     }
   }
@@ -886,12 +983,13 @@ const catchUpSubjectFor = (
       title: goals.get(goalId)?.title ?? "Goal no longer available",
     };
   }
-  if (item.targetType === "system") {
+  const systemId = item.systemId ?? (item.targetType === "system" ? item.targetId : undefined);
+  if (systemId) {
     return {
-      id: `system:${item.targetId}`,
+      id: `system:${systemId}`,
       subjectType: "system",
-      subjectId: item.targetId,
-      title: systems.get(item.targetId)?.title ?? "System no longer available",
+      subjectId: systemId,
+      title: systems.get(systemId)?.title ?? "System no longer available",
     };
   }
   return { id: "unassigned", subjectType: "unassigned", title: "Unassigned work" };
@@ -1059,16 +1157,21 @@ const agentView = (
   agent: Agent,
   goals: readonly Goal[],
   attention: readonly AttentionItem[],
+  systems: readonly System[] = [],
 ): AgentView => {
+  const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
+  const systemId = effectiveSystemId(agent, goalsById);
   return {
     ...publicAgent(agent),
-    goalTitle: goals.find((goal) => goal.id === agent.primaryGoalId)?.title,
+    goalTitle: goalsById.get(agent.primaryGoalId ?? "")?.title,
+    systemTitle: systems.find((system) => system.id === systemId)?.title,
     attention: attention.find((item) => item.agentId === agent.id),
   };
 };
 
 const projectInspector = (
   state: {
+    readonly systems?: readonly System[];
     readonly goals: readonly Goal[];
     readonly agents: readonly Agent[];
     readonly hosts: readonly HostHealth[];
@@ -1112,7 +1215,7 @@ const projectInspector = (
     if (!goal) return { kind: "empty-inspector", lines: ["Goal no longer exists."] };
     const agents = activeAgents
       .filter((agent) => agent.primaryGoalId === goal.id)
-      .map((agent) => agentView(agent, state.goals, attention.items))
+      .map((agent) => agentView(agent, state.goals, attention.items, state.systems))
       .sort(compareAgents);
     const view: GoalView = {
       ...goal,
@@ -1135,7 +1238,7 @@ const projectInspector = (
 
   const agent = state.agents.find((candidate) => candidate.id === target.id);
   if (!agent) return { kind: "empty-inspector", lines: ["Agent no longer exists."] };
-  const view = agentView(agent, state.goals, attention.items);
+  const view = agentView(agent, state.goals, attention.items, state.systems);
   const conversation = safeConversationReference(agent.nativeConversationRef);
   const lines = [
     `state   ${view.lifecycleState} · ${agent.runtimeState}`,
@@ -1149,7 +1252,8 @@ const projectInspector = (
     `branch  ${agent.branch ?? "unknown"}`,
     `worktree ${agent.worktree ?? "unknown"}`,
     `provider ${agent.provider ?? "unknown"}`,
-    `goal    ${view.goalTitle ?? "unassigned"}`,
+    `system  ${view.systemTitle ?? "unassigned"}`,
+    `goal    ${view.goalTitle ?? "none"}`,
     ...(view.attention
       ? [`why     ${view.attention.explanation}`, `waiting ${formatAge(view.attention.ageMs)}`]
       : []),

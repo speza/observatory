@@ -26,6 +26,7 @@ const GOAL_GRID_STEP_X = 72;
 const GOAL_GRID_STEP_Y = 48;
 const GOAL_GAP_X = 16;
 const GOAL_GAP_Y = 12;
+const MAP_GRID_STEP = 24;
 
 export interface GoalLayoutOccupancy {
   readonly position: MapPosition;
@@ -112,11 +113,11 @@ const stableSlotPositions = (
 const satelliteOffsets = (minimumCount: number): readonly MapPosition[] => {
   const offsets: MapPosition[] = [];
   for (let ring = 1; offsets.length < minimumCount; ring += 1) {
-    const width = ring * 32;
+    const width = ring * 24;
     const height = ring * 24;
-    for (let x = -ring; x <= ring; x += 1) offsets.push({ x: x * 32, y: -height });
+    for (let x = -ring; x <= ring; x += 1) offsets.push({ x: x * 24, y: -height });
     for (let y = -ring + 1; y <= ring; y += 1) offsets.push({ x: width, y: y * 24 });
-    for (let x = ring - 1; x >= -ring; x -= 1) offsets.push({ x: x * 32, y: height });
+    for (let x = ring - 1; x >= -ring; x -= 1) offsets.push({ x: x * 24, y: height });
     for (let y = ring - 1; y >= -ring + 1; y -= 1) offsets.push({ x: -width, y: y * 24 });
   }
   return offsets;
@@ -131,11 +132,11 @@ const inboxOffsets = (minimumCount: number): readonly MapPosition[] => {
   const offsets: MapPosition[] = [];
   for (let ring = 1; offsets.length < minimumCount; ring += 1) {
     const width = ring * 72;
-    const height = ring * 32;
-    for (let x = -width; x <= width; x += 36) offsets.push({ x, y: -height });
-    for (let y = -height + 32; y <= height; y += 32) offsets.push({ x: width, y });
-    for (let x = width - 36; x >= -width; x -= 36) offsets.push({ x, y: height });
-    for (let y = height - 32; y >= -height + 32; y -= 32) offsets.push({ x: -width, y });
+    const height = ring * 24;
+    for (let x = -width; x <= width; x += 24) offsets.push({ x, y: -height });
+    for (let y = -height + 24; y <= height; y += 24) offsets.push({ x: width, y });
+    for (let x = width - 24; x >= -width; x -= 24) offsets.push({ x, y: height });
+    for (let y = height - 24; y >= -height + 24; y -= 24) offsets.push({ x: -width, y });
   }
   return offsets;
 };
@@ -230,8 +231,8 @@ const overflowGoalMapPosition = (
     if (footprint.halfWidth > maximumHalfWidth) maximumHalfWidth = footprint.halfWidth;
     if (footprint.halfHeight > maximumHalfHeight) maximumHalfHeight = footprint.halfHeight;
   }
-  const stepX = maximumHalfWidth * 2 + GOAL_GAP_X;
-  const stepY = maximumHalfHeight * 2 + GOAL_GAP_Y;
+  const stepX = Math.ceil((maximumHalfWidth * 2 + GOAL_GAP_X) / MAP_GRID_STEP) * MAP_GRID_STEP;
+  const stepY = Math.ceil((maximumHalfHeight * 2 + GOAL_GAP_Y) / MAP_GRID_STEP) * MAP_GRID_STEP;
   const buckets = new Map<string, GoalLayoutOccupancy[]>();
   for (const entry of occupied) {
     const key = cellKey(Math.round(entry.position.x / stepX), Math.round(entry.position.y / stepY));
@@ -348,7 +349,10 @@ export const mapInboxAnchor = (goals: readonly MapPosition[]): MapPosition => {
   }
   // Leave room for the inbox orbit's outer edge and both card bounds. This
   // keeps the neutral sector separate even at the minimum wide-map zoom.
-  return { x: minimumX - 144, y: Math.round(totalY / goals.length) };
+  return {
+    x: minimumX - 144,
+    y: Math.round(totalY / goals.length / MAP_GRID_STEP) * MAP_GRID_STEP,
+  };
 };
 
 /** Place unassigned agents in a stable, collision-free neutral orbit. */
@@ -364,9 +368,9 @@ export const unassignedAgentPosition = (anchor: MapPosition, agentId: string): M
 
 // Grid metrics sized for the renderer's discovery card (278x132 logical
 // units) plus a small gap, so a compact dock never overlaps itself.
-const DISCOVERY_DOCK_HORIZONTAL_STEP = 302;
-const DISCOVERY_DOCK_VERTICAL_STEP = 156;
-const DISCOVERY_DOCK_CLEARANCE = 200;
+const DISCOVERY_DOCK_HORIZONTAL_STEP = 288;
+const DISCOVERY_DOCK_VERTICAL_STEP = 144;
+const DISCOVERY_DOCK_CLEARANCE = 192;
 const DISCOVERY_DOCK_MAXIMUM_COLUMNS = 4;
 
 const discoveryDockColumns = (count: number): number => {
@@ -395,8 +399,12 @@ export const discoveredExecutionDockPositions = (
   const maximumX = occupied.length > 0 ? Math.max(...occupied.map((point) => point.x)) : 0;
   const baseY = occupied.length > 0 ? Math.max(...occupied.map((point) => point.y)) : 0;
   const anchor: MapPosition = {
-    x: Math.round((minimumX + maximumX) / 2 - ((columns - 1) * DISCOVERY_DOCK_HORIZONTAL_STEP) / 2),
-    y: Math.round(baseY + DISCOVERY_DOCK_CLEARANCE),
+    x:
+      Math.round(
+        ((minimumX + maximumX) / 2 - ((columns - 1) * DISCOVERY_DOCK_HORIZONTAL_STEP) / 2) /
+          MAP_GRID_STEP,
+      ) * MAP_GRID_STEP,
+    y: Math.round((baseY + DISCOVERY_DOCK_CLEARANCE) / MAP_GRID_STEP) * MAP_GRID_STEP,
   };
   return new Map(
     uniqueHandles.map((handle, index) => [

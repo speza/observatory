@@ -460,6 +460,11 @@
 .agent__quick-action:focus svg {
   color: var(--paper-panel);
 }
+.agent__quick-action--destructive:hover rect,
+.agent__quick-action--destructive:focus rect {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
 
 .discovered-executions {
   pointer-events: none;
@@ -520,6 +525,18 @@
 }
 .discovered-dock {
   pointer-events: none;
+}
+.discovered-dock__toggle {
+  pointer-events: all;
+  cursor: pointer;
+  outline: none;
+}
+.discovered-dock__toggle-hit {
+  fill: transparent;
+}
+.discovered-dock__toggle:hover .discovered-dock__toggle-hit,
+.discovered-dock__toggle:focus .discovered-dock__toggle-hit {
+  fill: color-mix(in srgb, var(--paper-panel) 68%, var(--accent) 32%);
 }
 .discovered-dock__frame {
   fill: color-mix(in srgb, var(--paper-panel) 45%, transparent);
@@ -779,4 +796,43 @@
     left: 20px;
     bottom: 20px;
   }
+}
+.workspace-island__surface {
+  fill: color-mix(in srgb, var(--paper-panel) 58%, var(--paper) 42%);
+  stroke: var(--hairline);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.workspace-island__label {
+  fill: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.workspace-island,
+.workspace-less .agent {
+  transition:
+    opacity 260ms ease,
+    filter 260ms ease;
+}
+
+.agent__goal-chip {
+  fill: color-mix(in srgb, var(--goal-color) 12%, transparent);
+  stroke: color-mix(in srgb, var(--goal-color) 55%, var(--hairline));
+  stroke-width: 0.7;
+}
+
+.workspace-less .agent__card {
+  stroke-dasharray: 5 4;
+}
+
+.workspace-less__frame {
+  fill: color-mix(in srgb, var(--paper-panel) 34%, transparent);
+  stroke: var(--hairline);
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
 }

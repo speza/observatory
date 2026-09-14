@@ -385,8 +385,19 @@
   padding-top: 14px;
   border-top: 1px dashed var(--hairline);
 }
-.workspace-tree__discovered-section > .overline {
+.workspace-tree__discovered-heading {
   color: var(--uncertain);
+}
+.workspace-tree__discovered-heading::before {
+  content: "+";
+  width: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-align: center;
+}
+.workspace-tree__discovered-section[open] > .workspace-tree__discovered-heading::before {
+  content: "−";
 }
 .workspace-tree .workspace-tree__discovered {
   margin-left: 0;

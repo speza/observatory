@@ -378,6 +378,49 @@ describe("SQLite persistence", () => {
     }
   });
 
+  test("persists direct System Agent assignments across store restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ao-v0-sqlite-direct-system-"));
+    const databasePath = join(directory, "universe.sqlite");
+    const first = new SqliteUniverseStore(databasePath);
+    try {
+      const setup = makeUniverse({ store: first });
+      setup.universe.execute({ type: "CreateSystem", title: "Persisted context" });
+      admitObservedConversationsAndReconcile(setup.universe, hostSnapshot([observation]));
+      expect(
+        setup.universe.execute({
+          type: "AssignAgentToSystem",
+          agentId: "agent-1",
+          systemId: "system-1",
+        }),
+      ).toEqual({ ok: true, agentId: "agent-1", systemId: "system-1" });
+      const state = first.load();
+      expect(state.agents[0]?.primaryGoalId).toBeUndefined();
+      expect(state.agents[0]?.systemId).toBe("system-1");
+      expect(state.changes.at(-1)).toMatchObject({
+        targetType: "agent",
+        targetId: "agent-1",
+        systemId: "system-1",
+      });
+      first.close();
+
+      const second = new SqliteUniverseStore(databasePath);
+      try {
+        expect(second.load()).toEqual(state);
+        const recovered = makeUniverse({ store: second }).universe;
+        const projection = recovered.project({ kind: "command-centre", now: 1_000_000 });
+        if (projection.kind !== "command-centre") throw new Error("wrong projection");
+        expect(projection.systems.find((system) => system.id === "system-1")?.agents).toHaveLength(
+          1,
+        );
+      } finally {
+        second.close();
+      }
+    } finally {
+      first.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("initializes the complete clean-break schema", () => {
     const store = new SqliteUniverseStore(":memory:");
     expect(

@@ -88,6 +88,7 @@ const AgentFields = {
   displayName: Schema.String,
   displayNameSource: Schema.Literal("human", "provider", "fallback"),
   description: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   primaryGoalId: Schema.optional(Schema.String),
   runtimeState: RuntimeState,
   runtimeStateSource: Schema.String,
@@ -102,6 +103,7 @@ const AgentFields = {
   provider: Schema.optional(Schema.String),
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
+  systemTitle: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
   providerEvidence: Schema.optional(
     Schema.Struct({
@@ -171,6 +173,7 @@ const SystemView = Schema.Struct({
   description: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
+  agents: Schema.Array(AgentView),
   goals: Schema.Array(GoalView),
   agentCount: Schema.Number,
   workingCount: Schema.Number,
@@ -248,6 +251,17 @@ const UniverseMap = Schema.Struct({
   generatedAt: Schema.Number,
   host: OptionalHostHealth,
   attention: AttentionProjection,
+  workspaces: Schema.Array(
+    Schema.Struct({
+      label: Schema.String,
+      mapPosition: MapPosition,
+      agents: Schema.Array(MapAgentView),
+      goalIds: Schema.Array(Schema.String),
+      attentionCount: Schema.Number,
+      uncertaintyCount: Schema.Number,
+    }),
+  ),
+  workspaceLess: Schema.Array(MapAgentView),
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
   discoveredExecutions: Schema.optional(Schema.Array(MapDiscoveredExecution)),
@@ -263,6 +277,7 @@ const UniverseChange = Schema.Struct({
   targetType: Schema.Literal("system", "goal", "agent"),
   targetId: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   summary: Schema.String,
 });
 const EvidenceCatchUpGroup = Schema.Struct({
@@ -334,6 +349,7 @@ const PendingLaunch = Schema.Struct({
   harnessId: Schema.String,
   displayName: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   message: Schema.String,
 });
 export const WebPortfolioResponseSchema = Schema.Struct({
@@ -408,6 +424,7 @@ export const SearchProjectionSchema = Schema.Struct({
       context: Schema.String,
       status: Schema.String,
       goalId: Schema.optional(Schema.String),
+      systemId: Schema.optional(Schema.String),
     }),
   ),
 });
@@ -438,6 +455,7 @@ const StartAgentResult = Schema.Struct({
   message: Schema.String,
   requestId: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   agentId: Schema.optional(Schema.String),
   workspace: Schema.optional(PreparedWorkspace),
   warnings: Schema.optional(Schema.Array(Schema.String)),

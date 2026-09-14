@@ -45,6 +45,7 @@ describe("ConversationHistoryDialog", () => {
             createdAt: 0,
             updatedAt: 0,
             goals: [],
+            agents: [],
             agentCount: 0,
             workingCount: 0,
             attentionCount: 0,
@@ -60,6 +61,8 @@ describe("ConversationHistoryDialog", () => {
     expect(markup).toContain("Search");
     expect(markup).toContain("All providers");
     expect(markup).toContain("Destination Goal");
+    expect(markup).toContain("Destination System");
+    expect(markup).toContain("Add to System");
     expect(markup).toContain("Platform · P1 · Regression goal");
     expect(markup).toContain("Add to goal");
     expect(markup).toContain("Add unassigned");

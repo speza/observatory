@@ -85,6 +85,7 @@ interface AgentRow {
   display_name: string;
   display_name_source: string;
   description: string | null;
+  system_id: string | null;
   primary_goal_id: string | null;
   runtime_state: string;
   runtime_state_source: string;
@@ -124,6 +125,7 @@ interface UniverseChangeRow {
   target_type: string;
   target_id: string;
   goal_id: string | null;
+  system_id: string | null;
   summary: string;
 }
 
@@ -202,7 +204,7 @@ const loadedHostInstanceId = (hostKind: string, value: string | null): string =>
   }
 };
 
-export const SQLITE_SCHEMA_GENERATION = 5;
+export const SQLITE_SCHEMA_GENERATION = 6;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {
@@ -230,6 +232,7 @@ const StartAgentResultSchema: Schema.Schema<StartAgentResult> = Schema.Struct({
   message: Schema.String,
   requestId: Schema.String,
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   agentId: Schema.optional(Schema.String),
   workspace: Schema.optional(PreparedWorkspaceSchema),
   warnings: Schema.optional(Schema.Array(Schema.String)),
@@ -256,6 +259,7 @@ const LaunchRecoverySchema: Schema.Schema<LaunchRecovery> = Schema.Struct({
   displayName: Schema.optional(Schema.String),
   nativeConversationRef: Schema.optional(NativeConversationRefSchema),
   goalId: Schema.optional(Schema.String),
+  systemId: Schema.optional(Schema.String),
   agentId: Schema.optional(Schema.String),
 });
 
@@ -447,6 +451,7 @@ export class SqliteUniverseStore
             },
           });
         if (row.description) Object.assign(agent, { description: row.description });
+        if (row.system_id) Object.assign(agent, { systemId: row.system_id });
         if (row.primary_goal_id) Object.assign(agent, { primaryGoalId: row.primary_goal_id });
         if (row.attention_since !== null)
           Object.assign(agent, { attentionSince: row.attention_since });
@@ -503,6 +508,7 @@ export class SqliteUniverseStore
           summary: row.summary,
         };
         if (row.goal_id) Object.assign(item, { goalId: row.goal_id });
+        if (row.system_id) Object.assign(item, { systemId: row.system_id });
         return item;
       });
     const checkpoint = this.db
@@ -561,7 +567,7 @@ export class SqliteUniverseStore
       }
       const agent = this.prepareSnapshotTable(
         "agents",
-        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, provider_resume_eligibility, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
+        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, provider_resume_eligibility, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, system_id, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
         ["id"],
       );
       for (const row of state.agents) {
@@ -588,6 +594,7 @@ export class SqliteUniverseStore
           row.displayName,
           row.displayNameSource,
           row.description ?? null,
+          row.systemId ?? null,
           row.primaryGoalId ?? null,
           row.runtimeState,
           row.runtimeStateSource,
@@ -628,7 +635,7 @@ export class SqliteUniverseStore
         dismissal.run(row.goalId, row.agentId, row.dismissedAt);
       const change = this.prepareSnapshotTable(
         "universe_changes",
-        "sequence, occurred_at, outcome, target_type, target_id, goal_id, summary",
+        "sequence, occurred_at, outcome, target_type, target_id, goal_id, system_id, summary",
         ["sequence"],
       );
       for (const row of state.changes)
@@ -639,6 +646,7 @@ export class SqliteUniverseStore
           row.targetType,
           row.targetId,
           row.goalId ?? null,
+          row.systemId ?? null,
           row.summary,
         );
       const checkpoint = this.prepareSnapshotTable(
@@ -1224,7 +1232,8 @@ export class SqliteUniverseStore
       this.db.exec(`
         DELETE FROM related_agent_dismissals;
         UPDATE agents
-        SET primary_goal_id = NULL,
+        SET system_id = NULL,
+            primary_goal_id = NULL,
             archived_at = NULL,
             attention_since = NULL,
             runtime_state = 'unknown',
@@ -1434,6 +1443,7 @@ export class SqliteUniverseStore
         display_name TEXT NOT NULL,
         display_name_source TEXT NOT NULL,
         description TEXT,
+        system_id TEXT,
         primary_goal_id TEXT,
         runtime_state TEXT NOT NULL,
         runtime_state_source TEXT NOT NULL,
@@ -1449,6 +1459,7 @@ export class SqliteUniverseStore
         execution_container_id TEXT,
         execution_container_label TEXT,
         archived_at INTEGER,
+        FOREIGN KEY(system_id) REFERENCES systems(id),
         FOREIGN KEY(primary_goal_id) REFERENCES goals(id)
       );
       CREATE TABLE IF NOT EXISTS hosts (
@@ -1474,6 +1485,7 @@ export class SqliteUniverseStore
         target_type TEXT NOT NULL,
         target_id TEXT NOT NULL,
         goal_id TEXT,
+        system_id TEXT,
         summary TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS operator_checkpoint (
@@ -1562,6 +1574,9 @@ export class SqliteUniverseStore
       CREATE INDEX IF NOT EXISTS agents_primary_goal
         ON agents(primary_goal_id)
         WHERE primary_goal_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS agents_system
+        ON agents(system_id)
+        WHERE system_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS goals_system
         ON goals(system_id)
         WHERE system_id IS NOT NULL;
