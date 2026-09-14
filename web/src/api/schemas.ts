@@ -104,6 +104,7 @@ const AgentFields = {
   archivedAt: Schema.optional(Schema.Number),
   goalTitle: Schema.optional(Schema.String),
   systemTitle: Schema.optional(Schema.String),
+  workspaceLabel: Schema.optional(Schema.String),
   attention: Schema.optional(AttentionItem),
   providerEvidence: Schema.optional(
     Schema.Struct({

@@ -206,6 +206,31 @@ describe("Workspace navigation views", () => {
     expect(markup).toContain("Discovered in Herdr");
     expect(markup).toContain("Discovered execution");
   });
+
+  test("agent rows show their qualified workspace as muted context", () => {
+    const { universe, clock } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          nativeId: "placed",
+          displayName: "Placed worker",
+          runtimeState: "working",
+          runtimeStateSource: "test",
+          hostLocator: "test:placed",
+          observedAt: clock.now(),
+          executionContainer: { id: "ctx-1", label: "Review workspace" },
+        },
+      ]),
+    );
+    const projection = universe.project({ kind: "command-centre", now: clock.now() });
+    if (projection.kind !== "command-centre") throw new Error("Expected command centre");
+    const markup = renderToStaticMarkup(
+      <WorkspaceNavigation projection={projection} onSystem={() => {}} onSelect={() => {}} />,
+    );
+    expect(markup).toContain("workspace-tree__context");
+    expect(markup).toContain("Review workspace");
+  });
 });
 
 describe("Workspace navigation disclosure", () => {

@@ -76,6 +76,12 @@ export interface AgentView extends Omit<
   readonly execution?: Pick<NonNullable<Agent["execution"]>, "hostKind">;
   readonly goalTitle?: string;
   readonly systemTitle?: string;
+  /**
+   * Qualified, host-neutral workspace label derived at the boundary from
+   * exactly identified, fresh live execution evidence. Presentation metadata
+   * only; never durable or organisational state.
+   */
+  readonly workspaceLabel?: string;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;

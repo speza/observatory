@@ -136,6 +136,9 @@ export const WorkspaceNavigation = ({
       >
         <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
         <span>{agent.displayName}</span>
+        {agent.workspaceLabel ? (
+          <span className="workspace-tree__context">{agent.workspaceLabel}</span>
+        ) : null}
         <span
           className="workspace-tree__status"
           role="img"

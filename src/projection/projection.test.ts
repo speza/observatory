@@ -733,6 +733,16 @@ describe("projections", () => {
 
     const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
     if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const commandCentreLabels = new Map(
+      [
+        ...commandCentre.goals.flatMap((goal) => goal.agents),
+        ...commandCentre.systems.flatMap((system) => system.agents),
+        ...commandCentre.unassigned,
+      ].map((view) => [view.id, view.workspaceLabel]),
+    );
+    expect(commandCentreLabels.get("agent-1")).toBe("API workspace");
+    expect(commandCentreLabels.get("agent-2")).toBe("API workspace");
+    expect(commandCentreLabels.get("agent-3")).toBe("API workspace");
     const differentlyScopedAgents = universe.snapshot().agents.map((agent) =>
       agent.id === "agent-2" && agent.execution
         ? {
@@ -1047,6 +1057,39 @@ describe("projections", () => {
       "changed",
       "attention",
     ]);
+  });
+
+  test("publishes the workspace label only from qualified fresh live evidence", () => {
+    const placed = {
+      ...bareAgent("placed", "live"),
+      execution: {
+        hostKind: "test-host",
+        hostInstanceId: "host-1",
+        nativeId: "pane-1",
+        hostLocator: "opaque:pane-1",
+        observedAt: 0,
+      },
+      executionPresence: "live",
+      executionContainer: { id: "ctx-1", label: "  Review workspace  " },
+    } satisfies Agent;
+    const staleObservation = {
+      ...placed,
+      id: "stale-observation",
+      observationHealth: "stale" as const,
+    } satisfies Agent;
+    const unnamedContainer = {
+      ...placed,
+      id: "unnamed-container",
+      executionContainer: { id: "ctx-2", label: "   " },
+    } satisfies Agent;
+    const projected = projectCommandCentre(
+      { goals: [], agents: [placed, staleObservation, unnamedContainer], hosts: [] },
+      0,
+    );
+    const labels = new Map(projected.unassigned.map((view) => [view.id, view.workspaceLabel]));
+    expect(labels.get("placed")).toBe("Review workspace");
+    expect(labels.get("stale-observation")).toBeUndefined();
+    expect(labels.get("unnamed-container")).toBe("Live workspace");
   });
 
   test("orders non-live host health consistently and selects a stable host", () => {

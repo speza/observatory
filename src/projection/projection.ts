@@ -174,6 +174,7 @@ const projectCommandCentre = (
         const systemId = effectiveSystemId(agent, goalsById);
         return systemId ? systemsById.get(systemId)?.title : undefined;
       })(),
+      workspaceLabel: qualifiedWorkspace(agent)?.label,
       attention: attentionByAgent.get(agent.id),
     };
   });
@@ -501,6 +502,30 @@ const opaqueContextValue = (value: string | undefined): string | undefined => {
   return normalized || undefined;
 };
 
+/**
+ * Qualified, host-neutral workspace evidence: a fresh live execution on a live
+ * host inside an exactly identified execution container. The grouping key stays
+ * server-side; only the safe host-reported label is published to views.
+ */
+const qualifiedWorkspace = (
+  agent: Agent | undefined,
+): { readonly key: string; readonly label: string } | undefined => {
+  if (!agent?.execution) return undefined;
+  const containerId = opaqueContextValue(agent.executionContainer?.id);
+  if (
+    !containerId ||
+    agent.executionPresence !== "live" ||
+    agent.observationHealth !== "fresh" ||
+    agent.hostHealth !== "live"
+  ) {
+    return undefined;
+  }
+  return {
+    key: `${agent.execution.hostKind}\u0000${agent.execution.hostInstanceId}\u0000${containerId}`,
+    label: agent.executionContainer?.label?.trim() || "Live workspace",
+  };
+};
+
 const relatedEvidenceRank = (strength: RelatedAgentEvidence["strength"]): number =>
   strength === "strong" ? 0 : 1;
 
@@ -702,26 +727,14 @@ export const mapFromCommandCentre = (
   const grouped = new Map<string, { label: string; agents: typeof allAgents }>();
   const workspaceLessAgents: typeof allAgents = [];
   for (const agent of allAgents) {
-    const source = sourceAgentsById.get(agent.id);
-    const containerId = opaqueContextValue(source?.executionContainer?.id);
-    if (
-      !source?.execution ||
-      !containerId ||
-      source.executionPresence !== "live" ||
-      source.observationHealth !== "fresh" ||
-      source.hostHealth !== "live"
-    ) {
+    const workspace = qualifiedWorkspace(sourceAgentsById.get(agent.id));
+    if (!workspace) {
       workspaceLessAgents.push(agent);
       continue;
     }
-    const key = `${source.execution.hostKind}\u0000${source.execution.hostInstanceId}\u0000${containerId}`;
-    const existing = grouped.get(key);
+    const existing = grouped.get(workspace.key);
     if (existing) existing.agents.push(agent);
-    else
-      grouped.set(key, {
-        label: source.executionContainer?.label?.trim() || "Live workspace",
-        agents: [agent],
-      });
+    else grouped.set(workspace.key, { label: workspace.label, agents: [agent] });
   }
   const occupied: { position: MapPosition; agentCount: number }[] = [];
   const workspaces: MapWorkspaceView[] = [];
@@ -1165,6 +1178,7 @@ const agentView = (
     ...publicAgent(agent),
     goalTitle: goalsById.get(agent.primaryGoalId ?? "")?.title,
     systemTitle: systems.find((system) => system.id === systemId)?.title,
+    workspaceLabel: qualifiedWorkspace(agent)?.label,
     attention: attention.find((item) => item.agentId === agent.id),
   };
 };

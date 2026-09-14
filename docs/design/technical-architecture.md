@@ -294,6 +294,12 @@ observations.
   derived positions,
   keeps live or uncertain Agents without trustworthy workspace evidence
   explicit, and omits confirmed-absent executions from active projections.
+  Command Centre Agent views additionally carry that qualified safe workspace
+  label as presentation metadata (for example navigator row context), so the
+  tree can show which live territory an Agent runs in without re-parenting the
+  durable `System -> Goal -> Agent` tree or accepting workspace as
+  organisational state. Agents without qualified evidence simply omit the
+  label.
   Durable records remain available through history/search and include-archived
   views. The renderer lays out workspace card grids and the compact discovery
   dock while keeping viewport state outside persistence.
@@ -582,7 +588,9 @@ its source workspace context while retaining the exact execution binding for
 access and lifecycle. The projection emits only stable coordinates, a safe
 label, public Agent views, Goal references and aggregate
 attention/uncertainty; opaque grouping keys and native host identifiers never
-cross that boundary. This derived geography does not
+cross that boundary. Command Centre Agent views carry the same qualified safe
+label as optional presentation metadata; the grouping key itself never does.
+This derived geography does not
 alter the durable `System -> Goal -> Agent` authority.
 
 The intended dependency direction is:
