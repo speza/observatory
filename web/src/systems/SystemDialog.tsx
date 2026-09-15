@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SystemView } from "../../../src/projection/types.ts";
-import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol.ts";
+import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol/index.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
 
 interface SystemDialogProps {

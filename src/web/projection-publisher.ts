@@ -6,7 +6,7 @@ import type {
   RendererSubject,
   WebPendingLaunch,
   WebPortfolioResponse,
-} from "./protocol.ts";
+} from "./protocol/index.ts";
 import { isAllowedWebRequest } from "./security.ts";
 
 const DEFAULT_BATCH_MS = 250;

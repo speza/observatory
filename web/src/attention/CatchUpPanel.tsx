@@ -3,7 +3,6 @@ import type {
   CatchUpSubject,
   EvidenceCatchUpItem,
 } from "../../../src/projection/types.ts";
-import type { UniverseChange } from "../../../src/universe/types.ts";
 import type { Selection } from "../app/selection.ts";
 
 interface CatchUpPanelProps {
@@ -40,7 +39,7 @@ export const CatchUpPanel = ({
       })
     : "your first checkpoint";
 
-  const selectChange = (item: UniverseChange): void => {
+  const selectChange = (item: CatchUpSubject["transitions"][number]): void => {
     if (item.targetType === "system") onSelectSystem(item.targetId);
     else onSelect({ type: item.targetType, id: item.targetId });
   };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentView } from "../../../src/projection/types.ts";
-import type { WebAgentRepositoryStatusResponse } from "../../../src/web/protocol.ts";
-import { summarizeIntegrationReadiness } from "../../../src/repositories/review-summary.ts";
+import type { WebAgentRepositoryStatusResponse } from "../../../src/web/protocol/index.ts";
+import { summarizeIntegrationReadiness } from "../shared/integrationSummary.ts";
 import { fetchAgentRepositoryStatus } from "../api/client.ts";
 
 interface ReviewEvidenceProps {

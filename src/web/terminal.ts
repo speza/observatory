@@ -13,7 +13,9 @@ import type { Universe } from "../universe/universe.ts";
 import type { Agent, NativeConversationRef } from "../universe/types.ts";
 import type { StartAgentCoordinator } from "../session-launch/types.ts";
 import {
-  WEB_TERMINAL_DIMENSION_LIMITS,
+  TerminalClientMessageSchema,
+  TerminalOpenRequestSchema,
+  TerminalSessionIdSchema,
   type WebTerminalActionResponse,
   type WebTerminalClientMessage,
   type WebTerminalEvent,
@@ -22,63 +24,12 @@ import {
   type WebTerminalOpenResponse,
   type WebTerminalScrollRequest,
   type WebTerminalServerMessage,
-} from "./protocol.ts";
+} from "./protocol/index.ts";
 
 const MAX_TERMINAL_BODY_BYTES = 65_536;
 const MAX_REPLAY_EVENTS = 128;
 const MAX_LINK_HANDLES = 256;
 const TERMINAL_RECONNECT_GRACE_MS = 15_000;
-const SessionId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
-const LinkId = Schema.String.pipe(Schema.pattern(/^[0-9a-f-]{36}$/u));
-const Dimensions = Schema.Struct({
-  columns: Schema.Number.pipe(
-    Schema.int(),
-    Schema.between(
-      WEB_TERMINAL_DIMENSION_LIMITS.minColumns,
-      WEB_TERMINAL_DIMENSION_LIMITS.maxColumns,
-    ),
-  ),
-  rows: Schema.Number.pipe(
-    Schema.int(),
-    Schema.between(WEB_TERMINAL_DIMENSION_LIMITS.minRows, WEB_TERMINAL_DIMENSION_LIMITS.maxRows),
-  ),
-});
-const OpenRequest = Schema.Struct({
-  agentId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160))),
-  requestId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))),
-  discoveryHandle: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))),
-  dimensions: Dimensions,
-  resizeMode: Schema.optional(Schema.Literal("fit", "preserve")),
-  linkId: Schema.optional(LinkId),
-});
-const TextInputRequest = Schema.Struct({
-  kind: Schema.Literal("input"),
-  value: Schema.String.pipe(Schema.maxLength(32_768)),
-});
-const BytesInputRequest = Schema.Struct({
-  kind: Schema.Literal("bytes"),
-  bytes: Schema.Array(Schema.Number.pipe(Schema.int(), Schema.between(0, 255))).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(32_768),
-  ),
-});
-const ScrollInputRequest = Schema.Struct({
-  kind: Schema.Literal("scroll"),
-  direction: Schema.Literal("up", "down"),
-  lines: Schema.Number.pipe(Schema.int(), Schema.between(1, 512)),
-  source: Schema.Literal("wheel", "page-key"),
-});
-const ResizeRequest = Schema.Struct({
-  kind: Schema.Literal("resize"),
-  columns: Dimensions.fields.columns,
-  rows: Dimensions.fields.rows,
-});
-const SocketRequest = Schema.Union(
-  TextInputRequest,
-  BytesInputRequest,
-  ScrollInputRequest,
-  ResizeRequest,
-);
 
 interface ActiveTerminal {
   readonly terminal: HostedTerminalSession;
@@ -193,7 +144,7 @@ export class WebTerminalGateway {
   }
 
   async open(body: string): Promise<WebTerminalOpenResponse> {
-    const request = decode(OpenRequest, body);
+    const request = decode(TerminalOpenRequestSchema, body);
     const targetCount = [request.agentId, request.requestId, request.discoveryHandle].filter(
       Boolean,
     ).length;
@@ -365,7 +316,7 @@ export class WebTerminalGateway {
       receive: (message) => {
         if (closed) return pending;
         pending = pending
-          .then(() => this.socketAction(active, decode(SocketRequest, message)))
+          .then(() => this.socketAction(active, decode(TerminalClientMessageSchema, message)))
           .catch((error: Error) => {
             send({
               kind: "error",
@@ -557,7 +508,7 @@ export class WebTerminalGateway {
 
   private validSessionId(raw: string): string {
     try {
-      return Schema.decodeUnknownSync(SessionId)(raw);
+      return Schema.decodeUnknownSync(TerminalSessionIdSchema)(raw);
     } catch {
       throw new WebTerminalError("Terminal session id is invalid.", 400);
     }

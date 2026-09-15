@@ -1,4 +1,4 @@
-import type { AgentRepositoryStatusSnapshot } from "./types.ts";
+import type { WebAgentRepositoryStatusResponse } from "../../../src/web/protocol/index.ts";
 
 export type IntegrationWarningKind =
   | "dirty-worktree"
@@ -22,7 +22,7 @@ export interface IntegrationReviewSummary {
 export const NO_PULL_REQUEST_DIAGNOSTIC = "No pull request found for this repository and branch.";
 
 export const summarizeIntegrationReadiness = (
-  snapshot: AgentRepositoryStatusSnapshot,
+  snapshot: WebAgentRepositoryStatusResponse,
 ): IntegrationReviewSummary => {
   const warnings: IntegrationWarning[] = [];
   const information: string[] = [];

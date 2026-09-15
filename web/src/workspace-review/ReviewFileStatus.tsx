@@ -1,4 +1,4 @@
-import type { WorkspaceDiffFileStatus } from "../../../src/workspaces/types.ts";
+import type { WebReviewDiffFileStatus } from "../../../src/web/protocol/index.ts";
 
 const STATUS_LABELS = {
   added: "added",
@@ -7,7 +7,7 @@ const STATUS_LABELS = {
   renamed: "renamed",
   copied: "copied",
   untracked: "untracked",
-} as const satisfies Readonly<Record<WorkspaceDiffFileStatus, string>>;
+} as const satisfies Readonly<Record<WebReviewDiffFileStatus, string>>;
 
 const STATUS_BADGES = {
   added: "A",
@@ -16,10 +16,10 @@ const STATUS_BADGES = {
   renamed: "R",
   copied: "C",
   untracked: "U",
-} as const satisfies Readonly<Record<WorkspaceDiffFileStatus, string>>;
+} as const satisfies Readonly<Record<WebReviewDiffFileStatus, string>>;
 
 interface ReviewFileStatusProps {
-  readonly status: WorkspaceDiffFileStatus;
+  readonly status: WebReviewDiffFileStatus;
   readonly binary?: boolean;
 }
 

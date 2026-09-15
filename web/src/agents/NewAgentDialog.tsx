@@ -4,7 +4,7 @@ import type {
   WebStartAgentRequest,
   WebStartAgentResponse,
   WebWorkspaceBrowserResponse,
-} from "../../../src/web/protocol.ts";
+} from "../../../src/web/protocol/index.ts";
 import { browseLaunchWorkspace, fetchLaunchOptions, startWebAgent } from "../api/client.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
 

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PortfolioResponse } from "../../../src/web/portfolio.ts";
 import type {
   BrowserProjectionEvent,
+  PortfolioResponse,
   RendererSubject,
   WebPendingLaunch,
   WebPortfolioResponse,
-} from "../../../src/web/protocol.ts";
+} from "../../../src/web/protocol/index.ts";
 import {
   decodeBrowserProjectionEvent,
   fetchPortfolio,

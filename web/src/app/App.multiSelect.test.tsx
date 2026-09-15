@@ -10,8 +10,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { Schema } from "effect";
 import { projectPortfolio } from "../../../src/web/portfolio.ts";
 import type { InspectorProjection } from "../../../src/projection/types.ts";
-import { CommandResponseSchema } from "../api/schemas.ts";
-import type { WebPortfolioResponse } from "../../../src/web/protocol.ts";
+import {
+  CommandResponseSchema,
+  type WebPortfolioResponse,
+} from "../../../src/web/protocol/index.ts";
 import {
   admitObservedConversationsAndReconcile,
   hostSnapshot,

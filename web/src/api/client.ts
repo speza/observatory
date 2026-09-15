@@ -1,142 +1,47 @@
 import type { InspectorProjection, SearchProjection } from "../../../src/projection/types.ts";
-import type {
-  WebPortfolioResponse,
-  WebCommand,
-  WebCommandResponse,
-  WebCloseoutResponse,
-  WebLaunchOptionsResponse,
-  WebStartAgentRequest,
-  WebStartAgentResponse,
-  WebResumeAgentRequest,
-  WebResumeAgentResponse,
-  WebWorkspaceBrowserResponse,
-  WebWorkspaceReviewFileResponse,
-  WebWorkspaceReviewResponse,
-  WebTerminalActionResponse,
-  WebTerminalEvent,
-  WebTerminalLink,
-  WebTerminalLinksResponse,
-  WebTerminalOpenResponse,
-  WebAgentRepositoryStatusResponse,
-  WebConversationHistoryResponse,
-  WebAddConversationResponse,
-  WebAdmitDiscoveredExecutionResponse,
-  BrowserProjectionEvent,
-  WebTerminalServerMessage,
-} from "../../../src/web/protocol.ts";
 import { Schema } from "effect";
 import {
+  AgentRepositoryStatusResponseSchema,
+  AddConversationResponseSchema,
+  AdmitDiscoveredExecutionResponseSchema,
+  BrowserProjectionEventSchema,
+  CloseoutResponseSchema,
   CommandResponseSchema,
+  ConversationHistoryResponseSchema,
   InspectorProjectionSchema,
-  WebPortfolioResponseSchema,
+  LaunchOptionsResponseSchema,
   SearchProjectionSchema,
   StartAgentResponseSchema,
-  CloseoutResponseSchema,
+  TerminalOpenResponseSchema,
+  WebPortfolioResponseSchema,
+  WebTerminalActionResponseSchema,
+  WebTerminalLinksResponseSchema,
+  WebTerminalServerMessageSchema,
+  WorkspaceBrowserResponseSchema,
   WorkspaceReviewFileResponseSchema,
   WorkspaceReviewResponseSchema,
-  AgentRepositoryStatusResponseSchema,
-  BrowserProjectionEventSchema,
-} from "./schemas.ts";
-
-const TerminalOpenSchema = Schema.Struct({ sessionId: Schema.String, message: Schema.String });
-const LaunchGoalSchema = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  priority: Schema.Literal("P0", "P1", "P2", "P3"),
-});
-const LaunchSystemSchema = Schema.Struct({ id: Schema.String, title: Schema.String });
-const WorkspaceChoiceSchema = Schema.Struct({
-  path: Schema.String,
-  label: Schema.String,
-  kind: Schema.Literal("workspace", "directory"),
-  repository: Schema.optional(Schema.String),
-  branch: Schema.optional(Schema.String),
-  available: Schema.Boolean,
-});
-const LaunchOptionSchema = Schema.Struct({
-  harnessId: Schema.String,
-  label: Schema.String,
-  description: Schema.optional(Schema.String),
-});
-const LaunchOptionsSchema: Schema.Schema<WebLaunchOptionsResponse> = Schema.Struct({
-  kind: Schema.Literal("launch-options"),
-  systems: Schema.Array(LaunchSystemSchema),
-  goals: Schema.Array(LaunchGoalSchema),
-  locations: Schema.Array(WorkspaceChoiceSchema),
-  agents: Schema.Array(LaunchOptionSchema),
-});
-const WorkspaceBrowserSchema: Schema.Schema<WebWorkspaceBrowserResponse> = Schema.Struct({
-  kind: Schema.Literal("workspace-browser"),
-  path: Schema.String,
-  parentPath: Schema.optional(Schema.String),
-  entries: Schema.Array(WorkspaceChoiceSchema),
-});
-const TerminalLinkSchema: Schema.Schema<WebTerminalLink> = Schema.Struct({
-  id: Schema.String,
-  kind: Schema.Literal("shell", "agent"),
-  label: Schema.String,
-  source: Schema.Literal("observed", "prepared"),
-  available: Schema.Boolean,
-  explanation: Schema.String,
-});
-const TerminalLinksSchema: Schema.Schema<WebTerminalLinksResponse> = Schema.Struct({
-  kind: Schema.Literal("terminal-links"),
-  agentId: Schema.String,
-  agentName: Schema.String,
-  links: Schema.Array(TerminalLinkSchema),
-  message: Schema.optional(Schema.String),
-});
-const TerminalActionSchema = Schema.Struct({ ok: Schema.Literal(true), message: Schema.String });
-const TerminalEventSchema: Schema.Schema<WebTerminalEvent> = Schema.Union(
-  Schema.Struct({
-    kind: Schema.Literal("frame"),
-    deliveryId: Schema.Number,
-    bytes: Schema.String,
-    columns: Schema.optional(Schema.Number),
-    rows: Schema.optional(Schema.Number),
-    sequence: Schema.optional(Schema.Number),
-    full: Schema.optional(Schema.Boolean),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("closed"),
-    deliveryId: Schema.optional(Schema.Number),
-    reason: Schema.optional(Schema.String),
-  }),
-);
-const TerminalServerMessageSchema: Schema.Schema<WebTerminalServerMessage> = Schema.Union(
-  TerminalEventSchema,
-  Schema.Struct({ kind: Schema.Literal("error"), message: Schema.String }),
-);
-const ConversationHistoryItemSchema = Schema.Struct({
-  handle: Schema.String,
-  harnessId: Schema.String,
-  providerLabel: Schema.String,
-  title: Schema.String,
-  workspaceRef: Schema.optional(Schema.String),
-  createdAt: Schema.optional(Schema.Number),
-  lastActiveAt: Schema.optional(Schema.Number),
-  resumeEligibility: Schema.Literal("same-site", "provider-account", "blocked", "unknown"),
-  provenance: Schema.Literal("provider-index", "session-header"),
-  runtimeState: Schema.Literal("dormant", "runtime-unknown"),
-});
-const ConversationHistorySchema: Schema.Schema<WebConversationHistoryResponse> = Schema.Struct({
-  kind: Schema.Literal("conversation-history"),
-  conversations: Schema.Array(ConversationHistoryItemSchema),
-});
-const AddConversationSchema = Schema.Struct({
-  agentId: Schema.String,
-  goalId: Schema.optional(Schema.String),
-  systemId: Schema.optional(Schema.String),
-  portfolio: WebPortfolioResponseSchema,
-});
-const AdmitDiscoveredExecutionSchema = Schema.Struct({
-  agentId: Schema.String,
-  goalId: Schema.optional(Schema.String),
-  systemId: Schema.optional(Schema.String),
-  message: Schema.String,
-  partial: Schema.optional(Schema.Boolean),
-  portfolio: WebPortfolioResponseSchema,
-});
+  type BrowserProjectionEvent,
+  type WebCommand,
+  type WebCommandResponse,
+  type WebCloseoutResponse,
+  type WebLaunchOptionsResponse,
+  type WebPortfolioResponse,
+  type WebResumeAgentRequest,
+  type WebResumeAgentResponse,
+  type WebStartAgentRequest,
+  type WebStartAgentResponse,
+  type WebTerminalActionResponse,
+  type WebTerminalLinksResponse,
+  type WebTerminalOpenResponse,
+  type WebTerminalServerMessage,
+  type WebAgentRepositoryStatusResponse,
+  type WebConversationHistoryResponse,
+  type WebAddConversationResponse,
+  type WebAdmitDiscoveredExecutionResponse,
+  type WebWorkspaceBrowserResponse,
+  type WebWorkspaceReviewFileResponse,
+  type WebWorkspaceReviewResponse,
+} from "../../../src/web/protocol/index.ts";
 
 const responseFor = async (path: string, signal?: AbortSignal): Promise<Response> => {
   const response = await fetch(path, { signal });
@@ -162,7 +67,7 @@ export const fetchConversationHistory = async (options?: {
     `/api/conversations/history${options?.refresh ? "?refresh=1" : ""}`,
     options?.signal,
   );
-  return Schema.decodeUnknownSync(ConversationHistorySchema)(await response.json());
+  return Schema.decodeUnknownSync(ConversationHistoryResponseSchema)(await response.json());
 };
 
 export const addConversation = async (
@@ -177,7 +82,7 @@ export const addConversation = async (
   });
   if (!response.ok)
     throw new Error(await errorMessage(response, `Add conversation failed (${response.status}).`));
-  return Schema.decodeUnknownSync(AddConversationSchema)(await response.json());
+  return Schema.decodeUnknownSync(AddConversationResponseSchema)(await response.json());
 };
 
 export const admitDiscoveredExecution = async (
@@ -194,7 +99,7 @@ export const admitDiscoveredExecution = async (
     throw new Error(
       await errorMessage(response, `Discovered execution admission failed (${response.status}).`),
     );
-  return Schema.decodeUnknownSync(AdmitDiscoveredExecutionSchema)(await response.json());
+  return Schema.decodeUnknownSync(AdmitDiscoveredExecutionResponseSchema)(await response.json());
 };
 
 export const fetchInspector = async (
@@ -312,7 +217,7 @@ export const fetchLaunchOptions = async (
   signal?: AbortSignal,
 ): Promise<WebLaunchOptionsResponse> => {
   const response = await responseFor("/api/launch/options", signal);
-  return Schema.decodeUnknownSync(LaunchOptionsSchema)(await response.json());
+  return Schema.decodeUnknownSync(LaunchOptionsResponseSchema)(await response.json());
 };
 
 export const browseLaunchWorkspace = async (
@@ -320,7 +225,7 @@ export const browseLaunchWorkspace = async (
   signal?: AbortSignal,
 ): Promise<WebWorkspaceBrowserResponse> => {
   const response = await responseFor(`/api/launch/browse?path=${encodeURIComponent(path)}`, signal);
-  return Schema.decodeUnknownSync(WorkspaceBrowserSchema)(await response.json());
+  return Schema.decodeUnknownSync(WorkspaceBrowserResponseSchema)(await response.json());
 };
 
 export const startWebAgent = async (
@@ -395,7 +300,7 @@ export const openWebTerminal = async (
     "/api/terminal/open",
     JSON.stringify({ ...target, dimensions, ...options }),
   );
-  return Schema.decodeUnknownSync(TerminalOpenSchema)(await response.json());
+  return Schema.decodeUnknownSync(TerminalOpenResponseSchema)(await response.json());
 };
 
 export const fetchTerminalLinks = async (
@@ -406,7 +311,7 @@ export const fetchTerminalLinks = async (
     `/api/terminal/links?agentId=${encodeURIComponent(agentId)}`,
     signal,
   );
-  return Schema.decodeUnknownSync(TerminalLinksSchema)(await response.json());
+  return Schema.decodeUnknownSync(WebTerminalLinksResponseSchema)(await response.json());
 };
 
 export const releaseWebTerminal = async (sessionId: string): Promise<WebTerminalActionResponse> => {
@@ -414,7 +319,7 @@ export const releaseWebTerminal = async (sessionId: string): Promise<WebTerminal
     `/api/terminal/${encodeURIComponent(sessionId)}/release`,
     "{}",
   );
-  return Schema.decodeUnknownSync(TerminalActionSchema)(await response.json());
+  return Schema.decodeUnknownSync(WebTerminalActionResponseSchema)(await response.json());
 };
 
 export const webTerminalSocketUrl = (sessionId: string, afterDeliveryId?: number): string => {
@@ -428,4 +333,4 @@ export const webTerminalSocketUrl = (sessionId: string, afterDeliveryId?: number
 };
 
 export const parseWebTerminalMessage = (text: string): WebTerminalServerMessage =>
-  Schema.decodeUnknownSync(Schema.parseJson(TerminalServerMessageSchema))(text);
+  Schema.decodeUnknownSync(Schema.parseJson(WebTerminalServerMessageSchema))(text);

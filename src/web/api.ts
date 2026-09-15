@@ -16,26 +16,29 @@ import { WebCommandError, decodeWebCommand } from "./commands.ts";
 import { WebLaunchError, WebLaunchGateway, pendingLaunchView } from "./launch.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { ControlPlaneEventHub } from "../control-plane-events/index.ts";
-import type {
-  WebCommandResponse,
-  WebCloseoutResponse,
-  WebLaunchOptionsResponse,
-  WebPendingLaunchesResponse,
-  WebStartAgentResponse,
-  WebWorkspaceBrowserResponse,
-  WebTerminalLinksResponse,
-  WebWorkspaceReviewFileResponse,
-  WebWorkspaceReviewResponse,
-  WebTerminalActionResponse,
-  WebTerminalOpenResponse,
-  WebTerminalServerMessage,
-  WebAgentRepositoryStatusResponse,
-  WebPluginStatusResponse,
-  WebConversationHistoryResponse,
-  WebAddConversationResponse,
-  WebAdmitDiscoveredExecutionResponse,
-  WebPortfolioResponse,
-} from "./protocol.ts";
+import {
+  AdmitDiscoveredExecutionRequestSchema,
+  AddConversationRequestSchema,
+  type WebAdmitDiscoveredExecutionRequest,
+  type WebAdmitDiscoveredExecutionResponse,
+  type WebAgentRepositoryStatusResponse,
+  type WebCloseoutResponse,
+  type WebCommandResponse,
+  type WebConversationHistoryResponse,
+  type WebLaunchOptionsResponse,
+  type WebPendingLaunchesResponse,
+  type WebPluginStatusResponse,
+  type WebPortfolioResponse,
+  type WebStartAgentResponse,
+  type WebTerminalActionResponse,
+  type WebTerminalLinksResponse,
+  type WebTerminalOpenResponse,
+  type WebTerminalServerMessage,
+  type WebWorkspaceBrowserResponse,
+  type WebWorkspaceReviewFileResponse,
+  type WebWorkspaceReviewResponse,
+  type WebAddConversationResponse,
+} from "./protocol/index.ts";
 import {
   WebTerminalError,
   WebTerminalGateway,
@@ -57,18 +60,6 @@ interface ErrorResponse {
 const MAXIMUM_SEARCH_QUERY_LENGTH = 200;
 const MAXIMUM_SEARCH_RESULTS = 50;
 const MAX_DISCOVERY_REQUEST_BYTES = 16_384;
-const DiscoveryHandle = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240));
-
-const AddConversationRequestSchema = Schema.Struct({
-  handle: Schema.String,
-  goalId: Schema.optional(Schema.String),
-  systemId: Schema.optional(Schema.String),
-});
-const AdmitDiscoveredExecutionRequestSchema = Schema.Struct({
-  handle: DiscoveryHandle,
-  goalId: Schema.optional(DiscoveryHandle),
-  systemId: Schema.optional(DiscoveryHandle),
-});
 
 class WebDiscoveryAdmissionError extends Error {
   constructor(
@@ -81,7 +72,7 @@ class WebDiscoveryAdmissionError extends Error {
 
 const decodeAdmitDiscoveredExecutionRequest = (
   encoded: string,
-): { readonly handle: string; readonly goalId?: string; readonly systemId?: string } => {
+): WebAdmitDiscoveredExecutionRequest => {
   if (encoded.length > MAX_DISCOVERY_REQUEST_BYTES)
     throw new WebDiscoveryAdmissionError("Admission request is too large.", 413);
   try {

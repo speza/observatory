@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentView } from "../../../src/projection/types.ts";
-import type { WorkspaceDiffFile } from "../../../src/workspaces/types.ts";
+import type { WebReviewDiffFile } from "../../../src/web/protocol/index.ts";
 import { ChangedFileList, FileDiff } from "./WorkingTreeDiff.tsx";
 import { SyntaxSourceView } from "./SyntaxSourceView.tsx";
 import { WorkspaceReview } from "./WorkspaceReview.tsx";
@@ -99,7 +99,7 @@ describe("WorkspaceReview", () => {
         binary: true,
         hunks: [],
       },
-    ] satisfies readonly WorkspaceDiffFile[];
+    ] satisfies readonly WebReviewDiffFile[];
 
     const markup = renderToStaticMarkup(
       <ChangedFileList files={files} generatedAt={1} mode="unified" theme="dark" />,
@@ -133,7 +133,7 @@ describe("WorkspaceReview", () => {
       hunks: [
         "--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1 @@\n-const value = false;\n+const value = true;",
       ],
-    } satisfies WorkspaceDiffFile;
+    } satisfies WebReviewDiffFile;
 
     const markup = renderToStaticMarkup(<FileDiff file={file} mode="unified" theme="dark" />);
 
@@ -202,7 +202,7 @@ describe("WorkspaceReview", () => {
           () => "+value",
         ).join("\n")}`,
       ],
-    } satisfies WorkspaceDiffFile;
+    } satisfies WebReviewDiffFile;
 
     const markup = renderToStaticMarkup(<FileDiff file={file} mode="unified" theme="dark" />);
 

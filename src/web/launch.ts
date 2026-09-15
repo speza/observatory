@@ -7,47 +7,18 @@ import type {
 } from "../session-launch/types.ts";
 import type { Universe } from "../universe/universe.ts";
 import type { WorkspaceProvider } from "../workspaces/types.ts";
-import type {
-  WebLaunchOptionsResponse,
-  WebPendingLaunch,
-  WebPendingLaunchesResponse,
-  WebResumeAgentRequest,
-  WebStartAgentRequest,
-  WebWorkspaceBrowserResponse,
-} from "./protocol.ts";
+import {
+  WebResumeAgentRequestSchema,
+  WebStartAgentRequestSchema,
+  type WebLaunchOptionsResponse,
+  type WebPendingLaunch,
+  type WebPendingLaunchesResponse,
+  type WebResumeAgentRequest,
+  type WebStartAgentRequest,
+  type WebWorkspaceBrowserResponse,
+} from "./protocol/index.ts";
 
 const MAX_LAUNCH_BYTES = 32_768;
-const Id = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240));
-const Path = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096));
-const OptionalName = Schema.optional(Schema.String.pipe(Schema.maxLength(240)));
-const OptionalPrompt = Schema.optional(Schema.String.pipe(Schema.maxLength(16_384)));
-
-const WorkspaceSelectionSchema = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("existing"), path: Path }),
-  Schema.Struct({
-    kind: Schema.Literal("worktree"),
-    repositoryPath: Path,
-    branch: Id,
-    base: Schema.optional(Id),
-    path: Schema.optional(Path),
-  }),
-);
-
-const WebStartAgentRequestSchema: Schema.Schema<WebStartAgentRequest> = Schema.Struct({
-  requestId: Id,
-  goalId: Schema.optional(Id),
-  systemId: Schema.optional(Id),
-  workspace: WorkspaceSelectionSchema,
-  harnessId: Id,
-  agentName: OptionalName,
-  prompt: OptionalPrompt,
-});
-
-const WebResumeAgentRequestSchema: Schema.Schema<WebResumeAgentRequest> = Schema.Struct({
-  requestId: Id,
-  agentId: Id,
-  prompt: OptionalPrompt,
-});
 
 export const pendingLaunchView = (
   launch: ReturnType<StartAgentCoordinator["pendingLaunches"]>[number],

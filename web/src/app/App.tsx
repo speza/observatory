@@ -7,13 +7,13 @@ import type {
   DiscoveredExecutionView,
   SystemView,
 } from "../../../src/projection/types.ts";
-import type {
-  WebCommand,
-  WebCommandResponse,
-  WebPendingLaunch,
-} from "../../../src/web/protocol.ts";
-import type { ConversationHistoryView } from "../../../src/conversations/types.ts";
-import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
+import {
+  DEFAULT_SYSTEM_ID,
+  type WebCommand,
+  type WebCommandResponse,
+  type WebConversationHistoryItem,
+  type WebPendingLaunch,
+} from "../../../src/web/protocol/index.ts";
 import {
   closeAndArchiveAgents,
   executeCommand,
@@ -129,7 +129,7 @@ export const App = (): React.JSX.Element => {
     () => new Set(),
   );
   const [conversationHistory, setConversationHistory] = useState<
-    readonly ConversationHistoryView[]
+    readonly WebConversationHistoryItem[]
   >([]);
 
   useEffect(() => {

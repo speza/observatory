@@ -5,8 +5,13 @@ import type {
   DiscoveredExecutionView,
   InspectorProjection,
 } from "../../../src/projection/types.ts";
-import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
-import type { WebCommand, WebCommandResponse } from "../../../src/web/protocol.ts";
+import {
+  DEFAULT_SYSTEM_ID,
+  WEB_PRIORITIES,
+  type WebCommand,
+  type WebCommandResponse,
+  type WebPriority,
+} from "../../../src/web/protocol/index.ts";
 import { batchDestinationValue } from "./batchDestination.ts";
 import { RepositoryStatus } from "./RepositoryStatus.tsx";
 
@@ -45,7 +50,7 @@ interface InspectorProps {
   readonly onResume: (agent: AgentView) => Promise<void>;
 }
 
-const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
+const priorities: readonly WebPriority[] = WEB_PRIORITIES;
 
 const decisionTitle = {
   respond: "Response needed",

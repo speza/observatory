@@ -1,18 +1,10 @@
 import type { AgentObservationModule } from "../agent-observations/types.ts";
 import { enrichCatchUp, enrichCommandCentre, enrichMap } from "../agent-observations/projection.ts";
 import { mapFromCommandCentre } from "../projection/projection.ts";
-import type {
-  CatchUpProjection,
-  CommandCentreProjection,
-  UniverseMapProjection,
-} from "../projection/types.ts";
 import type { Universe } from "../universe/universe.ts";
+import type { PortfolioResponse } from "./protocol/index.ts";
 
-export interface PortfolioResponse {
-  readonly map: UniverseMapProjection;
-  readonly commandCentre: CommandCentreProjection;
-  readonly catchUp: CatchUpProjection;
-}
+export type { PortfolioResponse };
 
 export interface PortfolioLimits {
   readonly maximumAgents?: number;

@@ -6,7 +6,7 @@ import {
   PortfolioResponseSchema,
   WebPortfolioResponseSchema,
   SearchProjectionSchema,
-} from "./schemas.ts";
+} from "../../../src/web/protocol/index.ts";
 
 const portfolioAt = (generatedAt: number) => {
   const { universe } = makeUniverse({ clock: new FixedClock(generatedAt) });

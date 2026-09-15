@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { InspectorProjection } from "../../../src/projection/types.ts";
-import type { RendererSubject } from "../../../src/web/protocol.ts";
+import type { RendererSubject } from "../../../src/web/protocol/index.ts";
 import { fetchInspector } from "../api/client.ts";
 import type { Selection } from "../app/selection.ts";
 

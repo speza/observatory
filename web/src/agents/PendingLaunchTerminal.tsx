@@ -1,4 +1,4 @@
-import type { WebPendingLaunch } from "../../../src/web/protocol.ts";
+import type { WebPendingLaunch } from "../../../src/web/protocol/index.ts";
 import { TerminalSurface, type TerminalTheme } from "../terminal/TerminalSurface.tsx";
 
 interface PendingLaunchTerminalProps {

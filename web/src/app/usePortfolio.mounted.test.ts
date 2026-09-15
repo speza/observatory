@@ -4,7 +4,10 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { makeUniverse } from "../../../src/universe/test-support.ts";
 import { projectPortfolio } from "../../../src/web/portfolio.ts";
-import type { BrowserProjectionEvent, WebPortfolioResponse } from "../../../src/web/protocol.ts";
+import type {
+  BrowserProjectionEvent,
+  WebPortfolioResponse,
+} from "../../../src/web/protocol/index.ts";
 import { portfolioDelivery, usePortfolio, type PortfolioState } from "./usePortfolio.ts";
 
 // Closing a transport does not erase callbacks already queued by the browser.

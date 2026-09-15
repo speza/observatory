@@ -4,7 +4,7 @@ import { FixedClock, hostSnapshot, makeUniverse } from "../universe/test-support
 import { projectPortfolio, type PortfolioLimits, type PortfolioResponse } from "./portfolio.ts";
 import { ProjectionPublisher } from "./projection-publisher.ts";
 import { ObservatoryWebApi } from "./api.ts";
-import type { WebPortfolioResponse, WebCommandResponse } from "./protocol.ts";
+import type { WebPortfolioResponse, WebCommandResponse } from "./protocol/index.ts";
 
 const portfolio = (generatedAt: number): PortfolioResponse => {
   const { universe } = makeUniverse({ clock: new FixedClock(generatedAt) });

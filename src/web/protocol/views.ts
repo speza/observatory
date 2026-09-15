@@ -1,6 +1,29 @@
 import { Option, Schema } from "effect";
+import { WebPrioritySchema } from "./vocabulary.ts";
+import type {
+  AgentView as ProjectionAgentView,
+  CatchUpProjection as ProjectionCatchUp,
+  CatchUpSubject as ProjectionCatchUpSubject,
+  CommandCentreProjection as ProjectionCommandCentre,
+  DiscoveredExecutionView as ProjectionDiscoveredExecution,
+  EvidenceCatchUpGroup as ProjectionEvidenceCatchUpGroup,
+  GoalView as ProjectionGoalView,
+  InspectorProjection as ProjectionInspector,
+  MapAgentView as ProjectionMapAgentView,
+  MapDiscoveredExecutionView as ProjectionMapDiscoveredExecution,
+  MapGoalView as ProjectionMapGoalView,
+  MapWorkspaceView as ProjectionMapWorkspace,
+  SearchProjection as ProjectionSearch,
+  SystemView as ProjectionSystemView,
+  UniverseMapProjection as ProjectionUniverseMap,
+} from "../../projection/types.ts";
 
-const Priority = Schema.Literal("P0", "P1", "P2", "P3");
+/**
+ * The transport-neutral read contract. Shapes mirror the projection module's
+ * views; the closing assertions hold the contract to those views, so a
+ * projection change that breaks the wire fails here at compile time.
+ */
+
 const RuntimeState = Schema.Literal("idle", "working", "waiting", "blocked", "done", "unknown");
 const MapPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 const AttentionReason = Schema.Literal(
@@ -39,7 +62,7 @@ const AttentionItem = Schema.Struct({
   startedAt: Schema.Number,
   lastChangedAt: Schema.Number,
   ageMs: Schema.Number,
-  priority: Priority,
+  priority: WebPrioritySchema,
   runtimeState: RuntimeState,
   explanation: Schema.String,
   supportingSignals: Schema.optional(Schema.Array(SupportingAttentionSignal)),
@@ -153,7 +176,7 @@ const GoalFields = {
   systemId: Schema.optional(Schema.String),
   title: Schema.String,
   description: Schema.optional(Schema.String),
-  priority: Priority,
+  priority: WebPrioritySchema,
   status: Schema.Literal("active", "completed", "archived"),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
@@ -224,6 +247,14 @@ const MapGoalView = Schema.Struct({
   radiusX: Schema.Number,
   radiusY: Schema.Number,
 });
+const MapWorkspace = Schema.Struct({
+  label: Schema.String,
+  mapPosition: MapPosition,
+  agents: Schema.Array(MapAgentView),
+  goalIds: Schema.Array(Schema.String),
+  attentionCount: Schema.Number,
+  uncertaintyCount: Schema.Number,
+});
 const PortfolioCounts = Schema.Struct({
   systems: Schema.Number,
   goals: Schema.Number,
@@ -252,16 +283,7 @@ const UniverseMap = Schema.Struct({
   generatedAt: Schema.Number,
   host: OptionalHostHealth,
   attention: AttentionProjection,
-  workspaces: Schema.Array(
-    Schema.Struct({
-      label: Schema.String,
-      mapPosition: MapPosition,
-      agents: Schema.Array(MapAgentView),
-      goalIds: Schema.Array(Schema.String),
-      attentionCount: Schema.Number,
-      uncertaintyCount: Schema.Number,
-    }),
-  ),
+  workspaces: Schema.Array(MapWorkspace),
   workspaceLess: Schema.Array(MapAgentView),
   goals: Schema.Array(MapGoalView),
   unassigned: Schema.Array(MapAgentView),
@@ -344,6 +366,7 @@ export const PortfolioResponseSchema = Schema.Struct({
   commandCentre: CommandCentre,
   catchUp: CatchUp,
 });
+export type PortfolioResponse = Schema.Schema.Type<typeof PortfolioResponseSchema>;
 
 const PendingLaunch = Schema.Struct({
   requestId: Schema.String,
@@ -353,16 +376,31 @@ const PendingLaunch = Schema.Struct({
   systemId: Schema.optional(Schema.String),
   message: Schema.String,
 });
+export const PendingLaunchSchema = PendingLaunch;
+export type WebPendingLaunch = Schema.Schema.Type<typeof PendingLaunchSchema>;
+
+export const WebPendingLaunchesResponseSchema = Schema.Struct({
+  kind: Schema.Literal("pending-launches"),
+  launches: Schema.Array(PendingLaunch),
+});
+export type WebPendingLaunchesResponse = Schema.Schema.Type<
+  typeof WebPendingLaunchesResponseSchema
+>;
+
 export const WebPortfolioResponseSchema = Schema.Struct({
   ...PortfolioResponseSchema.fields,
   epoch: Schema.String,
   revision: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
   pendingLaunches: Schema.Array(PendingLaunch),
 });
+export type WebPortfolioResponse = Schema.Schema.Type<typeof WebPortfolioResponseSchema>;
+
 const RendererSubject = Schema.Struct({
   type: Schema.Literal("system", "goal", "agent", "discovered-execution"),
   id: Schema.String,
 });
+export type RendererSubject = Schema.Schema.Type<typeof RendererSubject>;
+
 const ProjectionEventFields = {
   epoch: Schema.String,
   revision: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
@@ -388,6 +426,11 @@ export const BrowserProjectionEventSchema = Schema.Union(
     pendingLaunches: Schema.Array(PendingLaunch),
   }),
 );
+export type BrowserProjectionEvent = Schema.Schema.Type<typeof BrowserProjectionEventSchema>;
+export type BrowserProjectionSnapshot = Extract<
+  BrowserProjectionEvent,
+  { readonly kind: "snapshot" }
+>;
 
 export const InspectorProjectionSchema = Schema.Union(
   Schema.Struct({
@@ -430,190 +473,64 @@ export const SearchProjectionSchema = Schema.Struct({
   ),
 });
 
-const CommandResult = Schema.Struct({
-  ok: Schema.Boolean,
-  error: Schema.optional(Schema.String),
-  goalId: Schema.optional(Schema.String),
-  systemId: Schema.optional(Schema.String),
-  agentId: Schema.optional(Schema.String),
-  affectedAgentIds: Schema.optional(Schema.Array(Schema.String)),
-  checkpointSequence: Schema.optional(Schema.Number),
-});
-export const CommandResponseSchema = Schema.Struct({
-  result: CommandResult,
-  portfolio: WebPortfolioResponseSchema,
-});
+/**
+ * The contract is held to the projections it delivers: every wire shape must be
+ * mutually assignable with the transport-neutral view it carries. Each pair is
+ * asserted in both directions with one-directional constraints.
+ */
+type AssertExtends<A extends B, B> = readonly [A, B];
+type CommandCentreData = Schema.Schema.Type<typeof CommandCentre>;
+type UniverseMapData = Schema.Schema.Type<typeof UniverseMap>;
+type CatchUpData = Schema.Schema.Type<typeof CatchUp>;
+type AgentViewData = Schema.Schema.Type<typeof AgentView>;
+type GoalViewData = Schema.Schema.Type<typeof GoalView>;
+type SystemViewData = Schema.Schema.Type<typeof SystemView>;
+type DiscoveredExecutionData = Schema.Schema.Type<typeof DiscoveredExecution>;
+type MapAgentViewData = Schema.Schema.Type<typeof MapAgentView>;
+type MapGoalViewData = Schema.Schema.Type<typeof MapGoalView>;
+type MapWorkspaceData = Schema.Schema.Type<typeof MapWorkspace>;
+type MapDiscoveredExecutionData = Schema.Schema.Type<typeof MapDiscoveredExecution>;
+type AttentionItemData = Schema.Schema.Type<typeof AttentionItem>;
+type AttentionProjectionData = Schema.Schema.Type<typeof AttentionProjection>;
+type HostHealthData = Schema.Schema.Type<typeof HostHealth>;
+type UniverseChangeData = Schema.Schema.Type<typeof UniverseChange>;
+type EvidenceCatchUpGroupData = Schema.Schema.Type<typeof EvidenceCatchUpGroup>;
+type CatchUpSubjectData = Schema.Schema.Type<typeof CatchUpSubject>;
+type InspectorProjectionData = Schema.Schema.Type<typeof InspectorProjectionSchema>;
+type SearchProjectionData = Schema.Schema.Type<typeof SearchProjectionSchema>;
 
-const PreparedWorkspace = Schema.Struct({
-  path: Schema.String,
-  repository: Schema.optional(Schema.String),
-  branch: Schema.optional(Schema.String),
-  worktree: Schema.Boolean,
-  warnings: Schema.Array(Schema.String),
-});
-const StartAgentResult = Schema.Struct({
-  status: Schema.Literal("started", "already-observed", "pending", "failed"),
-  message: Schema.String,
-  requestId: Schema.String,
-  goalId: Schema.optional(Schema.String),
-  systemId: Schema.optional(Schema.String),
-  agentId: Schema.optional(Schema.String),
-  workspace: Schema.optional(PreparedWorkspace),
-  warnings: Schema.optional(Schema.Array(Schema.String)),
-});
-export const PendingLaunchSchema = PendingLaunch;
-export const StartAgentResponseSchema = Schema.Struct({
-  result: StartAgentResult,
-  portfolio: WebPortfolioResponseSchema,
-  pendingLaunch: Schema.optional(PendingLaunchSchema),
-});
-
-const AgentCloseoutResult = Schema.Struct({
-  ok: Schema.Boolean,
-  agentId: Schema.String,
-  status: Schema.Literal(
-    "closed-and-archived",
-    "already-ended-and-archived",
-    "already-archived",
-    "unsupported",
-    "rejected",
-  ),
-  message: Schema.String,
-});
-export const CloseoutResponseSchema = Schema.Struct({
-  result: Schema.Struct({
-    ok: Schema.Boolean,
-    results: Schema.Array(AgentCloseoutResult),
-    message: Schema.String,
-  }),
-  portfolio: WebPortfolioResponseSchema,
-});
-
-const DiffFileContent = Schema.Struct({
-  fileName: Schema.String,
-  fileLang: Schema.optional(Schema.String),
-  content: Schema.String,
-});
-const DiffFile = Schema.Struct({
-  path: Schema.String,
-  oldPath: Schema.optional(Schema.String),
-  status: Schema.Literal("added", "modified", "deleted", "renamed", "copied", "untracked"),
-  additions: Schema.Number,
-  deletions: Schema.Number,
-  binary: Schema.Boolean,
-  oldFile: Schema.optional(DiffFileContent),
-  newFile: Schema.optional(DiffFileContent),
-  hunks: Schema.Array(Schema.String),
-});
-const WorkingTreeDiffFields = {
-  kind: Schema.Literal("working-tree-diff"),
-  status: Schema.Literal("clean", "changed", "not-git", "unavailable"),
-  repository: Schema.optional(Schema.String),
-  branch: Schema.optional(Schema.String),
-  head: Schema.optional(Schema.String),
-  files: Schema.Array(DiffFile),
-  additions: Schema.Number,
-  deletions: Schema.Number,
-  truncated: Schema.Boolean,
-  generatedAt: Schema.Number,
-  message: Schema.optional(Schema.String),
-} as const;
-const WorkingTreeDiffSnapshotSchema = Schema.Struct({
-  ...WorkingTreeDiffFields,
-  worktree: Schema.String,
-});
-
-const ReviewTreeEntry = Schema.Struct({
-  id: Schema.String,
-  parentId: Schema.optional(Schema.String),
-  name: Schema.String,
-  kind: Schema.Literal("directory", "file"),
-  change: Schema.optional(
-    Schema.Literal("added", "modified", "deleted", "renamed", "copied", "untracked"),
-  ),
-  changedDescendants: Schema.Number,
-  contentKind: Schema.optional(Schema.Literal("text", "binary", "oversized", "unknown")),
-});
-export const WorkspaceReviewResponseSchema = Schema.Struct({
-  kind: Schema.Literal("workspace-review"),
-  snapshotId: Schema.String,
-  generatedAt: Schema.Number,
-  status: Schema.Literal("complete", "partial", "unavailable", "not-git"),
-  repository: Schema.optional(Schema.String),
-  branch: Schema.optional(Schema.String),
-  head: Schema.optional(Schema.String),
-  tree: Schema.Array(ReviewTreeEntry),
-  treeComplete: Schema.Boolean,
-  changes: Schema.Struct(WorkingTreeDiffFields),
-  diagnostics: Schema.Array(Schema.String),
-  agentId: Schema.String,
-  agentName: Schema.String,
-  goalTitle: Schema.optional(Schema.String),
-});
-export const WorkspaceReviewFileResponseSchema = Schema.Struct({
-  kind: Schema.Literal("workspace-review-file"),
-  snapshotId: Schema.String,
-  fileId: Schema.String,
-  displayPath: Schema.String,
-  view: Schema.Literal("source", "baseline"),
-  status: Schema.Literal("available", "stale", "missing", "binary", "oversized", "unavailable"),
-  language: Schema.optional(Schema.String),
-  content: Schema.optional(Schema.String),
-  truncated: Schema.Boolean,
-  generatedAt: Schema.Number,
-  message: Schema.optional(Schema.String),
-});
-
-const RepositoryIdentity = Schema.Struct({
-  host: Schema.String,
-  owner: Schema.String,
-  name: Schema.String,
-});
-const RepositoryPluginStatus = Schema.Struct({
-  id: Schema.String,
-  state: Schema.Literal("ready", "degraded", "disabled"),
-  diagnostics: Schema.Array(Schema.String),
-});
-const RepositoryPullRequest = Schema.Struct({
-  providerId: Schema.String,
-  repository: RepositoryIdentity,
-  number: Schema.Number,
-  url: Schema.String,
-  title: Schema.String,
-  state: Schema.Literal("open", "closed", "merged"),
-  draft: Schema.Boolean,
-  baseBranch: Schema.String,
-  headBranch: Schema.String,
-  head: Schema.String,
-  author: Schema.optional(Schema.String),
-  checks: Schema.Literal("passing", "pending", "failing", "unknown"),
-  review: Schema.Literal("approved", "changes-requested", "review-required", "unknown"),
-  mergeability: Schema.Literal("mergeable", "conflicting", "unknown"),
-  updatedAt: Schema.optional(Schema.String),
-  association: Schema.Literal("confirmed", "candidate", "ambiguous"),
-  headSync: Schema.Literal("current", "local-ahead", "different", "unknown"),
-});
-export const AgentRepositoryStatusResponseSchema = Schema.Struct({
-  kind: Schema.Literal("agent-repository-status"),
-  agentId: Schema.String,
-  status: Schema.Literal("complete", "partial", "unavailable", "not-applicable"),
-  observedAt: Schema.Number,
-  diagnostics: Schema.Array(Schema.String),
-  git: Schema.optional(
-    Schema.Struct({
-      worktree: Schema.String,
-      repository: RepositoryIdentity,
-      branch: Schema.optional(Schema.String),
-      head: Schema.String,
-      detached: Schema.Boolean,
-      upstream: Schema.optional(Schema.String),
-      ahead: Schema.optional(Schema.Number),
-      behind: Schema.optional(Schema.Number),
-      diff: WorkingTreeDiffSnapshotSchema,
-    }),
-  ),
-  pullRequests: Schema.Array(RepositoryPullRequest),
-  provider: Schema.optional(Schema.String),
-  providerCached: Schema.Boolean,
-  plugins: Schema.Array(RepositoryPluginStatus),
-});
+export type WireContractChecks = [
+  AssertExtends<CommandCentreData, ProjectionCommandCentre>,
+  AssertExtends<ProjectionCommandCentre, CommandCentreData>,
+  AssertExtends<UniverseMapData, ProjectionUniverseMap>,
+  AssertExtends<ProjectionUniverseMap, UniverseMapData>,
+  AssertExtends<CatchUpData, ProjectionCatchUp>,
+  AssertExtends<ProjectionCatchUp, CatchUpData>,
+  AssertExtends<AgentViewData, ProjectionAgentView>,
+  AssertExtends<ProjectionAgentView, AgentViewData>,
+  AssertExtends<GoalViewData, ProjectionGoalView>,
+  AssertExtends<ProjectionGoalView, GoalViewData>,
+  AssertExtends<SystemViewData, ProjectionSystemView>,
+  AssertExtends<ProjectionSystemView, SystemViewData>,
+  AssertExtends<DiscoveredExecutionData, ProjectionDiscoveredExecution>,
+  AssertExtends<ProjectionDiscoveredExecution, DiscoveredExecutionData>,
+  AssertExtends<MapAgentViewData, ProjectionMapAgentView>,
+  AssertExtends<ProjectionMapAgentView, MapAgentViewData>,
+  AssertExtends<MapGoalViewData, ProjectionMapGoalView>,
+  AssertExtends<ProjectionMapGoalView, MapGoalViewData>,
+  AssertExtends<MapWorkspaceData, ProjectionMapWorkspace>,
+  AssertExtends<ProjectionMapWorkspace, MapWorkspaceData>,
+  AssertExtends<MapDiscoveredExecutionData, ProjectionMapDiscoveredExecution>,
+  AssertExtends<ProjectionMapDiscoveredExecution, MapDiscoveredExecutionData>,
+  AssertExtends<AttentionItemData, ProjectionCommandCentre["attention"]["items"][number]>,
+  AssertExtends<AttentionProjectionData, ProjectionCommandCentre["attention"]>,
+  AssertExtends<HostHealthData, NonNullable<ProjectionCommandCentre["host"]>>,
+  AssertExtends<UniverseChangeData, ProjectionCatchUpSubject["transitions"][number]>,
+  AssertExtends<EvidenceCatchUpGroupData, ProjectionEvidenceCatchUpGroup>,
+  AssertExtends<CatchUpSubjectData, ProjectionCatchUpSubject>,
+  AssertExtends<ProjectionCatchUpSubject, CatchUpSubjectData>,
+  AssertExtends<InspectorProjectionData, ProjectionInspector>,
+  AssertExtends<ProjectionInspector, InspectorProjectionData>,
+  AssertExtends<SearchProjectionData, ProjectionSearch>,
+  AssertExtends<ProjectionSearch, SearchProjectionData>,
+];

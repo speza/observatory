@@ -1,7 +1,7 @@
 import type {
-  WorkspaceDiffFileStatus,
-  WorkspaceReviewContentKind,
-} from "../../../src/workspaces/types.ts";
+  WebReviewContentKind,
+  WebReviewDiffFileStatus,
+} from "../../../src/web/protocol/index.ts";
 import { Schema } from "effect";
 
 export const MAX_OPEN_FILE_TABS = 8;
@@ -25,15 +25,15 @@ export interface ReviewScrollPosition {
 export interface ReviewFileResolution {
   readonly path: string;
   readonly fileId: string;
-  readonly change?: WorkspaceDiffFileStatus;
-  readonly contentKind?: WorkspaceReviewContentKind;
+  readonly change?: WebReviewDiffFileStatus;
+  readonly contentKind?: WebReviewContentKind;
 }
 
 export interface OpenFileTab {
   readonly path: string;
   readonly previousPath?: string;
   readonly fileId?: string;
-  readonly change?: WorkspaceDiffFileStatus;
+  readonly change?: WebReviewDiffFileStatus;
   readonly mode: ReviewFileMode;
   readonly scroll: Readonly<Partial<Record<ReviewFileMode, ReviewScrollPosition>>>;
   readonly availability: ReviewTabAvailability;
@@ -112,7 +112,7 @@ const availabilityFor = (file: ReviewFileResolution): ReviewTabAvailability => {
 };
 
 export const availableFileModes = (
-  change: WorkspaceDiffFileStatus | undefined,
+  change: WebReviewDiffFileStatus | undefined,
 ): readonly ReviewFileMode[] => {
   if (!change) return ["source"];
   if (change === "deleted") return ["diff", "baseline"];
@@ -122,7 +122,7 @@ export const availableFileModes = (
 
 const validMode = (
   requested: ReviewFileMode,
-  change: WorkspaceDiffFileStatus | undefined,
+  change: WebReviewDiffFileStatus | undefined,
 ): ReviewFileMode => {
   const modes = availableFileModes(change);
   return modes.includes(requested) ? requested : (modes[0] ?? "source");

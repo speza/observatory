@@ -29,7 +29,7 @@ import type {
   WebTerminalOpenResponse,
   WebTerminalServerMessage,
   WebWorkspaceReviewResponse,
-} from "./protocol.ts";
+} from "./protocol/index.ts";
 
 type TerminalTestBody =
   | {

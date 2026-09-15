@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boundWebTerminalDimensions, WEB_TERMINAL_DIMENSION_LIMITS } from "./protocol.ts";
+import { boundWebTerminalDimensions, WEB_TERMINAL_DIMENSION_LIMITS } from "./protocol/index.ts";
 
 describe("web terminal dimensions", () => {
   test("bounds massive and tiny viewports to the shared terminal contract", () => {

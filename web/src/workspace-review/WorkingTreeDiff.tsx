@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { DiffFile, DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
-import type { WorkspaceDiffFile } from "../../../src/workspaces/types.ts";
+import type { WebReviewDiffFile } from "../../../src/web/protocol/index.ts";
 import { ReviewFileStatus } from "./ReviewFileStatus.tsx";
 
 type Theme = "light" | "dark";
@@ -19,7 +19,7 @@ const fileIdentity = (path: string): { readonly name: string; readonly directory
 };
 
 interface FileDiffProps {
-  readonly file: WorkspaceDiffFile;
+  readonly file: WebReviewDiffFile;
   readonly mode: DiffMode;
   readonly theme: Theme;
 }
@@ -64,7 +64,7 @@ export const FileDiff = ({ file, mode, theme }: FileDiffProps): React.JSX.Elemen
 };
 
 interface ChangedFileListProps {
-  readonly files: readonly WorkspaceDiffFile[];
+  readonly files: readonly WebReviewDiffFile[];
   readonly generatedAt: number;
   readonly mode: DiffMode;
   readonly theme: Theme;
@@ -75,7 +75,7 @@ const ChangedFile = ({
   mode,
   theme,
 }: {
-  readonly file: WorkspaceDiffFile;
+  readonly file: WebReviewDiffFile;
   readonly mode: DiffMode;
   readonly theme: Theme;
 }): React.JSX.Element => {

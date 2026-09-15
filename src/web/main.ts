@@ -9,7 +9,7 @@ import { createObservatoryRuntime, initializeObservatoryRuntime } from "../runti
 import { createStartAgentCoordinator } from "../session-launch/coordinator.ts";
 import { LocalWorkspaceProvider } from "../workspaces/local.ts";
 import { ObservatoryWebApi } from "./api.ts";
-import type { WebTerminalServerMessage } from "./protocol.ts";
+import type { WebTerminalServerMessage } from "./protocol/index.ts";
 import { WebTerminalError, type WebTerminalSocketConnection } from "./terminal.ts";
 import { loadPluginRegistry, readPluginConfiguration } from "../plugins/registry.ts";
 import { DefaultAgentRepositoryStatusReader } from "../repositories/reader.ts";

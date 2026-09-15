@@ -1,4 +1,4 @@
-import { formatAge } from "../../../src/attention/attention.ts";
+import { formatAge } from "../shared/formatAge.ts";
 import type { AgentView, ProviderEvidenceView } from "../../../src/projection/types.ts";
 
 const TITLE_LINE_LENGTH = 26;

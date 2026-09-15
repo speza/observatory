@@ -14,7 +14,7 @@ import {
   type WebTerminalClientMessage,
   type WebTerminalLink,
   type WebTerminalScrollRequest,
-} from "../../../src/web/protocol.ts";
+} from "../../../src/web/protocol/index.ts";
 import {
   openWebTerminal,
   parseWebTerminalMessage,

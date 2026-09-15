@@ -3,7 +3,7 @@ import type {
   CommandCentreProjection,
   UniverseMapProjection,
 } from "../../../src/projection/types.ts";
-import type { PortfolioResponse } from "../../../src/web/portfolio.ts";
+import type { PortfolioResponse } from "../../../src/web/protocol/index.ts";
 
 export interface ScopedPortfolio {
   readonly commandCentre: CommandCentreProjection;

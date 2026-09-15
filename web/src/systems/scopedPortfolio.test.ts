@@ -4,7 +4,7 @@ import {
   hostSnapshot,
   makeUniverse,
 } from "../../../src/universe/test-support.ts";
-import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
+import { DEFAULT_SYSTEM_ID } from "../../../src/web/protocol/index.ts";
 import { scopePortfolio } from "./scopedPortfolio.ts";
 import { systemScopeForSelection } from "./systemScope.ts";
 import { projectPortfolio } from "../../../src/web/portfolio.ts";

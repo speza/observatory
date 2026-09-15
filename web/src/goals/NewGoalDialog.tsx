@@ -1,7 +1,11 @@
 import { useState } from "react";
-import { DEFAULT_SYSTEM_ID, type Priority } from "../../../src/universe/types.ts";
+import {
+  DEFAULT_SYSTEM_ID,
+  WEB_PRIORITIES,
+  type WebCommand,
+  type WebPriority,
+} from "../../../src/web/protocol/index.ts";
 import type { SystemView } from "../../../src/projection/types.ts";
-import type { WebCommand } from "../../../src/web/protocol.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
 
 interface NewGoalDialogProps {
@@ -13,7 +17,7 @@ interface NewGoalDialogProps {
   readonly defaultSystemId?: string;
 }
 
-const priorities: readonly Priority[] = ["P0", "P1", "P2", "P3"];
+const priorities: readonly WebPriority[] = WEB_PRIORITIES;
 
 export const NewGoalDialog = ({
   pending,
@@ -25,7 +29,7 @@ export const NewGoalDialog = ({
 }: NewGoalDialogProps): React.JSX.Element => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<Priority>("P2");
+  const [priority, setPriority] = useState<WebPriority>("P2");
   const [systemId, setSystemId] = useState(defaultSystemId ?? DEFAULT_SYSTEM_ID);
   return (
     <ModalDialog ariaLabelledBy="new-goal-title" className="modal-backdrop" onClose={onCancel}>

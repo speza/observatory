@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentView, DiscoveredExecutionView } from "../../../src/projection/types.ts";
-import type { WebTerminalLink } from "../../../src/web/protocol.ts";
+import type { WebTerminalLink } from "../../../src/web/protocol/index.ts";
 import { fetchTerminalLinks } from "../api/client.ts";
 import type { TerminalAppearance } from "../settings/browserSettings.ts";
 import { TerminalSurface, type TerminalTheme } from "./TerminalSurface.tsx";

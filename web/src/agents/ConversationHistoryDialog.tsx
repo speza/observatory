@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
-import type { ConversationHistoryView } from "../../../src/conversations/types.ts";
+import type { WebConversationHistoryItem } from "../../../src/web/protocol/index.ts";
 import type { GoalView, SystemView } from "../../../src/projection/types.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
 
 interface ConversationHistoryDialogProps {
-  readonly conversations: readonly ConversationHistoryView[];
+  readonly conversations: readonly WebConversationHistoryItem[];
   readonly goals: readonly GoalView[];
   readonly systems: readonly SystemView[];
   readonly pending: boolean;
@@ -26,7 +26,7 @@ type ConversationFilter = "all" | "resumable" | "dormant" | "runtime-unknown";
 const isConversationFilter = (value: string): value is ConversationFilter =>
   ["all", "resumable", "dormant", "runtime-unknown"].includes(value);
 
-const stateFor = (conversation: ConversationHistoryView): Exclude<ConversationFilter, "all"> => {
+const stateFor = (conversation: WebConversationHistoryItem): Exclude<ConversationFilter, "all"> => {
   if (
     conversation.runtimeState === "dormant" &&
     conversation.workspaceRef &&
@@ -107,7 +107,7 @@ export const ConversationHistoryDialog = ({
     filteredHandles.length > 0 && filteredHandles.every((handle) => selected.includes(handle));
 
   const performAdd = async (
-    conversation: ConversationHistoryView,
+    conversation: WebConversationHistoryItem,
     selectedGoalId?: string,
     selectedSystemId?: string,
     resume = false,

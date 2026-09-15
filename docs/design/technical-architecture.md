@@ -358,6 +358,17 @@ complete replacements to bounded SSE subscribers. Initial and reconnect
 snapshots repair missed process-local events. Projection schemas remain
 transport-neutral and renderers do not replay domain events.
 
+The web wire contract is the single server-owned vocabulary for everything that
+crosses the browser↔server boundary (`src/web/protocol/`); see
+`docs/design/web-wire-contract.md`. Its Effect Schemas are the source of truth
+and TypeScript types derive from them. The contract composes only the
+projection module's transport-neutral view types; domain types map onto contract
+shapes at the gateway edge through explicitly typed functions, so a domain shape
+change that breaks the wire fails at compile time instead of as a browser decode
+failure. Lint enforces both directions: contract modules import nothing except
+projection types, and renderer code imports the contract and projection types
+only.
+
 The browser uses the SSE snapshot as its primary bootstrap rather than issuing
 parallel REST bootstrap requests. A five-second bootstrap deadline, stream
 errors and malformed events trigger REST recovery, limited to once per thirty
@@ -605,6 +616,13 @@ renderer → web gateways → coordinators → module interfaces
 Universe → UniverseStore interface
 adapters → the interfaces they satisfy
 ```
+
+The wire contract refines the renderer edge: `src/web/protocol/` composes only
+the projection module's transport-neutral types, and `web/src/` imports the
+wire contract and projection types only. Renderer tests may additionally use
+the mock host and universe test fixtures. oxlint `no-restricted-imports`
+enforces both directions; `docs/design/web-wire-contract.md` records the rules
+and their rationale.
 
 A future host, provider integration or renderer must not require changes to
 Universe records merely to expose its native concepts. If an integration needs

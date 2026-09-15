@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FixedClock, makeUniverse } from "../../../src/universe/test-support.ts";
-import type { PortfolioResponse } from "../../../src/web/api.ts";
+import type { PortfolioResponse } from "../../../src/web/protocol/index.ts";
 import { createStreamRecovery, portfolioDelivery, reconcilePortfolio } from "./usePortfolio.ts";
 
 const portfolioAt = (generatedAt: number): PortfolioResponse => {

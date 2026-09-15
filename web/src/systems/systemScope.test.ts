@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SYSTEM_ID } from "../../../src/universe/types.ts";
+import { DEFAULT_SYSTEM_ID } from "../../../src/web/protocol/index.ts";
 import {
   admitObservedConversationsAndReconcile,
   hostSnapshot,

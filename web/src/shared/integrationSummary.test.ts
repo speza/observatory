@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentRepositoryStatusSnapshot, AssociatedPullRequest } from "./types.ts";
-import { NO_PULL_REQUEST_DIAGNOSTIC, summarizeIntegrationReadiness } from "./review-summary.ts";
+import type {
+  WebAgentRepositoryStatusResponse,
+  WebReviewPullRequest,
+} from "../../../src/web/protocol/index.ts";
+import { NO_PULL_REQUEST_DIAGNOSTIC, summarizeIntegrationReadiness } from "./integrationSummary.ts";
 
-const pullRequest = (overrides: Partial<AssociatedPullRequest> = {}): AssociatedPullRequest => ({
+const pullRequest = (overrides: Partial<WebReviewPullRequest> = {}): WebReviewPullRequest => ({
   providerId: "synthetic",
   repository: { host: "example.test", owner: "observatory", name: "synthetic" },
   number: 42,
@@ -22,8 +25,8 @@ const pullRequest = (overrides: Partial<AssociatedPullRequest> = {}): Associated
 });
 
 const snapshot = (
-  overrides: Partial<AgentRepositoryStatusSnapshot> = {},
-): AgentRepositoryStatusSnapshot => ({
+  overrides: Partial<WebAgentRepositoryStatusResponse> = {},
+): WebAgentRepositoryStatusResponse => ({
   kind: "agent-repository-status",
   agentId: "agent-1",
   status: "complete",
@@ -53,7 +56,7 @@ const snapshot = (
   ...overrides,
 });
 
-const kinds = (value: AgentRepositoryStatusSnapshot): readonly string[] =>
+const kinds = (value: WebAgentRepositoryStatusResponse): readonly string[] =>
   summarizeIntegrationReadiness(value).warnings.map((warning) => warning.kind);
 
 describe("integration review summary", () => {

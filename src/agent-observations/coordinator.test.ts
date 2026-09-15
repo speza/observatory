@@ -8,7 +8,7 @@ import type { AgentHarness, AgentObservationSnapshot } from "../plugin-sdk/index
 import { createMemoryStore, SqliteUniverseStore } from "../persistence/sqlite/sqlite-store.ts";
 import { ObservatoryWebApi } from "../web/api.ts";
 import type { PortfolioResponse } from "../web/portfolio.ts";
-import type { WebCommandResponse } from "../web/protocol.ts";
+import type { WebCommandResponse } from "../web/protocol/index.ts";
 import { enrichCatchUp, enrichCommandCentre, enrichInspector, enrichMap } from "./projection.ts";
 import { hostSnapshot, makeUniverse } from "../universe/test-support.ts";
 import { AgentObservationCoordinator } from "./coordinator.ts";

@@ -16,10 +16,11 @@ import {
 import type { AgentView } from "../../../src/projection/types.ts";
 import { Schema } from "effect";
 import type {
+  WebReviewDiffFile,
+  WebReviewTreeEntry,
   WebWorkspaceReviewFileResponse,
   WebWorkspaceReviewResponse,
-} from "../../../src/web/protocol.ts";
-import type { WorkspaceDiffFile, WorkspaceReviewTreeEntry } from "../../../src/workspaces/types.ts";
+} from "../../../src/web/protocol/index.ts";
 import { fetchWorkspaceReview, fetchWorkspaceReviewFile } from "../api/client.ts";
 import type { TerminalAppearance } from "../settings/browserSettings.ts";
 import { ModalDialog } from "../shared/ModalDialog.tsx";
@@ -57,8 +58,8 @@ const DiffViews = lazy(() =>
       scrollRef,
       onScroll,
     }: {
-      readonly file?: WorkspaceDiffFile;
-      readonly files: readonly WorkspaceDiffFile[];
+      readonly file?: WebReviewDiffFile;
+      readonly files: readonly WebReviewDiffFile[];
       readonly mode: "unified" | "split";
       readonly theme: "light" | "dark";
       readonly generatedAt: number;
@@ -122,15 +123,15 @@ interface WorkspaceReviewProps {
 }
 
 interface TreeRow {
-  readonly entry: WorkspaceReviewTreeEntry;
+  readonly entry: WebReviewTreeEntry;
   readonly path: string;
   readonly depth: number;
 }
 
-const pathIndex = (entries: readonly WorkspaceReviewTreeEntry[]): ReadonlyMap<string, string> => {
+const pathIndex = (entries: readonly WebReviewTreeEntry[]): ReadonlyMap<string, string> => {
   const byId = new Map(entries.map((entry) => [entry.id, entry] as const));
   const paths = new Map<string, string>();
-  const pathFor = (entry: WorkspaceReviewTreeEntry): string => {
+  const pathFor = (entry: WebReviewTreeEntry): string => {
     const existing = paths.get(entry.id);
     if (existing) return existing;
     const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
@@ -143,7 +144,7 @@ const pathIndex = (entries: readonly WorkspaceReviewTreeEntry[]): ReadonlyMap<st
 };
 
 const treeRows = (
-  entries: readonly WorkspaceReviewTreeEntry[],
+  entries: readonly WebReviewTreeEntry[],
   expanded: ReadonlySet<string>,
   query: string,
 ): readonly TreeRow[] => {
@@ -158,7 +159,7 @@ const treeRows = (
       )
       .map((entry) => ({ entry, path: paths.get(entry.id) ?? entry.name, depth: 0 }));
 
-  const children = new Map<string | undefined, WorkspaceReviewTreeEntry[]>();
+  const children = new Map<string | undefined, WebReviewTreeEntry[]>();
   for (const entry of entries) {
     const siblings = children.get(entry.parentId) ?? [];
     siblings.push(entry);
@@ -180,7 +181,7 @@ const treeRows = (
   return rows;
 };
 
-const fileResolution = (entry: WorkspaceReviewTreeEntry, path: string): ReviewFileResolution => ({
+const fileResolution = (entry: WebReviewTreeEntry, path: string): ReviewFileResolution => ({
   path,
   fileId: entry.id,
   change: entry.change,
@@ -405,7 +406,7 @@ export const WorkspaceReview = ({
     if (pending) dispatchOpenFiles({ type: "save-scroll", ...pending });
   }, []);
 
-  const selectFile = (entry: WorkspaceReviewTreeEntry, preferred: ReviewFileMode = "source") => {
+  const selectFile = (entry: WebReviewTreeEntry, preferred: ReviewFileMode = "source") => {
     if (entry.kind !== "file") return;
     const path = paths.get(entry.id);
     if (!path) return;

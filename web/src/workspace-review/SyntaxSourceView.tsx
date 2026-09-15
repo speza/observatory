@@ -1,6 +1,6 @@
 import { highlighter } from "@git-diff-view/react";
 import type { Ref, UIEventHandler } from "react";
-import type { WebWorkspaceReviewFileResponse } from "../../../src/web/protocol.ts";
+import type { WebWorkspaceReviewFileResponse } from "../../../src/web/protocol/index.ts";
 
 const MAX_HIGHLIGHT_CHARACTERS = 100_000;
 const MAX_HIGHLIGHT_LINES = 3_000;

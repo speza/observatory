@@ -87,6 +87,65 @@
       "rules": {
         "typescript/no-unsafe-enum-comparison": "off"
       }
+    },
+    {
+      "files": ["src/web/protocol/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../**", "!../../projection/types.ts"],
+                "message": "The wire contract composes the projection module's transport-neutral types only (docs/design/web-wire-contract.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["web/src/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "../../../src/**",
+                  "!../../../src/web/protocol/**",
+                  "!../../../src/projection/types.ts"
+                ],
+                "message": "Renderers consume the web wire contract and projection types only (docs/design/web-wire-contract.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["web/src/**/*.test.ts", "web/src/**/*.test.tsx"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "../../../src/**",
+                  "!../../../src/web/protocol/**",
+                  "!../../../src/web/portfolio.ts",
+                  "!../../../src/projection/types.ts",
+                  "!../../../src/universe/test-support.ts",
+                  "!../../../src/hosts/mock/**"
+                ],
+                "message": "Renderer tests may additionally use the mock host and universe test fixtures; production renderer code may not."
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
