@@ -5,6 +5,7 @@ import type {
   GoalView,
 } from "../../../src/projection/types.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
+import { presentExecution } from "../shared/executionPresentation.ts";
 import { presentAgentCard } from "../atlas/agentCardPresentation.ts";
 import { flattenAgentOrder } from "../app/navigatorAgents.ts";
 import {
@@ -60,8 +61,12 @@ const AgentRow = ({
         <span className={`state state--${state}`} />
         <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
         <span className="ledger__agent-copy">
-          <b>{agent.displayName}</b>
+          <b>{presentation.titleLines.join(" ")}</b>
           {presentation.detail ? <small>{presentation.detail}</small> : null}
+          {presentation.secondaryContext &&
+          presentation.secondaryContext !== presentation.detail ? (
+            <small className="ledger__agent-context">{presentation.secondaryContext}</small>
+          ) : null}
         </span>
         <em>{state}</em>
       </button>
@@ -99,20 +104,21 @@ const DiscoveredRow = ({
 }): React.JSX.Element => {
   const state = execution.presence === "live" ? execution.runtimeState : "unknown";
   const stateLabel = execution.presence === "live" ? state : "runtime unknown";
+  const { primaryLabel, secondaryContext } = presentExecution(execution);
   return (
     <li>
       <button
-        aria-label={`${execution.displayName}, ${stateLabel}, discovered in ${execution.hostKind}`}
+        aria-label={`${primaryLabel}${secondaryContext ? `, ${secondaryContext}` : ""}, ${stateLabel}, discovered in ${execution.hostKind}`}
         onClick={() => onSelect({ type: "discovered-execution", id: execution.handle })}
         type="button"
       >
         <span className={`state state--${state}`} />
         <AgentLogo provider={execution.provider} />
         <span className="ledger__agent-copy">
-          <b>{execution.displayName}</b>
+          <b>{primaryLabel}</b>
           <small>
-            {execution.worktree ?? execution.repository ?? "Workspace unknown"} ·{" "}
-            {execution.hostKind}
+            {secondaryContext || execution.worktree || execution.repository || "Workspace unknown"}{" "}
+            · {execution.hostKind}
           </small>
         </span>
         <em>{stateLabel}</em>

@@ -102,9 +102,13 @@ controlled and never inferred from execution metadata.
 
 ### Supporting facts
 
-Repository, branch, worktree, host, execution container, provider activity,
-pull request and checks are evidence attached to an Agent. They support review,
-search and related-work proposals but do not become map hierarchy.
+Repository, branch, worktree, host, execution group, immediate execution
+context (including a workspace/tab breadcrumb), explicit individual execution
+label, provider activity, pull request and checks are evidence attached to an
+Agent. They support review, search and related-work proposals but do not become
+map hierarchy. The group, immediate context and individual label remain
+separate so a linked worktree or named tab context does not erase the explicit
+execution name that distinguishes a sibling.
 
 ## Authority and uncertainty
 
@@ -169,9 +173,14 @@ qualifies opaque grouping equality by host instance and emits only safe labels,
 public Agent views and derived positions. Tabs and panes remain host-owned
 placement details rather than map grouping levels.
 
-Each Agent card carries its Goal as a coloured semantic tag. Selecting a Goal
-highlights and fits all of its Agents across workspace territories. This keeps
-human intent visible without claiming a false Workspace-to-Goal 1:1 invariant.
+Each Agent card carries its Goal as a coloured semantic tag. Its primary title
+uses an explicit live individual label when the Agent name is provider- or
+fallback-derived, then falls back to the immediate execution context (which may
+be a named workspace/tab breadcrumb); an explicit human name remains
+authoritative. Group and immediate execution context are shown as secondary
+card, navigation and inspector context. Selecting a Goal highlights and fits all
+of its Agents across workspace territories. This keeps human intent visible without claiming a false
+Workspace-to-Goal 1:1 invariant.
 Agents whose workspace evidence is missing, stale or unavailable appear in a
 separate labelled area rather than being assigned by inference or omitted.
 

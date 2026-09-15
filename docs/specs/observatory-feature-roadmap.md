@@ -99,8 +99,9 @@ sustained use against disposable real Agents.
    accept, close or archive.
 5. Add the Related-Agent review/adopt/dismiss workflow over the existing
    projection; never auto-assign from weak similarity.
-6. Introduce only the typed delegation, result, dependency or integration
-   relationships that improve concrete supervision tasks.
+6. Test [agent-directed delegation](agent-directed-delegation.md): let an
+   accepted Agent request bounded cross-harness launches while Observatory
+   records exact causal relationships without owning workflow recipes.
 7. Surface cross-Agent workspace overlap and integration risk as evidence, not
    new organisational nodes.
 8. Add explicit semantic-density controls only if focus and Ledger do not solve

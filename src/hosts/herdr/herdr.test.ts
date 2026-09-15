@@ -226,12 +226,83 @@ describe("Herdr adapter", () => {
     expect(snapshot.agents.find((agent) => agent.nativeId === "fixture-w1:p1")?.provider).toBe(
       "codex",
     );
-    expect(
-      snapshot.agents.find((agent) => agent.nativeId === "fixture-w1:p1")?.executionContainer,
-    ).toEqual({ id: "fixture-w1", label: "alpha" });
+    const alpha = snapshot.agents.find((agent) => agent.nativeId === "fixture-w1:p1");
+    expect(alpha?.executionContainer).toEqual({ id: "fixture-w1", label: "alpha" });
+    expect(alpha?.executionContext).toEqual({ id: "fixture-w1", label: "alpha" });
+    expect(alpha?.executionLabel).toBe("alpha-builder");
     expect(snapshot.agents[0]?.hostLocator).toContain("paneId");
     expect(snapshot.agents[0]?.hostLocator).not.toContain("terminal output");
     expect(snapshot.agents.some((agent) => agent.nativeId === "fixture-w1:p2")).toBe(false);
+  });
+
+  test("uses named tabs for tab-only executions without losing workspace context", () => {
+    const snapshot = parseHerdrSnapshot(
+      {
+        result: {
+          snapshot: {
+            workspaces: [{ workspace_id: "root", label: "frontier" }],
+            tabs: [
+              { tab_id: "root:t-named", workspace_id: "root", label: "simulation-pass" },
+              { tab_id: "root:t-explicit", workspace_id: "root", label: "release" },
+              { tab_id: "root:t-default", workspace_id: "root", label: "2" },
+            ],
+            panes: [
+              {
+                pane_id: "tab-only",
+                terminal_id: "term-tab-only",
+                workspace_id: "root",
+                tab_id: "root:t-named",
+                terminal_title_stripped: "shell fallback",
+              },
+              {
+                pane_id: "explicit-name",
+                terminal_id: "term-explicit",
+                workspace_id: "root",
+                tab_id: "root:t-explicit",
+                terminal_title_stripped: "terminal fallback",
+              },
+              {
+                pane_id: "numeric-tab",
+                terminal_id: "term-numeric",
+                workspace_id: "root",
+                tab_id: "root:t-default",
+                terminal_title_stripped: "terminal fallback",
+              },
+            ],
+            agents: [
+              { pane_id: "tab-only", agent: "pi", agent_status: "idle" },
+              {
+                pane_id: "explicit-name",
+                agent: "pi",
+                name: "sim_progression",
+                agent_status: "working",
+              },
+              { pane_id: "numeric-tab", agent: "pi", agent_status: "idle" },
+            ],
+          },
+        },
+      },
+      100,
+    );
+    const byId = new Map(snapshot.agents.map((agent) => [agent.nativeId, agent]));
+
+    expect(byId.get("tab-only")).toMatchObject({
+      displayName: "simulation-pass",
+      executionContext: { id: "root", label: "frontier · simulation-pass" },
+      executionContainer: { id: "root", label: "frontier" },
+    });
+    expect(byId.get("tab-only")?.executionLabel).toBeUndefined();
+    expect(byId.get("explicit-name")).toMatchObject({
+      displayName: "sim_progression",
+      executionLabel: "sim_progression",
+      executionContext: { id: "root", label: "frontier · release" },
+    });
+    expect(byId.get("numeric-tab")).toMatchObject({
+      displayName: "terminal fallback",
+      executionLabel: "terminal fallback",
+      executionContext: { id: "root", label: "frontier" },
+    });
+    expect(byId.get("tab-only")?.displayName).not.toBe("tab-only");
   });
 
   test("groups linked worktree executions with the primary repository workspace", () => {
@@ -274,6 +345,7 @@ describe("Herdr adapter", () => {
                 },
               },
             ],
+            tabs: [{ tab_id: "linked-tab", workspace_id: "linked", label: "audit" }],
             panes: [
               {
                 pane_id: "root-agent",
@@ -314,6 +386,20 @@ describe("Herdr adapter", () => {
       id: "duplicate-root",
       label: "frontier copy",
     });
+    const contexts = new Map(
+      snapshot.agents.map((agent) => [agent.nativeId, agent.executionContext]),
+    );
+    expect(contexts.get("linked-agent")).toEqual({
+      id: "linked",
+      label: "company-compeition-audit · audit",
+    });
+    expect(snapshot.agents.find((agent) => agent.nativeId === "linked-agent"))?.toMatchObject({
+      displayName: "audit",
+      executionContainer: { id: "root", label: "frontier" },
+    });
+    expect(
+      snapshot.agents.find((agent) => agent.nativeId === "linked-agent")?.executionLabel,
+    ).toBeUndefined();
   });
 
   test("uses Herdr worktree provenance when duplicate primary workspaces exist", async () => {

@@ -100,6 +100,9 @@ interface AgentRow {
   provider: string | null;
   execution_container_id: string | null;
   execution_container_label: string | null;
+  execution_context_id: string | null;
+  execution_context_label: string | null;
+  execution_label: string | null;
   archived_at: number | null;
 }
 
@@ -204,7 +207,7 @@ const loadedHostInstanceId = (hostKind: string, value: string | null): string =>
   }
 };
 
-export const SQLITE_SCHEMA_GENERATION = 6;
+export const SQLITE_SCHEMA_GENERATION = 7;
 const MAX_CURRENT_OBSERVATIONS_PER_SOURCE = 500;
 
 export interface DatabaseResetSummary {
@@ -465,6 +468,13 @@ export class SqliteUniverseStore
               ? { id: row.execution_container_id, label: row.execution_container_label }
               : { id: row.execution_container_id },
           });
+        if (row.execution_context_id)
+          Object.assign(agent, {
+            executionContext: row.execution_context_label
+              ? { id: row.execution_context_id, label: row.execution_context_label }
+              : { id: row.execution_context_id },
+          });
+        if (row.execution_label) Object.assign(agent, { executionLabel: row.execution_label });
         if (row.archived_at !== null) Object.assign(agent, { archivedAt: row.archived_at });
         return agent;
       });
@@ -567,7 +577,7 @@ export class SqliteUniverseStore
       }
       const agent = this.prepareSnapshotTable(
         "agents",
-        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, provider_resume_eligibility, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, system_id, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, archived_at",
+        "id, host_kind, host_instance_id, native_id, host_locator, execution_observed_at, harness_id, continuity_scope_id, native_conversation_kind, native_conversation_value, continuity, provider_continuity, provider_resume_eligibility, execution_presence, resume_capability, observation_health, provider_observed_at, execution_history_json, conflicting_executions_json, display_name, display_name_source, description, system_id, primary_goal_id, runtime_state, runtime_state_source, host_health, last_seen_at, last_observed_at, last_changed_at, attention_since, repository, branch, worktree, provider, execution_container_id, execution_container_label, execution_context_id, execution_context_label, execution_label, archived_at",
         ["id"],
       );
       for (const row of state.agents) {
@@ -609,6 +619,9 @@ export class SqliteUniverseStore
           row.provider ?? null,
           row.executionContainer?.id ?? null,
           row.executionContainer?.label ?? null,
+          row.executionContext?.id ?? null,
+          row.executionContext?.label ?? null,
+          row.executionLabel ?? null,
           row.archivedAt ?? null,
         );
       }
@@ -1458,6 +1471,9 @@ export class SqliteUniverseStore
         provider TEXT,
         execution_container_id TEXT,
         execution_container_label TEXT,
+        execution_context_id TEXT,
+        execution_context_label TEXT,
+        execution_label TEXT,
         archived_at INTEGER,
         FOREIGN KEY(system_id) REFERENCES systems(id),
         FOREIGN KEY(primary_goal_id) REFERENCES goals(id)

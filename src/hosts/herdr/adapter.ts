@@ -92,6 +92,29 @@ const stripWorkingMarker = (value: string): string => {
   const stripped = value.replace(/^[◐◓◑◒]\s*/u, "").trim();
   return stripped || value;
 };
+
+const firstLabel = (...values: readonly (string | undefined)[]): string | undefined => {
+  for (const value of values) {
+    const label = value ? stripWorkingMarker(value) : undefined;
+    if (label) return label;
+  }
+  return undefined;
+};
+
+/** Herdr emits numeric tab labels for ordinary tabs; they are not useful UI identity. */
+const meaningfulTabLabel = (tab: RecordValue): string | undefined => {
+  const candidates = [
+    stringValue(tab, "label"),
+    stringValue(tab, "name"),
+    stringValue(tab, "title"),
+  ];
+  for (const candidate of candidates) {
+    const label = firstLabel(candidate);
+    if (label && !/^\d+$/u.test(label)) return label;
+  }
+  return undefined;
+};
+
 const status = (value: JsonValue | undefined): HostAgentObservation["runtimeState"] => {
   switch (value) {
     case "idle":
@@ -387,8 +410,10 @@ export const parseHerdrSnapshot = (
   const panes = snapshot.panes;
   const agentRecords = snapshot.agents;
   const workspaces = Array.isArray(snapshot.workspaces) ? snapshot.workspaces : [];
+  const tabs = Array.isArray(snapshot.tabs) ? snapshot.tabs : [];
   const paneById = new Map<string, RecordValue>();
   const workspaceById = new Map<string, RecordValue>();
+  const tabById = new Map<string, RecordValue>();
   const diagnostics: string[] = [];
   for (const item of panes) {
     const record = nonEmptyRecord(item);
@@ -399,6 +424,11 @@ export const parseHerdrSnapshot = (
     const record = nonEmptyRecord(item);
     const workspaceId = stringValue(record, "workspace_id");
     if (workspaceId) workspaceById.set(workspaceId, record);
+  }
+  for (const item of tabs) {
+    const record = nonEmptyRecord(item);
+    const tabId = stringValue(record, "tab_id");
+    if (tabId) tabById.set(tabId, record);
   }
   const workspaceGroups = workspaceGroupById(workspaces, explicitWorkspaceGroups);
 
@@ -428,15 +458,34 @@ export const parseHerdrSnapshot = (
     } else seen.add(paneId);
     const workspace = workspaceById.get(workspaceId) ?? {};
     const worktree = nonEmptyRecord(workspace.worktree);
-    const displayName = stripWorkingMarker(
-      stringValue(item, "name") ??
-        stringValue(item, "title") ??
-        stringValue(item, "terminal_title_stripped") ??
-        stringValue(pane, "terminal_title_stripped") ??
-        stringValue(item, "label") ??
-        stringValue(workspace, "label") ??
-        paneId,
+    const tab = tabById.get(tabId);
+    const workspaceLabel = stringValue(workspace, "label");
+    const explicitAgentLabel = firstLabel(
+      stringValue(item, "name"),
+      stringValue(item, "agent_name"),
+      stringValue(item, "display_name"),
+      stringValue(item, "label"),
     );
+    const tabLabel = tab ? meaningfulTabLabel(tab) : undefined;
+    const terminalLabel = firstLabel(
+      stringValue(item, "terminal_title_stripped"),
+      stringValue(pane, "terminal_title_stripped"),
+      stringValue(item, "title"),
+      stringValue(item, "terminal_title"),
+      stringValue(pane, "title"),
+      stringValue(pane, "name"),
+      stringValue(pane, "label"),
+    );
+    // A named tab is the immediate execution context, not the individual
+    // occupant. Only an explicit Herdr agent/pane name becomes the individual
+    // label. A terminal title is fallback individual evidence when no named
+    // tab exists; otherwise the tab remains the stronger presentation fallback.
+    const executionLabel = explicitAgentLabel ?? (tabLabel ? undefined : terminalLabel);
+    const contextLabels = [workspaceLabel, tabLabel].filter(
+      (label, index, labels): label is string => Boolean(label) && labels.indexOf(label) === index,
+    );
+    const executionContextLabel = contextLabels.join(" · ") || undefined;
+    const displayName = explicitAgentLabel ?? tabLabel ?? terminalLabel ?? workspaceLabel ?? paneId;
     const repository = stringValue(worktree, "repo_name");
     const worktreePath = stringValue(worktree, "checkout_path") ?? paneWorkingDirectory(pane);
     const branch = stringValue(worktree, "branch");
@@ -445,7 +494,7 @@ export const parseHerdrSnapshot = (
     const discoverable = harnessEvidence?.nativeConversationRef !== undefined;
     const workspaceGroup = workspaceGroups.get(workspaceId);
     const executionContainerId = workspaceGroup?.workspaceId ?? workspaceId;
-    const executionContainerLabel = workspaceGroup?.label ?? stringValue(workspace, "label");
+    const executionContainerLabel = workspaceGroup?.label ?? workspaceLabel;
     const observedState = status(item.agent_status ?? pane.agent_status);
     const observation = {
       nativeId: paneId,
@@ -457,7 +506,11 @@ export const parseHerdrSnapshot = (
       executionContainer: executionContainerLabel
         ? { id: executionContainerId, label: executionContainerLabel }
         : { id: executionContainerId },
+      executionContext: executionContextLabel
+        ? { id: workspaceId, label: executionContextLabel }
+        : { id: workspaceId },
     };
+    if (executionLabel) Object.assign(observation, { executionLabel });
     if (harnessEvidence) Object.assign(observation, { harnessEvidence });
     if (!discoverable) Object.assign(observation, { discoverable: false });
     if (repository) Object.assign(observation, { repository });

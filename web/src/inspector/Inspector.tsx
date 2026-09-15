@@ -14,6 +14,7 @@ import {
 } from "../../../src/web/protocol/index.ts";
 import { batchDestinationValue } from "./batchDestination.ts";
 import { RepositoryStatus } from "./RepositoryStatus.tsx";
+import { presentExecution } from "../shared/executionPresentation.ts";
 
 interface InspectorProps {
   readonly projection?: InspectorProjection;
@@ -137,6 +138,12 @@ export const Inspector = ({
   const batchAgents = (batch ?? []).map((agentId) => agentsById.get(agentId));
   const batchPlacementSummary = batchPlacement(batchAgents);
   const activeGoals = commandCentre.goals.filter((candidate) => candidate.status === "active");
+  const agentPresentation = agent ? presentExecution(agent) : undefined;
+  const agentPrimaryLabel = agentPresentation?.primaryLabel;
+  const agentSecondaryContext = agentPresentation?.secondaryContext;
+  const discoveryPresentation = discovery ? presentExecution(discovery) : undefined;
+  const discoveryPrimaryLabel = discoveryPresentation?.primaryLabel;
+  const discoverySecondaryContext = discoveryPresentation?.secondaryContext;
 
   useEffect(() => {
     setTitle(goal?.title ?? "");
@@ -152,9 +159,9 @@ export const Inspector = ({
     : projection?.kind === "goal-inspector"
       ? projection.goal.title
       : projection?.kind === "agent-inspector"
-        ? projection.agent.displayName
+        ? (agentPrimaryLabel ?? projection.agent.displayName)
         : projection?.kind === "discovered-execution-inspector"
-          ? projection.execution.displayName
+          ? (discoveryPrimaryLabel ?? projection.execution.displayName)
           : "Selection";
   return (
     <aside className="inspector" aria-label="Selection inspector">
@@ -373,11 +380,34 @@ export const Inspector = ({
             </strong>
             <span>Discovered in {discovery.hostKind}</span>
           </div>
+          {discoverySecondaryContext ? (
+            <p className="inspector__execution-context">
+              Live context · {discoverySecondaryContext}
+            </p>
+          ) : null}
           <dl className="inspector__discovered-facts">
             <div>
               <dt>Provider</dt>
               <dd>{discovery.provider ?? "Unknown"}</dd>
             </div>
+            {discovery.executionPresentation?.group ? (
+              <div>
+                <dt>Execution group</dt>
+                <dd>{discovery.executionPresentation.group}</dd>
+              </div>
+            ) : null}
+            {discovery.executionPresentation?.context ? (
+              <div>
+                <dt>Execution context</dt>
+                <dd>{discovery.executionPresentation.context}</dd>
+              </div>
+            ) : null}
+            {discovery.executionPresentation?.label ? (
+              <div>
+                <dt>Execution label</dt>
+                <dd>{discovery.executionPresentation.label}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Workspace</dt>
               <dd title={discovery.worktree ?? discovery.repository}>
@@ -508,6 +538,9 @@ export const Inspector = ({
                 {projection.agent.harnessId ?? projection.agent.provider ?? "Unknown provider"}
               </span>
             </div>
+            {agentSecondaryContext ? (
+              <p className="inspector__execution-context">Live context · {agentSecondaryContext}</p>
+            ) : null}
             <label className="inspector__assignment">
               <span>Assigned goal</span>
               <select
@@ -722,6 +755,30 @@ export const Inspector = ({
                     {projection.agent.worktree ?? "Unknown"}
                   </dd>
                 </div>
+                {projection.agent.executionPresentation?.group ? (
+                  <div>
+                    <dt>Execution group</dt>
+                    <dd>{projection.agent.executionPresentation.group}</dd>
+                  </div>
+                ) : null}
+                {projection.agent.executionPresentation?.context ? (
+                  <div>
+                    <dt>Execution context</dt>
+                    <dd>{projection.agent.executionPresentation.context}</dd>
+                  </div>
+                ) : null}
+                {projection.agent.executionPresentation?.label ? (
+                  <div>
+                    <dt>Execution label</dt>
+                    <dd>{projection.agent.executionPresentation.label}</dd>
+                  </div>
+                ) : null}
+                {agentPrimaryLabel !== projection.agent.displayName ? (
+                  <div>
+                    <dt>Durable name</dt>
+                    <dd>{projection.agent.displayName}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Agent ID</dt>
                   <dd className="inspector__identifier">

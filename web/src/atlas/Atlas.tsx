@@ -20,6 +20,7 @@ import {
   type Selection,
 } from "../app/selection.ts";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
+import { presentExecution } from "../shared/executionPresentation.ts";
 import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
@@ -244,7 +245,7 @@ export const Atlas = ({
         transform={`translate(${point.x} ${point.y})`}
       >
         <g
-          aria-label={`${agent.displayName}, ${state}, ${agent.goalTitle ? `goal ${agent.goalTitle}` : agent.systemTitle ? `system ${agent.systemTitle}` : "unassigned"}`}
+          aria-label={`${card.titleLines.join(" ")}${card.secondaryContext ? `, ${card.secondaryContext}` : ""}, ${state}, ${agent.goalTitle ? `goal ${agent.goalTitle}` : agent.systemTitle ? `system ${agent.systemTitle}` : "unassigned"}`}
           className="agent__card-target"
           role="button"
           tabIndex={0}
@@ -668,6 +669,8 @@ export const Atlas = ({
                     };
                     const state =
                       execution.presence === "live" ? execution.runtimeState : "unknown";
+                    const { primaryLabel: executionLabel, secondaryContext: executionContext } =
+                      presentExecution(execution);
                     const selected =
                       subject?.type === "discovered-execution" && subject.id === execution.handle;
                     const focus = (): void =>
@@ -683,7 +686,7 @@ export const Atlas = ({
                         transform={`translate(${centre.x} ${centre.y})`}
                       >
                         <g
-                          aria-label={`${execution.displayName}, ${state}, discovered in ${execution.hostKind}`}
+                          aria-label={`${executionLabel}${executionContext ? `, ${executionContext}` : ""}, ${state}, discovered in ${execution.hostKind}`}
                           className="discovered-execution__card-target"
                           onClick={() =>
                             onSelect({ type: "discovered-execution", id: execution.handle })
@@ -743,11 +746,14 @@ export const Atlas = ({
                             </text>
                           </g>
                           <text className="discovered-execution__name" x="-124" y="-15">
-                            {truncateAtlasLine(execution.displayName, 29)}
+                            {truncateAtlasLine(executionLabel, 29)}
                           </text>
                           <text className="discovered-execution__context" x="-124" y="17">
                             {truncateAtlasLine(
-                              execution.worktree ?? execution.repository ?? "Workspace unknown",
+                              executionContext ||
+                                execution.worktree ||
+                                execution.repository ||
+                                "Workspace unknown",
                               43,
                             )}
                           </text>
@@ -761,7 +767,7 @@ export const Atlas = ({
                         </g>
                         {execution.presence === "live" && onOpenDiscoveredTerminal ? (
                           <g
-                            aria-label={`Open ${execution.displayName} terminal`}
+                            aria-label={`Open ${executionLabel} terminal`}
                             className="discovered-execution__quick-action"
                             onClick={(event) => {
                               event.stopPropagation();

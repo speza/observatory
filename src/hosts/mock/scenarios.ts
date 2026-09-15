@@ -49,7 +49,8 @@ const agent = (
   runtimeState: RuntimeState = "idle",
 ): MockAgentObservation => {
   const harnessId = providerFor(nativeId);
-  return {
+  const executionContainer = executionContainerFor(nativeId);
+  const result: MockAgentObservation = {
     nativeId,
     displayName,
     runtimeState,
@@ -70,9 +71,18 @@ const agent = (
       source: "native-integration",
       observedAt: 0,
     },
-    executionContainer: executionContainerFor(nativeId),
+    executionContainer,
+    executionLabel: displayName,
     hostLocator: `mock-agent:${nativeId}`,
   };
+  if (executionContainer)
+    Object.assign(result, {
+      executionContext: {
+        id: `synthetic/context/${nativeId}`,
+        label: `tab · ${nativeId}`,
+      },
+    });
+  return result;
 };
 
 const baseCatalog: readonly MockAgentObservation[] = [

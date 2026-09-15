@@ -228,7 +228,9 @@ ExecutionObservation
   workspaceRef?
   repository?
   branch?
-  executionContainer?
+  executionContainer?          grouped host context for related executions
+  executionContext?            immediate workspace/tab breadcrumb
+  executionLabel?              explicit individual agent/pane label
   observedAt
   hostLocator
 
@@ -247,13 +249,19 @@ Execution observations and provider observations have independent freshness and
 completeness scopes. Derived presentation state is computed from them; it is
 not persisted as one overloaded Agent status.
 
-A host may also report a grouping context for related execution containers.
-Herdr uses this for its Git worktree family: linked worktree workspaces share
-their source repository workspace's grouping context, while plain duplicate
-workspaces remain separate. Observatory uses that relationship only for
-workspace-first presentation and related evidence; it does not create a
-repository hierarchy, merge execution identities or infer multi-repository
-Agent semantics from it.
+A host may also report a grouping context for related execution containers,
+an immediate context for the specific workspace/tab, and an explicit individual
+label for one agent or pane. These are separate presentation facts: the group
+may be shared by linked worktrees while the immediate context and individual
+label remain distinct. A meaningful named tab belongs to the immediate context;
+when no explicit individual label exists, renderers may use that context as the
+primary fallback without copying the tab into the individual label. Herdr uses
+the group for its Git worktree family: linked
+worktree workspaces share their source repository workspace's grouping context,
+while plain duplicate workspaces remain separate. Observatory uses that
+relationship only for workspace-first presentation and related evidence; it does
+not create a repository hierarchy, merge execution identities or infer
+multi-repository Agent semantics from it.
 
 ## Core invariants
 
@@ -439,11 +447,15 @@ Agent display-name precedence is:
 
 1. explicit human name;
 2. provider conversation title;
-3. bounded workspace/repository fallback; and
+3. bounded workspace/tab/repository fallback; and
 4. harness label plus a short Observatory identifier.
 
-Host terminal titles and Herdr workspace labels describe executions. They never
-overwrite an Agent's human or provider-derived name.
+Host terminal titles, grouping labels, immediate workspace/tab labels and
+explicit individual agent/pane labels describe executions. They never overwrite
+an Agent's human or provider-derived name. Live presentation uses an explicit
+individual label as the primary card/navigation title when available; when it
+is absent, the immediate workspace/tab context may be the fallback, while the
+group and remaining context stay secondary.
 
 An unnamed Observatory launch initially shows its launch/workspace fallback.
 When the provider supplies a meaningful conversation title, the title may

@@ -65,10 +65,21 @@ export type AgentLifecycleState =
   | "conversation-unavailable"
   | "conflict";
 
+export interface ExecutionPresentationView {
+  /** Safe live label for the host's grouping context, when available. */
+  readonly group?: string;
+  /** Safe live label for the immediate execution context, including named-tab breadcrumbs. */
+  readonly context?: string;
+  /** Safe live label for the explicit individual execution, when available. */
+  readonly label?: string;
+}
+
 export interface AgentView extends Omit<
   Agent,
   | "execution"
   | "executionContainer"
+  | "executionContext"
+  | "executionLabel"
   | "nativeConversationRef"
   | "executionHistory"
   | "conflictingExecutions"
@@ -77,11 +88,14 @@ export interface AgentView extends Omit<
   readonly goalTitle?: string;
   readonly systemTitle?: string;
   /**
-   * Qualified, host-neutral workspace label derived at the boundary from
+   * Qualified, host-neutral group/workspace label derived at the boundary from
    * exactly identified, fresh live execution evidence. Presentation metadata
-   * only; never durable or organisational state.
+   * only; never durable or organisational state. `executionPresentation` keeps
+   * the group, immediate context and individual label distinct.
    */
   readonly workspaceLabel?: string;
+  /** Distinct, safe live execution labels; never durable semantic names. */
+  readonly executionPresentation?: ExecutionPresentationView;
   readonly attention?: AttentionItem;
   readonly canResume: boolean;
   readonly lifecycleState: AgentLifecycleState;
@@ -159,6 +173,7 @@ export interface DiscoveredExecutionView {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
+  readonly executionPresentation?: ExecutionPresentationView;
   readonly conversation?: {
     readonly kind: string;
     readonly id: string;

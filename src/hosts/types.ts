@@ -1,6 +1,10 @@
 import type { Effect, Stream } from "effect";
 import type { AgentProcessPlan, OpaqueNativeConversationRef } from "../plugin-sdk/index.ts";
-import type { ExecutionContainerRef, RuntimeState } from "../universe/types.ts";
+import type {
+  ExecutionContextRef,
+  ExecutionContainerRef,
+  RuntimeState,
+} from "../universe/types.ts";
 import type { HostError } from "./errors.ts";
 
 /** Convert an opaque host kind into a readable label without knowing a host's brand. */
@@ -28,8 +32,12 @@ export interface HostAgentObservation {
    * cannot prove an agent identity should set this rather than omitting the row.
    */
   readonly discoverable?: boolean;
-  /** Optional host-observed execution context; its identity is opaque to core. */
+  /** Optional host grouping context; its identity is opaque to core. */
   readonly executionContainer?: ExecutionContainerRef;
+  /** Immediate host execution context beneath the optional group. */
+  readonly executionContext?: ExecutionContextRef;
+  /** Explicit individual host label, such as an agent or pane name; tab context stays separate. */
+  readonly executionLabel?: string;
   /** Serialized and opaque outside the agent-host adapter. */
   readonly hostLocator: string;
 }

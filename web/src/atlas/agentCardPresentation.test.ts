@@ -29,6 +29,55 @@ const agent = (overrides: Partial<MapAgentView> = {}): MapAgentView => ({
 });
 
 describe("agent card presentation", () => {
+  test("uses a useful live label while keeping group and immediate context secondary", () => {
+    const presentation = presentAgentCard(
+      agent({
+        displayName: "Codex · simulation-pass",
+        executionPresentation: {
+          group: "frontier",
+          context: "simulation-pass",
+          label: "sim_progression",
+        },
+      }),
+    );
+    expect(presentation.titleLines).toEqual(["sim_progression"]);
+    expect(presentation.secondaryContext).toBe("simulation-pass · frontier");
+    expect(presentation.detail).toContain("simulation-pass · frontier");
+  });
+
+  test("keeps an explicit human name authoritative over live execution labels", () => {
+    const presentation = presentAgentCard(
+      agent({
+        displayName: "My accepted name",
+        displayNameSource: "human",
+        executionPresentation: {
+          group: "frontier",
+          context: "frontier · simulation-pass",
+          label: "sim_progression",
+        },
+      }),
+    );
+    expect(presentation.titleLines).toEqual(["My accepted name"]);
+    expect(presentation.secondaryContext).toBe("sim_progression · frontier · simulation-pass");
+  });
+
+  test("keeps a live label primary when it matches the provider or fallback display name", () => {
+    for (const displayNameSource of ["provider", "fallback"] as const) {
+      const presentation = presentAgentCard(
+        agent({
+          displayName: "same execution",
+          displayNameSource,
+          executionPresentation: {
+            label: "same execution",
+            context: "frontier",
+          },
+        }),
+      );
+      expect(presentation.titleLines).toEqual(["same execution"]);
+      expect(presentation.secondaryContext).toBe("frontier");
+    }
+  });
+
   test("wraps a hyphenated title without clipping its meaning", () => {
     expect(agentTitleLines("Checkout provider-native-observations")).toEqual([
       "Checkout provider-native-",
@@ -74,10 +123,42 @@ describe("agent card presentation", () => {
     ).toBe("Observed: composing response · 56s");
   });
 
+  test("keeps waiting attention ahead of a long execution context", () => {
+    const presentation = presentAgentCard(
+      agent({
+        executionPresentation: {
+          group: "frontier",
+          context: `frontier · ${"release-".repeat(80)}`,
+        },
+        attention: {
+          id: "agent-1:waiting",
+          targetType: "agent",
+          targetId: "agent-1",
+          agentId: "agent-1",
+          reason: "waiting",
+          action: "respond",
+          requiresHumanInput: true,
+          startedAt: 1_000,
+          lastChangedAt: 1_000,
+          ageMs: 120_000,
+          priority: "P1",
+          runtimeState: "waiting",
+          explanation: "The host reports that this agent is waiting for input.",
+        },
+      }),
+    );
+    expect(presentation.detail).toBe("Waiting for human input · 2m");
+    expect(presentation.titleLines[0]).toContain("frontier");
+  });
+
   test("prioritises an observed human request over background activity", () => {
     expect(
       presentAgentCard(
         agent({
+          executionPresentation: {
+            group: "frontier",
+            context: `frontier · ${"approval-".repeat(80)}`,
+          },
           providerEvidence: {
             providerLabel: "Codex",
             health: "healthy",

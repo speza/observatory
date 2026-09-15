@@ -41,6 +41,7 @@ import type {
   SystemView,
   AgentView,
   DiscoveredExecutionView,
+  ExecutionPresentationView,
   MapDiscoveredExecutionView,
   MapWorkspaceView,
   UniverseMapProjection,
@@ -60,6 +61,15 @@ const hostHealthRank = {
   unavailable: 2,
 } satisfies Record<HostHealth["status"], number>;
 
+const presentationSortLabel = (
+  agent: Pick<AgentView, "displayName" | "displayNameSource" | "executionPresentation">,
+): string =>
+  agent.displayNameSource === "human"
+    ? agent.displayName
+    : agent.executionPresentation?.label?.trim() ||
+      agent.executionPresentation?.context?.trim() ||
+      agent.displayName;
+
 const compareAgents = (left: AgentView, right: AgentView): number => {
   if (Boolean(left.attention) !== Boolean(right.attention)) return left.attention ? -1 : 1;
   if (left.attention && right.attention && left.attention.startedAt !== right.attention.startedAt) {
@@ -67,7 +77,11 @@ const compareAgents = (left: AgentView, right: AgentView): number => {
   }
   if (left.hostHealth !== right.hostHealth)
     return hostHealthRank[left.hostHealth] - hostHealthRank[right.hostHealth];
-  return compareText(left.displayName, right.displayName) || compareText(left.id, right.id);
+  return (
+    compareText(presentationSortLabel(left), presentationSortLabel(right)) ||
+    compareText(left.displayName, right.displayName) ||
+    compareText(left.id, right.id)
+  );
 };
 
 const compareDiscoveredExecutions = (
@@ -75,6 +89,10 @@ const compareDiscoveredExecutions = (
   right: DiscoveredExecutionView,
 ): number =>
   (left.presence === right.presence ? 0 : left.presence === "live" ? -1 : 1) ||
+  compareText(
+    left.executionPresentation?.label ?? left.executionPresentation?.context ?? left.displayName,
+    right.executionPresentation?.label ?? right.executionPresentation?.context ?? right.displayName,
+  ) ||
   compareText(left.displayName, right.displayName) ||
   compareText(left.hostKind, right.hostKind) ||
   compareText(left.handle, right.handle);
@@ -116,15 +134,42 @@ const effectiveSystemId = (
 ): string | undefined =>
   agent.primaryGoalId ? goals.get(agent.primaryGoalId)?.systemId : agent.systemId;
 
+const boundedPresentationLabel = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim().replace(/\s+/gu, " ");
+  if (!normalized) return undefined;
+  return normalized.slice(0, 240);
+};
+
+const liveExecutionPresentation = (agent: Agent): ExecutionPresentationView | undefined => {
+  if (
+    !agent.execution ||
+    agent.executionPresence !== "live" ||
+    agent.observationHealth !== "fresh" ||
+    agent.hostHealth !== "live"
+  )
+    return undefined;
+  const group = boundedPresentationLabel(agent.executionContainer?.label);
+  const context = boundedPresentationLabel(agent.executionContext?.label);
+  const label = boundedPresentationLabel(agent.executionLabel);
+  const presentation: ExecutionPresentationView = {};
+  if (group) Object.assign(presentation, { group });
+  if (context) Object.assign(presentation, { context });
+  if (label) Object.assign(presentation, { label });
+  return Object.keys(presentation).length > 0 ? presentation : undefined;
+};
+
 const publicAgent = (agent: Agent) => {
   const {
     execution,
     executionContainer: _executionContainer,
+    executionContext: _executionContext,
+    executionLabel: _executionLabel,
     nativeConversationRef: _nativeConversationRef,
     executionHistory: _executionHistory,
     conflictingExecutions,
     ...publicFields
   } = agent;
+  const executionPresentation = liveExecutionPresentation(agent);
   const state = lifecycleState(agent);
   const canResume =
     agent.providerContinuity === "confirmed" &&
@@ -136,6 +181,7 @@ const publicAgent = (agent: Agent) => {
   return {
     ...publicFields,
     execution: execution ? { hostKind: execution.hostKind } : undefined,
+    executionPresentation,
     lifecycleState: state,
     executionConflictCount: conflictingExecutions.length,
     canResume,
@@ -511,9 +557,10 @@ const qualifiedWorkspace = (
   agent: Agent | undefined,
 ): { readonly key: string; readonly label: string } | undefined => {
   if (!agent?.execution) return undefined;
-  const containerId = opaqueContextValue(agent.executionContainer?.id);
+  const group = agent.executionContainer ?? agent.executionContext;
+  const groupId = opaqueContextValue(group?.id);
   if (
-    !containerId ||
+    !groupId ||
     agent.executionPresence !== "live" ||
     agent.observationHealth !== "fresh" ||
     agent.hostHealth !== "live"
@@ -521,8 +568,11 @@ const qualifiedWorkspace = (
     return undefined;
   }
   return {
-    key: `${agent.execution.hostKind}\u0000${agent.execution.hostInstanceId}\u0000${containerId}`,
-    label: agent.executionContainer?.label?.trim() || "Live workspace",
+    key: `${agent.execution.hostKind}\u0000${agent.execution.hostInstanceId}\u0000${groupId}`,
+    label:
+      boundedPresentationLabel(group?.label) ??
+      boundedPresentationLabel(agent.executionContext?.label) ??
+      "Live workspace",
   };
 };
 
@@ -844,8 +894,12 @@ const projectSearch = (
   }
   for (const agent of state.agents) {
     if (results.length >= maximum) break;
+    const executionPresentation = liveExecutionPresentation(agent);
     const haystack = [
       agent.displayName,
+      executionPresentation?.label,
+      executionPresentation?.context,
+      executionPresentation?.group,
       agent.description,
       agent.execution?.hostKind,
       agent.repository,
@@ -863,7 +917,10 @@ const projectSearch = (
       const result: SearchResult = {
         type: "agent",
         id: agent.id,
-        label: agent.displayName,
+        label:
+          agent.displayNameSource === "human"
+            ? agent.displayName
+            : (executionPresentation?.label ?? executionPresentation?.context ?? agent.displayName),
         context: agent.primaryGoalId
           ? `agent · ${goalsById.get(agent.primaryGoalId)?.title ?? "Goal unavailable"}`
           : systemId
@@ -880,6 +937,9 @@ const projectSearch = (
     if (results.length >= maximum) break;
     const haystack = [
       execution.displayName,
+      execution.executionPresentation?.label,
+      execution.executionPresentation?.context,
+      execution.executionPresentation?.group,
       execution.hostKind,
       execution.provider,
       execution.repository,
@@ -895,7 +955,10 @@ const projectSearch = (
     results.push({
       type: "discovered-execution",
       id: execution.handle,
-      label: execution.displayName,
+      label:
+        execution.executionPresentation?.label ??
+        execution.executionPresentation?.context ??
+        execution.displayName,
       context: `discovered in ${execution.hostKind}`,
       status: execution.presence === "live" ? execution.runtimeState : "runtime unknown",
     });

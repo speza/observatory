@@ -1,4 +1,5 @@
 import { formatAge } from "../shared/formatAge.ts";
+import { presentExecution } from "../shared/executionPresentation.ts";
 import type { AgentView, ProviderEvidenceView } from "../../../src/projection/types.ts";
 
 const TITLE_LINE_LENGTH = 26;
@@ -109,19 +110,25 @@ export interface AgentCardPresentation {
   readonly titleLines: readonly string[];
   readonly detail?: string;
   readonly context?: string;
+  /** Live execution context shown below the distinguishing title. */
+  readonly secondaryContext?: string;
 }
 
 export const presentAgentCard = (agent: AgentView): AgentCardPresentation => {
+  const { primaryLabel, secondaryContext } = presentExecution(agent);
   const evidenceDetail = agent.providerEvidence ? activityLabel(agent.providerEvidence) : undefined;
-  const detail =
+  const priorityDetail =
     attentionLabel(agent) ?? evidenceDetail ?? concise(agent.description, DETAIL_LENGTH);
+  const detail = priorityDetail ?? secondaryContext;
   const repository = basename(agent.repository) ?? basename(agent.worktree);
   const context = concise([repository, agent.branch].filter(Boolean).join(" · "), CONTEXT_LENGTH);
-  return {
+  const presentation: AgentCardPresentation = {
     identity:
       concise(agent.harnessId ?? agent.provider ?? "session", 16)?.toUpperCase() ?? "SESSION",
-    titleLines: agentTitleLines(agent.displayName),
+    titleLines: agentTitleLines(primaryLabel),
     detail: concise(detail, DETAIL_LENGTH),
     context,
   };
+  if (secondaryContext) Object.assign(presentation, { secondaryContext });
+  return presentation;
 };

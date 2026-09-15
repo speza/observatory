@@ -18,6 +18,7 @@ import {
   safeConversationReference,
   type Clock,
   type ExecutionContainerRef,
+  type ExecutionContextRef,
   type Goal,
   type GoalId,
   type HostHealth,
@@ -192,6 +193,11 @@ const normalizeText = (value: string | undefined): string | undefined => {
   return normalized ? normalized : undefined;
 };
 
+const normalizePresentationText = (value: string | undefined): string | undefined => {
+  const normalized = normalizeText(value)?.replace(/\s+/gu, " ");
+  return normalized ? normalized.slice(0, 240) : undefined;
+};
+
 const isPriority = (value: string): value is Priority =>
   PRIORITIES.some((priority) => priority === value);
 
@@ -203,6 +209,8 @@ const copyExecutionContainer = (
   const label = normalizeText(value?.label);
   return label ? { id, label } : { id };
 };
+
+const copyExecutionContext = copyExecutionContainer;
 
 const copyNativeConversationAliases = (
   references: readonly NativeConversationRef[] | undefined,
@@ -228,6 +236,12 @@ export interface DiscoveredExecutionAccess {
   readonly nativeConversationAliases?: readonly NativeConversationRef[];
 }
 
+interface ExecutionPresentationLabels {
+  group?: string;
+  context?: string;
+  label?: string;
+}
+
 interface DiscoveredExecutionRecord {
   readonly handle: string;
   readonly binding: AgentExecutionBinding;
@@ -239,6 +253,8 @@ interface DiscoveredExecutionRecord {
   readonly worktree?: string;
   readonly provider?: string;
   readonly executionContainer?: ExecutionContainerRef;
+  readonly executionContext?: ExecutionContextRef;
+  readonly executionLabel?: string;
   readonly nativeConversationRef?: NativeConversationRef;
   readonly presence: "live" | "unknown";
   readonly observationHealth: "fresh" | "unknown" | "unavailable";
@@ -1055,6 +1071,8 @@ const mergeConversationAgents = (
         merged.providerResumeEligibility ?? duplicate.providerResumeEligibility,
       providerObservedAt: combinedProviderObservedAt(merged, duplicate),
       executionContainer: merged.executionContainer ?? duplicate.executionContainer,
+      executionContext: merged.executionContext ?? duplicate.executionContext,
+      executionLabel: merged.executionLabel ?? duplicate.executionLabel,
       archivedAt:
         merged.archivedAt === undefined
           ? duplicate.archivedAt
@@ -1289,6 +1307,8 @@ const reconcileObservation = (
     worktree: observation.worktree,
     provider: observation.provider,
     executionContainer: copyExecutionContainer(observation.executionContainer),
+    executionContext: copyExecutionContext(observation.executionContext),
+    executionLabel: normalizeText(observation.executionLabel),
   };
   replaceAgent(draft.state, {
     ...updated,
@@ -1524,7 +1544,19 @@ export class Universe {
                   ? "Conversation identity is not scoped to a provider catalogue; exact evidence is required before adding it."
                   : "Exact catalogue evidence is not available for this execution.",
             };
-        return {
+        const presentation = (() => {
+          if (discovery.presence !== "live" || discovery.observationHealth !== "fresh")
+            return undefined;
+          const next: ExecutionPresentationLabels = {};
+          const group = normalizePresentationText(discovery.executionContainer?.label);
+          const context = normalizePresentationText(discovery.executionContext?.label);
+          const label = normalizePresentationText(discovery.executionLabel);
+          if (group) next.group = group;
+          if (context) next.context = context;
+          if (label) next.label = label;
+          return next;
+        })();
+        const item: DiscoveredExecutionView = {
           type: "discovered-execution",
           handle: discovery.handle,
           displayName: discovery.displayName,
@@ -1545,6 +1577,9 @@ export class Universe {
           admission,
           conversationConflictCount,
         };
+        if (presentation && Object.keys(presentation).length > 0)
+          Object.assign(item, { executionPresentation: presentation });
+        return item;
       })
       .sort(
         (left, right) =>
@@ -1697,6 +1732,8 @@ export class Universe {
         worktree: normalizeText(observation.worktree),
         provider: normalizeText(observation.provider),
         executionContainer: copyExecutionContainer(observation.executionContainer),
+        executionContext: copyExecutionContext(observation.executionContext),
+        executionLabel: normalizeText(observation.executionLabel),
         nativeConversationRef: effectiveConversation,
         presence: "live",
         observationHealth: "fresh",
@@ -1938,7 +1975,15 @@ export class Universe {
           agent.displayNameSource !== "human" && normalizeText(session.title)
             ? ("provider" as const)
             : agent.displayNameSource,
-        worktree: normalizeText(session.workspaceRef) ?? agent.worktree,
+        // A fresh live host observation owns the current checkout path. A
+        // provider catalogue may fill a missing path, but must not replace
+        // execution-local context while the host is authoritative.
+        worktree:
+          agent.executionPresence === "live" &&
+          agent.observationHealth === "fresh" &&
+          agent.worktree !== undefined
+            ? agent.worktree
+            : (normalizeText(session.workspaceRef) ?? agent.worktree),
       };
     });
     const updatedAgentIds = changedAgentIds(previous.agents, next.agents);

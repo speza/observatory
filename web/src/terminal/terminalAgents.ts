@@ -1,4 +1,5 @@
 import type { AgentView } from "../../../src/projection/types.ts";
+import { presentExecution } from "../shared/executionPresentation.ts";
 
 export const orderTerminalAgents = (
   agents: readonly AgentView[],
@@ -31,17 +32,20 @@ export const filterTerminalAgents = (
 ): readonly AgentView[] => {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return agents;
-  return agents.filter((agent) =>
-    [
+  return agents.filter((agent) => {
+    const presentation = presentExecution(agent);
+    return [
       agent.displayName,
+      presentation.primaryLabel,
+      presentation.secondaryContext,
       agent.goalTitle,
       agent.systemTitle,
       agent.lifecycleState,
       agent.execution?.hostKind,
     ]
       .filter(Boolean)
-      .some((value) => value!.toLocaleLowerCase().includes(normalized)),
-  );
+      .some((value) => value!.toLocaleLowerCase().includes(normalized));
+  });
 };
 
 export const cycleTerminalAgent = (

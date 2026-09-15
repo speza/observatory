@@ -294,12 +294,16 @@ observations.
   derived positions,
   keeps live or uncertain Agents without trustworthy workspace evidence
   explicit, and omits confirmed-absent executions from active projections.
-  Command Centre Agent views additionally carry that qualified safe workspace
-  label as presentation metadata (for example navigator row context), so the
-  tree can show which live territory an Agent runs in without re-parenting the
-  durable `System -> Goal -> Agent` tree or accepting workspace as
-  organisational state. Agents without qualified evidence simply omit the
-  label.
+  Command Centre Agent views additionally carry qualified safe execution
+  presentation metadata: a group label, an immediate execution-context label
+  (including a bounded workspace/tab breadcrumb) and an optional explicit
+  individual execution label. Cards and navigation use the explicit individual
+  label when available and otherwise fall back to the immediate context, while
+  an explicit human name remains authoritative. Group and context remain
+  secondary when a human name is primary. These labels let the tree show the live
+  execution without re-parenting the durable `System -> Goal -> Agent` tree or
+  accepting any workspace, tab or pane as organisational state. Agents without qualified
+  evidence omit the live presentation metadata.
   Durable records remain available through history/search and include-archived
   views. The renderer lays out workspace card grids and the compact discovery
   dock while keeping viewport state outside persistence.
@@ -596,12 +600,14 @@ The browser map projection derives workspace geography at the server boundary
 from the qualified `(host kind, host instance, host-reported grouping context)`
 identity. A host adapter may make a linked-worktree grouping context equal to
 its source workspace context while retaining the exact execution binding for
-access and lifecycle. The projection emits only stable coordinates, a safe
-label, public Agent views, Goal references and aggregate
+access and lifecycle. The projection emits only stable coordinates, safe
+presentation labels, public Agent views, Goal references and aggregate
 attention/uncertainty; opaque grouping keys and native host identifiers never
-cross that boundary. Command Centre Agent views carry the same qualified safe
-label as optional presentation metadata; the grouping key itself never does.
-This derived geography does not
+cross that boundary. Command Centre Agent views carry the safe group and
+immediate context (including named-tab breadcrumbs) plus optional individual
+labels as presentation metadata. Individual labels never duplicate a named tab
+that is already represented by context. The grouping key and execution binding
+never do. This derived geography does not
 alter the durable `System -> Goal -> Agent` authority.
 
 The intended dependency direction is:

@@ -41,14 +41,20 @@ export interface MapPosition {
 }
 
 /**
- * An opaque host-observed execution context shared by one or more agents.
- * Observatory may compare refs for evidence, but it does not make the
- * context a durable organisational node or interpret its identifier.
+ * An opaque host-observed execution context. Observatory may compare refs for
+ * evidence, but it does not make the context a durable organisational node or
+ * interpret its identifier.
  */
-export interface ExecutionContainerRef {
+export interface ExecutionContextRef {
   readonly id: string;
   readonly label?: string;
 }
+
+/**
+ * The grouped execution context retained for existing related-agent evidence.
+ * A host may additionally report the immediate execution context below it.
+ */
+export type ExecutionContainerRef = ExecutionContextRef;
 
 export interface RelatedAgentDismissal {
   readonly goalId: GoalId;
@@ -136,8 +142,12 @@ export interface Agent {
   readonly branch?: string;
   readonly worktree?: string;
   readonly provider?: string;
-  /** Optional observed execution context used only for related-agent evidence. */
+  /** Optional host grouping context used only for related-agent evidence and presentation. */
   readonly executionContainer?: ExecutionContainerRef;
+  /** Immediate host execution context, such as one linked-worktree workspace. */
+  readonly executionContext?: ExecutionContextRef;
+  /** Explicit individual host label, such as an agent or pane name; tab context stays separate. */
+  readonly executionLabel?: string;
   /** Human-controlled archive marker; archived agents stay in history but leave active projections. */
   readonly archivedAt?: number;
 }
@@ -255,6 +265,8 @@ export const cloneUniverseState = (state: UniverseState): UniverseState => {
         ? { ...agent.nativeConversationRef }
         : undefined,
       executionContainer: agent.executionContainer ? { ...agent.executionContainer } : undefined,
+      executionContext: agent.executionContext ? { ...agent.executionContext } : undefined,
+      executionLabel: agent.executionLabel,
     })),
     hosts: state.hosts.map((host) => ({ ...host })),
     relatedAgentDismissals: (state.relatedAgentDismissals ?? []).map((dismissal) => ({

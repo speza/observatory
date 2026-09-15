@@ -32,6 +32,8 @@ const observation = {
     observedAt: 1_000_000,
   },
   executionContainer: { id: "container-1", label: "Persisted context" },
+  executionContext: { id: "context-1", label: "simulation-pass" },
+  executionLabel: "sim_progression",
   hostLocator: "opaque:pane-1",
 };
 
@@ -352,6 +354,11 @@ describe("SQLite persistence", () => {
         id: "container-1",
         label: "Persisted context",
       });
+      expect(state.agents[0]?.executionContext).toEqual({
+        id: "context-1",
+        label: "simulation-pass",
+      });
+      expect(state.agents[0]?.executionLabel).toBe("sim_progression");
       expect(state.agents[0]?.nativeConversationRef).toEqual({
         harnessId: "codex",
         kind: "session-id",

@@ -5,6 +5,7 @@ import { fetchTerminalLinks } from "../api/client.ts";
 import type { TerminalAppearance } from "../settings/browserSettings.ts";
 import { TerminalSurface, type TerminalTheme } from "./TerminalSurface.tsx";
 import { cycleTerminalAgent, filterTerminalAgents } from "./terminalAgents.ts";
+import { presentExecution } from "../shared/executionPresentation.ts";
 
 interface TerminalTab {
   readonly id: string;
@@ -32,6 +33,9 @@ const terminalAppearances: readonly TerminalAppearance[] = ["application", "ligh
 const terminalAppearanceLabel = (appearance: TerminalAppearance): string =>
   appearance === "application" ? "Auto" : appearance === "light" ? "Light" : "Dark";
 
+const terminalAgentLabel = (candidate: AgentView | DiscoveredExecutionView): string =>
+  presentExecution(candidate).primaryLabel;
+
 export const TerminalDeck = ({
   agent,
   agents,
@@ -44,6 +48,7 @@ export const TerminalDeck = ({
 }: TerminalDeckProps): React.JSX.Element => {
   const discovery = isDiscoveredExecution(agent) ? agent : undefined;
   const selectedAgent = isDiscoveredExecution(agent) ? undefined : agent;
+  const terminalPresentation = presentExecution(agent);
   const isDiscovery = discovery !== undefined;
   const subjectId = discovery?.handle ?? selectedAgent?.id;
   const availableAgents = agents ?? (selectedAgent ? [selectedAgent] : []);
@@ -192,7 +197,7 @@ export const TerminalDeck = ({
 
   return (
     <section
-      aria-label={`${agent.displayName} terminal deck`}
+      aria-label={`${terminalPresentation.primaryLabel} terminal deck${terminalPresentation.secondaryContext ? ` · ${terminalPresentation.secondaryContext}` : ""}`}
       className={`terminal-deck terminal-deck--${terminalTheme}${embedded ? " terminal-deck--embedded" : " terminal-deck--standalone"}`}
       onKeyDownCapture={handleDeckKeyDown}
     >
@@ -213,7 +218,12 @@ export const TerminalDeck = ({
             TERMINAL DECK /{" "}
             {discovery ? discovery.hostKind : (selectedAgent?.execution?.hostKind ?? "detached")}
           </span>
-          <strong>{agent.displayName}</strong>
+          <strong>{terminalPresentation.primaryLabel}</strong>
+          {terminalPresentation.secondaryContext ? (
+            <small className="terminal-deck__identity-context">
+              {terminalPresentation.secondaryContext}
+            </small>
+          ) : null}
           {canSwitchAgent ? <span aria-hidden="true">⌄</span> : null}
         </button>
         <div className="terminal-deck__actions">
@@ -279,7 +289,7 @@ export const TerminalDeck = ({
                 <span
                   className={`terminal-deck__tab-dot terminal-deck__tab-dot--${tab.link?.kind ?? "primary"}`}
                 />
-                <span>{tab.link?.label ?? `Main · ${agent.displayName}`}</span>
+                <span>{tab.link?.label ?? `Main · ${terminalAgentLabel(agent)}`}</span>
                 <small>{index + 1}</small>
               </button>
               {tab.link ? (
@@ -362,33 +372,39 @@ export const TerminalDeck = ({
             {filteredAgents.length === 0 ? (
               <p className="terminal-deck__picker-empty">No observed agent terminals match.</p>
             ) : null}
-            {filteredAgents.map((candidate) => (
-              <button
-                aria-current={candidate.id === selectedAgent.id ? "true" : undefined}
-                className="terminal-deck__picker-item"
-                key={candidate.id}
-                onClick={() => {
-                  if (candidate.id !== selectedAgent.id) onSwitchAgent?.(candidate);
-                  else {
-                    setAgentPickerOpen(false);
-                    setAgentQuery("");
-                  }
-                }}
-                type="button"
-              >
-                <span
-                  className={`terminal-deck__tab-dot terminal-deck__tab-dot--${candidate.attention ? "attention" : "primary"}`}
-                />
-                <span>
-                  <strong>{candidate.displayName}</strong>
-                  <small>
-                    {candidate.goalTitle ?? candidate.systemTitle ?? "Inbox"} ·{" "}
-                    {candidate.lifecycleState.replaceAll("-", " ")}
-                  </small>
-                </span>
-                <em>{candidate.id === selectedAgent.id ? "CURRENT" : "OPEN"}</em>
-              </button>
-            ))}
+            {filteredAgents.map((candidate) => {
+              const candidatePresentation = presentExecution(candidate);
+              return (
+                <button
+                  aria-current={candidate.id === selectedAgent.id ? "true" : undefined}
+                  className="terminal-deck__picker-item"
+                  key={candidate.id}
+                  onClick={() => {
+                    if (candidate.id !== selectedAgent.id) onSwitchAgent?.(candidate);
+                    else {
+                      setAgentPickerOpen(false);
+                      setAgentQuery("");
+                    }
+                  }}
+                  type="button"
+                >
+                  <span
+                    className={`terminal-deck__tab-dot terminal-deck__tab-dot--${candidate.attention ? "attention" : "primary"}`}
+                  />
+                  <span>
+                    <strong>{candidatePresentation.primaryLabel}</strong>
+                    <small>
+                      {candidatePresentation.secondaryContext
+                        ? `${candidatePresentation.secondaryContext} · `
+                        : ""}
+                      {candidate.goalTitle ?? candidate.systemTitle ?? "Inbox"} ·{" "}
+                      {candidate.lifecycleState.replaceAll("-", " ")}
+                    </small>
+                  </span>
+                  <em>{candidate.id === selectedAgent.id ? "CURRENT" : "OPEN"}</em>
+                </button>
+              );
+            })}
           </div>
           <footer>
             Only Agents with an observed execution are listed. Terminal access is validated when

@@ -15,6 +15,8 @@ const observation = (
   repository = "repo",
   worktree = "/sandbox/tree",
   executionContainer?: { readonly id: string; readonly label?: string },
+  executionContext?: { readonly id: string; readonly label?: string },
+  executionLabel?: string,
 ) => ({
   nativeId,
   displayName,
@@ -26,6 +28,8 @@ const observation = (
   worktree,
   provider: "fixture-provider",
   executionContainer,
+  executionContext,
+  executionLabel,
   hostLocator: `opaque:${nativeId}`,
 });
 
@@ -1057,6 +1061,69 @@ describe("projections", () => {
       "changed",
       "attention",
     ]);
+  });
+
+  test("projects group, immediate context, and individual execution labels separately", () => {
+    const { universe } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        {
+          ...observation(
+            "pane-sim",
+            "provider catalogue title",
+            "working",
+            "repo",
+            "/worktrees/simulation-pass",
+            { id: "group-frontier", label: "frontier" },
+            { id: "workspace-simulation", label: "simulation-pass" },
+            "sim_progression",
+          ),
+        },
+      ]),
+    );
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    const agent = commandCentre.unassigned[0];
+    expect(agent?.displayName).toBe("provider catalogue title");
+    expect(agent?.workspaceLabel).toBe("frontier");
+    expect(agent?.executionPresentation).toEqual({
+      group: "frontier",
+      context: "simulation-pass",
+      label: "sim_progression",
+    });
+    expect(JSON.stringify(commandCentre)).not.toContain("group-frontier");
+    expect(JSON.stringify(commandCentre)).not.toContain("workspace-simulation");
+
+    const map = universe.project({ kind: "universe-map", now: 1_000_000 });
+    if (map.kind !== "universe-map") throw new Error("wrong projection");
+    expect(map.workspaces).toHaveLength(1);
+    expect(map.workspaces[0]?.agents[0]?.executionPresentation?.context).toBe("simulation-pass");
+  });
+
+  test("keeps a named tab in context instead of duplicating it as an execution label", () => {
+    const { universe } = makeUniverse();
+    admitObservedConversationsAndReconcile(
+      universe,
+      hostSnapshot([
+        observation(
+          "pane-release",
+          "release",
+          "working",
+          "repo",
+          "/worktrees/release",
+          { id: "group-frontier", label: "frontier" },
+          { id: "workspace-release", label: "frontier · release" },
+        ),
+      ]),
+    );
+    const commandCentre = universe.project({ kind: "command-centre", now: 1_000_000 });
+    if (commandCentre.kind !== "command-centre") throw new Error("wrong projection");
+    expect(commandCentre.unassigned[0]?.executionPresentation).toEqual({
+      group: "frontier",
+      context: "frontier · release",
+    });
+    expect(commandCentre.unassigned[0]?.executionPresentation?.label).toBeUndefined();
   });
 
   test("publishes the workspace label only from qualified fresh live evidence", () => {

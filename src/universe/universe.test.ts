@@ -617,6 +617,62 @@ describe("Universe", () => {
     expect(agent?.runtimeState).toBe("blocked");
   });
 
+  test("preserves separate host execution labels when provider names and human names change", () => {
+    const { universe } = makeUniverse();
+    const first = {
+      ...scopedConversation("pane-1", "conversation-context"),
+      displayName: "sim_progression",
+      executionContainer: { id: "group-frontier", label: "frontier" },
+      executionContext: { id: "workspace-simulation", label: "simulation-pass" },
+      executionLabel: "sim_progression",
+    };
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([first]));
+
+    const reference = first.harnessEvidence.nativeConversationRef;
+    universe.observe({
+      kind: "provider-catalogue",
+      harnessId: "codex",
+      continuityScopeId: "scope-test",
+      observedAt: 2_000_000,
+      complete: true,
+      sessions: [
+        {
+          nativeConversationRef: reference,
+          observedAt: 2_000_000,
+          title: "Codex · simulation-pass",
+          workspaceRef: "/catalogue/workspace",
+          resumeEligibility: "same-site",
+        },
+      ],
+    });
+
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      displayName: "Codex · simulation-pass",
+      worktree: "/worktrees/pane-1",
+      executionContainer: { id: "group-frontier", label: "frontier" },
+      executionContext: { id: "workspace-simulation", label: "simulation-pass" },
+      executionLabel: "sim_progression",
+    });
+
+    universe.execute({
+      type: "RenameAgent",
+      agentId: "agent-1",
+      displayName: "Human chosen name",
+    });
+    const second = {
+      ...first,
+      displayName: "new host fallback",
+      executionLabel: "sim_progression_retry",
+      observedAt: 3_000_000,
+    };
+    admitObservedConversationsAndReconcile(universe, hostSnapshot([second], 3_000_000));
+    expect(universe.snapshot().agents[0]).toMatchObject({
+      displayName: "Human chosen name",
+      executionLabel: "sim_progression_retry",
+      executionContext: { label: "simulation-pass" },
+    });
+  });
+
   test("is idempotent and detaches missing executions without losing Agent identity", () => {
     const { universe } = makeUniverse();
     admitObservedConversationsAndReconcile(

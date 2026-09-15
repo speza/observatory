@@ -84,6 +84,11 @@ const OptionalHostHealth = Schema.optionalToRequired(HostHealth, Schema.Undefine
   decode: Option.getOrUndefined,
   encode: Option.fromNullable,
 });
+const ExecutionPresentation = Schema.Struct({
+  group: Schema.optional(Schema.String),
+  context: Schema.optional(Schema.String),
+  label: Schema.optional(Schema.String),
+});
 const AgentFields = {
   id: Schema.String,
   execution: Schema.optional(
@@ -128,6 +133,7 @@ const AgentFields = {
   goalTitle: Schema.optional(Schema.String),
   systemTitle: Schema.optional(Schema.String),
   workspaceLabel: Schema.optional(Schema.String),
+  executionPresentation: Schema.optional(ExecutionPresentation),
   attention: Schema.optional(AttentionItem),
   providerEvidence: Schema.optional(
     Schema.Struct({
@@ -218,6 +224,7 @@ const DiscoveredExecutionFields = {
   branch: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
+  executionPresentation: Schema.optional(ExecutionPresentation),
   conversation: Schema.optional(Schema.Struct({ kind: Schema.String, id: Schema.String })),
   conversationIdentified: Schema.Boolean,
   conversationTitle: Schema.optional(Schema.String),

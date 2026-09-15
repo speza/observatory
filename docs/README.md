@@ -44,6 +44,8 @@ architecture overview.
   slice for bounded file, source, diff, evidence and terminal review.
 - [Structured conversation interaction](specs/structured-conversation-interaction.md) —
   feasibility and stop gates for an optional native conversation surface.
+- [Agent-directed delegation](specs/agent-directed-delegation.md) — proposed
+  bounded delegated launch and exact relationship-capture slice.
 
 ## Guides and operations
 

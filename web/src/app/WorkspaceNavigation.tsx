@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Circle, Layers, CircleAlert } from "lucide-react";
 import { AgentLogo } from "../shared/AgentLogo.tsx";
+import { presentExecution } from "../shared/executionPresentation.ts";
 import type {
   AgentView,
   CommandCentreProjection,
@@ -116,6 +117,7 @@ export const WorkspaceNavigation = ({
   );
   const agentRow = (agent: AgentView): React.JSX.Element => {
     const selected = selectedAgentIds.has(agent.id);
+    const { primaryLabel, secondaryContext } = presentExecution(agent);
     return (
       <button
         type="button"
@@ -123,7 +125,7 @@ export const WorkspaceNavigation = ({
         key={agent.id}
         aria-current={subject?.type === "agent" && subject.id === agent.id ? "true" : undefined}
         aria-pressed={selected}
-        title={`${agent.displayName} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
+        title={`${primaryLabel}${secondaryContext ? ` · ${secondaryContext}` : ""} · ${agent.runtimeState}${agent.attention ? ` · ${agent.attention.explanation}` : ""}`}
         onClick={(event) => {
           const intent = selectionIntent(event);
           if ((intent.additive || intent.range) && onSelectAgent) {
@@ -135,9 +137,9 @@ export const WorkspaceNavigation = ({
         }}
       >
         <AgentLogo harnessId={agent.harnessId} provider={agent.provider} />
-        <span>{agent.displayName}</span>
-        {agent.workspaceLabel ? (
-          <span className="workspace-tree__context">{agent.workspaceLabel}</span>
+        <span>{primaryLabel}</span>
+        {secondaryContext ? (
+          <span className="workspace-tree__context">{secondaryContext}</span>
         ) : null}
         <span
           className="workspace-tree__status"
@@ -218,6 +220,7 @@ export const WorkspaceNavigation = ({
   );
   const discoveredRow = (execution: DiscoveredExecutionView): React.JSX.Element => {
     const state = execution.presence === "live" ? execution.runtimeState : "unknown";
+    const { primaryLabel, secondaryContext } = presentExecution(execution);
     return (
       <button
         type="button"
@@ -228,11 +231,14 @@ export const WorkspaceNavigation = ({
             ? "true"
             : undefined
         }
-        title={`${execution.displayName} · ${state} · discovered in ${execution.hostKind}`}
+        title={`${primaryLabel}${secondaryContext ? ` · ${secondaryContext}` : ""} · ${state} · discovered in ${execution.hostKind}`}
         onClick={() => onSelect({ type: "discovered-execution", id: execution.handle })}
       >
         <AgentLogo provider={execution.provider} />
-        <span>{execution.displayName}</span>
+        <span>{primaryLabel}</span>
+        {secondaryContext ? (
+          <span className="workspace-tree__context">{secondaryContext}</span>
+        ) : null}
         <span
           className="workspace-tree__status"
           role="img"

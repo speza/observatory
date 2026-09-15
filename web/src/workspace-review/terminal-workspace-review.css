@@ -146,6 +146,17 @@
   white-space: nowrap;
 }
 
+.terminal-deck__identity-context {
+  max-width: min(420px, 32vw);
+  margin-left: 8px;
+  overflow: hidden;
+  color: var(--review-muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .terminal-deck__identity > span:last-child {
   margin-left: 9px;
   color: var(--review-muted);
